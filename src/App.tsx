@@ -35,6 +35,8 @@ import SentinelBoard from "./pages/SentinelBoard";
 import ApexHub from "./pages/ApexHub";
 import AIProviders from "./pages/AIProviders";
 import PodStation from "./pages/PodStation";
+import RouterMesh from "./pages/RouterMesh";
+import RouterMeshDocs from "./pages/RouterMeshDocs";
 const EruRouter = lazy(() => import("./eru/EruRouter"));
 const FloatingEditorNav = lazy(() => import("./eru/FloatingEditorNav"));
 const VisualizerLab = lazy(() => import("./eru/VisualizerLab"));
