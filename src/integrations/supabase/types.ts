@@ -762,6 +762,89 @@ export type Database = {
         }
         Relationships: []
       }
+      mesh_jobs: {
+        Row: {
+          capability_required: string
+          claimed_at: string | null
+          created_at: string
+          error: string | null
+          finished_at: string | null
+          id: string
+          prompt: string
+          result: string | null
+          router_id: string | null
+          status: string
+          user_id: string
+        }
+        Insert: {
+          capability_required: string
+          claimed_at?: string | null
+          created_at?: string
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          prompt: string
+          result?: string | null
+          router_id?: string | null
+          status?: string
+          user_id: string
+        }
+        Update: {
+          capability_required?: string
+          claimed_at?: string | null
+          created_at?: string
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          prompt?: string
+          result?: string | null
+          router_id?: string | null
+          status?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mesh_jobs_router_id_fkey"
+            columns: ["router_id"]
+            isOneToOne: false
+            referencedRelation: "mesh_routers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mesh_routers: {
+        Row: {
+          capabilities: string[]
+          created_at: string
+          id: string
+          last_seen_at: string | null
+          name: string
+          secret_hash: string
+          status: string
+          user_id: string
+        }
+        Insert: {
+          capabilities?: string[]
+          created_at?: string
+          id?: string
+          last_seen_at?: string | null
+          name: string
+          secret_hash: string
+          status?: string
+          user_id: string
+        }
+        Update: {
+          capabilities?: string[]
+          created_at?: string
+          id?: string
+          last_seen_at?: string | null
+          name?: string
+          secret_hash?: string
+          status?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_bots: {
         Row: {
           behavior_style: string
