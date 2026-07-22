@@ -1,83 +1,71 @@
+# Router Mesh — Minimal Lovable Surface
 
-# Lovable-First, Fallback-Everywhere AI Routing
+Goal: Lovable holds the smallest possible contract (registry + job queue + logs). Every router node — Pi, old phone, VPS, browser tab, ESP32, whatever — is yours to build, break, and learn from.
 
-## Intent
-Lovable AI Gateway is the default brain of the app — always tried first, always pre-selected. Everywhere a model is called, the user (and Jackie herself, when auto-routing) can fall back to any other provider in a strict priority order: **free first, freemium next**. Nothing else about Jackie changes — memory, presets, archive, pods, and existing edge functions stay intact.
+## Division of labor
 
-## Provider Priority (single source of truth)
-Order used for defaults, auto-fallback, and UI listing:
+```text
+  YOUR TERRITORY (learn here)          LOVABLE (thin meeting point)
+  ────────────────────────────         ────────────────────────────
+  Router nodes (any language)   ◄──►   /router-poll   claim a job
+  HTTP polling or webhook       ◄──►   /router-result post the answer
+  Talks to AI provider          ◄──►   /router-register  self-register
+  Retries, auth, scraping,             Registry table, jobs table, logs
+  local models, whatever
+```
 
-1. **Lovable AI Gateway** — default, no key needed (Gemini 3 Flash default chat model)
-2. **Groq** — free tier, needs `GROQ_API_KEY`
-3. **OpenRouter :free models** — free tier, needs `OPENROUTER_API_KEY`
-4. **Ollama / self-hosted** — free, needs `OLLAMA_BASE_URL`
-5. **Google AI Studio (Gemini direct)** — free tier, needs `GOOGLE_AI_STUDIO_KEY` *(new)*
-6. **Mistral La Plateforme** — free tier, needs `MISTRAL_API_KEY` *(new)*
-7. **Cerebras** — free tier, needs `CEREBRAS_API_KEY` *(new)*
-8. **Together AI** — freemium, needs `TOGETHER_API_KEY` *(new)*
-9. **Hugging Face Inference** — freemium, needs `HF_TOKEN` *(new)*
-10. **DeepInfra** — freemium, needs `DEEPINFRA_API_KEY` *(new)*
-11. **Fireworks** — freemium, needs `FIREWORKS_API_KEY` *(new)*
-12. **OpenAI / Anthropic / xAI direct** — paid, only if user adds keys *(new, opt-in)*
+Lovable never talks to an AI provider on the router path. It only holds jobs and hands them out. You own everything past the endpoint.
 
-Each entry is a row in `src/lib/jackie-providers.ts` (existing file, extended — not rebuilt), marked `tier: "free" | "freemium" | "paid"` and `default: true` for Lovable.
+## What gets built on Lovable
 
-## What Changes in the App
+### 1. Two tables
+- `mesh_routers` — id, user_id, name, shared_secret_hash, capabilities (text[], e.g. `['groq','ollama:qwen','chatgpt-web']`), last_seen_at, status
+- `mesh_jobs` — id, user_id, router_id (nullable), prompt, capability_required, status (`queued|claimed|done|failed`), result, created_at, claimed_at, finished_at
 
-### 1. Universal `<ModelPicker/>` component
-One shared React component used **everywhere a model is chosen** (Chat toolbar, Control Panel, Swarm builder, Bot Foundry, VeilOps, Sentinel, Providers page, Verify panel). It:
-- Pre-selects Lovable AI + default Gemini model on first mount.
-- Groups providers by tier (Free → Freemium → Paid) with Lovable pinned on top.
-- Shows a key-status dot per provider (configured / missing) via `secrets--fetch_secrets` names only.
-- "Fallback chain" toggle: when on, failed calls cascade through the priority list.
+Both RLS-scoped to `auth.uid()`. Standard GRANTs.
 
-### 2. Auto-fallback in the client stream layer
-`src/lib/jackie-provider-stream.ts` gains a `withFallback()` wrapper:
-- Try selected provider.
-- On 429/402/5xx or `provider_key_missing`, drop to next in priority list.
-- Surface which provider actually answered (badge in the message meta).
-- Preserve existing per-provider error surfacing.
+### 2. Three edge functions (all tiny, all documented)
+- `router-register` → POST name + capabilities → returns router_id + shared_secret (shown once). You write this secret into your Pi/phone script.
+- `router-poll` → router sends `{router_id, secret, capabilities}` → returns oldest matching queued job or `null`. Marks it `claimed`.
+- `router-result` → router sends `{router_id, secret, job_id, result | error}` → writes to `mesh_jobs`.
 
-### 3. New edge functions (thin, mirror existing pattern)
-Same shape as `jackie-groq` / `jackie-openrouter`:
-- `jackie-google` (Gemini direct)
-- `jackie-mistral`
-- `jackie-cerebras`
-- `jackie-together`
-- `jackie-hf`
-- `jackie-deepinfra`
-- `jackie-fireworks`
+That's it. No provider logic, no scraping code, no model calls on Lovable's side.
 
-Each: JWT-gated, reads its own secret, OpenAI-compatible passthrough, streaming SSE. No orchestrator rewrite.
+### 3. One UI page `/mesh`
+- **Routers tab**: list your registered routers, last-seen heartbeat, capability tags, revoke button.
+- **Register button**: opens a modal, you name the router + pick capabilities, it shows the secret + a copy-pasteable curl example so you can immediately test from any terminal.
+- **Jobs tab**: submit a test job (prompt + required capability), watch it flip queued → claimed → done, see which router took it and what it returned.
+- **Logs tab**: last 200 jobs with timings.
 
-### 4. Providers page (`/providers`) upgrade
-- Sectioned by tier.
-- "Add key" button per provider that opens the `add_secret` flow with the correct env var name and help URL.
-- Live test button already exists — kept.
+### 4. Docs page `/mesh/docs`
+Plain markdown inside the app showing:
+- The 3 endpoint contracts (request/response JSON)
+- A ~30-line Python polling example
+- A ~30-line Node polling example
+- A bash/curl one-liner example
+- Note that Telegram bot can push results back to your phone if you want (uses the token you already saved)
 
-### 5. Preset & orchestrator wiring
-- Chat preset defaults to `{ provider: "lovable", model: "google/gemini-3-flash-preview" }` for new users.
-- `jackie-orchestrator` model buckets (reasoning/coding/fast/long) list Lovable models first, then fall through the priority chain when a bucket's preferred key is missing.
+No SDK, no wrapper. Raw HTTP so you actually learn the protocol.
 
-## What Does NOT Change
-- Memory system, pod system, archive/import, audit log, sidebar layout, colors, floating toolbar behavior.
-- Existing edge functions keep their auth gates and logic.
-- No provider is removed. No provider is auto-billed. Paid providers stay off unless the user pastes a key.
+## What is explicitly NOT built
+- No Lovable-side scraper, no Playwright, no provider fallback on the mesh path (your existing `/providers` fallback chain stays separate and untouched).
+- No auto-generated router code shipped as a binary. Examples only — you write your own.
+- No forced router runtime. Python, Node, Go, Rust, a shell script, an Arduino — any of them can hit three HTTP endpoints.
 
-## Secrets Requested (only if user opts in per provider)
-Handled via `add_secret` on demand from the Providers page — none requested up front.
+## Security boundary
+- Each router has its own secret, hashed at rest, verified per request.
+- All jobs scoped by `user_id`; a router can only claim jobs belonging to its owner.
+- Rate limit poll to 1/sec per router (soft, in-function).
 
-## Files Touched
-- `src/lib/jackie-providers.ts` — extend registry
-- `src/lib/jackie-provider-stream.ts` — add fallback wrapper
-- `src/lib/jackie-preset.ts` — Lovable as hard default
-- `src/lib/jackie-orchestrator.ts` — priority-aware bucket resolution
-- `src/components/ModelPicker.tsx` — new shared component
-- `src/pages/AIProviders.tsx` — tier grouping + add-key buttons
-- `src/components/DraggableToolbar.tsx`, Control Panel, Swarm, VeilOps AI bridge — swap in `<ModelPicker/>`
-- `supabase/functions/jackie-{google,mistral,cerebras,together,hf,deepinfra,fireworks}/index.ts` — new
+## Why this shape
+- **You learn the hard parts** (transport, auth flows, scraping, model hosting, retries) on hardware you own.
+- **Lovable does the boring part** (a queue with auth and a UI) so you're not rebuilding CRUD every time you try a new router idea.
+- **Nothing here locks you in** — the contract is 3 HTTP endpoints. If you ever leave Lovable, you replace them with 40 lines of Fastify and your routers keep working.
 
-## Out of Scope (call out, don't do)
-- Rewriting Base44/CYBERNETIC bridge.
-- Any billing UI or usage meter beyond what Lovable already shows.
-- Auto-provisioning paid keys.
+## Out of scope for this plan
+- Building the actual router nodes (that's your workshop).
+- Any scraping of chatgpt.com / claude.ai (legal + fragility issue — your call, your box).
+- Changing the existing `/providers` fallback chain.
+
+## Deliverable
+Two tables, three edge functions, one `/mesh` page with 3 tabs, one `/mesh/docs` page with copy-pasteable examples in 3 languages. Nothing more.
