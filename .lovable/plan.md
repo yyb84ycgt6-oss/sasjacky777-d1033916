@@ -1,71 +1,84 @@
-# Router Mesh — Minimal Lovable Surface
+# Seed Pods + Micro-Routers — Bridge Layer
 
-Goal: Lovable holds the smallest possible contract (registry + job queue + logs). Every router node — Pi, old phone, VPS, browser tab, ESP32, whatever — is yours to build, break, and learn from.
+Connect the three pieces that already exist (`/eyepod`, `/mesh`, `/providers`) into the vision: **color-coded QR seeds, pod-bound routers, lazy decompression, and Y-axis folding**.
 
-## Division of labor
+Nothing gets rebuilt. Only bridges are added.
+
+## What gets added
+
+### 1. Seed identity (colors + QR)
+Every eYe pod gets:
+- `color` (from a fixed 24-color palette, one per pod slot)
+- `glyph` (single emoji/symbol)
+- `capability` string (e.g. `seed:security`, `seed:code`, `seed:memory`)
+- `version` + `content_hash` (SHA-256 of the compressed blob)
+
+A **Seed Card** UI on `/eyepod` shows each pod as a colored tile with its glyph and a **QR button**. The QR encodes:
+```json
+{ "pod_id": "...", "version": 3, "capability": "seed:security",
+  "hash": "sha256:...", "url": "<supabase-url>/functions/v1/pod-fetch" }
+```
+Scanning it on another device (or from a router node) is enough to pull + verify that exact seed. No secrets in the QR — read-only pod fetch is gated by the scanner's own auth.
+
+### 2. Pod-bound routers
+`mesh_routers` gets a nullable `pod_id` column. A router registered with a `pod_id`:
+- Only receives jobs whose `capability_required` matches that pod's capability.
+- Reports pod version on every poll; if the server has a newer version, the poll response includes `{seed_update: {url, hash}}` so the router can pull the new seed before continuing.
+
+This is your "router knows the application" — the pod IS the application slice it knows.
+
+### 3. Lazy / streaming decompression
+`src/lib/eye-pods.ts` gains `openSlice(podId, path)` — decompress only a JSON path (e.g. `openSlice("security", "rules.mitre.T1078")`), leaving the rest sealed. Uses the existing LZ blob but decompresses in a chunked worker so a big pod doesn't freeze the tab. Speed is capped by a `bytesPerTick` knob (adjustable — your "slow speed as to not fault hardware").
+
+### 4. Y-axis fold (surface → circle with infinite points)
+New edge function `pod-fold`:
+- Input: a slice of pod content (text)
+- Output: `{ vector: number[768], hash, glyph, color }`
+- Uses Lovable AI embeddings (`google/gemini-embedding-001`, truncated to 768 dims via OpenAI's `text-embedding-3-small` when the caller wants the smaller footprint — chosen by pod, not hardcoded).
+- Storage: new `pod_folds` table with `pgvector` column so a router can drop its folded slice into a shared searchable surface.
+- What this means concretely: a router reads 20 KB of pod text, folds it to a 3 KB vector + hash, ships THAT back to Lovable. The full text never leaves the pod. Anyone querying similarity gets a hit + the hash + which pod/router owns it — decrypt is a separate step gated by the pod's own auth.
+
+### 5. Merge surface (`/eyepod/surface`)
+A visual page: every folded vector plotted as a point on a unit circle (2D projection via t-SNE-lite in browser), colored by source pod. Clicking a point shows `{pod, capability, hash, router_that_folded_it, timestamp}`. This is the "circle with infinite points" you described — the merged surface of all folded knowledge.
+
+## Data model additions
 
 ```text
-  YOUR TERRITORY (learn here)          LOVABLE (thin meeting point)
-  ────────────────────────────         ────────────────────────────
-  Router nodes (any language)   ◄──►   /router-poll   claim a job
-  HTTP polling or webhook       ◄──►   /router-result post the answer
-  Talks to AI provider          ◄──►   /router-register  self-register
-  Retries, auth, scraping,             Registry table, jobs table, logs
-  local models, whatever
+mesh_routers    + pod_id (uuid, nullable, references eye_pods.id)
+eye_pods        + color, glyph, capability, version, content_hash
+                (or if eye_pods lives only in IndexedDB today,
+                 add a lightweight `eye_pod_registry` mirror table
+                 for QR / router lookup — decision noted below)
+pod_folds       (new): id, user_id, pod_id, router_id, capability,
+                vector(768), hash, source_ref, created_at
+                + pgvector hnsw index
 ```
 
-Lovable never talks to an AI provider on the router path. It only holds jobs and hands them out. You own everything past the endpoint.
+## New edge functions
+- `pod-fetch` — auth'd, returns a pod blob by id + verifies hash
+- `pod-fold` — embeds a slice, inserts into `pod_folds`
+- `pod-search` — cosine search over `pod_folds`, returns hits + hashes
 
-## What gets built on Lovable
+## UI changes
+- `/eyepod`: swap tile grid for **Seed Cards** with color, glyph, QR button, capability tag, size, version.
+- `/mesh`: registration modal gains a "Bind to seed pod" dropdown; router cards show their pod chip.
+- `/eyepod/surface`: new page with the merged fold circle.
 
-### 1. Two tables
-- `mesh_routers` — id, user_id, name, shared_secret_hash, capabilities (text[], e.g. `['groq','ollama:qwen','chatgpt-web']`), last_seen_at, status
-- `mesh_jobs` — id, user_id, router_id (nullable), prompt, capability_required, status (`queued|claimed|done|failed`), result, created_at, claimed_at, finished_at
+## Open decision (need your call before building)
+**Where does the pod registry live?** Right now pods are IndexedDB-only (per-device). QR + pod-bound routers need a small server-side registry so a scanned QR resolves on any device.
 
-Both RLS-scoped to `auth.uid()`. Standard GRANTs.
+Two options:
+- **A. Add `eye_pod_registry` server table** — metadata only (id, color, glyph, capability, version, hash, size). Blob still lives in IndexedDB + optional Supabase storage bucket for cross-device sync. Cleanest, unlocks the full vision.
+- **B. Keep pods device-local** — QR encodes the blob itself (limits pod size to ~2KB; kills the vision for anything real).
 
-### 2. Three edge functions (all tiny, all documented)
-- `router-register` → POST name + capabilities → returns router_id + shared_secret (shown once). You write this secret into your Pi/phone script.
-- `router-poll` → router sends `{router_id, secret, capabilities}` → returns oldest matching queued job or `null`. Marks it `claimed`.
-- `router-result` → router sends `{router_id, secret, job_id, result | error}` → writes to `mesh_jobs`.
+Recommendation: **A**.
 
-That's it. No provider logic, no scraping code, no model calls on Lovable's side.
+## Explicitly out of scope
+- No changes to `/providers`, `/control`, Jackie chat, or the existing router mesh contract (3 endpoints stay identical — pod-binding is additive).
+- No new AI provider. Folding uses the Lovable AI embeddings you already have.
+- No proprietary encryption scheme invented. Cipher = AES-GCM with per-pod key derived from user session; hash = SHA-256. Standard, auditable.
 
-### 3. One UI page `/mesh`
-- **Routers tab**: list your registered routers, last-seen heartbeat, capability tags, revoke button.
-- **Register button**: opens a modal, you name the router + pick capabilities, it shows the secret + a copy-pasteable curl example so you can immediately test from any terminal.
-- **Jobs tab**: submit a test job (prompt + required capability), watch it flip queued → claimed → done, see which router took it and what it returned.
-- **Logs tab**: last 200 jobs with timings.
+## Deliverable when built
+Colored seed tiles with QR export → scan on another device or feed to a router → that router only wakes for its pod's capability → folds slices to vectors → the merged surface page shows the whole knowledge circle growing in real time.
 
-### 4. Docs page `/mesh/docs`
-Plain markdown inside the app showing:
-- The 3 endpoint contracts (request/response JSON)
-- A ~30-line Python polling example
-- A ~30-line Node polling example
-- A bash/curl one-liner example
-- Note that Telegram bot can push results back to your phone if you want (uses the token you already saved)
-
-No SDK, no wrapper. Raw HTTP so you actually learn the protocol.
-
-## What is explicitly NOT built
-- No Lovable-side scraper, no Playwright, no provider fallback on the mesh path (your existing `/providers` fallback chain stays separate and untouched).
-- No auto-generated router code shipped as a binary. Examples only — you write your own.
-- No forced router runtime. Python, Node, Go, Rust, a shell script, an Arduino — any of them can hit three HTTP endpoints.
-
-## Security boundary
-- Each router has its own secret, hashed at rest, verified per request.
-- All jobs scoped by `user_id`; a router can only claim jobs belonging to its owner.
-- Rate limit poll to 1/sec per router (soft, in-function).
-
-## Why this shape
-- **You learn the hard parts** (transport, auth flows, scraping, model hosting, retries) on hardware you own.
-- **Lovable does the boring part** (a queue with auth and a UI) so you're not rebuilding CRUD every time you try a new router idea.
-- **Nothing here locks you in** — the contract is 3 HTTP endpoints. If you ever leave Lovable, you replace them with 40 lines of Fastify and your routers keep working.
-
-## Out of scope for this plan
-- Building the actual router nodes (that's your workshop).
-- Any scraping of chatgpt.com / claude.ai (legal + fragility issue — your call, your box).
-- Changing the existing `/providers` fallback chain.
-
-## Deliverable
-Two tables, three edge functions, one `/mesh` page with 3 tabs, one `/mesh/docs` page with copy-pasteable examples in 3 languages. Nothing more.
+**Confirm option A vs B, and I'll build it.**
