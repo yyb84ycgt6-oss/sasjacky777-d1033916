@@ -1,19 +1,47 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { PROVIDERS, OLLAMA_AGENTS, type ProviderId } from "@/lib/jackie-providers";
+import { PROVIDERS, OLLAMA_AGENTS, providersByTier, type ProviderId, type ProviderTier } from "@/lib/jackie-providers";
 import { streamProviderChat } from "@/lib/jackie-provider-stream";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Zap, Cpu, Cloud, HardDrive, ExternalLink, KeyRound, Play, Loader2, CheckCircle2 } from "lucide-react";
+import {
+  ArrowLeft, Zap, Cpu, Cloud, HardDrive, ExternalLink, KeyRound, Play, Loader2,
+  CheckCircle2, Star, Sparkles, Building2, Flame, Boxes, Brain, Globe,
+} from "lucide-react";
 
 const ICONS: Record<ProviderId, typeof Zap> = {
-  lovable: Cloud,
+  lovable: Star,
   groq: Zap,
   openrouter: Cpu,
   ollama: HardDrive,
+  google: Sparkles,
+  mistral: Cloud,
+  cerebras: Zap,
+  together: Boxes,
+  hf: Brain,
+  deepinfra: Cloud,
+  fireworks: Flame,
+  openai: Building2,
+  anthropic: Building2,
+  xai: Globe,
+};
+
+const TIER_LABEL: Record<ProviderTier, string> = {
+  default: "Default — Lovable-first",
+  free: "Free tier",
+  freemium: "Freemium",
+  paid: "Paid (bring your own key)",
+};
+
+const TIER_HINT: Record<ProviderTier, string> = {
+  default: "Always tried first. No configuration needed.",
+  free: "Free API keys. Cascade order after Lovable.",
+  freemium: "Free credits on signup, pay-per-token after.",
+  paid: "Direct provider access. Only used if you paste your own key.",
 };
 
 export default function AIProviders() {
@@ -24,17 +52,24 @@ export default function AIProviders() {
   const [output, setOutput] = useState("");
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fallback, setFallback] = useState(true);
+  const [servedBy, setServedBy] = useState<string | null>(null);
+  const [fallbackNote, setFallbackNote] = useState<string | null>(null);
+
+  const tiers = providersByTier();
 
   const runTest = async () => {
-    setRunning(true); setOutput(""); setError(null);
+    setRunning(true); setOutput(""); setError(null); setServedBy(null); setFallbackNote(null);
     await streamProviderChat({
       provider: providerId,
       model: modelId,
       messages: [{ role: "user", content: prompt }],
       system: "You are Jackie. Respond concisely.",
+      fallback,
       onDelta: (t) => setOutput((o) => o + t),
-      onDone: () => setRunning(false),
+      onDone: (meta) => { if (meta) setServedBy(`${meta.servedBy} · ${meta.model}`); setRunning(false); },
       onError: (e) => { setError(e); setRunning(false); },
+      onFallback: (from, to, reason) => setFallbackNote(`${from} → ${to} (${reason})`),
     });
   };
 
@@ -42,7 +77,35 @@ export default function AIProviders() {
     setProviderId(id);
     const p = PROVIDERS.find((x) => x.id === id)!;
     setModelId(p.models[0].id);
-    setOutput(""); setError(null);
+    setOutput(""); setError(null); setServedBy(null); setFallbackNote(null);
+  };
+
+  const renderCard = (p: (typeof PROVIDERS)[number]) => {
+    const Icon = ICONS[p.id];
+    const active = p.id === providerId;
+    return (
+      <Card
+        key={p.id}
+        onClick={() => switchProvider(p.id)}
+        className={`p-4 cursor-pointer transition border ${active ? "border-primary bg-primary/5" : "hover:border-primary/40"}`}
+      >
+        <div className="flex items-start justify-between mb-2">
+          <Icon className={`w-5 h-5 ${active ? "text-primary" : "text-muted-foreground"}`} />
+          <div className="flex gap-1">
+            {p.isDefault && <Badge className="text-[9px]">DEFAULT</Badge>}
+            {p.free && !p.isDefault && <Badge variant="secondary" className="text-[10px]">FREE</Badge>}
+          </div>
+        </div>
+        <h3 className="font-semibold text-sm">{p.label}</h3>
+        <p className="text-xs text-muted-foreground mt-1 line-clamp-3">{p.description}</p>
+        {p.requiresSecret && (
+          <div className="mt-3 pt-3 border-t border-border flex items-center gap-1.5 text-[11px] text-amber-500">
+            <KeyRound className="w-3 h-3" />
+            Needs {p.requiresSecret}
+          </div>
+        )}
+      </Card>
+    );
   };
 
   return (
@@ -52,37 +115,26 @@ export default function AIProviders() {
           <Link to="/"><Button variant="ghost" size="icon"><ArrowLeft className="w-4 h-4" /></Button></Link>
           <div>
             <h1 className="text-2xl md:text-3xl font-bold">AI Provider Hub</h1>
-            <p className="text-sm text-muted-foreground">Jackie here — pick a provider, test it, wire it into any bot.</p>
+            <p className="text-sm text-muted-foreground">
+              Lovable-first, fallback-everywhere. Free → Freemium → Paid, in that order.
+            </p>
           </div>
         </div>
 
-        {/* Provider grid */}
-        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3">
-          {PROVIDERS.map((p) => {
-            const Icon = ICONS[p.id];
-            const active = p.id === providerId;
-            return (
-              <Card
-                key={p.id}
-                onClick={() => switchProvider(p.id)}
-                className={`p-4 cursor-pointer transition border ${active ? "border-primary bg-primary/5" : "hover:border-primary/40"}`}
-              >
-                <div className="flex items-start justify-between mb-2">
-                  <Icon className={`w-5 h-5 ${active ? "text-primary" : "text-muted-foreground"}`} />
-                  {p.free && <Badge variant="secondary" className="text-[10px]">FREE TIER</Badge>}
-                </div>
-                <h3 className="font-semibold text-sm">{p.label}</h3>
-                <p className="text-xs text-muted-foreground mt-1 line-clamp-3">{p.description}</p>
-                {p.requiresSecret && (
-                  <div className="mt-3 pt-3 border-t border-border flex items-center gap-1.5 text-[11px] text-amber-500">
-                    <KeyRound className="w-3 h-3" />
-                    Needs {p.requiresSecret}
-                  </div>
-                )}
-              </Card>
-            );
-          })}
-        </div>
+        {/* Tier sections */}
+        {(["default", "free", "freemium", "paid"] as ProviderTier[]).map((tier) => (
+          <section key={tier} className="space-y-2">
+            <div className="flex items-baseline justify-between">
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                {TIER_LABEL[tier]}
+              </h2>
+              <span className="text-[11px] text-muted-foreground">{TIER_HINT[tier]}</span>
+            </div>
+            <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3">
+              {tiers[tier].map(renderCard)}
+            </div>
+          </section>
+        ))}
 
         {/* Test panel */}
         <Card className="p-4 md:p-6 space-y-4">
@@ -91,14 +143,20 @@ export default function AIProviders() {
               <h2 className="font-semibold">Test: {provider.label}</h2>
               <p className="text-xs text-muted-foreground">{provider.description}</p>
             </div>
-            {provider.helpUrl && (
-              <a href={provider.helpUrl} target="_blank" rel="noreferrer">
-                <Button variant="outline" size="sm" className="gap-1.5">
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  Get {provider.requiresSecret ?? "docs"}
-                </Button>
-              </a>
-            )}
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2 text-xs cursor-pointer">
+                <Switch checked={fallback} onCheckedChange={setFallback} />
+                Auto-fallback chain
+              </label>
+              {provider.helpUrl && (
+                <a href={provider.helpUrl} target="_blank" rel="noreferrer">
+                  <Button variant="outline" size="sm" className="gap-1.5">
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    Get {provider.requiresSecret ?? "docs"}
+                  </Button>
+                </a>
+              )}
+            </div>
           </div>
 
           <div className="grid md:grid-cols-2 gap-3">
@@ -129,14 +187,12 @@ export default function AIProviders() {
             </div>
           </div>
 
-          <Textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            rows={2}
-            className="font-mono text-xs"
-          />
+          <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={2} className="font-mono text-xs" />
 
-          <div className="rounded-lg border border-border bg-secondary/40 p-3 min-h-[140px]">
+          <div className="rounded-lg border border-border bg-secondary/40 p-3 min-h-[140px] space-y-2">
+            {fallbackNote && (
+              <div className="text-[11px] text-amber-400 font-mono">↪ fallback: {fallbackNote}</div>
+            )}
             {error ? (
               <div className="text-xs text-red-400 font-mono whitespace-pre-wrap">{error}</div>
             ) : output ? (
@@ -146,6 +202,9 @@ export default function AIProviders() {
               </div>
             ) : (
               <div className="text-xs text-muted-foreground">Output appears here…</div>
+            )}
+            {servedBy && !error && (
+              <div className="text-[11px] text-green-400 font-mono">✓ served by {servedBy}</div>
             )}
           </div>
         </Card>
@@ -158,8 +217,8 @@ export default function AIProviders() {
             <Badge variant="secondary" className="text-[10px]">local · offline · $0</Badge>
           </div>
           <p className="text-xs text-muted-foreground mb-4">
-            Install <code className="text-primary">ollama pull &lt;model&gt;</code> on your machine, expose via
-            Cloudflare Tunnel, drop URL in <code className="text-primary">OLLAMA_BASE_URL</code>, then hit "Run test" above.
+            Install <code className="text-primary">ollama pull &lt;model&gt;</code>, expose via
+            Cloudflare Tunnel, drop URL in <code className="text-primary">OLLAMA_BASE_URL</code>, then "Run test".
           </p>
           <div className="grid md:grid-cols-2 gap-3">
             {OLLAMA_AGENTS.map((a) => (
@@ -182,19 +241,21 @@ export default function AIProviders() {
         <Card className="p-4 md:p-6 border-amber-500/30 bg-amber-500/5">
           <div className="flex items-start gap-3">
             <KeyRound className="w-5 h-5 text-amber-500 mt-0.5" />
-            <div className="text-xs space-y-2">
-              <p className="font-semibold text-foreground">Adding API keys in-app</p>
+            <div className="text-xs space-y-2 w-full">
+              <p className="font-semibold text-foreground">Add API keys in Cloud → Secrets</p>
               <p className="text-muted-foreground">
-                Open <span className="text-foreground font-mono">Backend → Secrets</span> from the Lovable Cloud panel and paste keys:
+                Each provider reads its own secret. Missing keys auto-skip during the fallback cascade.
               </p>
-              <ul className="space-y-1 font-mono text-[11px]">
-                <li>· <span className="text-primary">GROQ_API_KEY</span> — free at console.groq.com/keys</li>
-                <li>· <span className="text-primary">OPENROUTER_API_KEY</span> — free at openrouter.ai/keys</li>
-                <li>· <span className="text-primary">OLLAMA_BASE_URL</span> — your tunnel URL (e.g. https://ollama.yourdomain.com)</li>
-                <li>· <span className="text-primary">OLLAMA_API_KEY</span> — optional if your tunnel requires auth</li>
+              <ul className="grid md:grid-cols-2 gap-1 font-mono text-[11px] pt-1">
+                {PROVIDERS.filter((p) => p.requiresSecret).map((p) => (
+                  <li key={p.id}>
+                    · <span className="text-primary">{p.requiresSecret}</span>{" "}
+                    <span className="text-muted-foreground">— {p.label}</span>
+                  </li>
+                ))}
               </ul>
               <p className="text-muted-foreground pt-2">
-                No redeploy needed — the edge functions pick them up on the next request.
+                No redeploy needed — the edge functions pick keys up on the next request.
               </p>
             </div>
           </div>

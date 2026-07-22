@@ -1,80 +1,83 @@
 
-## Goal
+# Lovable-First, Fallback-Everywhere AI Routing
 
-Fuse the Eru (`cybernetic67`, Base44) app into Jackie as a single Lovable codebase. Jackie stays the host shell (auth, theme, Supabase, AnimatedCanvas). Eru pages are imported, JSX → TSX, Base44 SDK calls routed through a thin bridge so existing Eru entities keep working without ripping out Base44 yet.
+## Intent
+Lovable AI Gateway is the default brain of the app — always tried first, always pre-selected. Everywhere a model is called, the user (and Jackie herself, when auto-routing) can fall back to any other provider in a strict priority order: **free first, freemium next**. Nothing else about Jackie changes — memory, presets, archive, pods, and existing edge functions stay intact.
 
-## Architecture
+## Provider Priority (single source of truth)
+Order used for defaults, auto-fallback, and UI listing:
 
-```text
-Jackie shell (React + Vite + Supabase + Tailwind)
-├── /src/eru/                       ← imported Eru namespace
-│   ├── bridge/base44.ts            ← single client, lazy init, env-driven
-│   ├── bridge/entities.ts          ← typed wrappers around Base44 entities
-│   ├── bridge/auth.ts              ← maps Jackie user ↔ Eru profile
-│   ├── components/…                ← Eru components, .tsx
-│   ├── pages/…                     ← Eru pages, .tsx
-│   └── ui/FloatingEditorNav.tsx    ← floating quick-nav + inline editor
-├── /src/pages/eru/                 ← Jackie route entries that mount Eru pages
-└── /src/components/visualizers/    ← shared upgraded visualizers
-```
+1. **Lovable AI Gateway** — default, no key needed (Gemini 3 Flash default chat model)
+2. **Groq** — free tier, needs `GROQ_API_KEY`
+3. **OpenRouter :free models** — free tier, needs `OPENROUTER_API_KEY`
+4. **Ollama / self-hosted** — free, needs `OLLAMA_BASE_URL`
+5. **Google AI Studio (Gemini direct)** — free tier, needs `GOOGLE_AI_STUDIO_KEY` *(new)*
+6. **Mistral La Plateforme** — free tier, needs `MISTRAL_API_KEY` *(new)*
+7. **Cerebras** — free tier, needs `CEREBRAS_API_KEY` *(new)*
+8. **Together AI** — freemium, needs `TOGETHER_API_KEY` *(new)*
+9. **Hugging Face Inference** — freemium, needs `HF_TOKEN` *(new)*
+10. **DeepInfra** — freemium, needs `DEEPINFRA_API_KEY` *(new)*
+11. **Fireworks** — freemium, needs `FIREWORKS_API_KEY` *(new)*
+12. **OpenAI / Anthropic / xAI direct** — paid, only if user adds keys *(new, opt-in)*
 
-## Bridge (Keep Base44, add bridge)
+Each entry is a row in `src/lib/jackie-providers.ts` (existing file, extended — not rebuilt), marked `tier: "free" | "freemium" | "paid"` and `default: true` for Lovable.
 
-1. New env vars in `.env.example`: `VITE_BASE44_APP_ID`, `VITE_BASE44_APP_BASE_URL`.
-2. `src/eru/bridge/base44.ts` exports a single `base44` client (`@base44/sdk`) created lazily so missing env vars degrade gracefully (returns null + console warn, never crashes Jackie).
-3. `src/eru/bridge/entities.ts` re-exports the entities Eru pages actually import (`Bot`, `BotListing`, `SecurityEvent`, `RedteamRun`, `SwarmRun`, …) with TS types and a fallback to Supabase shims where a Jackie table already covers the data.
-4. `src/eru/bridge/auth.ts` reads Jackie's `useAuth` session and exposes a `useEruIdentity()` hook so Eru pages stop calling `User.me()` directly.
+## What Changes in the App
 
-## First-slice pages (TSX-converted, Jackie-themed)
+### 1. Universal `<ModelPicker/>` component
+One shared React component used **everywhere a model is chosen** (Chat toolbar, Control Panel, Swarm builder, Bot Foundry, VeilOps, Sentinel, Providers page, Verify panel). It:
+- Pre-selects Lovable AI + default Gemini model on first mount.
+- Groups providers by tier (Free → Freemium → Paid) with Lovable pinned on top.
+- Shows a key-status dot per provider (configured / missing) via `secrets--fetch_secrets` names only.
+- "Fallback chain" toggle: when on, failed calls cascade through the priority list.
 
-Import from the zip, run a transform that:
-- renames `.jsx` → `.tsx`
-- rewrites `@/api/entities` → `@/eru/bridge/entities`
-- rewrites `@/api/integrations` → `@/eru/bridge/integrations`
-- rewrites `createPageUrl(...)` to Jackie router paths (`/eru/<slug>`)
-- wraps each page in `<EruPageShell>` (Jackie sticky banner + `AnimatedCanvas theme="neural_mesh"` background + REFERENCE/LIVE label)
+### 2. Auto-fallback in the client stream layer
+`src/lib/jackie-provider-stream.ts` gains a `withFallback()` wrapper:
+- Try selected provider.
+- On 429/402/5xx or `provider_key_missing`, drop to next in priority list.
+- Surface which provider actually answered (badge in the message meta).
+- Preserve existing per-provider error surfacing.
 
-Pages landing in this wave:
+### 3. New edge functions (thin, mirror existing pattern)
+Same shape as `jackie-groq` / `jackie-openrouter`:
+- `jackie-google` (Gemini direct)
+- `jackie-mistral`
+- `jackie-cerebras`
+- `jackie-together`
+- `jackie-hf`
+- `jackie-deepinfra`
+- `jackie-fireworks`
 
-| Eru page | Mount at | Notes |
-|---|---|---|
-| `BotForge` | `/eru/bot-forge` | also linked from Jackie BotFoundry sidebar |
-| `BotMarketplace` | `/eru/bot-market` | shares card components with Jackie BotSwarm |
-| `SecurityCommandCenter` | `/eru/security` | pairs with VeilOps in the Security cluster |
-| `AILab` | `/eru/ai-lab` | uses `jackie-orchestrate` instead of Base44 LLM call |
-| `EruRedteamTest` | `/eru/redteam` | wired to `jackie-orchestrate` with red-team system prompt |
-| `EruSwarmTest` | `/eru/swarm` | wired to `jackie-orchestrate` with swarm system prompt |
+Each: JWT-gated, reads its own secret, OpenAI-compatible passthrough, streaming SSE. No orchestrator rewrite.
 
-## Floating editor nav
+### 4. Providers page (`/providers`) upgrade
+- Sectioned by tier.
+- "Add key" button per provider that opens the `add_secret` flow with the correct env var name and help URL.
+- Live test button already exists — kept.
 
-`src/eru/ui/FloatingEditorNav.tsx` — bottom-right floating dock visible on every Eru/Jackie route, ported from Eru's `FloatingQuickActions` + `CollabScratchpad`:
-- pill launcher → expands to: jump-to-page, inline Monaco scratchpad, AI ask (calls `jackie-orchestrate`), copy-context, toggle theme.
-- Persists scratchpad to `localStorage` under `jackie.floating.scratchpad`.
-- Mounted once in `App.tsx` inside `ProtectedRoute` so it follows the user across Jackie and Eru pages.
+### 5. Preset & orchestrator wiring
+- Chat preset defaults to `{ provider: "lovable", model: "google/gemini-3-flash-preview" }` for new users.
+- `jackie-orchestrator` model buckets (reasoning/coding/fast/long) list Lovable models first, then fall through the priority chain when a bucket's preferred key is missing.
 
-## Visualizers refresh
+## What Does NOT Change
+- Memory system, pod system, archive/import, audit log, sidebar layout, colors, floating toolbar behavior.
+- Existing edge functions keep their auth gates and logic.
+- No provider is removed. No provider is auto-billed. Paid providers stay off unless the user pastes a key.
 
-Single shared module `src/components/visualizers/` consumed by both Jackie and Eru screens:
-- `NeuralMesh.tsx` — upgraded version of the current AnimatedCanvas mesh, framer-motion entry, jade/gold accent line.
-- `NodeGraph.tsx` — replaces ad-hoc graphs in Eru AILab + Jackie Architecture views.
-- `PulseTimeline.tsx` — used by SecurityCommandCenter and VeilOps.
-- `OrbitField.tsx` — used by Swarm/Redteam panels and SphereCommand mini-cards.
+## Secrets Requested (only if user opts in per provider)
+Handled via `add_secret` on demand from the Providers page — none requested up front.
 
-Each visualizer accepts `data`, `theme`, `density`, `interactive` props and has a Storybook-style "vibe demo" route at `/eru/visualizers` so both Jackies (Jackie + Eru shell) can preview them.
+## Files Touched
+- `src/lib/jackie-providers.ts` — extend registry
+- `src/lib/jackie-provider-stream.ts` — add fallback wrapper
+- `src/lib/jackie-preset.ts` — Lovable as hard default
+- `src/lib/jackie-orchestrator.ts` — priority-aware bucket resolution
+- `src/components/ModelPicker.tsx` — new shared component
+- `src/pages/AIProviders.tsx` — tier grouping + add-key buttons
+- `src/components/DraggableToolbar.tsx`, Control Panel, Swarm, VeilOps AI bridge — swap in `<ModelPicker/>`
+- `supabase/functions/jackie-{google,mistral,cerebras,together,hf,deepinfra,fireworks}/index.ts` — new
 
-## Routing + nav
-
-- `src/App.tsx` adds the six new `/eru/*` routes (lazy-loaded) and `/eru/visualizers`.
-- Jackie sidebar (`src/pages/Index.tsx`) gets a new "Eru" group listing the six pages and the visualizer lab.
-
-## Out of scope (this wave)
-
-- Remaining 70+ Eru pages — imported in later waves once the bridge is proven.
-- Replacing Base44 with Supabase tables — explicit "keep Base44 + bridge" decision.
-- Eru auth screens (`Login`, `Register`, `ResetPassword`) — Jackie's auth wins; bridge maps the session.
-
-## Risks
-
-- Base44 SDK is browser-only and needs `VITE_BASE44_APP_ID`. Without it the bridge no-ops; pages render in "offline" mode with empty data and a banner.
-- JSX→TSX conversion will surface implicit-any errors; we add `// @ts-expect-error eru-import` only where unavoidable and track in `Jackie/ROADMAP.md`.
-- Floating nav must not conflict with Jackie's existing `FloatingQuickActions`; we replace, not stack.
+## Out of Scope (call out, don't do)
+- Rewriting Base44/CYBERNETIC bridge.
+- Any billing UI or usage meter beyond what Lovable already shows.
+- Auto-provisioning paid keys.

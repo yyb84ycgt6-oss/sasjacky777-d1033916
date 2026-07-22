@@ -9,9 +9,10 @@ export type ChatPreset = {
   system?: string;
 };
 
+// Lovable AI Gateway is the default brain — always tried first for new users.
 const DEFAULT: ChatPreset = {
   provider: "lovable",
-  model: "google/gemini-2.5-pro",
+  model: "google/gemini-3.6-flash",
 };
 
 export function getChatPreset(): ChatPreset {
