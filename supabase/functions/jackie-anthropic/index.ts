@@ -1,0 +1,126 @@
+// Streaming chat via Anthropic Claude direct (paid).
+// Translates OpenAI-shape request into Anthropic Messages API + SSE.
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
+const ALLOWED = new Set([
+  "claude-3-5-sonnet-latest",
+  "claude-3-5-haiku-latest",
+  "claude-3-opus-latest",
+]);
+const DEFAULT_MODEL = "claude-3-5-haiku-latest";
+const SECRET = "ANTHROPIC_API_KEY";
+const BASE = "https://api.anthropic.com/v1/messages";
+
+async function requireUser(req: Request): Promise<Response | null> {
+  const auth = req.headers.get("Authorization");
+  if (!auth?.startsWith("Bearer ")) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+  const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {
+    global: { headers: { Authorization: auth } },
+  });
+  const { data, error } = await sb.auth.getClaims(auth.replace("Bearer ", ""));
+  if (error || !data?.claims) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+  return null;
+}
+
+// Adapt Anthropic SSE ("content_block_delta") to OpenAI SSE deltas so the
+// unified client parser works unchanged.
+function anthropicToOpenAIStream(upstream: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
+  const dec = new TextDecoder();
+  const enc = new TextEncoder();
+  let buf = "";
+  return new ReadableStream({
+    async start(controller) {
+      const reader = upstream.getReader();
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          let idx: number;
+          while ((idx = buf.indexOf("\n")) !== -1) {
+            const line = buf.slice(0, idx).trim();
+            buf = buf.slice(idx + 1);
+            if (!line.startsWith("data:")) continue;
+            const payload = line.slice(5).trim();
+            if (!payload) continue;
+            try {
+              const j = JSON.parse(payload);
+              if (j.type === "content_block_delta" && j.delta?.type === "text_delta") {
+                const oai = { choices: [{ delta: { content: j.delta.text } }] };
+                controller.enqueue(enc.encode(`data: ${JSON.stringify(oai)}\n\n`));
+              } else if (j.type === "message_stop") {
+                controller.enqueue(enc.encode("data: [DONE]\n\n"));
+              }
+            } catch { /* partial */ }
+          }
+        }
+      } finally {
+        controller.close();
+      }
+    },
+  });
+}
+
+serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  const un = await requireUser(req);
+  if (un) return un;
+
+  const key = Deno.env.get(SECRET);
+  if (!key) {
+    return new Response(JSON.stringify({
+      error: `${SECRET} not configured. Paste your Anthropic key at https://console.anthropic.com/settings/keys`,
+      needs_secret: SECRET,
+    }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
+
+  try {
+    const { messages, model, system } = await req.json();
+    const selected = ALLOWED.has(model) ? model : DEFAULT_MODEL;
+    const body = {
+      model: selected,
+      max_tokens: 4096,
+      system: system || undefined,
+      messages: (messages as Array<{ role: string; content: string }>)
+        .filter((m) => m.role !== "system")
+        .map((m) => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content })),
+      stream: true,
+    };
+    const resp = await fetch(BASE, {
+      method: "POST",
+      headers: {
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok || !resp.body) {
+      const text = await resp.text();
+      return new Response(JSON.stringify({ error: `Anthropic ${resp.status}: ${text}` }), {
+        status: resp.status, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    return new Response(anthropicToOpenAIStream(resp.body), {
+      headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown" }), {
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+});
