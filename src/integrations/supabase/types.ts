@@ -1011,7 +1011,25 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      match_pod_folds: {
+        Args: {
+          match_count?: number
+          match_user: string
+          query_embedding: string
+        }
+        Returns: {
+          capability: string
+          color: string
+          created_at: string
+          glyph: string
+          id: string
+          pod_id: string
+          router_id: string
+          similarity: number
+          source_hash: string
+          source_ref: string
+        }[]
+      }
     }
     Enums: {
       design_entry_category:
