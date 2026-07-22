@@ -289,6 +289,54 @@ export type Database = {
         }
         Relationships: []
       }
+      eye_pod_registry: {
+        Row: {
+          bytes_compressed: number
+          bytes_raw: number
+          capability: string
+          color: string
+          content_hash: string | null
+          created_at: string
+          glyph: string
+          id: string
+          name: string
+          pod_key: string
+          updated_at: string
+          user_id: string
+          version: number
+        }
+        Insert: {
+          bytes_compressed?: number
+          bytes_raw?: number
+          capability: string
+          color?: string
+          content_hash?: string | null
+          created_at?: string
+          glyph?: string
+          id?: string
+          name: string
+          pod_key: string
+          updated_at?: string
+          user_id: string
+          version?: number
+        }
+        Update: {
+          bytes_compressed?: number
+          bytes_raw?: number
+          capability?: string
+          color?: string
+          content_hash?: string | null
+          created_at?: string
+          glyph?: string
+          id?: string
+          name?: string
+          pod_key?: string
+          updated_at?: string
+          user_id?: string
+          version?: number
+        }
+        Relationships: []
+      }
       game_design_entries: {
         Row: {
           category: Database["public"]["Enums"]["design_entry_category"]
@@ -819,6 +867,7 @@ export type Database = {
           id: string
           last_seen_at: string | null
           name: string
+          pod_id: string | null
           secret_hash: string
           status: string
           user_id: string
@@ -829,6 +878,7 @@ export type Database = {
           id?: string
           last_seen_at?: string | null
           name: string
+          pod_id?: string | null
           secret_hash: string
           status?: string
           user_id: string
@@ -839,11 +889,77 @@ export type Database = {
           id?: string
           last_seen_at?: string | null
           name?: string
+          pod_id?: string | null
           secret_hash?: string
           status?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "mesh_routers_pod_id_fkey"
+            columns: ["pod_id"]
+            isOneToOne: false
+            referencedRelation: "eye_pod_registry"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pod_folds: {
+        Row: {
+          capability: string
+          color: string | null
+          created_at: string
+          embedding: string
+          glyph: string | null
+          id: string
+          pod_id: string | null
+          router_id: string | null
+          source_hash: string
+          source_ref: string | null
+          user_id: string
+        }
+        Insert: {
+          capability: string
+          color?: string | null
+          created_at?: string
+          embedding: string
+          glyph?: string | null
+          id?: string
+          pod_id?: string | null
+          router_id?: string | null
+          source_hash: string
+          source_ref?: string | null
+          user_id: string
+        }
+        Update: {
+          capability?: string
+          color?: string | null
+          created_at?: string
+          embedding?: string
+          glyph?: string | null
+          id?: string
+          pod_id?: string | null
+          router_id?: string | null
+          source_hash?: string
+          source_ref?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pod_folds_pod_id_fkey"
+            columns: ["pod_id"]
+            isOneToOne: false
+            referencedRelation: "eye_pod_registry"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pod_folds_router_id_fkey"
+            columns: ["router_id"]
+            isOneToOne: false
+            referencedRelation: "mesh_routers"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       user_bots: {
         Row: {
