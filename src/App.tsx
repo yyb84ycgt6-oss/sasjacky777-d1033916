@@ -38,6 +38,7 @@ import GrokStudio from "./pages/GrokStudio";
 import PodStation from "./pages/PodStation";
 import JackyLive from "./pages/JackyLive";
 import AgentLab from "./pages/AgentLab";
+import AgentCompare from "./pages/AgentCompare";
 import RouterMesh from "./pages/RouterMesh";
 import RouterMeshDocs from "./pages/RouterMeshDocs";
 import PCDesktop from "./pages/PCDesktop";
@@ -205,6 +206,7 @@ const App = () => (
               <Route path="/pods" element={<ProtectedRoute><PodStation /></ProtectedRoute>} />
               <Route path="/jacky-live" element={<ProtectedRoute><JackyLive /></ProtectedRoute>} />
               <Route path="/agent-lab" element={<ProtectedRoute><AgentLab /></ProtectedRoute>} />
+              <Route path="/agent-compare" element={<ProtectedRoute><AgentCompare /></ProtectedRoute>} />
               <Route path="/mesh" element={<ProtectedRoute><RouterMesh /></ProtectedRoute>} />
               <Route path="/mesh/docs" element={<ProtectedRoute><RouterMeshDocs /></ProtectedRoute>} />
               <Route
