@@ -40,7 +40,9 @@ import AgentLab from "./pages/AgentLab";
 import RouterMesh from "./pages/RouterMesh";
 import RouterMeshDocs from "./pages/RouterMeshDocs";
 import PCDesktop from "./pages/PCDesktop";
-import { ERU_ROUTES } from "./eru/routes.generated";
+import { ERU_ALIASES } from "./lib/routeManifest";
+import RouteDebugOverlay from "./components/RouteDebugOverlay";
+
 const EruRouter = lazy(() => import("./eru/EruRouter"));
 const FloatingEditorNav = lazy(() => import("./eru/FloatingEditorNav"));
 const VisualizerLab = lazy(() => import("./eru/VisualizerLab"));
