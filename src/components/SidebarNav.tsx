@@ -99,6 +99,7 @@ const NAV_GROUPS: NavGroup[] = [
     id: "build",
     label: "Build",
     items: [
+      { label: "🧪 Agent R&D Lab", href: "/agent-lab", title: "Build agents on any provider, set a small or large context budget, run them for real, and export them as portable assets" },
       { label: "🤖 Bot Foundry", href: "/bots" },
       { label: "🕸️ Bot Swarm", href: "/swarm" },
       { label: "🛰️ Control", href: "/control" },
