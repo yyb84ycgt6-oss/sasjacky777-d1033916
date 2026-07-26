@@ -34,6 +34,7 @@ import SentinelDashboard from "./pages/SentinelDashboard";
 import SentinelBoard from "./pages/SentinelBoard";
 import ApexHub from "./pages/ApexHub";
 import AIProviders from "./pages/AIProviders";
+import GrokStudio from "./pages/GrokStudio";
 import PodStation from "./pages/PodStation";
 import JackyLive from "./pages/JackyLive";
 import AgentLab from "./pages/AgentLab";
@@ -200,6 +201,7 @@ const App = () => (
               <Route path="/sentinel/board" element={<ProtectedRoute><SentinelBoard /></ProtectedRoute>} />
               <Route path="/apex" element={<ProtectedRoute><ApexHub /></ProtectedRoute>} />
               <Route path="/providers" element={<ProtectedRoute><AIProviders /></ProtectedRoute>} />
+              <Route path="/grok" element={<ProtectedRoute><GrokStudio /></ProtectedRoute>} />
               <Route path="/pods" element={<ProtectedRoute><PodStation /></ProtectedRoute>} />
               <Route path="/jacky-live" element={<ProtectedRoute><JackyLive /></ProtectedRoute>} />
               <Route path="/agent-lab" element={<ProtectedRoute><AgentLab /></ProtectedRoute>} />
