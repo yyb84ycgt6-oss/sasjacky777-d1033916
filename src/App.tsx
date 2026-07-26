@@ -213,17 +213,19 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
-              {ERU_ROUTES.filter(({ path }) => path.length > 0).map(({ path, name }) => (
+              {ERU_ALIASES.map(({ path, label }) => (
                 <Route
-                  key={`eru-alias-${path}-${name}`}
-                  path={`/${path}`}
+                  key={`eru-alias-${path}`}
+                  path={path}
                   element={
                     <ProtectedRoute>
                       <EruAliasRedirect />
                     </ProtectedRoute>
                   }
+                  aria-label={label}
                 />
               ))}
+
               <Route
                 path="/eru/*"
                 element={
