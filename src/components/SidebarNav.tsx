@@ -5,8 +5,13 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 /**
  * Jackie's left-menu navigation, grouped into collapsible sections so the
  * growing tool list stays scannable. Every destination that used to live in
- * the flat list is still here — plus The PC section, which deep-links into
- * the embedded Visual Computer (/pc?app=<pc-app-id>).
+ * the flat list is still here — plus The PC sections at the top, which
+ * deep-link into the embedded Visual Computer (/pc?app=<pc-app-id>).
+ *
+ * The PC ships whole under /public/pc-os/ and is framed by /pc (PCDesktop).
+ * The four PC groups lead the menu: the desktop itself + the App Commander,
+ * then AI & Agents, Data & Ops, and Studio & Research deep links. Every
+ * app id below is verified present in the embedded build, so no link is dead.
  */
 
 interface NavItem {
@@ -28,10 +33,65 @@ const NAV_GROUPS: NavGroup[] = [
     label: "The PC",
     items: [
       { label: "🖥️ The PC · Visual Computer", href: "/pc", title: "The whole PC — 90+ apps, windows, ink gestures — embedded with nothing compromised" },
+      { label: "👁️ eYe App Commander", href: "/app-commander.html", title: "Fleet command center — live GPU/thermal, routing tier, AES-GCM vault, collapse pipeline", external: true },
       { label: "🧭 JACKY v3 (in PC)", href: "/pc?app=jacky", title: "Open the PC with JACKY v3 running" },
       { label: "⌨️ ai-term Console", href: "/pc?app=aiterm", title: "Open the PC with the ai-term console running" },
       { label: "🛡️ PC Security Center", href: "/pc?app=security_center", title: "Open the PC with the Security Center running" },
       { label: "🧬 qpdb Matrix", href: "/pc?app=qpdb", title: "Open the PC with the qpdb Matrix running" },
+    ],
+  },
+  {
+    id: "pc-ai",
+    label: "PC · AI & Agents",
+    items: [
+      { label: "🔀 Model Router", href: "/pc?app=model_router" },
+      { label: "🧠 On-Device Models", href: "/pc?app=ondevice_models" },
+      { label: "📎 Claude Assistant", href: "/pc?app=claude_assistant" },
+      { label: "⚡ Grok Terminal", href: "/pc?app=grok_terminal" },
+      { label: "📜 Codex", href: "/pc?app=codex" },
+      { label: "🛠️ Agent Builder", href: "/pc?app=agent_builder" },
+      { label: "🐝 Small Agent Fleet", href: "/pc?app=small_agent_fleet" },
+      { label: "🌐 LLM Environment", href: "/pc?app=llm_environment" },
+      { label: "🔗 LangChain", href: "/pc?app=langchain" },
+      { label: "🦙 Ollama", href: "/pc?app=ollama" },
+      { label: "🦅 OpenClaw", href: "/pc?app=openclaw" },
+    ],
+  },
+  {
+    id: "pc-data",
+    label: "PC · Data & Ops",
+    items: [
+      { label: "💾 Data Pods", href: "/pc?app=data_pods" },
+      { label: "🗜️ Knowledge Compressor", href: "/pc?app=knowledge_compressor" },
+      { label: "📦 Archiver", href: "/pc?app=archiver" },
+      { label: "💬 Chat History & Share", href: "/pc?app=chat_history_share" },
+      { label: "🗺️ Fleet Atlas", href: "/pc?app=fleet_atlas" },
+      { label: "☁️ Cloud Infrastructure", href: "/pc?app=cloud_infrastructure" },
+      { label: "⚙️ Automation", href: "/pc?app=automation" },
+      { label: "🔔 Notification Center", href: "/pc?app=notification_center" },
+      { label: "🗝️ API Keys", href: "/pc?app=api_keys" },
+      { label: "🎛️ System Settings", href: "/pc?app=system_settings" },
+      { label: "🐙 GitHub Sync", href: "/pc?app=github_sync" },
+      { label: "🐇 CodeRabbit", href: "/pc?app=coderabbit" },
+      { label: "📤 Cybernetic Export", href: "/pc?app=cybernetic_export" },
+    ],
+  },
+  {
+    id: "pc-studio",
+    label: "PC · Studio & Research",
+    items: [
+      { label: "🎛️ SuperSayen Studio", href: "/pc?app=supersayen" },
+      { label: "🌀 Blender", href: "/pc?app=blender" },
+      { label: "🎮 Unreal Engine", href: "/pc?app=unreal" },
+      { label: "📊 Slides", href: "/pc?app=slides" },
+      { label: "📝 Notepad", href: "/pc?app=notepad" },
+      { label: "✉️ Mail", href: "/pc?app=mail" },
+      { label: "📁 Folders", href: "/pc?app=folder" },
+      { label: "🎓 Semantic Scholar", href: "/pc?app=semantic_scholar" },
+      { label: "🐰 Research Rabbit", href: "/pc?app=research_rabbit" },
+      { label: "📄 Papers with Code", href: "/pc?app=papers_with_code" },
+      { label: "♟️ Zenith Chess", href: "/pc?app=chess" },
+      { label: "🐍 Snake", href: "/pc?app=snake" },
     ],
   },
   {
