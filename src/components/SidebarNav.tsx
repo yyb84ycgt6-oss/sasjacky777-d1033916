@@ -34,6 +34,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "🖥️ The PC · Visual Computer", href: "/pc", title: "The whole PC — 90+ apps, windows, ink gestures — embedded with nothing compromised" },
       { label: "👁️ eYe App Commander", href: "/app-commander.html", title: "Fleet command center — live GPU/thermal, routing tier, AES-GCM vault, collapse pipeline", external: true },
+      { label: "📡 Jacky Live · Real Engine", href: "/jacky-live", title: "Live RTX-3090 telemetry, situation-aware routing and squad dispatch from the real jacky engine" },
       { label: "🧭 JACKY v3 (in PC)", href: "/pc?app=jacky", title: "Open the PC with JACKY v3 running" },
       { label: "⌨️ ai-term Console", href: "/pc?app=aiterm", title: "Open the PC with the ai-term console running" },
       { label: "🛡️ PC Security Center", href: "/pc?app=security_center", title: "Open the PC with the Security Center running" },
