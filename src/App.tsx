@@ -213,7 +213,7 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
-              {ERU_ALIASES.map(({ path, label }) => (
+              {ERU_ALIASES.map(({ path }) => (
                 <Route
                   key={`eru-alias-${path}`}
                   path={path}
@@ -222,7 +222,6 @@ const App = () => (
                       <EruAliasRedirect />
                     </ProtectedRoute>
                   }
-                  aria-label={label}
                 />
               ))}
 
@@ -236,6 +235,7 @@ const App = () => (
               />
               <Route path="*" element={<NotFound />} />
             </Routes>
+            <RouteDebugOverlay />
             <Suspense fallback={null}><FloatingEditorNav /></Suspense>
             </SandboxCatcher>
           </BrowserRouter>
