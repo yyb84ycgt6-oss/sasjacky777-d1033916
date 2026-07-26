@@ -36,6 +36,7 @@ import ApexHub from "./pages/ApexHub";
 import AIProviders from "./pages/AIProviders";
 import PodStation from "./pages/PodStation";
 import JackyLive from "./pages/JackyLive";
+import AgentLab from "./pages/AgentLab";
 import RouterMesh from "./pages/RouterMesh";
 import RouterMeshDocs from "./pages/RouterMeshDocs";
 const EruRouter = lazy(() => import("./eru/EruRouter"));
@@ -183,6 +184,7 @@ const App = () => (
               <Route path="/providers" element={<ProtectedRoute><AIProviders /></ProtectedRoute>} />
               <Route path="/pods" element={<ProtectedRoute><PodStation /></ProtectedRoute>} />
               <Route path="/jacky-live" element={<ProtectedRoute><JackyLive /></ProtectedRoute>} />
+              <Route path="/agent-lab" element={<ProtectedRoute><AgentLab /></ProtectedRoute>} />
               <Route path="/mesh" element={<ProtectedRoute><RouterMesh /></ProtectedRoute>} />
               <Route path="/mesh/docs" element={<ProtectedRoute><RouterMeshDocs /></ProtectedRoute>} />
               <Route
