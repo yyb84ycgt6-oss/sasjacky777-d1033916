@@ -233,6 +233,59 @@ export function exportRun(run: RunRecord): void {
   download(`${slug(run.agentName)}-${run.at}.md`, md, "text/markdown");
 }
 
+/** One agent's result in a side-by-side comparison. */
+export interface ComparisonLane {
+  agentName: string;
+  provider: string;
+  model: string;
+  contextBudget: number;
+  output: string;
+  servedBy?: string;
+  servedModel?: string;
+  ms?: number;
+  promptTokens: number;
+  error?: string;
+}
+
+/**
+ * Download a side-by-side comparison as a Markdown report — the artifact you
+ * keep from an R&D session. Includes a results table plus each full output.
+ */
+export function exportComparison(prompt: string, lanes: ComparisonLane[]): void {
+  const stamp = new Date();
+  const rows = lanes.map((l) => {
+    const served = l.error ? "—" : `${l.servedBy ?? "—"}${l.servedModel ? ` (${l.servedModel})` : ""}`;
+    const secs = typeof l.ms === "number" ? `${(l.ms / 1000).toFixed(2)}s` : "—";
+    const chars = l.error ? "—" : String(l.output.length);
+    return `| ${l.agentName} | ${l.provider} · ${l.model} | ${(l.contextBudget / 1000).toFixed(0)}k | ${served} | ${secs} | ${chars} | ${l.error ? "❌" : "✅"} |`;
+  });
+  const md = [
+    `# Agent comparison — ${stamp.toLocaleString()}`,
+    "",
+    "## Prompt",
+    "",
+    prompt,
+    "",
+    "## Results",
+    "",
+    "| Agent | Configured | Budget | Served by | Latency | Output chars | |",
+    "|---|---|---|---|---|---|---|",
+    ...rows,
+    "",
+    `_Prompt tokens are estimates (~4 chars/token). Latency is measured wall-clock._`,
+    "",
+    "## Outputs",
+    "",
+    ...lanes.flatMap((l) => [
+      `### ${l.agentName}`,
+      "",
+      l.error ? `> **Error:** ${l.error}` : l.output || "_(empty)_",
+      "",
+    ]),
+  ].join("\n");
+  download(`agent-comparison-${stamp.getTime()}.md`, md, "text/markdown");
+}
+
 function isAgentish(v: unknown): v is LabAgent {
   const a = v as LabAgent;
   return !!a && typeof a.name === "string" && typeof a.system === "string" && typeof a.provider === "string";
