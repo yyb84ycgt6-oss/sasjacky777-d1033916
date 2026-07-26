@@ -32,6 +32,7 @@ export const CORE_ROUTES: RouteEntry[] = [
   { path: "/swarm", label: "Bot Swarm", group: "ai" },
   { path: "/control", label: "Jackie Control", group: "ai" },
   { path: "/providers", label: "AI Providers", group: "ai" },
+  { path: "/grok", label: "Grok Studio", group: "ai" },
   { path: "/agent-lab", label: "Agent Lab", group: "ai" },
   { path: "/jacky-live", label: "Jacky Live", group: "ai" },
   { path: "/keys", label: "API Keys", group: "ai" },
