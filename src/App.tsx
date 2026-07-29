@@ -42,6 +42,7 @@ import AgentCompare from "./pages/AgentCompare";
 import RouterMesh from "./pages/RouterMesh";
 import RouterMeshDocs from "./pages/RouterMeshDocs";
 import PCDesktop from "./pages/PCDesktop";
+import GithubSync from "./pages/GithubSync";
 import { ERU_ALIASES } from "./lib/routeManifest";
 import RouteDebugOverlay from "./components/RouteDebugOverlay";
 
