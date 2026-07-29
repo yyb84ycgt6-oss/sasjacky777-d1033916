@@ -210,7 +210,9 @@ const App = () => (
               <Route path="/agent-compare" element={<ProtectedRoute><AgentCompare /></ProtectedRoute>} />
               <Route path="/mesh" element={<ProtectedRoute><RouterMesh /></ProtectedRoute>} />
               <Route path="/mesh/docs" element={<ProtectedRoute><RouterMeshDocs /></ProtectedRoute>} />
+              <Route path="/github" element={<ProtectedRoute><GithubSync /></ProtectedRoute>} />
               <Route
+
                 path="/eru/visualizers"
                 element={
                   <ProtectedRoute>
