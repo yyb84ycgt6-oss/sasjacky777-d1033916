@@ -1,7 +1,7 @@
 {
   "name": "Jackie's PC",
   "short_name": "Jackie",
-  "description": "Jackie's PC \u2014 a personal, offline-capable AI workspace with Jackie as your operator.",
+  "description": "Jackie's PC — a personal, offline-capable AI workspace with Jackie as your operator.",
   "start_url": "/pc-os/",
   "display": "standalone",
   "background_color": "#04030a",
