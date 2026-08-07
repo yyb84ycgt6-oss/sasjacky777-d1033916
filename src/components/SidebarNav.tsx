@@ -10,8 +10,16 @@ import { ChevronDown, ChevronRight } from "lucide-react";
  *
  * The PC ships whole under /public/pc-os/ and is framed by /pc (PCDesktop).
  * The four PC groups lead the menu: the desktop itself + the App Commander,
- * then AI & Agents, Data & Ops, and Studio & Research deep links. Every
- * app id below is verified present in the embedded build, so no link is dead.
+ * then AI & Agents, Data & Ops, and Studio & Research deep links.
+ *
+ * These groups are a hand-picked shortcut to the apps used most, NOT the whole
+ * roster — they reach 38 of the PC's 90. `/pc-apps` lists all of them, and its
+ * list is generated from the PC's own desktop items rather than typed out.
+ *
+ * This file used to claim every id here was verified present. It was not:
+ * `unreal` (the PC calls it `unreal_engine`) and `folder` (never an app at all)
+ * both went nowhere. When adding a link, check the id against src/data/pcApps.ts
+ * — a wrong one fails silently, dropping you on the desktop with nothing open.
  */
 
 interface NavItem {
@@ -33,6 +41,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "The PC",
     items: [
       { label: "🖥️ The PC · Visual Computer", href: "/pc", title: "The whole PC — 90+ apps, windows, ink gestures — embedded with nothing compromised" },
+      { label: "🗂️ PC App Library · all 90", href: "/pc-apps", title: "Every app in the PC, searchable — the groups below are a shortcut to the ones used most" },
       { label: "👁️ eYe App Commander", href: "/app-commander.html", title: "Fleet command center — live GPU/thermal, routing tier, AES-GCM vault, collapse pipeline", external: true },
       { label: "📡 Jacky Live · Real Engine", href: "/jacky-live", title: "Live RTX-3090 telemetry, situation-aware routing and squad dispatch from the real jacky engine" },
       { label: "🧭 JACKY v3 (in PC)", href: "/pc?app=jacky", title: "Open the PC with JACKY v3 running" },
@@ -83,11 +92,11 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "🎛️ SuperSayen Studio", href: "/pc?app=supersayen" },
       { label: "🌀 Blender", href: "/pc?app=blender" },
-      { label: "🎮 Unreal Engine", href: "/pc?app=unreal" },
+      { label: "🎮 Unreal Engine", href: "/pc?app=unreal_engine" },
       { label: "📊 Slides", href: "/pc?app=slides" },
       { label: "📝 Notepad", href: "/pc?app=notepad" },
       { label: "✉️ Mail", href: "/pc?app=mail" },
-      { label: "📁 Folders", href: "/pc?app=folder" },
+      { label: "📁 Documents", href: "/pc?app=docs" },
       { label: "🎓 Semantic Scholar", href: "/pc?app=semantic_scholar" },
       { label: "🐰 Research Rabbit", href: "/pc?app=research_rabbit" },
       { label: "📄 Papers with Code", href: "/pc?app=papers_with_code" },

@@ -42,6 +42,7 @@ import AgentCompare from "./pages/AgentCompare";
 import RouterMesh from "./pages/RouterMesh";
 import RouterMeshDocs from "./pages/RouterMeshDocs";
 import PCDesktop from "./pages/PCDesktop";
+import PcApps from "./pages/PcApps";
 import GithubSync from "./pages/GithubSync";
 import { ERU_ALIASES } from "./lib/routeManifest";
 import RouteDebugOverlay from "./components/RouteDebugOverlay";
@@ -123,6 +124,14 @@ const App = () => (
                 element={
                   <ProtectedRoute>
                     <PCDesktop />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/pc-apps"
+                element={
+                  <ProtectedRoute>
+                    <PcApps />
                   </ProtectedRoute>
                 }
               />
