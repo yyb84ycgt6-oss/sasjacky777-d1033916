@@ -1,0 +1,149 @@
+{
+  "_vendor-B9I1Peu7.js": {
+    "file": "assets/vendor-B9I1Peu7.js",
+    "name": "vendor",
+    "isDynamicEntry": true,
+    "imports": [
+      "_vendor-react-C95WAip3.js"
+    ],
+    "assets": [
+      "assets/ort-wasm-simd-threaded.jsep-B0T3yYHD.wasm"
+    ]
+  },
+  "_vendor-chess-_tZXOO1G.js": {
+    "file": "assets/vendor-chess-_tZXOO1G.js",
+    "name": "vendor-chess",
+    "imports": [
+      "_vendor-react-C95WAip3.js"
+    ]
+  },
+  "_vendor-firebase-aSkZhJQd.js": {
+    "file": "assets/vendor-firebase-aSkZhJQd.js",
+    "name": "vendor-firebase",
+    "imports": [
+      "_vendor-B9I1Peu7.js"
+    ]
+  },
+  "_vendor-genai-CROhDBt-.js": {
+    "file": "assets/vendor-genai-CROhDBt-.js",
+    "name": "vendor-genai",
+    "imports": [
+      "_vendor-B9I1Peu7.js"
+    ]
+  },
+  "_vendor-icons-hdc-ReJy.js": {
+    "file": "assets/vendor-icons-hdc-ReJy.js",
+    "name": "vendor-icons",
+    "imports": [
+      "_vendor-react-C95WAip3.js"
+    ]
+  },
+  "_vendor-react-C95WAip3.js": {
+    "file": "assets/vendor-react-C95WAip3.js",
+    "name": "vendor-react"
+  },
+  "components/apps/BypassApp.tsx": {
+    "file": "assets/BypassApp-D0oQFmHq.js",
+    "name": "BypassApp",
+    "src": "components/apps/BypassApp.tsx",
+    "isDynamicEntry": true,
+    "imports": [
+      "_vendor-react-C95WAip3.js",
+      "index.html",
+      "_vendor-icons-hdc-ReJy.js",
+      "_vendor-genai-CROhDBt-.js",
+      "_vendor-B9I1Peu7.js",
+      "_vendor-chess-_tZXOO1G.js",
+      "_vendor-firebase-aSkZhJQd.js"
+    ]
+  },
+  "components/apps/FleetApp.tsx": {
+    "file": "assets/FleetApp-Ct2-EWig.js",
+    "name": "FleetApp",
+    "src": "components/apps/FleetApp.tsx",
+    "isDynamicEntry": true,
+    "imports": [
+      "_vendor-react-C95WAip3.js",
+      "index.html",
+      "_vendor-icons-hdc-ReJy.js",
+      "_vendor-genai-CROhDBt-.js",
+      "_vendor-B9I1Peu7.js",
+      "_vendor-chess-_tZXOO1G.js",
+      "_vendor-firebase-aSkZhJQd.js"
+    ]
+  },
+  "components/apps/JackieChatApp.tsx": {
+    "file": "assets/JackieChatApp-zhdX0gXU.js",
+    "name": "JackieChatApp",
+    "src": "components/apps/JackieChatApp.tsx",
+    "isDynamicEntry": true,
+    "imports": [
+      "_vendor-react-C95WAip3.js",
+      "index.html",
+      "_vendor-icons-hdc-ReJy.js",
+      "_vendor-genai-CROhDBt-.js",
+      "_vendor-B9I1Peu7.js",
+      "_vendor-chess-_tZXOO1G.js",
+      "_vendor-firebase-aSkZhJQd.js"
+    ]
+  },
+  "components/apps/KnowledgeApp.tsx": {
+    "file": "assets/KnowledgeApp-plwjM88H.js",
+    "name": "KnowledgeApp",
+    "src": "components/apps/KnowledgeApp.tsx",
+    "isDynamicEntry": true,
+    "imports": [
+      "_vendor-react-C95WAip3.js",
+      "_vendor-icons-hdc-ReJy.js"
+    ]
+  },
+  "index.html": {
+    "file": "assets/index-CLBCsOtS.js",
+    "name": "index",
+    "src": "index.html",
+    "isEntry": true,
+    "imports": [
+      "_vendor-react-C95WAip3.js",
+      "_vendor-genai-CROhDBt-.js",
+      "_vendor-icons-hdc-ReJy.js",
+      "_vendor-chess-_tZXOO1G.js",
+      "_vendor-B9I1Peu7.js",
+      "_vendor-firebase-aSkZhJQd.js"
+    ],
+    "dynamicImports": [
+      "lib/routerMenu/subRouters/workstation.ts",
+      "lib/routerMenu/subRouters/routers.ts",
+      "lib/routerMenu/subRouters/storage.ts",
+      "components/apps/BypassApp.tsx",
+      "components/apps/FleetApp.tsx",
+      "components/apps/KnowledgeApp.tsx",
+      "components/apps/JackieChatApp.tsx",
+      "_vendor-B9I1Peu7.js"
+    ],
+    "css": [
+      "assets/index-DIeCoBXu.css"
+    ]
+  },
+  "lib/routerMenu/subRouters/routers.ts": {
+    "file": "assets/routers-DXAeyea5.js",
+    "name": "routers",
+    "src": "lib/routerMenu/subRouters/routers.ts",
+    "isDynamicEntry": true
+  },
+  "lib/routerMenu/subRouters/storage.ts": {
+    "file": "assets/storage-G04GZ7QG.js",
+    "name": "storage",
+    "src": "lib/routerMenu/subRouters/storage.ts",
+    "isDynamicEntry": true
+  },
+  "lib/routerMenu/subRouters/workstation.ts": {
+    "file": "assets/workstation-8ncuANLa.js",
+    "name": "workstation",
+    "src": "lib/routerMenu/subRouters/workstation.ts",
+    "isDynamicEntry": true
+  },
+  "node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.wasm": {
+    "file": "assets/ort-wasm-simd-threaded.jsep-B0T3yYHD.wasm",
+    "src": "node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.wasm"
+  }
+}

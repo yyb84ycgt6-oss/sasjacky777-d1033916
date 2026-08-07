@@ -8,27 +8,15 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="apple-touch-icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' width='100' height='100'><rect width='100%' height='100%' fill='black' /><text x='50' y='55' font-family='monospace' font-size='28' font-weight='bold' fill='white' text-anchor='middle' dominant-baseline='middle'>‾_o_‾</text></svg>">
     <title>‾_o_‾</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        os: {
-                            bg: '#1e1e2e',
-                            surface: '#313244',
-                            text: '#cdd6f4',
-                            accent: '#89b4fa'
-                        }
-                    },
-                    animation: {
-                        'pulse-fast': 'pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite',
-                    }
-                }
-            }
-        }
-    </script>
+    <!-- Tailwind is compiled into the bundle by PostCSS (see tailwind.config.js
+         and index.css) rather than fetched from cdn.tailwindcss.com, so the PC
+         styles correctly offline. The theme that used to be declared inline
+         here now lives in tailwind.config.js. -->
+    <!-- html2canvas is a bundled dependency imported on demand where it is
+         used, for the same reason Tailwind is compiled in above: a CDN script
+         never loads with no network, so the screenshot feature failed silently
+         off-grid. It also blocked first paint on every load for a feature most
+         sessions never touch. -->
     <style>
         * {
             -webkit-tap-highlight-color: transparent;
@@ -38,7 +26,8 @@
 
         input, textarea, select, button {
             -webkit-user-select: text;
-            user-select: text;
+            -moz-user-select: text;
+                 user-select: text;
         }
 
         html, body {
@@ -77,6 +66,10 @@
         }
     </style>
 
+<!-- index.css is imported from index.tsx so PostCSS compiles the @tailwind
+     directives; linking it here as well would ship the raw file too. -->
+<!-- PC theme system: styles are scoped under [data-pc-family] on the PC
+     desktop container only — inert while the cosmic default is active. -->
 <script type="importmap">
 {
   "imports": {
@@ -88,13 +81,14 @@
   }
 }
 </script>
-  <script type="module" crossorigin src="/pc-os/assets/index-8EwCwmjM.js"></script>
-  <link rel="modulepreload" crossorigin href="/pc-os/assets/vendor-react-Dqsy2SAS.js">
-  <link rel="modulepreload" crossorigin href="/pc-os/assets/vendor-genai-D1jNAwLK.js">
-  <link rel="modulepreload" crossorigin href="/pc-os/assets/vendor-icons-bfHQBRY1.js">
-  <link rel="modulepreload" crossorigin href="/pc-os/assets/vendor-chess-0Nnf-7PG.js">
-  <link rel="modulepreload" crossorigin href="/pc-os/assets/vendor-firebase-gZ8J_qHm.js">
-  <link rel="stylesheet" crossorigin href="/pc-os/assets/index-C6syC2k9.css">
+  <script type="module" crossorigin src="/pc-os/assets/index-CLBCsOtS.js"></script>
+  <link rel="modulepreload" crossorigin href="/pc-os/assets/vendor-react-C95WAip3.js">
+  <link rel="modulepreload" crossorigin href="/pc-os/assets/vendor-B9I1Peu7.js">
+  <link rel="modulepreload" crossorigin href="/pc-os/assets/vendor-genai-CROhDBt-.js">
+  <link rel="modulepreload" crossorigin href="/pc-os/assets/vendor-icons-hdc-ReJy.js">
+  <link rel="modulepreload" crossorigin href="/pc-os/assets/vendor-chess-_tZXOO1G.js">
+  <link rel="modulepreload" crossorigin href="/pc-os/assets/vendor-firebase-aSkZhJQd.js">
+  <link rel="stylesheet" crossorigin href="/pc-os/assets/index-DIeCoBXu.css">
 </head>
 <body class="h-full overflow-hidden text-zinc-100 font-sans antialiased">
     <div id="root" class="h-full w-full flex"></div>
