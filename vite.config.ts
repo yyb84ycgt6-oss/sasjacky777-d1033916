@@ -35,8 +35,19 @@ export default defineConfig(({ mode }) => ({
       },
       workbox: {
         maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
+        // The PC embed under /pc-os/ is a complete build with its own service
+        // worker, which precaches its own shell and route chunks from its own
+        // .vite/manifest.json. Precaching it again here would duplicate ~26 MB
+        // into Jackie's precache manifest and force a full re-download on every
+        // PC rebuild — and it hard-fails the build outright, because the
+        // on-device AI wasm is 21.6 MB against workbox's per-file limit.
+        // Runtime caching below still picks these up on demand.
+        globIgnores: ["**/pc-os/**"],
         navigateFallback: "/index.html",
-        navigateFallbackDenylist: [/^\/~oauth/, /^\/api/, /^\/functions/],
+        // /pc-os/index.html is a real navigation when the PC is opened in its
+        // own tab. Without this it would fall back to Jackie's shell offline,
+        // so the PC could not start standalone.
+        navigateFallbackDenylist: [/^\/~oauth/, /^\/api/, /^\/functions/, /^\/pc-os\//],
         runtimeCaching: [
           {
             urlPattern: ({ request }) => request.mode === "navigate",
