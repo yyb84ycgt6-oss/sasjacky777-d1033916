@@ -55,7 +55,8 @@ export async function fetchRoles(userId?: string): Promise<AppRole[]> {
   }
   if (!id) return [];
 
-  const { data, error } = await supabase
+  // Cast: user_roles/audit_events are not present in the generated types yet.
+  const { data, error } = await (supabase as unknown as UntypedClient)
     .from("user_roles")
     .select("role")
     .eq("user_id", id);
