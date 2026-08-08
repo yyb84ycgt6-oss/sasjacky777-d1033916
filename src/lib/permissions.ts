@@ -1,6 +1,17 @@
 import { supabase } from "@/integrations/supabase/client";
 
 /**
+ * Tables introduced by the roles/audit migrations that are not yet reflected in
+ * the generated database types. Narrow, local escape hatch — nothing else.
+ */
+type UntypedClient = {
+  from: (table: string) => {
+    select: (cols: string) => { eq: (col: string, val: string) => Promise<{ data: { role: AppRole }[] | null; error: unknown }> };
+    insert: (row: Record<string, unknown>) => Promise<{ error: unknown }>;
+  };
+};
+
+/**
  * Roles and the audit trail, client side.
  *
  * The database is the authority here, not this file. Every function below is a
