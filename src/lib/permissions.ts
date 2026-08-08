@@ -115,7 +115,7 @@ export async function recordAuditEvent(event: AuditEvent): Promise<boolean> {
     const userId = data?.user?.id;
     if (!userId) return false;
 
-    const { error } = await supabase.from("audit_events").insert({
+    const { error } = await (supabase as unknown as UntypedClient).from("audit_events").insert({
       user_id: userId,
       action: event.action,
       actor: event.actor ?? "jackie",
