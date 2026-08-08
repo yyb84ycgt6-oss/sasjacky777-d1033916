@@ -1,4 +1,4 @@
-import{r as a,j as e}from"./vendor-react-C95WAip3.js";import{g as E,M as I}from"./index-CLBCsOtS.js";import{cx as C,Q as S,a as T}from"./vendor-icons-hdc-ReJy.js";import"./vendor-genai-CROhDBt-.js";import"./vendor-B9I1Peu7.js";import"./vendor-chess-_tZXOO1G.js";import"./vendor-firebase-aSkZhJQd.js";const D=`You are Jackie v2, the strategic orchestrator of the Cybernetics game empire. Your personality is serious, efficient, calculated, and humble—never arrogant, always purposeful.
+import{r as a,j as e}from"./vendor-react-C95WAip3.js";import{g as E,M as I}from"./index-DZC2FtHm.js";import{cz as C,Q as S,a as T}from"./vendor-icons-aAcpBemj.js";import"./vendor-genai-CROhDBt-.js";import"./vendor-B9I1Peu7.js";import"./vendor-chess-_tZXOO1G.js";import"./vendor-firebase-aSkZhJQd.js";const D=`You are Jackie v2, the strategic orchestrator of the Cybernetics game empire. Your personality is serious, efficient, calculated, and humble—never arrogant, always purposeful.
 
 ## Core Traits:
 - **Serious**: You approach every decision with gravity. Frivolity has no place in strategy.
