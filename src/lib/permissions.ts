@@ -1,6 +1,17 @@
 import { supabase } from "@/integrations/supabase/client";
 
 /**
+ * Tables introduced by the roles/audit migrations that are not yet reflected in
+ * the generated database types. Narrow, local escape hatch — nothing else.
+ */
+type UntypedClient = {
+  from: (table: string) => {
+    select: (cols: string) => { eq: (col: string, val: string) => Promise<{ data: { role: AppRole }[] | null; error: unknown }> };
+    insert: (row: Record<string, unknown>) => Promise<{ error: unknown }>;
+  };
+};
+
+/**
  * Roles and the audit trail, client side.
  *
  * The database is the authority here, not this file. Every function below is a
@@ -55,7 +66,8 @@ export async function fetchRoles(userId?: string): Promise<AppRole[]> {
   }
   if (!id) return [];
 
-  const { data, error } = await supabase
+  // Cast: user_roles/audit_events are not present in the generated types yet.
+  const { data, error } = await (supabase as unknown as UntypedClient)
     .from("user_roles")
     .select("role")
     .eq("user_id", id);
@@ -103,7 +115,7 @@ export async function recordAuditEvent(event: AuditEvent): Promise<boolean> {
     const userId = data?.user?.id;
     if (!userId) return false;
 
-    const { error } = await supabase.from("audit_events").insert({
+    const { error } = await (supabase as unknown as UntypedClient).from("audit_events").insert({
       user_id: userId,
       action: event.action,
       actor: event.actor ?? "jackie",
