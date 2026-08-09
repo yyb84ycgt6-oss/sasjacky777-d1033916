@@ -30,6 +30,7 @@ import {
   exportAgent, exportAll, exportRun, importAgentsFromFile,
   listVersions, saveVersion, deleteVersion, deleteVersionsFor, diffSummary,
 } from "@/lib/agentLab";
+import { installLovableAgents } from "@/lib/lovableAgents";
 
 const DEFAULT_PROVIDER = (PROVIDERS[0]?.id ?? "lovable") as ProviderId;
 const DEFAULT_MODEL = PROVIDERS[0]?.models[0]?.id ?? "";
