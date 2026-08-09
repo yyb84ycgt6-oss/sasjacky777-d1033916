@@ -209,6 +209,9 @@ export default function AgentLab() {
         <Button variant="outline" size="sm" disabled={!agents.length} onClick={() => exportAll(agents)}>
           <Download size={13} className="mr-1" /> Export all
         </Button>
+        <Button variant="outline" size="sm" onClick={installAgents}>
+          <Bot size={13} className="mr-1" /> Add Lovable agents
+        </Button>
         <Button size="sm" onClick={create}>
           <Plus size={13} className="mr-1" /> New agent
         </Button>
