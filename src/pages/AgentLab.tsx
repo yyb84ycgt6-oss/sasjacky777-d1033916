@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   ArrowLeft, Beaker, Plus, Play, Square, Save, Trash2, Copy, Download,
-  Upload, FileDown, Gauge, Sparkles, History, RotateCcw,
+  Upload, FileDown, Gauge, Sparkles, History, RotateCcw, Bot,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -30,6 +30,7 @@ import {
   exportAgent, exportAll, exportRun, importAgentsFromFile,
   listVersions, saveVersion, deleteVersion, deleteVersionsFor, diffSummary,
 } from "@/lib/agentLab";
+import { installLovableAgents } from "@/lib/lovableAgents";
 
 const DEFAULT_PROVIDER = (PROVIDERS[0]?.id ?? "lovable") as ProviderId;
 const DEFAULT_MODEL = PROVIDERS[0]?.models[0]?.id ?? "";
@@ -91,6 +92,19 @@ export default function AgentLab() {
     persist(a, "Agent created");
     setOutput("");
   }
+
+  /** Seed the prebuilt Lovable AI roster — no key needed, safe to re-run. */
+  function installAgents() {
+    const { added, skipped } = installLovableAgents();
+    const list = listAgents();
+    setAgents(list);
+    if (added && list[0]) select(list[0]);
+    toast({
+      title: added ? `Added ${added} Lovable agent${added === 1 ? "" : "s"}` : "Lovable agents already installed",
+      description: skipped ? `${skipped} already present — left untouched.` : undefined,
+    });
+  }
+
 
   function patch(p: Partial<LabAgent>) {
     setDraft((d) => (d ? { ...d, ...p } : d));
@@ -208,6 +222,9 @@ export default function AgentLab() {
         </Button>
         <Button variant="outline" size="sm" disabled={!agents.length} onClick={() => exportAll(agents)}>
           <Download size={13} className="mr-1" /> Export all
+        </Button>
+        <Button variant="outline" size="sm" onClick={installAgents}>
+          <Bot size={13} className="mr-1" /> Add Lovable agents
         </Button>
         <Button size="sm" onClick={create}>
           <Plus size={13} className="mr-1" /> New agent
