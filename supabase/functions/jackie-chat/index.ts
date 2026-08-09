@@ -132,14 +132,27 @@ serve(async (req) => {
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
 
     const ALLOWED_MODELS = [
+      "google/gemini-3.6-flash",
+      "google/gemini-3.5-flash",
+      "google/gemini-3.1-flash-lite",
+      "google/gemini-3.1-pro-preview",
+      "google/gemini-3-flash-preview",
       "google/gemini-2.5-pro",
       "google/gemini-2.5-flash",
       "google/gemini-2.5-flash-lite",
-      "google/gemini-3-flash-preview",
+      "openai/gpt-5.6-terra",
+      "openai/gpt-5.6-luna",
+      "openai/gpt-5.4-mini",
       "openai/gpt-5",
       "openai/gpt-5-mini",
+      "openai/gpt-5-nano",
     ];
-    const selectedModel = ALLOWED_MODELS.includes(model) ? model : "google/gemini-2.5-pro";
+    const selectedModel = ALLOWED_MODELS.includes(model) ? model : "google/gemini-3.6-flash";
+    // GPT-5.6 on chat completions runs with reasoning on by default and rejects
+    // tool-bearing requests unless effort is explicitly disabled.
+    const extraFields = selectedModel.startsWith("openai/gpt-5.6")
+      ? { reasoning_effort: "none" }
+      : {};
 
     // Build dynamic system prompt
     let systemPrompt = BASE_PROMPT;
@@ -160,6 +173,7 @@ serve(async (req) => {
         },
         body: JSON.stringify({
           model: selectedModel,
+          ...extraFields,
           messages: [
             { role: "system", content: systemPrompt },
             ...messages,
