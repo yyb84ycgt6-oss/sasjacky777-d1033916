@@ -92,6 +92,19 @@ export default function AgentLab() {
     setOutput("");
   }
 
+  /** Seed the prebuilt Lovable AI roster — no key needed, safe to re-run. */
+  function installAgents() {
+    const { added, skipped } = installLovableAgents();
+    const list = listAgents();
+    setAgents(list);
+    if (added && list[0]) select(list[0]);
+    toast({
+      title: added ? `Added ${added} Lovable agent${added === 1 ? "" : "s"}` : "Lovable agents already installed",
+      description: skipped ? `${skipped} already present — left untouched.` : undefined,
+    });
+  }
+
+
   function patch(p: Partial<LabAgent>) {
     setDraft((d) => (d ? { ...d, ...p } : d));
   }
