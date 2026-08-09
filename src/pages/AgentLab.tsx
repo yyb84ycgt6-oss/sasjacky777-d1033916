@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   ArrowLeft, Beaker, Plus, Play, Square, Save, Trash2, Copy, Download,
-  Upload, FileDown, Gauge, Sparkles, History, RotateCcw,
+  Upload, FileDown, Gauge, Sparkles, History, RotateCcw, Bot,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
