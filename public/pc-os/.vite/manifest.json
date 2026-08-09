@@ -1,289 +1,317 @@
 {
-  "_parallel-CqhakU3u.js": {
-    "file": "assets/parallel-CqhakU3u.js",
+  "_parallel-YKrH2Clm.js": {
+    "file": "assets/parallel-YKrH2Clm.js",
     "name": "parallel",
     "imports": [
       "index.html"
     ]
   },
-  "_recorder-Bl_eMG9a.js": {
-    "file": "assets/recorder-Bl_eMG9a.js",
+  "_recorder-DDtdXXn3.js": {
+    "file": "assets/recorder-DDtdXXn3.js",
     "name": "recorder",
     "imports": [
       "index.html"
     ]
   },
-  "_vendor-B9I1Peu7.js": {
-    "file": "assets/vendor-B9I1Peu7.js",
+  "_vendor-B5y3n4jd.js": {
+    "file": "assets/vendor-B5y3n4jd.js",
     "name": "vendor",
     "isDynamicEntry": true,
     "imports": [
-      "_vendor-react-C95WAip3.js"
+      "_vendor-react-CydkfUxy.js"
     ],
     "assets": [
       "assets/ort-wasm-simd-threaded.jsep-B0T3yYHD.wasm"
     ]
   },
-  "_vendor-chess-_tZXOO1G.js": {
-    "file": "assets/vendor-chess-_tZXOO1G.js",
+  "_vendor-chess-BdveOW5A.js": {
+    "file": "assets/vendor-chess-BdveOW5A.js",
     "name": "vendor-chess",
     "imports": [
-      "_vendor-react-C95WAip3.js"
+      "_vendor-react-CydkfUxy.js"
     ]
   },
-  "_vendor-firebase-aSkZhJQd.js": {
-    "file": "assets/vendor-firebase-aSkZhJQd.js",
+  "_vendor-firebase-CR2gM9d2.js": {
+    "file": "assets/vendor-firebase-CR2gM9d2.js",
     "name": "vendor-firebase",
     "imports": [
-      "_vendor-B9I1Peu7.js"
+      "_vendor-B5y3n4jd.js"
     ]
   },
-  "_vendor-genai-CROhDBt-.js": {
-    "file": "assets/vendor-genai-CROhDBt-.js",
+  "_vendor-genai-Cbw91LLA.js": {
+    "file": "assets/vendor-genai-Cbw91LLA.js",
     "name": "vendor-genai",
     "imports": [
-      "_vendor-B9I1Peu7.js"
+      "_vendor-B5y3n4jd.js"
     ]
   },
-  "_vendor-icons-CJYPM37v.js": {
-    "file": "assets/vendor-icons-CJYPM37v.js",
+  "_vendor-icons-DBvzRHaM.js": {
+    "file": "assets/vendor-icons-DBvzRHaM.js",
     "name": "vendor-icons",
     "imports": [
-      "_vendor-react-C95WAip3.js"
+      "_vendor-react-CydkfUxy.js"
     ]
   },
-  "_vendor-react-C95WAip3.js": {
-    "file": "assets/vendor-react-C95WAip3.js",
-    "name": "vendor-react"
+  "_vendor-react-CydkfUxy.js": {
+    "file": "assets/vendor-react-CydkfUxy.js",
+    "name": "vendor-react",
+    "imports": [
+      "_vendor-B5y3n4jd.js"
+    ]
+  },
+  "_vendor-telegram-CZJfBlZi.js": {
+    "file": "assets/vendor-telegram-CZJfBlZi.js",
+    "name": "vendor-telegram",
+    "imports": [
+      "_vendor-B5y3n4jd.js"
+    ]
   },
   "components/apps/AmbientAgentsApp.tsx": {
-    "file": "assets/AmbientAgentsApp-Dnp3TbXa.js",
+    "file": "assets/AmbientAgentsApp-DqI40PnW.js",
     "name": "AmbientAgentsApp",
     "src": "components/apps/AmbientAgentsApp.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_vendor-react-C95WAip3.js",
+      "_vendor-react-CydkfUxy.js",
       "index.html",
-      "_vendor-icons-CJYPM37v.js",
-      "_vendor-genai-CROhDBt-.js",
-      "_vendor-B9I1Peu7.js",
-      "_vendor-chess-_tZXOO1G.js",
-      "_vendor-firebase-aSkZhJQd.js"
+      "_vendor-icons-DBvzRHaM.js",
+      "_vendor-B5y3n4jd.js",
+      "_vendor-genai-Cbw91LLA.js",
+      "_vendor-chess-BdveOW5A.js",
+      "_vendor-firebase-CR2gM9d2.js"
     ]
   },
   "components/apps/BudgetRadarApp.tsx": {
-    "file": "assets/BudgetRadarApp-DB1yIIhJ.js",
+    "file": "assets/BudgetRadarApp-BUvS2YMH.js",
     "name": "BudgetRadarApp",
     "src": "components/apps/BudgetRadarApp.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_vendor-react-C95WAip3.js",
+      "_vendor-react-CydkfUxy.js",
       "index.html",
-      "_vendor-icons-CJYPM37v.js",
-      "_vendor-genai-CROhDBt-.js",
-      "_vendor-B9I1Peu7.js",
-      "_vendor-chess-_tZXOO1G.js",
-      "_vendor-firebase-aSkZhJQd.js"
+      "_vendor-icons-DBvzRHaM.js",
+      "_vendor-B5y3n4jd.js",
+      "_vendor-genai-Cbw91LLA.js",
+      "_vendor-chess-BdveOW5A.js",
+      "_vendor-firebase-CR2gM9d2.js"
     ]
   },
   "components/apps/BusRecorderApp.tsx": {
-    "file": "assets/BusRecorderApp-N6ODXyUv.js",
+    "file": "assets/BusRecorderApp-Cr_7anlJ.js",
     "name": "BusRecorderApp",
     "src": "components/apps/BusRecorderApp.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_vendor-react-C95WAip3.js",
-      "_recorder-Bl_eMG9a.js",
-      "_vendor-icons-CJYPM37v.js",
+      "_vendor-react-CydkfUxy.js",
+      "_recorder-DDtdXXn3.js",
+      "_vendor-icons-DBvzRHaM.js",
+      "_vendor-B5y3n4jd.js",
       "index.html",
-      "_vendor-genai-CROhDBt-.js",
-      "_vendor-B9I1Peu7.js",
-      "_vendor-chess-_tZXOO1G.js",
-      "_vendor-firebase-aSkZhJQd.js"
+      "_vendor-genai-Cbw91LLA.js",
+      "_vendor-chess-BdveOW5A.js",
+      "_vendor-firebase-CR2gM9d2.js"
     ]
   },
   "components/apps/BypassApp.tsx": {
-    "file": "assets/BypassApp-ftqrIOOO.js",
+    "file": "assets/BypassApp-D3UQR-Mv.js",
     "name": "BypassApp",
     "src": "components/apps/BypassApp.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_vendor-react-C95WAip3.js",
+      "_vendor-react-CydkfUxy.js",
       "index.html",
-      "_vendor-icons-CJYPM37v.js",
-      "_vendor-genai-CROhDBt-.js",
-      "_vendor-B9I1Peu7.js",
-      "_vendor-chess-_tZXOO1G.js",
-      "_vendor-firebase-aSkZhJQd.js"
+      "_vendor-icons-DBvzRHaM.js",
+      "_vendor-B5y3n4jd.js",
+      "_vendor-genai-Cbw91LLA.js",
+      "_vendor-chess-BdveOW5A.js",
+      "_vendor-firebase-CR2gM9d2.js"
     ]
   },
   "components/apps/CartographerApp.tsx": {
-    "file": "assets/CartographerApp-IlXePqmA.js",
+    "file": "assets/CartographerApp-880jE7_J.js",
     "name": "CartographerApp",
     "src": "components/apps/CartographerApp.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_vendor-react-C95WAip3.js",
-      "_recorder-Bl_eMG9a.js",
+      "_vendor-react-CydkfUxy.js",
+      "_recorder-DDtdXXn3.js",
       "index.html",
-      "_vendor-icons-CJYPM37v.js",
-      "_vendor-genai-CROhDBt-.js",
-      "_vendor-B9I1Peu7.js",
-      "_vendor-chess-_tZXOO1G.js",
-      "_vendor-firebase-aSkZhJQd.js"
+      "_vendor-icons-DBvzRHaM.js",
+      "_vendor-B5y3n4jd.js",
+      "_vendor-genai-Cbw91LLA.js",
+      "_vendor-chess-BdveOW5A.js",
+      "_vendor-firebase-CR2gM9d2.js"
     ]
   },
   "components/apps/ChoreographyApp.tsx": {
-    "file": "assets/ChoreographyApp-CS0qD805.js",
+    "file": "assets/ChoreographyApp-BbETYUrz.js",
     "name": "ChoreographyApp",
     "src": "components/apps/ChoreographyApp.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_vendor-react-C95WAip3.js",
+      "_vendor-react-CydkfUxy.js",
       "index.html",
-      "_vendor-icons-CJYPM37v.js",
-      "_vendor-genai-CROhDBt-.js",
-      "_vendor-B9I1Peu7.js",
-      "_vendor-chess-_tZXOO1G.js",
-      "_vendor-firebase-aSkZhJQd.js"
+      "_vendor-icons-DBvzRHaM.js",
+      "_vendor-B5y3n4jd.js",
+      "_vendor-genai-Cbw91LLA.js",
+      "_vendor-chess-BdveOW5A.js",
+      "_vendor-firebase-CR2gM9d2.js"
     ]
   },
   "components/apps/ColosseumApp.tsx": {
-    "file": "assets/ColosseumApp-jEc_PIwS.js",
+    "file": "assets/ColosseumApp-CnbgKTzu.js",
     "name": "ColosseumApp",
     "src": "components/apps/ColosseumApp.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_vendor-react-C95WAip3.js",
+      "_vendor-react-CydkfUxy.js",
       "index.html",
-      "_parallel-CqhakU3u.js",
-      "_vendor-icons-CJYPM37v.js",
-      "_vendor-genai-CROhDBt-.js",
-      "_vendor-B9I1Peu7.js",
-      "_vendor-chess-_tZXOO1G.js",
-      "_vendor-firebase-aSkZhJQd.js"
+      "_parallel-YKrH2Clm.js",
+      "_vendor-icons-DBvzRHaM.js",
+      "_vendor-B5y3n4jd.js",
+      "_vendor-genai-Cbw91LLA.js",
+      "_vendor-chess-BdveOW5A.js",
+      "_vendor-firebase-CR2gM9d2.js"
     ]
   },
   "components/apps/CortexApp.tsx": {
-    "file": "assets/CortexApp-B9x1b8YR.js",
+    "file": "assets/CortexApp-DhDUK-OE.js",
     "name": "CortexApp",
     "src": "components/apps/CortexApp.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_vendor-react-C95WAip3.js",
+      "_vendor-react-CydkfUxy.js",
       "index.html",
-      "_vendor-icons-CJYPM37v.js",
-      "_vendor-genai-CROhDBt-.js",
-      "_vendor-B9I1Peu7.js",
-      "_vendor-chess-_tZXOO1G.js",
-      "_vendor-firebase-aSkZhJQd.js"
+      "_vendor-icons-DBvzRHaM.js",
+      "_vendor-B5y3n4jd.js",
+      "_vendor-genai-Cbw91LLA.js",
+      "_vendor-chess-BdveOW5A.js",
+      "_vendor-firebase-CR2gM9d2.js"
     ]
   },
   "components/apps/FleetApp.tsx": {
-    "file": "assets/FleetApp-B0uvAsJ_.js",
+    "file": "assets/FleetApp-18sI4Ezm.js",
     "name": "FleetApp",
     "src": "components/apps/FleetApp.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_vendor-react-C95WAip3.js",
+      "_vendor-react-CydkfUxy.js",
       "index.html",
-      "_vendor-icons-CJYPM37v.js",
-      "_vendor-genai-CROhDBt-.js",
-      "_vendor-B9I1Peu7.js",
-      "_vendor-chess-_tZXOO1G.js",
-      "_vendor-firebase-aSkZhJQd.js"
+      "_vendor-icons-DBvzRHaM.js",
+      "_vendor-B5y3n4jd.js",
+      "_vendor-genai-Cbw91LLA.js",
+      "_vendor-chess-BdveOW5A.js",
+      "_vendor-firebase-CR2gM9d2.js"
     ]
   },
   "components/apps/JackieChatApp.tsx": {
-    "file": "assets/JackieChatApp-BAd8R4N8.js",
+    "file": "assets/JackieChatApp-DlK390-g.js",
     "name": "JackieChatApp",
     "src": "components/apps/JackieChatApp.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_vendor-react-C95WAip3.js",
+      "_vendor-react-CydkfUxy.js",
       "index.html",
-      "_vendor-icons-CJYPM37v.js",
-      "_vendor-genai-CROhDBt-.js",
-      "_vendor-B9I1Peu7.js",
-      "_vendor-chess-_tZXOO1G.js",
-      "_vendor-firebase-aSkZhJQd.js"
+      "_vendor-icons-DBvzRHaM.js",
+      "_vendor-B5y3n4jd.js",
+      "_vendor-genai-Cbw91LLA.js",
+      "_vendor-chess-BdveOW5A.js",
+      "_vendor-firebase-CR2gM9d2.js"
     ]
   },
   "components/apps/KnowledgeApp.tsx": {
-    "file": "assets/KnowledgeApp-BQkqdlju.js",
+    "file": "assets/KnowledgeApp-DuA9t5S1.js",
     "name": "KnowledgeApp",
     "src": "components/apps/KnowledgeApp.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_vendor-react-C95WAip3.js",
-      "_vendor-icons-CJYPM37v.js"
+      "_vendor-react-CydkfUxy.js",
+      "_vendor-icons-DBvzRHaM.js",
+      "_vendor-B5y3n4jd.js"
     ]
   },
   "components/apps/PromptGenomeApp.tsx": {
-    "file": "assets/PromptGenomeApp-BJWlG_we.js",
+    "file": "assets/PromptGenomeApp-BcVG4_Dw.js",
     "name": "PromptGenomeApp",
     "src": "components/apps/PromptGenomeApp.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_vendor-react-C95WAip3.js",
+      "_vendor-react-CydkfUxy.js",
       "index.html",
-      "_parallel-CqhakU3u.js",
-      "_vendor-icons-CJYPM37v.js",
-      "_vendor-genai-CROhDBt-.js",
-      "_vendor-B9I1Peu7.js",
-      "_vendor-chess-_tZXOO1G.js",
-      "_vendor-firebase-aSkZhJQd.js"
+      "_parallel-YKrH2Clm.js",
+      "_vendor-icons-DBvzRHaM.js",
+      "_vendor-B5y3n4jd.js",
+      "_vendor-genai-Cbw91LLA.js",
+      "_vendor-chess-BdveOW5A.js",
+      "_vendor-firebase-CR2gM9d2.js"
     ]
   },
   "components/apps/SpeedRacerApp.tsx": {
-    "file": "assets/SpeedRacerApp-Bvp7sNPn.js",
+    "file": "assets/SpeedRacerApp-BtgCkB5H.js",
     "name": "SpeedRacerApp",
     "src": "components/apps/SpeedRacerApp.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_vendor-react-C95WAip3.js",
+      "_vendor-react-CydkfUxy.js",
       "index.html",
-      "_parallel-CqhakU3u.js",
-      "_vendor-icons-CJYPM37v.js",
-      "_vendor-genai-CROhDBt-.js",
-      "_vendor-B9I1Peu7.js",
-      "_vendor-chess-_tZXOO1G.js",
-      "_vendor-firebase-aSkZhJQd.js"
+      "_parallel-YKrH2Clm.js",
+      "_vendor-icons-DBvzRHaM.js",
+      "_vendor-B5y3n4jd.js",
+      "_vendor-genai-Cbw91LLA.js",
+      "_vendor-chess-BdveOW5A.js",
+      "_vendor-firebase-CR2gM9d2.js"
+    ]
+  },
+  "components/apps/TelegramApp.tsx": {
+    "file": "assets/TelegramApp-XrTqPh_a.js",
+    "name": "TelegramApp",
+    "src": "components/apps/TelegramApp.tsx",
+    "isDynamicEntry": true,
+    "imports": [
+      "_vendor-react-CydkfUxy.js",
+      "_vendor-telegram-CZJfBlZi.js",
+      "index.html",
+      "_vendor-icons-DBvzRHaM.js",
+      "_vendor-B5y3n4jd.js",
+      "_vendor-genai-Cbw91LLA.js",
+      "_vendor-chess-BdveOW5A.js",
+      "_vendor-firebase-CR2gM9d2.js"
     ]
   },
   "components/apps/UnderstudyApp.tsx": {
-    "file": "assets/UnderstudyApp-CP4kqtZk.js",
+    "file": "assets/UnderstudyApp-DPKNeTr3.js",
     "name": "UnderstudyApp",
     "src": "components/apps/UnderstudyApp.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_vendor-react-C95WAip3.js",
+      "_vendor-react-CydkfUxy.js",
       "index.html",
-      "_vendor-icons-CJYPM37v.js",
-      "_vendor-genai-CROhDBt-.js",
-      "_vendor-B9I1Peu7.js",
-      "_vendor-chess-_tZXOO1G.js",
-      "_vendor-firebase-aSkZhJQd.js"
+      "_vendor-icons-DBvzRHaM.js",
+      "_vendor-B5y3n4jd.js",
+      "_vendor-genai-Cbw91LLA.js",
+      "_vendor-chess-BdveOW5A.js",
+      "_vendor-firebase-CR2gM9d2.js"
     ]
   },
   "index.html": {
-    "file": "assets/index-CeytZxaR.js",
+    "file": "assets/index-DDF193di.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
     "imports": [
-      "_vendor-react-C95WAip3.js",
-      "_vendor-genai-CROhDBt-.js",
-      "_vendor-icons-CJYPM37v.js",
-      "_vendor-chess-_tZXOO1G.js",
-      "_vendor-B9I1Peu7.js",
-      "_vendor-firebase-aSkZhJQd.js"
+      "_vendor-react-CydkfUxy.js",
+      "_vendor-genai-Cbw91LLA.js",
+      "_vendor-icons-DBvzRHaM.js",
+      "_vendor-chess-BdveOW5A.js",
+      "_vendor-B5y3n4jd.js",
+      "_vendor-firebase-CR2gM9d2.js"
     ],
     "dynamicImports": [
       "components/apps/BypassApp.tsx",
       "components/apps/FleetApp.tsx",
       "components/apps/KnowledgeApp.tsx",
       "components/apps/JackieChatApp.tsx",
+      "components/apps/TelegramApp.tsx",
       "components/apps/BudgetRadarApp.tsx",
       "components/apps/ColosseumApp.tsx",
       "components/apps/AmbientAgentsApp.tsx",
@@ -297,10 +325,10 @@
       "lib/routerMenu/subRouters/workstation.ts",
       "lib/routerMenu/subRouters/routers.ts",
       "lib/routerMenu/subRouters/storage.ts",
-      "_vendor-B9I1Peu7.js"
+      "_vendor-B5y3n4jd.js"
     ],
     "css": [
-      "assets/index-IGbzcoZO.css"
+      "assets/index-G6Yjppo8.css"
     ]
   },
   "lib/routerMenu/subRouters/routers.ts": {
