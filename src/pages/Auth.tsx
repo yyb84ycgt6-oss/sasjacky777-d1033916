@@ -17,6 +17,15 @@ const Auth = () => {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // Preserved return path (e.g. the MCP OAuth consent screen). Same-origin
+  // relative paths only, so it can't be used as an open redirect.
+  const nextPath = (() => {
+    const raw = new URLSearchParams(window.location.search).get("next");
+    if (!raw) return null;
+    return raw.startsWith("/") && !raw.startsWith("//") ? raw : null;
+  })();
+  const returnUrl = nextPath ? `${window.location.origin}${nextPath}` : window.location.origin;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -34,6 +43,10 @@ const Auth = () => {
       if (view === "login") {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
+        if (nextPath) {
+          window.location.href = returnUrl;
+          return;
+        }
       } else if (view === "signup") {
         if (password.length < 6) {
           toast.error("Password must be at least 6 characters.");
@@ -42,7 +55,7 @@ const Auth = () => {
         const { error } = await supabase.auth.signUp({
           email,
           password,
-          options: { emailRedirectTo: window.location.origin },
+          options: { emailRedirectTo: returnUrl },
         });
         if (error) throw error;
         toast.success("Check your email to confirm your account.");
@@ -274,7 +287,7 @@ const Auth = () => {
               onClick={async () => {
                 setLoading(true);
                 const { error } = await lovable.auth.signInWithOAuth("google" as any, {
-                  redirect_uri: window.location.origin,
+                  redirect_uri: returnUrl,
                 });
                 if (error) toast.error(error.message || "Google sign-in failed.");
                 setLoading(false);

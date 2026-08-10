@@ -10,6 +10,7 @@ import { useEffect, lazy, Suspense } from "react";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import Sandbox from "./pages/Sandbox";
+import OAuthConsent from "./pages/OAuthConsent";
 import { SandboxBanner } from "./components/SandboxBanner";
 
 import Play from "./pages/Play";
@@ -99,6 +100,7 @@ const App = () => (
             <SandboxCatcher>
               <Routes>
                 <Route path="/auth" element={<Auth />} />
+                <Route path="/.lovable/oauth/consent" element={<OAuthConsent />} />
                 <Route path="/sandbox" element={<Sandbox />} />
                 <Route path="/index" element={<Navigate to="/" replace />} />
               <Route

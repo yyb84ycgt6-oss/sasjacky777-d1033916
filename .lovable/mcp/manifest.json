@@ -1,0 +1,217 @@
+{
+  "version": 1,
+  "sdk_version": "0.26.1",
+  "path": "/functions/v1/mcp",
+  "auth": {
+    "type": "oauth",
+    "issuer": "https://iezgzdhhmwmbqshnxrie.supabase.co/auth/v1",
+    "accepted_audiences": [
+      "authenticated"
+    ]
+  },
+  "mcp": {
+    "server": {
+      "name": "sas-jacky",
+      "version": "0.1.0",
+      "title": "SAS-JACKY"
+    },
+    "tools": [
+      {
+        "name": "list_tasks",
+        "title": "List tasks",
+        "description": "List the signed-in user's Jackie tasks, newest first. Optionally filter by status.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "description": "Filter by task status, e.g. pending, in_progress, done."
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "description": "Max rows to return (default 25)."
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "create_task",
+        "title": "Create task",
+        "description": "Create a new Jackie task for the signed-in user.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Short task title."
+            },
+            "description": {
+              "type": "string",
+              "description": "Optional longer detail."
+            },
+            "priority": {
+              "type": "string",
+              "description": "Priority, e.g. low, medium, high."
+            },
+            "category": {
+              "type": "string",
+              "description": "Optional grouping category."
+            },
+            "due_date": {
+              "type": "string",
+              "description": "Optional ISO 8601 due date."
+            }
+          },
+          "required": [
+            "title"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "update_task_status",
+        "title": "Update task status",
+        "description": "Change the status of one of the signed-in user's Jackie tasks.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Task id (uuid)."
+            },
+            "status": {
+              "type": "string",
+              "minLength": 1,
+              "description": "New status, e.g. pending, in_progress, done."
+            }
+          },
+          "required": [
+            "id",
+            "status"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "search_memory",
+        "title": "Search Jackie memory",
+        "description": "Search the signed-in user's Jackie long-term memory entries by key or value text.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Text to match against memory key or value. Omit to list recent entries."
+            },
+            "category": {
+              "type": "string",
+              "description": "Optional category filter."
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "description": "Max rows to return (default 25)."
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "remember_fact",
+        "title": "Remember a fact",
+        "description": "Store or overwrite a fact in the signed-in user's Jackie long-term memory.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Stable identifier for the fact."
+            },
+            "value": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The fact to remember."
+            },
+            "category": {
+              "type": "string",
+              "description": "Optional category, e.g. preference, project, constraint."
+            }
+          },
+          "required": [
+            "key",
+            "value"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "list_conversations",
+        "title": "List conversations",
+        "description": "List the signed-in user's Jackie chat conversations, most recently updated first.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "description": "Max rows to return (default 20)."
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      }
+    ]
+  }
+}
