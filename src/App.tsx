@@ -254,7 +254,7 @@ const App = () => (
               <Route path="*" element={<NotFound />} />
             </Routes>
             <RouteDebugOverlay />
-            <Suspense fallback={null}><FloatingEditorNav /></Suspense>
+
             </SandboxCatcher>
           </BrowserRouter>
           </TooltipProvider>
