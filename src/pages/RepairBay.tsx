@@ -324,11 +324,12 @@ Tell me: (1) is this update worth taking for MY use case, or is it risk with no 
                       <Button
                         variant="outline"
                         className="min-h-11"
-                        onClick={() =>
-                          runConsult(
+                        onClick={() => {
+                          setTab("consult");
+                          void runConsult(
                             `I'm working through the "${p.title}" playbook on my rig. Symptom: ${p.symptom}. Walk me through it for my exact hardware and ask me for the one measurement or output you need next.`,
-                          ) && setTab("consult")
-                        }
+                          );
+                        }}
                       >
                         Work this with Jackie
                       </Button>
