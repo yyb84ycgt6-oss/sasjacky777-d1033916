@@ -76,6 +76,18 @@ function rigBrief() {
   return `Operator's workstation — ${RIG_NAME}\n${parts}\n\nStorage/RAID intent notes:\n${RAID_PLAN_NOTES.map((n) => `- ${n}`).join("\n")}`;
 }
 
+/** Last Jackie Boot startup report the operator pasted in, if any. */
+function lastStartupBrief() {
+  try {
+    const raw = localStorage.getItem("jackie.boot.v1");
+    if (!raw) return startupBrief(null);
+    const saved = JSON.parse(raw) as { report?: string };
+    return startupBrief(saved.report ? parseStartupReport(saved.report) : null);
+  } catch {
+    return startupBrief(null);
+  }
+}
+
 /** Built per question so freshly logged evidence is always in the grounding. */
 function consultSystem(evidence: EvidenceEntry[]) {
   return `You are Jackie, acting as this operator's computer repair and maintenance crew.
@@ -85,6 +97,8 @@ You always answer against the exact hardware below. Never give generic PC advice
 ${rigBrief()}
 
 ${detectedBrief()}
+
+${lastStartupBrief()}
 
 ${evidenceBrief(evidence)}
 
