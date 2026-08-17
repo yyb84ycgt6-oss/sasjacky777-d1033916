@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { RIG, RIG_NAME, RAID_PLAN_NOTES } from "@/lib/repair/rigProfile";
 import { PLAYBOOKS, FLASH_RULES, type Playbook } from "@/lib/repair/playbooks";
+import { TOOLKIT, CORRECTIONS } from "@/lib/repair/toolkit";
 import {
   loadFirmware, saveFirmware, loadCaptures, saveCaptures, newId, exportJson,
   type FirmwareEntry, type SessionCapture,
