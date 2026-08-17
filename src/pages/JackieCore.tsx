@@ -74,12 +74,15 @@ export default function JackieCore() {
     if (!loading) checkOwner();
   }, [loading, checkOwner]);
 
-  /** Claim the owner seat — succeeds only if this email is already allowlisted. */
+  /**
+   * Claim the owner seat. The decision is made server-side: the function reads
+   * the email from the verified session and checks it against the allowlist.
+   */
   const claim = async () => {
     setBusy(true);
-    const { data, error } = await db.rpc("claim_core_access");
+    const { data, error } = await supabase.functions.invoke("core-claim");
     setBusy(false);
-    if (error || data !== true) {
+    if (error || (data as { granted?: boolean })?.granted !== true) {
       toast({
         title: "Not on the allowlist",
         description: "This account is not authorised for Jackie Core.",
