@@ -36,6 +36,7 @@ import SentinelBoard from "./pages/SentinelBoard";
 import ApexHub from "./pages/ApexHub";
 import AIProviders from "./pages/AIProviders";
 import GrokStudio from "./pages/GrokStudio";
+import RepairBay from "./pages/RepairBay";
 import PodStation from "./pages/PodStation";
 import JackyLive from "./pages/JackyLive";
 import AgentLab from "./pages/AgentLab";
