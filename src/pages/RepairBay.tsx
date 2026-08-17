@@ -75,6 +75,9 @@ You always answer against the exact hardware below. Never give generic PC advice
 
 ${rigBrief()}
 
+${detectedBrief()}
+
+
 Update/firmware targets on this machine, with the verified rules for each:
 
 ${targetsBrief()}
