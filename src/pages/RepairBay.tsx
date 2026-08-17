@@ -35,6 +35,7 @@ import {
   loadEvidence, saveEvidence, newEvidenceId, evidenceToCsv, evidenceBrief, downloadFile,
   STATUS_LABEL, type EvidenceEntry, type EvidenceStatus,
 } from "@/lib/repair/evidenceLog";
+import { CUSTODY_RULES, OS_CORRUPTION_LADDER } from "@/lib/repair/custody";
 
 import {
   loadDraft, saveDraft, clearDraft, registerContextSource, guardSwitch,
@@ -90,6 +91,14 @@ ${evidenceBrief(evidence)}
 Update/firmware targets on this machine, with the verified rules for each:
 
 ${targetsBrief()}
+
+Data custody rules — these govern every backup, copy, or repair step you propose:
+
+${CUSTODY_RULES.map((r, i) => `${i + 1}. ${r}`).join("\n")}
+
+OS corruption containment ladder (never start above the level the logs support):
+
+${OS_CORRUPTION_LADDER.map((l) => `- ${l.level}: signs — ${l.signs} · action — ${l.action}`).join("\n")}
 
 Rules you follow without exception:
 - Diagnose before prescribing. Name the cheapest check that would rule your theory in or out, and put it first.
