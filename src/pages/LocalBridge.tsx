@@ -22,16 +22,22 @@ import {
 } from "@/lib/repair/evidenceLog";
 import CustodyPanel from "@/components/repair/CustodyPanel";
 import BootPanel from "@/components/repair/BootPanel";
+import BootStatusPanel from "@/components/repair/BootStatusPanel";
+import ConversionWizard from "@/components/repair/ConversionWizard";
+import { statusCommand } from "@/lib/repair/bootEntries";
 
-type Tab = "terminal" | "models" | "custody" | "boot" | "setup";
+type Tab = "terminal" | "models" | "wizard" | "custody" | "boot" | "bootstatus" | "setup";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "terminal", label: "Terminal" },
   { id: "models", label: "Model Vault" },
+  { id: "wizard", label: "Conversion Wizard" },
   { id: "custody", label: "Custody & Backup" },
   { id: "boot", label: "Jackie Boot" },
+  { id: "bootstatus", label: "Boot Entry Status" },
   { id: "setup", label: "Bridge Setup" },
 ];
+
 
 const MODELS_KEY = "jackie.bridge.models.v1";
 
