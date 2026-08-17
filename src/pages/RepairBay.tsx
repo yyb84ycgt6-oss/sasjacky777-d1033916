@@ -16,6 +16,10 @@ import {
 import { scoreAll, VERDICT_LABEL, type RiskScore, type Verdict } from "@/lib/repair/firmwareRisk";
 import { VENTOY_STEPS, ISO_CHECKLIST, CHECKLIST_KEY } from "@/lib/repair/ventoy";
 import {
+  FIRMWARE_TARGETS, FLASH_SEQUENCE, SEQUENCE_RULES, CADENCE_LABEL, targetsBrief,
+  type Cadence,
+} from "@/lib/repair/firmwareTargets";
+import {
   loadDraft, saveDraft, clearDraft, registerContextSource, guardSwitch,
 } from "@/lib/repair/contextGuard";
 import { orchestrate } from "@/lib/jackie-orchestrator";
@@ -47,6 +51,10 @@ You always answer against the exact hardware below. Never give generic PC advice
 
 ${rigBrief()}
 
+Update/firmware targets on this machine, with the verified rules for each:
+
+${targetsBrief()}
+
 Rules you follow without exception:
 - Diagnose before prescribing. Name the cheapest check that would rule your theory in or out, and put it first.
 - Never invent firmware or BIOS version numbers. If a version matters, say which vendor page to read and what to look for.
@@ -66,6 +74,13 @@ const VERDICT_VARIANT: Record<Verdict, "default" | "secondary" | "destructive" |
   postpone: "outline",
   never: "destructive",
   unknown: "outline",
+};
+
+const CADENCE_VARIANT: Record<Cadence, "default" | "secondary" | "destructive" | "outline"> = {
+  "safe-anytime": "default",
+  "read-notes-first": "secondary",
+  "only-for-a-named-fix": "outline",
+  "never-unsolicited": "destructive",
 };
 
 function loadChecklist(): Record<string, boolean> {
@@ -614,6 +629,115 @@ Tell me: (1) is this update worth taking for MY use case, or is it risk with no 
               part actually contains — plus how recoverable a failed flash is. No version is invented: if a
               row says "Log a version", that is exactly what it needs.
             </Card>
+
+            <Card className="p-4">
+              <h3 className="font-medium">The seven update targets on this rig</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Every updatable thing in the machine, with the exact way to read the version you're on, what
+                the update actually buys you, and what happens if it fails. Ordered by risk, not by hype.
+              </p>
+
+              <div className="mt-4 space-y-3">
+                {FIRMWARE_TARGETS.map((t) => (
+                  <div key={t.id} className="rounded-md border border-border p-3">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <h4 className="font-medium">{t.name}</h4>
+                        <p className="text-xs text-muted-foreground">{t.kind}</p>
+                      </div>
+                      <Badge variant={CADENCE_VARIANT[t.cadence]}>{CADENCE_LABEL[t.cadence]}</Badge>
+                    </div>
+
+                    <p className="mt-2 text-sm font-medium">Read your version</p>
+                    <ul className="mt-1 space-y-1">
+                      {t.readVersion.map((cmd) => (
+                        <li key={cmd} className="flex items-start gap-2">
+                          <code className="flex-1 break-all rounded bg-muted px-2 py-1 text-xs">{cmd}</code>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="min-h-11 shrink-0"
+                            onClick={() => {
+                              void navigator.clipboard.writeText(cmd);
+                              toast.success("Copied");
+                            }}
+                          >
+                            Copy
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+
+                    <p className="mt-3 text-sm">
+                      <span className="font-medium">What it buys you: </span>
+                      <span className="text-muted-foreground">{t.gain}</span>
+                    </p>
+                    <p className="mt-2 text-sm">
+                      <span className="font-medium">If it fails: </span>
+                      <span className="text-muted-foreground">{t.ifItFails}</span>
+                    </p>
+                    <p className="mt-2 text-sm">
+                      <span className="font-medium">Jackie's rule: </span>
+                      <span className="text-muted-foreground">{t.rule}</span>
+                    </p>
+
+                    {t.knownBuilds?.map((b) => (
+                      <p key={b.version} className="mt-2 rounded border border-border p-2 text-sm">
+                        <span className="font-medium">{b.version}</span>{" "}
+                        <span className="text-muted-foreground">{b.note}</span>
+                      </p>
+                    ))}
+
+                    {t.source && (
+                      <a
+                        href={t.source.url}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        className="mt-2 inline-flex min-h-11 items-center text-sm underline underline-offset-4"
+                      >
+                        {t.source.label} ↗
+                      </a>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </Card>
+
+            <Card className="p-4">
+              <h3 className="font-medium">Safe flash sequence</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                When you do a full pass, this is the order. It exists because each step can invalidate the one
+                before it.
+              </p>
+              <ol className="mt-3 space-y-2 text-sm">
+                {FLASH_SEQUENCE.map((t, i) => (
+                  <li key={t.id} className="flex gap-3">
+                    <span className="font-medium">{i + 1}.</span>
+                    <span>
+                      <span className="font-medium">{t.name}</span>{" "}
+                      <span className="text-muted-foreground">— {CADENCE_LABEL[t.cadence]}</span>
+                    </span>
+                  </li>
+                ))}
+              </ol>
+              <p className="mt-3 text-sm text-muted-foreground">
+                Not in the sequence: the 3090 VBIOS and the PSU. Neither has a legitimate routine update.
+              </p>
+              <ul className="mt-3 space-y-1 text-sm text-muted-foreground">
+                {SEQUENCE_RULES.map((r) => <li key={r}>• {r}</li>)}
+              </ul>
+              <Button
+                variant="outline"
+                className="mt-3 min-h-11"
+                onClick={() => {
+                  void navigator.clipboard.writeText(targetsBrief());
+                  toast.success("Full analysis copied");
+                }}
+              >
+                Copy full analysis
+              </Button>
+            </Card>
+
 
             {riskScores.map((r) => (
               <Card key={r.componentId} className="p-4">
