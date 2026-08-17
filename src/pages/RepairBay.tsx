@@ -60,6 +60,23 @@ function SeverityBadge({ s }: { s: Playbook["severity"] }) {
   return <Badge variant={variant as never}>{s}</Badge>;
 }
 
+const VERDICT_VARIANT: Record<Verdict, "default" | "secondary" | "destructive" | "outline"> = {
+  "flash-now": "default",
+  "flash-when-calm": "secondary",
+  postpone: "outline",
+  never: "destructive",
+  unknown: "outline",
+};
+
+function loadChecklist(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(CHECKLIST_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
 export default function RepairBay() {
   const [tab, setTab] = useState<Tab>("rig");
   const [query, setQuery] = useState("");
@@ -69,6 +86,8 @@ export default function RepairBay() {
   const [captures, setCaptures] = useState<SessionCapture[]>([]);
   const [capTitle, setCapTitle] = useState("");
   const [capBody, setCapBody] = useState("");
+  const [checklist, setChecklist] = useState<Record<string, boolean>>({});
+  const [openStep, setOpenStep] = useState<string | null>(VENTOY_STEPS[0]?.id ?? null);
 
   const [ask, setAsk] = useState("");
   const [answer, setAnswer] = useState("");
@@ -78,7 +97,55 @@ export default function RepairBay() {
   useEffect(() => {
     setFirmware(loadFirmware());
     setCaptures(loadCaptures());
+    setChecklist(loadChecklist());
+    const d = loadDraft();
+    setCapTitle(d.title);
+    setCapBody(d.body);
   }, []);
+
+  // Anything on this page is available to the Context Guard, so a provider or
+  // model switch anywhere in Jackie auto-saves it first.
+  useEffect(
+    () =>
+      registerContextSource("repair-bay", () =>
+        [
+          ask ? `question: ${ask}` : "",
+          answer ? `consultant answer (${modelUsed ?? "unknown model"}):\n${answer}` : "",
+          capBody ? `capture draft:\n${capBody}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+      ),
+    [ask, answer, modelUsed, capBody],
+  );
+
+  // Draft autosave — a refresh or a crash never eats a paste again.
+  useEffect(() => {
+    if (capTitle || capBody) saveDraft(capTitle, capBody);
+  }, [capTitle, capBody]);
+
+  // Pick up captures written automatically by the failover guard.
+  useEffect(() => {
+    if (tab === "capture") setCaptures(loadCaptures());
+  }, [tab]);
+
+  const riskScores = useMemo<RiskScore[]>(() => scoreAll(firmware), [firmware]);
+
+  const toggleCheck = (id: string) => {
+    setChecklist((prev) => {
+      const next = { ...prev, [id]: !prev[id] };
+      try {
+        localStorage.setItem(CHECKLIST_KEY, JSON.stringify(next));
+      } catch { /* storage blocked */ }
+      return next;
+    });
+  };
+
+  const copy = (text: string, label = "Copied") => {
+    navigator.clipboard.writeText(text);
+    toast.success(label);
+  };
+
 
   const filteredPlaybooks = useMemo(() => {
     const q = query.trim().toLowerCase();
