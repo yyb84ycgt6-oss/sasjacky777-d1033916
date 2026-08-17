@@ -545,6 +545,152 @@ Tell me: (1) is this update worth taking for MY use case, or is it risk with no 
           </section>
         )}
 
+        {tab === "evidence" && (
+          <section className="space-y-4">
+            <Card className="p-4 text-sm text-muted-foreground">
+              Every command you actually run gets recorded here with its timestamp, verbatim output, and the
+              conclusion it supports. A conclusion with no row behind it stays an assumption — the consultant is
+              grounded in these rows and will say "unverified" rather than fill a gap. Device-local; nothing leaves
+              this machine unless you export it.
+            </Card>
+
+            <Card className="p-4 space-y-3">
+              <h3 className="font-medium">Log a command run</h3>
+              <Input
+                className="min-h-11 font-mono text-xs"
+                placeholder="Command exactly as run"
+                value={evCommand}
+                onChange={(e) => setEvCommand(e.target.value)}
+              />
+              <Input
+                className="min-h-11"
+                placeholder="Where it ran — PowerShell (admin), BIOS setup, Linux live USB…"
+                value={evContext}
+                onChange={(e) => setEvContext(e.target.value)}
+              />
+              <Textarea
+                rows={6}
+                className="font-mono text-xs"
+                placeholder="Paste the output verbatim — do not clean it up"
+                value={evOutput}
+                onChange={(e) => setEvOutput(e.target.value)}
+              />
+              <Input
+                className="min-h-11"
+                placeholder="What this output tells us (the conclusion it bears on)"
+                value={evConclusion}
+                onChange={(e) => setEvConclusion(e.target.value)}
+              />
+              <div className="flex flex-wrap gap-2">
+                {(["supports", "contradicts", "inconclusive"] as EvidenceStatus[]).map((s) => (
+                  <Button
+                    key={s}
+                    size="sm"
+                    variant={evStatus === s ? "default" : "outline"}
+                    className="min-h-11"
+                    onClick={() => setEvStatus(s)}
+                  >
+                    {STATUS_LABEL[s]}
+                  </Button>
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <span className="text-xs text-muted-foreground self-center">Resolves discrepancy (optional):</span>
+                {DISCREPANCIES.map((d) => (
+                  <Button
+                    key={d.id}
+                    size="sm"
+                    variant={evLink === d.id ? "secondary" : "outline"}
+                    className="min-h-11"
+                    onClick={() => setEvLink(evLink === d.id ? "" : d.id)}
+                  >
+                    {d.what}
+                  </Button>
+                ))}
+              </div>
+              <Button className="min-h-11" onClick={addEvidence}>Record evidence</Button>
+            </Card>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                className="min-h-11 max-w-sm"
+                placeholder="Search command, output, or conclusion…"
+                value={evQuery}
+                onChange={(e) => setEvQuery(e.target.value)}
+              />
+              {evidence.length > 0 && (
+                <>
+                  <Button
+                    variant="outline"
+                    className="min-h-11"
+                    onClick={() => exportJson("jackie-evidence-log.json", evidence)}
+                  >
+                    Export JSON
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="min-h-11"
+                    onClick={() =>
+                      downloadFile("jackie-evidence-log.csv", evidenceToCsv(evidence), "text/csv")
+                    }
+                  >
+                    Export CSV
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="min-h-11"
+                    onClick={() =>
+                      void runConsult(
+                        "Read my evidence log and tell me, strictly from what is logged: what is now confirmed, what is still unverified, and the single next command to run.",
+                      )
+                    }
+                    disabled={busy}
+                  >
+                    Review the log with Jackie
+                  </Button>
+                </>
+              )}
+            </div>
+
+            {filteredEvidence.length === 0 && (
+              <Card className="p-4 text-sm text-muted-foreground">
+                {evidence.length === 0
+                  ? "Nothing logged yet. Run one of the commands from Detected Inventory and paste its output here — that is where confirmed facts start."
+                  : "No row matches that search."}
+              </Card>
+            )}
+
+            {filteredEvidence.map((r) => (
+              <Card key={r.id} className="p-4 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant={r.status === "contradicts" ? "destructive" : r.status === "supports" ? "default" : "outline"}>
+                      {STATUS_LABEL[r.status]}
+                    </Badge>
+                    <span className="text-xs text-muted-foreground">{new Date(r.ts).toLocaleString()}</span>
+                    <Badge variant="secondary">{r.context}</Badge>
+                    {r.linkedDiscrepancy && (
+                      <Badge variant="outline">
+                        {DISCREPANCIES.find((d) => d.id === r.linkedDiscrepancy)?.what ?? r.linkedDiscrepancy}
+                      </Badge>
+                    )}
+                  </div>
+                  <Button size="sm" variant="outline" className="min-h-11" onClick={() => removeEvidence(r.id)}>
+                    Delete
+                  </Button>
+                </div>
+                <pre className="overflow-auto whitespace-pre-wrap rounded-md bg-muted p-2 font-mono text-xs">
+                  $ {r.command}
+                </pre>
+                <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-muted p-3 font-mono text-xs">
+                  {r.output}
+                </pre>
+                <p className="text-sm">{r.conclusion}</p>
+              </Card>
+            ))}
+          </section>
+        )}
+
         {tab === "rig" && (
 
           <section className="space-y-4">
