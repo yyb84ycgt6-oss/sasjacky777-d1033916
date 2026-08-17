@@ -64,6 +64,7 @@ async function tryOne(
   args: StreamArgs,
   provider: ProviderId,
   model: string,
+  sink: { text: string },
 ): Promise<SingleResult> {
   const def = findProvider(provider);
   if (!def) return { kind: "fatal", reason: `Unknown provider: ${provider}` };
