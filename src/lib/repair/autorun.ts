@@ -131,7 +131,7 @@ foreach ($v in (Get-Volume | Where-Object { $_.DriveLetter -and $_.Size -gt 0 })
 # 5. Orphaned .part files — a copy that never committed
 if (Test-Path $custody) {
   $parts = Get-ChildItem $custody -Recurse -Filter *.part -File
-  if ($parts) { Add-Finding 'orphans' 'high' "$($parts.Count) uncommitted .part file(s) in the custody root" (($parts.FullName) -join "`n") }
+  if ($parts) { Add-Finding 'orphans' 'high' "$($parts.Count) uncommitted .part file(s) in the custody root" (($parts.FullName) -join [char]10) }
   else { Add-Finding 'orphans' 'ok' 'No uncommitted copies in the custody root' '' }
 }
 
@@ -144,19 +144,20 @@ if (Test-Path $manifest) {
       if ((Get-FileHash -LiteralPath $row.Path -Algorithm SHA256).Hash -ne $row.Hash) { $bad += $row.Path }
     } else { $bad += "MISSING: $($row.Path)" }
   }
-  if ($bad) { Add-Finding 'manifest' 'critical' "$($bad.Count) backup file(s) failed verification" ($bad -join "`n") }
+  if ($bad) { Add-Finding 'manifest' 'critical' "$($bad.Count) backup file(s) failed verification" ($bad -join [char]10) }
   else { Add-Finding 'manifest' 'ok' 'Backup manifest verified — every hash matches' '' }
 } else { Add-Finding 'manifest' 'info' 'No MANIFEST.csv yet — run the pre-work custody stages' $manifest }
 
 # 7. Critical / error events since boot
 $evt = Get-WinEvent -FilterHashtable @{LogName='System'; Level=1,2; StartTime=$boot} -MaxEvents 40
 if ($evt) {
-  Add-Finding 'critical' 'medium' "$($evt.Count) critical/error system event(s) since last boot" (($evt | Select-Object -First 10 | ForEach-Object { "$($_.TimeCreated) [$($_.ProviderName)] $($_.Id): $($_.Message.Split("`n")[0])" }) -join "`n")
+  Add-Finding 'critical' 'medium' "$($evt.Count) critical/error system event(s) since last boot" (($evt | Select-Object -First 10 | ForEach-Object { "$($_.TimeCreated) [$($_.ProviderName)] $($_.Id): " + ($_.Message -split [char]10)[0] }) -join [char]10)
 }
 
 # 8. Auto services that did not start
 $svc = Get-Service | Where-Object { $_.StartType -eq 'Automatic' -and $_.Status -ne 'Running' } | Select-Object Name,DisplayName
 if ($svc) { Add-Finding 'services' 'medium' "$($svc.Count) automatic service(s) not running" (($svc | ForEach-Object { $_.Name }) -join ', ') }
+
 
 # 9. AI estate — LM Studio is the hub, Ollama is a consumer of it
 if (Test-Path $lmStudio) {
@@ -165,7 +166,7 @@ if (Test-Path $lmStudio) {
   $gg | Select-Object FullName,Length | Export-Csv (Join-Path $dir 'gguf-inventory.csv') -NoTypeInformation
   Add-Finding 'models' 'ok' "LM Studio hub: $($gg.Count) GGUF, $($report.lmStudio.totalGB) GB" $lmStudio
 } else { Add-Finding 'models' 'info' 'LM Studio model folder not found at the configured path' $lmStudio }
-$report.ollama = (Get-Command ollama -ErrorAction SilentlyContinue) ? 'present' : 'not installed'
+if (Get-Command ollama -ErrorAction SilentlyContinue) { $report.ollama = 'present' } else { $report.ollama = 'not installed' }
 
 $json = $report | ConvertTo-Json -Depth 6
 $json | Set-Content (Join-Path $dir 'startup-report.json') -Encoding UTF8
