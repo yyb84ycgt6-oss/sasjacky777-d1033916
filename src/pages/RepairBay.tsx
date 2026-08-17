@@ -142,6 +142,15 @@ export default function RepairBay() {
   const [checklist, setChecklist] = useState<Record<string, boolean>>({});
   const [openStep, setOpenStep] = useState<string | null>(VENTOY_STEPS[0]?.id ?? null);
 
+  const [evidence, setEvidence] = useState<EvidenceEntry[]>([]);
+  const [evCommand, setEvCommand] = useState("");
+  const [evContext, setEvContext] = useState("PowerShell (admin)");
+  const [evOutput, setEvOutput] = useState("");
+  const [evConclusion, setEvConclusion] = useState("");
+  const [evStatus, setEvStatus] = useState<EvidenceStatus>("supports");
+  const [evLink, setEvLink] = useState("");
+  const [evQuery, setEvQuery] = useState("");
+
   const [ask, setAsk] = useState("");
   const [answer, setAnswer] = useState("");
   const [busy, setBusy] = useState(false);
