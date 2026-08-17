@@ -31,6 +31,10 @@ import {
   PRIORITY_READ,
   detectedBrief,
 } from "@/lib/repair/detectedInventory";
+import {
+  loadEvidence, saveEvidence, newEvidenceId, evidenceToCsv, evidenceBrief, downloadFile,
+  STATUS_LABEL, type EvidenceEntry, type EvidenceStatus,
+} from "@/lib/repair/evidenceLog";
 
 import {
   loadDraft, saveDraft, clearDraft, registerContextSource, guardSwitch,
