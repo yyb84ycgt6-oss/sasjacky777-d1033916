@@ -216,6 +216,7 @@ const App = () => (
               <Route path="/apex" element={<ProtectedRoute><ApexHub /></ProtectedRoute>} />
               <Route path="/providers" element={<ProtectedRoute><AIProviders /></ProtectedRoute>} />
               <Route path="/grok" element={<ProtectedRoute><GrokStudio /></ProtectedRoute>} />
+              <Route path="/repair" element={<ProtectedRoute><RepairBay /></ProtectedRoute>} />
               <Route path="/pods" element={<ProtectedRoute><PodStation /></ProtectedRoute>} />
               <Route path="/jacky-live" element={<ProtectedRoute><JackyLive /></ProtectedRoute>} />
               <Route path="/agent-lab" element={<ProtectedRoute><AgentLab /></ProtectedRoute>} />
