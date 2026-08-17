@@ -42,8 +42,32 @@ export const PLAYBOOKS: Playbook[] = [
         cmd: "where ollama\necho %LOCALAPPDATA%\ndir \"%LOCALAPPDATA%\\Programs\"",
       },
       {
+        do: "Prove elevation properly instead of trusting the title bar.",
+        why: "A window titled 'Administrator' can still be running a non-elevated child process, and UAC filtering silently strips the admin token from a shell launched by another user's session.",
+        cmd: "whoami /priv | findstr /i SeDebugPrivilege\nnet session >nul 2>&1 && echo ELEVATED || echo NOT ELEVATED\npowershell -c \"([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole('Administrators')\"",
+      },
+      {
+        do: "Confirm the account you switched to is actually in the Administrators group.",
+        why: "Switching to a second account that is a Standard user makes every admin command fail — often with no message at all inside a script.",
+        cmd: "net localgroup Administrators\nwhoami /user",
+      },
+      {
+        do: "Check that UAC and the secondary-logon service are not the thing blocking you.",
+        why: "If Secondary Logon (seclogon) is stopped, 'Run as different user' and several agent launchers fail silently after a user switch.",
+        cmd: "sc query seclogon\nreg query \"HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System\" /v EnableLUA\nreg query \"HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System\" /v ConsentPromptBehaviorAdmin",
+      },
+      {
         do: "Repair the execution policy / profile if PowerShell errors on startup.",
         cmd: "Get-ExecutionPolicy -List\nSet-ExecutionPolicy -Scope CurrentUser RemoteSigned",
+      },
+      {
+        do: "Test with the per-user profiles bypassed. If it works clean, the profile is the fault, not the shell.",
+        why: "A profile script left behind by an agent (or a half-written $PROFILE) can swallow input or throw on every command.",
+        cmd: "powershell -NoProfile -NoLogo\n:: then, inside it:\n:: Test-Path $PROFILE ; $PROFILE.CurrentUserAllHosts",
+      },
+      {
+        do: "Reset the per-user PowerShell profile — rename, never delete.",
+        cmd: "if (Test-Path $PROFILE) { Rename-Item $PROFILE \"$PROFILE.bak\" }\nif (Test-Path $PROFILE.CurrentUserAllHosts) { Rename-Item $PROFILE.CurrentUserAllHosts \"$($PROFILE.CurrentUserAllHosts).bak\" }\n# CMD equivalent: check for an AutoRun hijack\nreg query \"HKCU\\Software\\Microsoft\\Command Processor\" /v AutoRun",
       },
       {
         do: "Reset the Windows Terminal profile if the window itself misbehaves (no echo, no prompt).",
@@ -51,9 +75,19 @@ export const PLAYBOOKS: Playbook[] = [
         cmd: "wt --version\n:: then rename, do not delete:\nren \"%LOCALAPPDATA%\\Packages\\Microsoft.WindowsTerminal_8wekyb3d8bbwe\\LocalState\\settings.json\" settings.bak",
       },
       {
+        do: "Repair the per-user environment that the switch broke: PATH entries pointing at the other profile.",
+        why: "Per-user PATH entries containing C:\\Users\\<other-user> resolve to nothing under this account, so tools 'disappear'.",
+        cmd: "reg query \"HKCU\\Environment\" /v Path\n:: fix one entry without wiping the rest:\nsetx PATH \"%LOCALAPPDATA%\\Programs\\Ollama;%PATH%\"",
+      },
+      {
         do: "Verify system integrity only if the above all check out.",
         why: "SFC/DISM are for real component-store damage. Running them first wastes 20 minutes on a PATH problem.",
         cmd: "sfc /scannow\nDISM /Online /Cleanup-Image /RestoreHealth",
+      },
+      {
+        do: "Last resort before any reinstall: create a fresh local admin account and run the agent work there.",
+        why: "A damaged user profile (NTUSER.DAT) cannot be repaired in place. A new profile proves the OS is fine in two minutes.",
+        cmd: "net user jackie-ops * /add\nnet localgroup Administrators jackie-ops /add",
       },
       {
         do: "If commands run but affect the wrong account, stop switching users mid-task. Pick one admin account for all agent work.",
@@ -63,8 +97,50 @@ export const PLAYBOOKS: Playbook[] = [
     danger: [
       "Do not run random 'fix-my-terminal' registry scripts. They usually break Explorer's context menu next.",
       "Never grant an AI agent an elevated shell it can keep. Give it a normal shell, and elevate one specific command yourself.",
+      "Never set EnableLUA to 0 to 'fix' elevation. It disables UAC for the whole machine and breaks Store/packaged apps.",
+      "Delete nothing during profile repair — rename. A renamed profile can be put back; a deleted one cannot.",
     ],
   },
+  {
+    id: "ollama-ratelimit-failover",
+    title: "Ollama rate-limited / stalled — keep the assistant alive without losing context",
+    os: "Any",
+    severity: "repair",
+    symptom:
+      "The local runner starts returning 429s, 'model is loading', or connection refused, and the assistant stops mid-task.",
+    firstCheck:
+      "Is it a limit or a resource wall? A 3090 with a model already resident returns instantly; a second concurrent request queues. Check whether one model is loaded and one request is in flight before blaming a limit.",
+    steps: [
+      {
+        do: "Confirm what the runner is actually doing.",
+        cmd: "ollama ps\nollama list\ncurl http://127.0.0.1:11434/api/tags",
+      },
+      {
+        do: "Let Jackie fail over automatically instead of restarting anything.",
+        why:
+          "Jackie's provider cascade now treats Ollama 429 / overload / connection-refused as a failover trigger: context is auto-captured, then the next provider in the chain answers with the same messages. Nothing is lost and you don't retype.",
+        cmd: ":: Configure the order once at /providers — Lovable first, then free, then paid.",
+      },
+      {
+        do: "Cap concurrency so it stops happening.",
+        why: "Ollama queues per model; parallel agent calls to one 24 GB-resident model is what produces the stall.",
+        cmd: "setx OLLAMA_NUM_PARALLEL 1\nsetx OLLAMA_MAX_LOADED_MODELS 1\nsetx OLLAMA_KEEP_ALIVE 30m",
+      },
+      {
+        do: "Match the model to the 3090's 24 GB instead of fighting it.",
+        why: "A model that spills into system RAM does not error — it just gets 10× slower, which looks exactly like a rate limit.",
+        cmd: "nvidia-smi --query-gpu=memory.used,memory.total --format=csv",
+      },
+      {
+        do: "Keep one cloud provider configured at all times as the failover target.",
+        why: "A local-only setup has no fallback by definition. One free cloud key turns an outage into a hiccup.",
+      },
+    ],
+    danger: [
+      "Don't restart the runner mid-answer to 'unstick' it — that is what destroys context. Let the failover carry the session, then restart when idle.",
+    ],
+  },
+
   {
     id: "agent-context-loss",
     title: "Never lose agent context again (limits, crashes, closed windows)",
