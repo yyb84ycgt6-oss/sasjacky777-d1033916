@@ -14,15 +14,17 @@ import {
 } from "@/lib/repair/repairStore";
 import { orchestrate } from "@/lib/jackie-orchestrator";
 
-type Tab = "rig" | "playbooks" | "firmware" | "capture" | "consult";
+type Tab = "rig" | "playbooks" | "toolkit" | "firmware" | "capture" | "consult";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "rig", label: "Rig Profile" },
   { id: "playbooks", label: "Repair Playbooks" },
+  { id: "toolkit", label: "AI + Repair Toolkit" },
   { id: "firmware", label: "Firmware Log" },
   { id: "capture", label: "Session Capture" },
   { id: "consult", label: "Consultant" },
 ];
+
 
 /** The factual rig brief every consultant answer is grounded in. */
 function rigBrief() {
