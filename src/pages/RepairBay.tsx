@@ -24,9 +24,19 @@ import {
 } from "@/lib/repair/contextGuard";
 import { orchestrate } from "@/lib/jackie-orchestrator";
 
-type Tab = "rig" | "playbooks" | "toolkit" | "firmware" | "risk" | "bootstick" | "capture" | "consult";
+type Tab =
+  | "detected"
+  | "rig"
+  | "playbooks"
+  | "toolkit"
+  | "firmware"
+  | "risk"
+  | "bootstick"
+  | "capture"
+  | "consult";
 
 const TABS: { id: Tab; label: string }[] = [
+  { id: "detected", label: "Detected Inventory" },
   { id: "rig", label: "Rig Profile" },
   { id: "playbooks", label: "Repair Playbooks" },
   { id: "toolkit", label: "AI + Repair Toolkit" },
@@ -36,6 +46,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "capture", label: "Session Capture" },
   { id: "consult", label: "Consultant" },
 ];
+
 
 
 
