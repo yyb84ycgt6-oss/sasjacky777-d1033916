@@ -13,18 +13,26 @@ import {
   loadFirmware, saveFirmware, loadCaptures, saveCaptures, newId, exportJson,
   type FirmwareEntry, type SessionCapture,
 } from "@/lib/repair/repairStore";
+import { scoreAll, VERDICT_LABEL, type RiskScore, type Verdict } from "@/lib/repair/firmwareRisk";
+import { VENTOY_STEPS, ISO_CHECKLIST, CHECKLIST_KEY } from "@/lib/repair/ventoy";
+import {
+  loadDraft, saveDraft, clearDraft, registerContextSource, guardSwitch,
+} from "@/lib/repair/contextGuard";
 import { orchestrate } from "@/lib/jackie-orchestrator";
 
-type Tab = "rig" | "playbooks" | "toolkit" | "firmware" | "capture" | "consult";
+type Tab = "rig" | "playbooks" | "toolkit" | "firmware" | "risk" | "bootstick" | "capture" | "consult";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "rig", label: "Rig Profile" },
   { id: "playbooks", label: "Repair Playbooks" },
   { id: "toolkit", label: "AI + Repair Toolkit" },
   { id: "firmware", label: "Firmware Log" },
+  { id: "risk", label: "Update Risk" },
+  { id: "bootstick", label: "Boot Stick Wizard" },
   { id: "capture", label: "Session Capture" },
   { id: "consult", label: "Consultant" },
 ];
+
 
 
 /** The factual rig brief every consultant answer is grounded in. */
