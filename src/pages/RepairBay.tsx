@@ -31,6 +31,10 @@ import {
   PRIORITY_READ,
   detectedBrief,
 } from "@/lib/repair/detectedInventory";
+import {
+  loadEvidence, saveEvidence, newEvidenceId, evidenceToCsv, evidenceBrief, downloadFile,
+  STATUS_LABEL, type EvidenceEntry, type EvidenceStatus,
+} from "@/lib/repair/evidenceLog";
 
 import {
   loadDraft, saveDraft, clearDraft, registerContextSource, guardSwitch,
@@ -39,6 +43,7 @@ import { orchestrate } from "@/lib/jackie-orchestrator";
 
 type Tab =
   | "detected"
+  | "evidence"
   | "rig"
   | "playbooks"
   | "toolkit"
@@ -50,6 +55,7 @@ type Tab =
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "detected", label: "Detected Inventory" },
+  { id: "evidence", label: "Evidence Log" },
   { id: "rig", label: "Rig Profile" },
   { id: "playbooks", label: "Repair Playbooks" },
   { id: "toolkit", label: "AI + Repair Toolkit" },
@@ -69,7 +75,9 @@ function rigBrief() {
   return `Operator's workstation — ${RIG_NAME}\n${parts}\n\nStorage/RAID intent notes:\n${RAID_PLAN_NOTES.map((n) => `- ${n}`).join("\n")}`;
 }
 
-const CONSULT_SYSTEM = `You are Jackie, acting as this operator's computer repair and maintenance crew.
+/** Built per question so freshly logged evidence is always in the grounding. */
+function consultSystem(evidence: EvidenceEntry[]) {
+  return `You are Jackie, acting as this operator's computer repair and maintenance crew.
 
 You always answer against the exact hardware below. Never give generic PC advice when a rig-specific answer exists.
 
@@ -77,6 +85,7 @@ ${rigBrief()}
 
 ${detectedBrief()}
 
+${evidenceBrief(evidence)}
 
 Update/firmware targets on this machine, with the verified rules for each:
 
@@ -85,10 +94,12 @@ ${targetsBrief()}
 Rules you follow without exception:
 - Diagnose before prescribing. Name the cheapest check that would rule your theory in or out, and put it first.
 - Never invent firmware or BIOS version numbers. If a version matters, say which vendor page to read and what to look for.
+- Treat the evidence log as the only source of confirmed machine state. If a claim has no logged command output behind it, say it is unverified and name the command that would settle it.
 - Flag anything destructive (array creation, flashing, partitioning, CMOS clear) before the step, not after.
 - Write for someone who is confident but not a technician: plain steps, real commands, one clear "why" per step.
 - If the honest answer is "this needs hands on the hardware" or "back up first", say that plainly.
 - Do not pad. Short, ordered, specific.`;
+}
 
 function SeverityBadge({ s }: { s: Playbook["severity"] }) {
   const variant = s === "emergency" ? "destructive" : s === "repair" ? "default" : "secondary";
@@ -131,6 +142,15 @@ export default function RepairBay() {
   const [checklist, setChecklist] = useState<Record<string, boolean>>({});
   const [openStep, setOpenStep] = useState<string | null>(VENTOY_STEPS[0]?.id ?? null);
 
+  const [evidence, setEvidence] = useState<EvidenceEntry[]>([]);
+  const [evCommand, setEvCommand] = useState("");
+  const [evContext, setEvContext] = useState("PowerShell (admin)");
+  const [evOutput, setEvOutput] = useState("");
+  const [evConclusion, setEvConclusion] = useState("");
+  const [evStatus, setEvStatus] = useState<EvidenceStatus>("supports");
+  const [evLink, setEvLink] = useState("");
+  const [evQuery, setEvQuery] = useState("");
+
   const [ask, setAsk] = useState("");
   const [answer, setAnswer] = useState("");
   const [busy, setBusy] = useState(false);
@@ -140,10 +160,50 @@ export default function RepairBay() {
     setFirmware(loadFirmware());
     setCaptures(loadCaptures());
     setChecklist(loadChecklist());
+    setEvidence(loadEvidence());
     const d = loadDraft();
     setCapTitle(d.title);
     setCapBody(d.body);
   }, []);
+
+  const addEvidence = () => {
+    if (!evCommand.trim() || !evOutput.trim()) {
+      toast.error("A row needs the command and its real output — no blanks.");
+      return;
+    }
+    const row: EvidenceEntry = {
+      id: newEvidenceId(),
+      ts: new Date().toISOString(),
+      command: evCommand.trim(),
+      context: evContext.trim() || "unspecified",
+      output: evOutput,
+      conclusion: evConclusion.trim() || "(no conclusion drawn yet)",
+      status: evStatus,
+      linkedDiscrepancy: evLink || undefined,
+    };
+    const next = [row, ...evidence];
+    setEvidence(next);
+    saveEvidence(next);
+    setEvCommand("");
+    setEvOutput("");
+    setEvConclusion("");
+    setEvLink("");
+    toast.success("Logged on this device.");
+  };
+
+  const removeEvidence = (id: string) => {
+    const next = evidence.filter((r) => r.id !== id);
+    setEvidence(next);
+    saveEvidence(next);
+  };
+
+  const filteredEvidence = useMemo(() => {
+    const q = evQuery.trim().toLowerCase();
+    if (!q) return evidence;
+    return evidence.filter((r) =>
+      [r.command, r.context, r.output, r.conclusion, r.status].join(" ").toLowerCase().includes(q),
+    );
+  }, [evidence, evQuery]);
 
   // Anything on this page is available to the Context Guard, so a provider or
   // model switch anywhere in Jackie auto-saves it first.
@@ -237,7 +297,7 @@ export default function RepairBay() {
     setAnswer("");
     try {
       const r = await orchestrate({
-        system: CONSULT_SYSTEM,
+        system: consultSystem(evidence),
         kind: "reasoning",
         prompt: `Firmware/driver review request.
 
@@ -267,7 +327,7 @@ Tell me: (1) is this update worth taking for MY use case, or is it risk with no 
     try {
       const recent = captures.slice(0, 2).map((c) => `### ${c.title}\n${c.body.slice(0, 2000)}`).join("\n\n");
       const r = await orchestrate({
-        system: CONSULT_SYSTEM,
+        system: consultSystem(evidence),
         kind: "reasoning",
         prompt: recent ? `${q}\n\n---\nRecent session context I saved:\n${recent}` : q,
       });
@@ -463,6 +523,20 @@ Tell me: (1) is this update worth taking for MY use case, or is it risk with no 
                     >
                       Copy command
                     </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-2 ml-2 min-h-11"
+                      onClick={() => {
+                        setEvCommand(f.cmd);
+                        setEvContext("PowerShell (admin)");
+                        setEvConclusion(f.label);
+                        setTab("evidence");
+                        toast.success("Paste the output in the Evidence Log.");
+                      }}
+                    >
+                      Log its result
+                    </Button>
                   </div>
                 ))}
               </div>
@@ -482,6 +556,152 @@ Tell me: (1) is this update worth taking for MY use case, or is it risk with no 
                 </Button>
               </div>
             </Card>
+          </section>
+        )}
+
+        {tab === "evidence" && (
+          <section className="space-y-4">
+            <Card className="p-4 text-sm text-muted-foreground">
+              Every command you actually run gets recorded here with its timestamp, verbatim output, and the
+              conclusion it supports. A conclusion with no row behind it stays an assumption — the consultant is
+              grounded in these rows and will say "unverified" rather than fill a gap. Device-local; nothing leaves
+              this machine unless you export it.
+            </Card>
+
+            <Card className="p-4 space-y-3">
+              <h3 className="font-medium">Log a command run</h3>
+              <Input
+                className="min-h-11 font-mono text-xs"
+                placeholder="Command exactly as run"
+                value={evCommand}
+                onChange={(e) => setEvCommand(e.target.value)}
+              />
+              <Input
+                className="min-h-11"
+                placeholder="Where it ran — PowerShell (admin), BIOS setup, Linux live USB…"
+                value={evContext}
+                onChange={(e) => setEvContext(e.target.value)}
+              />
+              <Textarea
+                rows={6}
+                className="font-mono text-xs"
+                placeholder="Paste the output verbatim — do not clean it up"
+                value={evOutput}
+                onChange={(e) => setEvOutput(e.target.value)}
+              />
+              <Input
+                className="min-h-11"
+                placeholder="What this output tells us (the conclusion it bears on)"
+                value={evConclusion}
+                onChange={(e) => setEvConclusion(e.target.value)}
+              />
+              <div className="flex flex-wrap gap-2">
+                {(["supports", "contradicts", "inconclusive"] as EvidenceStatus[]).map((s) => (
+                  <Button
+                    key={s}
+                    size="sm"
+                    variant={evStatus === s ? "default" : "outline"}
+                    className="min-h-11"
+                    onClick={() => setEvStatus(s)}
+                  >
+                    {STATUS_LABEL[s]}
+                  </Button>
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <span className="text-xs text-muted-foreground self-center">Resolves discrepancy (optional):</span>
+                {DISCREPANCIES.map((d) => (
+                  <Button
+                    key={d.id}
+                    size="sm"
+                    variant={evLink === d.id ? "secondary" : "outline"}
+                    className="min-h-11"
+                    onClick={() => setEvLink(evLink === d.id ? "" : d.id)}
+                  >
+                    {d.what}
+                  </Button>
+                ))}
+              </div>
+              <Button className="min-h-11" onClick={addEvidence}>Record evidence</Button>
+            </Card>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                className="min-h-11 max-w-sm"
+                placeholder="Search command, output, or conclusion…"
+                value={evQuery}
+                onChange={(e) => setEvQuery(e.target.value)}
+              />
+              {evidence.length > 0 && (
+                <>
+                  <Button
+                    variant="outline"
+                    className="min-h-11"
+                    onClick={() => exportJson("jackie-evidence-log.json", evidence)}
+                  >
+                    Export JSON
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="min-h-11"
+                    onClick={() =>
+                      downloadFile("jackie-evidence-log.csv", evidenceToCsv(evidence), "text/csv")
+                    }
+                  >
+                    Export CSV
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="min-h-11"
+                    onClick={() =>
+                      void runConsult(
+                        "Read my evidence log and tell me, strictly from what is logged: what is now confirmed, what is still unverified, and the single next command to run.",
+                      )
+                    }
+                    disabled={busy}
+                  >
+                    Review the log with Jackie
+                  </Button>
+                </>
+              )}
+            </div>
+
+            {filteredEvidence.length === 0 && (
+              <Card className="p-4 text-sm text-muted-foreground">
+                {evidence.length === 0
+                  ? "Nothing logged yet. Run one of the commands from Detected Inventory and paste its output here — that is where confirmed facts start."
+                  : "No row matches that search."}
+              </Card>
+            )}
+
+            {filteredEvidence.map((r) => (
+              <Card key={r.id} className="p-4 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant={r.status === "contradicts" ? "destructive" : r.status === "supports" ? "default" : "outline"}>
+                      {STATUS_LABEL[r.status]}
+                    </Badge>
+                    <span className="text-xs text-muted-foreground">{new Date(r.ts).toLocaleString()}</span>
+                    <Badge variant="secondary">{r.context}</Badge>
+                    {r.linkedDiscrepancy && (
+                      <Badge variant="outline">
+                        {DISCREPANCIES.find((d) => d.id === r.linkedDiscrepancy)?.what ?? r.linkedDiscrepancy}
+                      </Badge>
+                    )}
+                  </div>
+                  <Button size="sm" variant="outline" className="min-h-11" onClick={() => removeEvidence(r.id)}>
+                    Delete
+                  </Button>
+                </div>
+                <pre className="overflow-auto whitespace-pre-wrap rounded-md bg-muted p-2 font-mono text-xs">
+                  $ {r.command}
+                </pre>
+                <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-muted p-3 font-mono text-xs">
+                  {r.output}
+                </pre>
+                <p className="text-sm">{r.conclusion}</p>
+              </Card>
+            ))}
           </section>
         )}
 

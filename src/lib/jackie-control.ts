@@ -257,6 +257,26 @@ function registerBuiltins() {
     },
   });
   registerAction({
+    id: "ui.path.resolve",
+    module: "ui",
+    description: "Resolve an app or surface name to its exact path. args: { name: string, open?: boolean }",
+    minRole: "user",
+    run: async (args) => {
+      const name = String(args?.name ?? "").trim();
+      if (!name) return "Give a name to resolve, e.g. { name: \"grok\" }";
+      const { findDestinations } = await import("@/lib/pathRouter");
+      const hits = findDestinations(name, 5);
+      if (hits.length === 0) return `No destination matches "${name}". Open /path to browse the directory.`;
+      if (args?.open) {
+        const target = hits[0].path;
+        window.history.pushState({}, "", target);
+        window.dispatchEvent(new PopStateEvent("popstate"));
+        return `Opened ${hits[0].label} → ${target}`;
+      }
+      return hits.map((h) => `${h.label} → ${h.path}`).join("\n");
+    },
+  });
+  registerAction({
     id: "system.storage.purge",
     module: "system",
     description: "Wipe non-essential local storage (keeps auth)",
