@@ -637,6 +637,38 @@ export default function LocalBridge() {
         </div>
       )}
 
+      {tab === "wizard" && (
+        <ConversionWizard
+          platform={platform}
+          onRun={status.state === "online" ? (c) => void run(c) : undefined}
+          onCopy={(c) => copy(c, "Command copied")}
+          onDownload={(name, content, mime) => downloadFile(name, content, mime || "text/plain")}
+          presetPath={selected?.path || (selected?.source === "ollama" ? selected.name : undefined)}
+          presetSource={
+            selected
+              ? selected.source === "ollama"
+                ? "ollama"
+                : selected.source === "lmstudio"
+                  ? "lmstudio"
+                  : selected.source === "bionicgpt"
+                    ? "bionicgpt"
+                    : "file"
+              : undefined
+          }
+          presetSize={selected?.sizeBytes}
+        />
+      )}
+
+      {tab === "bootstatus" && (
+        <BootStatusPanel
+          platform={platform}
+          onRun={status.state === "online" ? (c) => void run(c) : undefined}
+          onReadStatus={readBootStatus}
+          onCopy={(c) => copy(c, "Command copied")}
+        />
+      )}
+
+
       {tab === "custody" && (
         <CustodyPanel
           platform={platform}
