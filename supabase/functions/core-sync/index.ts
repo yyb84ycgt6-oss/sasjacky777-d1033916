@@ -666,10 +666,12 @@ Deno.serve(async (req) => {
   }
 
   // Owner check, asked of the database rather than inferred from the request.
-  const { data: isOwner } = await asUser.rpc("has_role", {
-    _user_id: user.id,
-    _role: "owner",
-  });
+  // Read as the caller: user_roles only ever returns rows the caller may see.
+  const { data: roles } = await asUser
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", user.id);
+  const isOwner = (roles ?? []).some((r: { role: string }) => r.role === "owner");
   if (!isOwner) {
     return new Response(JSON.stringify({ error: "Owner role required" }), {
       status: 403,
