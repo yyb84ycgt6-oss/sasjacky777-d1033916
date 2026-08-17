@@ -182,7 +182,7 @@ export default function AIProviders() {
           <div className="grid md:grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Model</label>
-              <Select value={modelId} onValueChange={setModelId}>
+              <Select value={modelId} onValueChange={switchModel}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {provider.models.map((m) => (
