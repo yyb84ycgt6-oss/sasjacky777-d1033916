@@ -49,7 +49,7 @@ const POLICY_TONE: Record<string, "default" | "secondary" | "destructive" | "out
 export default function CustodyPanel({
   platform, onRun, onCopy,
 }: { platform: Platform; onRun?: (c: string) => void; onCopy: (c: string) => void }) {
-  const [os, setOs] = useState<Platform>(os);
+  const [os, setOs] = useState<Platform>(platform);
   const [probe, setProbe] = useState("");
   const [src, setSrc] = useState("");
   const [dest, setDest] = useState("");
