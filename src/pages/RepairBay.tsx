@@ -248,7 +248,7 @@ export default function RepairBay() {
     setAnswer("");
     try {
       const r = await orchestrate({
-        system: CONSULT_SYSTEM,
+        system: consultSystem(evidence),
         kind: "reasoning",
         prompt: `Firmware/driver review request.
 
@@ -278,7 +278,7 @@ Tell me: (1) is this update worth taking for MY use case, or is it risk with no 
     try {
       const recent = captures.slice(0, 2).map((c) => `### ${c.title}\n${c.body.slice(0, 2000)}`).join("\n\n");
       const r = await orchestrate({
-        system: CONSULT_SYSTEM,
+        system: consultSystem(evidence),
         kind: "reasoning",
         prompt: recent ? `${q}\n\n---\nRecent session context I saved:\n${recent}` : q,
       });
