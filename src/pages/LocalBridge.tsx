@@ -172,7 +172,28 @@ export default function LocalBridge() {
     }
   };
 
+  /** Read-only firmware boot listing, straight into the status screen. */
+  const readBootStatus = async (): Promise<string> => {
+    if (status.state !== "online") {
+      toast.error("Bridge is not connected — run the command in an elevated terminal and paste the output");
+      return "";
+    }
+    const cmd = statusCommand(platform).command;
+    try {
+      const r = await execOnBridge(cfg, cmd, {});
+      setHistory((h) => [r, ...h].slice(0, 50));
+      if (autoLog) logEvidence(r);
+      const out = [r.stdout, r.stderr].filter(Boolean).join("\n");
+      if (r.exitCode !== 0) toast.warning(`Exit ${r.exitCode} — is the helper running elevated?`);
+      return out;
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not read the boot list");
+      return "";
+    }
+  };
+
   const mergeModels = (rows: LocalModel[], label: string) => {
+
     if (rows.length === 0) {
       toast.error("Nothing recognisable in that output");
       return;
