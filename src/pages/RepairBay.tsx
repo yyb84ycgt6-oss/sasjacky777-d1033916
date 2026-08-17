@@ -523,6 +523,20 @@ Tell me: (1) is this update worth taking for MY use case, or is it risk with no 
                     >
                       Copy command
                     </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-2 ml-2 min-h-11"
+                      onClick={() => {
+                        setEvCommand(f.cmd);
+                        setEvContext("PowerShell (admin)");
+                        setEvConclusion(f.label);
+                        setTab("evidence");
+                        toast.success("Paste the output in the Evidence Log.");
+                      }}
+                    >
+                      Log its result
+                    </Button>
                   </div>
                 ))}
               </div>
