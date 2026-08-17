@@ -160,10 +160,50 @@ export default function RepairBay() {
     setFirmware(loadFirmware());
     setCaptures(loadCaptures());
     setChecklist(loadChecklist());
+    setEvidence(loadEvidence());
     const d = loadDraft();
     setCapTitle(d.title);
     setCapBody(d.body);
   }, []);
+
+  const addEvidence = () => {
+    if (!evCommand.trim() || !evOutput.trim()) {
+      toast.error("A row needs the command and its real output — no blanks.");
+      return;
+    }
+    const row: EvidenceEntry = {
+      id: newEvidenceId(),
+      ts: new Date().toISOString(),
+      command: evCommand.trim(),
+      context: evContext.trim() || "unspecified",
+      output: evOutput,
+      conclusion: evConclusion.trim() || "(no conclusion drawn yet)",
+      status: evStatus,
+      linkedDiscrepancy: evLink || undefined,
+    };
+    const next = [row, ...evidence];
+    setEvidence(next);
+    saveEvidence(next);
+    setEvCommand("");
+    setEvOutput("");
+    setEvConclusion("");
+    setEvLink("");
+    toast.success("Logged on this device.");
+  };
+
+  const removeEvidence = (id: string) => {
+    const next = evidence.filter((r) => r.id !== id);
+    setEvidence(next);
+    saveEvidence(next);
+  };
+
+  const filteredEvidence = useMemo(() => {
+    const q = evQuery.trim().toLowerCase();
+    if (!q) return evidence;
+    return evidence.filter((r) =>
+      [r.command, r.context, r.output, r.conclusion, r.status].join(" ").toLowerCase().includes(q),
+    );
+  }, [evidence, evQuery]);
 
   // Anything on this page is available to the Context Guard, so a provider or
   // model switch anywhere in Jackie auto-saves it first.
