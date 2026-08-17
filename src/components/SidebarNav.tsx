@@ -40,6 +40,7 @@ const NAV_GROUPS: NavGroup[] = [
     id: "pc",
     label: "The PC",
     items: [
+      { label: "🔒 Jackie Core · owner only", href: "/core", title: "Identity, behaviour, memory, security, architecture, roadmap — sealed to the owner account" },
       { label: "🧭 Path Router · every location", href: "/path", title: "Type any app or surface name and get its exact path — the whole directory in one place" },
       { label: "🖥️ The PC · Visual Computer", href: "/pc", title: "The whole PC — 90+ apps, windows, ink gestures — embedded with nothing compromised" },
       { label: "🧰 Repair Bay · Maintenance Crew", href: "/repair", title: "Your rig profile, firmware log, emergency boot + recovery playbooks, and Jackie as repair consultant" },

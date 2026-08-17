@@ -46,6 +46,7 @@ import RouterMeshDocs from "./pages/RouterMeshDocs";
 import PCDesktop from "./pages/PCDesktop";
 import PcApps from "./pages/PcApps";
 import PathRouter from "./pages/PathRouter";
+import JackieCore from "./pages/JackieCore";
 import GithubSync from "./pages/GithubSync";
 import { ERU_ALIASES } from "./lib/routeManifest";
 import RouteDebugOverlay from "./components/RouteDebugOverlay";
@@ -120,6 +121,14 @@ const App = () => (
                 element={
                   <ProtectedRoute>
                     <Play />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/core"
+                element={
+                  <ProtectedRoute>
+                    <JackieCore />
                   </ProtectedRoute>
                 }
               />
