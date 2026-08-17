@@ -36,6 +36,7 @@ import {
   STATUS_LABEL, type EvidenceEntry, type EvidenceStatus,
 } from "@/lib/repair/evidenceLog";
 import { CUSTODY_RULES, OS_CORRUPTION_LADDER } from "@/lib/repair/custody";
+import { parseStartupReport, startupBrief } from "@/lib/repair/autorun";
 
 import {
   loadDraft, saveDraft, clearDraft, registerContextSource, guardSwitch,
