@@ -2,11 +2,44 @@
 // Every provider function returns OpenAI-compatible SSE (`data: {...}\n`).
 // Auto-fallback: on 429/402/5xx or missing-secret errors, cascades down
 // the FALLBACK_ORDER (Lovable → free → freemium → paid).
+//
+// Local runners (Ollama) always fail over, even with `fallback` off: a local
+// rate limit / overload / refused connection is never a reason for the main
+// assistant to stop. Context is auto-captured before every switch.
 import type { ProviderId } from "./jackie-providers";
 import { findProvider, FALLBACK_ORDER } from "./jackie-providers";
 import { supabase } from "@/integrations/supabase/client";
+import { captureContext } from "./repair/contextGuard";
 
 export type ChatMessage = { role: "user" | "assistant" | "system"; content: string };
+
+/** Providers that run on the operator's own machine — always worth failing over. */
+const LOCAL_PROVIDERS: ProviderId[] = ["ollama"];
+
+const RATE_LIMIT_PATTERNS =
+  /(429|rate ?limit|too many requests|overload|busy|model is loading|queue|timeout|timed out|connection refused|econnrefused|fetch failed|unavailable)/i;
+
+export function isRateLimitLike(reason: string) {
+  return RATE_LIMIT_PATTERNS.test(reason);
+}
+
+/** Auto-save the conversation before a provider/model switch takes it away. */
+function guard(args: StreamArgs, from: ProviderId, to: ProviderId, reason: string, partial: string) {
+  captureContext({
+    reason: "rate-limit-failover",
+    from: `${from} · ${args.model}`,
+    to,
+    detail: reason,
+    body: [
+      args.system ? `# system\n${args.system}` : "",
+      ...args.messages.map((m) => `# ${m.role}\n${m.content}`),
+      partial ? `# assistant (partial, before failover)\n${partial}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+  });
+}
+
 
 type StreamArgs = {
   provider: ProviderId;
