@@ -120,7 +120,7 @@ function loadChecklist(): Record<string, boolean> {
 }
 
 export default function RepairBay() {
-  const [tab, setTab] = useState<Tab>("rig");
+  const [tab, setTab] = useState<Tab>("detected");
   const [query, setQuery] = useState("");
   const [openPb, setOpenPb] = useState<string | null>(PLAYBOOKS[0]?.id ?? null);
 
