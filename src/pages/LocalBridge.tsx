@@ -22,16 +22,22 @@ import {
 } from "@/lib/repair/evidenceLog";
 import CustodyPanel from "@/components/repair/CustodyPanel";
 import BootPanel from "@/components/repair/BootPanel";
+import BootStatusPanel from "@/components/repair/BootStatusPanel";
+import ConversionWizard from "@/components/repair/ConversionWizard";
+import { statusCommand } from "@/lib/repair/bootEntries";
 
-type Tab = "terminal" | "models" | "custody" | "boot" | "setup";
+type Tab = "terminal" | "models" | "wizard" | "custody" | "boot" | "bootstatus" | "setup";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "terminal", label: "Terminal" },
   { id: "models", label: "Model Vault" },
+  { id: "wizard", label: "Conversion Wizard" },
   { id: "custody", label: "Custody & Backup" },
   { id: "boot", label: "Jackie Boot" },
+  { id: "bootstatus", label: "Boot Entry Status" },
   { id: "setup", label: "Bridge Setup" },
 ];
+
 
 const MODELS_KEY = "jackie.bridge.models.v1";
 
@@ -166,7 +172,28 @@ export default function LocalBridge() {
     }
   };
 
+  /** Read-only firmware boot listing, straight into the status screen. */
+  const readBootStatus = async (): Promise<string> => {
+    if (status.state !== "online") {
+      toast.error("Bridge is not connected — run the command in an elevated terminal and paste the output");
+      return "";
+    }
+    const cmd = statusCommand(platform).command;
+    try {
+      const r = await execOnBridge(cfg, cmd, {});
+      setHistory((h) => [r, ...h].slice(0, 50));
+      if (autoLog) logEvidence(r);
+      const out = [r.stdout, r.stderr].filter(Boolean).join("\n");
+      if (r.exitCode !== 0) toast.warning(`Exit ${r.exitCode} — is the helper running elevated?`);
+      return out;
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not read the boot list");
+      return "";
+    }
+  };
+
   const mergeModels = (rows: LocalModel[], label: string) => {
+
     if (rows.length === 0) {
       toast.error("Nothing recognisable in that output");
       return;
@@ -609,6 +636,38 @@ export default function LocalBridge() {
           </Card>
         </div>
       )}
+
+      {tab === "wizard" && (
+        <ConversionWizard
+          platform={platform}
+          onRun={status.state === "online" ? (c) => void run(c) : undefined}
+          onCopy={(c) => copy(c, "Command copied")}
+          onDownload={(name, content, mime) => downloadFile(name, content, mime || "text/plain")}
+          presetPath={selected?.path || (selected?.source === "ollama" ? selected.name : undefined)}
+          presetSource={
+            selected
+              ? selected.source === "ollama"
+                ? "ollama"
+                : selected.source === "lmstudio"
+                  ? "lmstudio"
+                  : selected.source === "bionicgpt"
+                    ? "bionicgpt"
+                    : "file"
+              : undefined
+          }
+          presetSize={selected?.sizeBytes}
+        />
+      )}
+
+      {tab === "bootstatus" && (
+        <BootStatusPanel
+          platform={platform}
+          onRun={status.state === "online" ? (c) => void run(c) : undefined}
+          onReadStatus={readBootStatus}
+          onCopy={(c) => copy(c, "Command copied")}
+        />
+      )}
+
 
       {tab === "custody" && (
         <CustodyPanel
