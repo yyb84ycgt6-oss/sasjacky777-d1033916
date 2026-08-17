@@ -41,6 +41,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "The PC",
     items: [
       { label: "🖥️ The PC · Visual Computer", href: "/pc", title: "The whole PC — 90+ apps, windows, ink gestures — embedded with nothing compromised" },
+      { label: "🧰 Repair Bay · Maintenance Crew", href: "/repair", title: "Your rig profile, firmware log, emergency boot + recovery playbooks, and Jackie as repair consultant" },
       { label: "🗂️ PC App Library · all 90", href: "/pc-apps", title: "Every app in the PC, searchable — the groups below are a shortcut to the ones used most" },
       { label: "👁️ eYe App Commander", href: "/app-commander.html", title: "Fleet command center — live GPU/thermal, routing tier, AES-GCM vault, collapse pipeline", external: true },
       { label: "📡 Jacky Live · Real Engine", href: "/jacky-live", title: "Live RTX-3090 telemetry, situation-aware routing and squad dispatch from the real jacky engine" },
