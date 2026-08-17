@@ -618,6 +618,15 @@ export default function LocalBridge() {
         />
       )}
 
+      {tab === "boot" && (
+        <BootPanel
+          platform={platform}
+          onRun={status.state === "online" ? (c) => void run(c) : undefined}
+          onCopy={(c) => copy(c, "Command copied")}
+          onDownload={(name, content, mime) => downloadFile(name, content, mime || "text/plain")}
+        />
+      )}
+
       {tab === "setup" && (
         <div className="space-y-4">
           <Card className="p-4">
