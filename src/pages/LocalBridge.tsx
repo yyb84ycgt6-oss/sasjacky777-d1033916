@@ -21,13 +21,15 @@ import {
   type EvidenceEntry,
 } from "@/lib/repair/evidenceLog";
 import CustodyPanel from "@/components/repair/CustodyPanel";
+import BootPanel from "@/components/repair/BootPanel";
 
-type Tab = "terminal" | "models" | "custody" | "setup";
+type Tab = "terminal" | "models" | "custody" | "boot" | "setup";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "terminal", label: "Terminal" },
   { id: "models", label: "Model Vault" },
   { id: "custody", label: "Custody & Backup" },
+  { id: "boot", label: "Jackie Boot" },
   { id: "setup", label: "Bridge Setup" },
 ];
 
@@ -613,6 +615,15 @@ export default function LocalBridge() {
           platform={platform}
           onRun={status.state === "online" ? (c) => void run(c) : undefined}
           onCopy={(c) => copy(c, "Command copied")}
+        />
+      )}
+
+      {tab === "boot" && (
+        <BootPanel
+          platform={platform}
+          onRun={status.state === "online" ? (c) => void run(c) : undefined}
+          onCopy={(c) => copy(c, "Command copied")}
+          onDownload={(name, content, mime) => downloadFile(name, content, mime || "text/plain")}
         />
       )}
 
