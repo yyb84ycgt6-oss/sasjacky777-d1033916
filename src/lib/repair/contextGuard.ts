@@ -114,7 +114,9 @@ const sources = new Map<string, ContextSource>();
 
 export function registerContextSource(key: string, get: ContextSource) {
   sources.set(key, get);
-  return () => sources.delete(key);
+  return () => {
+    sources.delete(key);
+  };
 }
 
 export function collectLiveContext(): string {
