@@ -49,24 +49,39 @@ const POLICY_TONE: Record<string, "default" | "secondary" | "destructive" | "out
 export default function CustodyPanel({
   platform, onRun, onCopy,
 }: { platform: Platform; onRun?: (c: string) => void; onCopy: (c: string) => void }) {
+  const [os, setOs] = useState<Platform>(os);
   const [probe, setProbe] = useState("");
   const [src, setSrc] = useState("");
   const [dest, setDest] = useState("");
-  const [backupRoot, setBackupRoot] = useState(platform === "windows" ? "D:\\jackie-custody" : "/mnt/backup/jackie-custody");
+  const [backupRoot, setBackupRoot] = useState(os === "windows" ? "D:\\jackie-custody" : "/mnt/backup/jackie-custody");
 
   const cls = useMemo(() => (probe.trim() ? classifyPath(probe) : null), [probe]);
   const stages = useMemo(() => preWorkStages(backupRoot), [backupRoot]);
   const copySteps = useMemo(
-    () => (src.trim() && dest.trim() ? safeCopySteps(src.trim(), dest.trim(), platform) : []),
-    [src, dest, platform],
+    () => (src.trim() && dest.trim() ? safeCopySteps(src.trim(), dest.trim(), os) : []),
+    [src, dest, os],
   );
   const linkSteps = useMemo(
-    () => (src.trim() && dest.trim() ? hardlinkSteps(src.trim(), dest.trim(), platform) : []),
-    [src, dest, platform],
+    () => (src.trim() && dest.trim() ? hardlinkSteps(src.trim(), dest.trim(), os) : []),
+    [src, dest, os],
   );
 
   return (
     <div className="space-y-4">
+      <Card className="p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-semibold">Target OS for generated commands</span>
+          {(["windows", "linux"] as Platform[]).map((o) => (
+            <Button key={o} size="sm" variant={os === o ? "default" : "secondary"} className="min-h-11" onClick={() => setOs(o)}>
+              {o === "windows" ? "Windows" : "Linux"}
+            </Button>
+          ))}
+        </div>
+        <p className="mt-2 text-xs text-muted-foreground">
+          Defaults to what the bridge reports. Switch it when you are preparing commands for the rescue stick instead of this machine.
+        </p>
+      </Card>
+
       <Card className="p-4">
         <h2 className="text-sm font-semibold">Custody rules — these hold whatever the task is</h2>
         <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
@@ -92,7 +107,7 @@ export default function CustodyPanel({
         <Input
           value={probe}
           onChange={(e) => setProbe(e.target.value)}
-          placeholder={platform === "windows" ? "C:\\Users\\Eru\\.ollama\\models\\blobs\\sha256-…" : "~/.ollama/models/blobs/sha256-…"}
+          placeholder={os === "windows" ? "C:\\Users\\Eru\\.ollama\\models\\blobs\\sha256-…" : "~/.ollama/models/blobs/sha256-…"}
           className="mt-2"
         />
         {cls && (
@@ -104,8 +119,8 @@ export default function CustodyPanel({
             </div>
             <p className="mt-2 text-sm text-muted-foreground">{cls.why}</p>
             <p className="mt-2 text-sm">{cls.handling}</p>
-            {cls.capture && (cls.capture[platform] ?? cls.capture.windows) && (
-              <Mono>{cls.capture[platform] ?? cls.capture.windows}</Mono>
+            {cls.capture && (cls.capture[os] ?? cls.capture.windows) && (
+              <Mono>{cls.capture[os] ?? cls.capture.windows}</Mono>
             )}
           </div>
         )}
@@ -145,7 +160,7 @@ export default function CustodyPanel({
           <Input
             value={backupRoot}
             onChange={(e) => setBackupRoot(e.target.value)}
-            placeholder={platform === "windows" ? "D:\\jackie-custody" : "/mnt/backup/jackie-custody"}
+            placeholder={os === "windows" ? "D:\\jackie-custody" : "/mnt/backup/jackie-custody"}
             className="max-w-md"
           />
           <Button
@@ -158,7 +173,7 @@ export default function CustodyPanel({
                   .map(
                     (s) =>
                       `# ${s.title}\n# ${s.purpose}\n` +
-                      s.commands.map((c) => c[platform] ?? c.windows ?? c.linux ?? "").filter(Boolean).join("\n"),
+                      s.commands.map((c) => c[os] ?? c.windows ?? c.linux ?? "").filter(Boolean).join("\n"),
                   )
                   .join("\n\n"),
               )
@@ -174,7 +189,7 @@ export default function CustodyPanel({
               <p className="mt-1 text-xs text-muted-foreground">{s.purpose}</p>
               <div className="mt-2 space-y-2">
                 {s.commands.map((c, i) => {
-                  const cmd = c[platform] ?? c.windows ?? c.linux;
+                  const cmd = c[os] ?? c.windows ?? c.linux;
                   if (!cmd) return null;
                   return <Cmd key={`${s.id}-${i}`} title={`Step ${i + 1}`} command={cmd} note={c.note} onRun={onRun} onCopy={onCopy} />;
                 })}
