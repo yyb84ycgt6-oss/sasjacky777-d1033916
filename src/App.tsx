@@ -123,6 +123,14 @@ const App = () => (
                 }
               />
               <Route
+                path="/path"
+                element={
+                  <ProtectedRoute>
+                    <PathRouter />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
                 path="/pc"
                 element={
                   <ProtectedRoute>
