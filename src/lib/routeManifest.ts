@@ -22,6 +22,7 @@ export type RouteEntry = {
 export const CORE_ROUTES: RouteEntry[] = [
   { path: "/", label: "Home", group: "core" },
   { path: "/pc", label: "The PC", group: "core" },
+  { path: "/repair", label: "Repair Bay", group: "core" },
   { path: "/play", label: "Play", group: "core" },
   { path: "/hub", label: "Telegram Hub", group: "core" },
   { path: "/vault", label: "Vault", group: "core" },
