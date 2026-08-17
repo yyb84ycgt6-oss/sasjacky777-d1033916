@@ -72,6 +72,13 @@ const VERDICT_VARIANT: Record<Verdict, "default" | "secondary" | "destructive" |
   unknown: "outline",
 };
 
+const CADENCE_VARIANT: Record<Cadence, "default" | "secondary" | "destructive" | "outline"> = {
+  "safe-anytime": "default",
+  "read-notes-first": "secondary",
+  "only-for-a-named-fix": "outline",
+  "never-unsolicited": "destructive",
+};
+
 function loadChecklist(): Record<string, boolean> {
   try {
     const raw = localStorage.getItem(CHECKLIST_KEY);
