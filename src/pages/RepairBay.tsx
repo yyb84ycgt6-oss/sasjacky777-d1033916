@@ -39,6 +39,7 @@ import { orchestrate } from "@/lib/jackie-orchestrator";
 
 type Tab =
   | "detected"
+  | "evidence"
   | "rig"
   | "playbooks"
   | "toolkit"
@@ -50,6 +51,7 @@ type Tab =
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "detected", label: "Detected Inventory" },
+  { id: "evidence", label: "Evidence Log" },
   { id: "rig", label: "Rig Profile" },
   { id: "playbooks", label: "Repair Playbooks" },
   { id: "toolkit", label: "AI + Repair Toolkit" },
