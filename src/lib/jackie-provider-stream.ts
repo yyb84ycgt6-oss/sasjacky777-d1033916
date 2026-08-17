@@ -125,7 +125,7 @@ async function tryOne(
         try {
           const j = JSON.parse(payload);
           const c = j.choices?.[0]?.delta?.content;
-          if (c) { args.onDelta(c); gotAnyDelta = true; }
+          if (c) { args.onDelta(c); sink.text += c; gotAnyDelta = true; }
         } catch { /* partial */ }
       }
     }
@@ -141,13 +141,22 @@ async function tryOne(
 
 export async function streamProviderChat(args: StreamArgs) {
   const primary = args.provider;
-  const first = await tryOne(args, primary, args.model);
+  const sink = { text: "" };
+  const first = await tryOne(args, primary, args.model, sink);
 
   if (first.kind === "ok") {
     args.onDone({ servedBy: primary, model: args.model });
     return;
   }
-  if (first.kind === "fatal" || !args.fallback) {
+
+  // A local runner hitting a limit/overload must never stop the assistant:
+  // fail over even when the caller didn't ask for fallback.
+  const forceFailover =
+    first.kind === "retryable" &&
+    LOCAL_PROVIDERS.includes(primary) &&
+    isRateLimitLike(first.reason);
+
+  if (first.kind === "fatal" || (!args.fallback && !forceFailover)) {
     args.onError(first.reason);
     return;
   }
@@ -160,8 +169,10 @@ export async function streamProviderChat(args: StreamArgs) {
     if (!def) continue;
     const fallbackModel = def.models[0]?.id;
     if (!fallbackModel) continue;
+    // Auto-save the context before handing the session to another provider.
+    guard(args, primary, next, lastReason, sink.text);
     args.onFallback?.(primary, next, lastReason);
-    const r = await tryOne(args, next, fallbackModel);
+    const r = await tryOne(args, next, fallbackModel, sink);
     if (r.kind === "ok") {
       args.onDone({ servedBy: next, model: fallbackModel });
       return;
@@ -174,3 +185,4 @@ export async function streamProviderChat(args: StreamArgs) {
   }
   args.onError(`All providers failed. Last error: ${lastReason}`);
 }
+
