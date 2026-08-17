@@ -454,6 +454,84 @@ Tell me: (1) is this update worth taking for MY use case, or is it risk with no 
           </section>
         )}
 
+        {tab === "toolkit" && (
+          <section className="space-y-6">
+            <Card className="p-4 text-sm text-muted-foreground">
+              Local runners, models that actually fit a 3090, and the repair/update managers worth trusting.
+              Commands are real — copy them into Windows Terminal (Admin). Nothing here installs itself.
+            </Card>
+
+            <Card className="p-4">
+              <h3 className="font-medium">Claims checked against your hardware</h3>
+              <ul className="mt-3 space-y-3 text-sm">
+                {CORRECTIONS.map((c) => (
+                  <li key={c.claim}>
+                    <p className="text-muted-foreground line-through decoration-destructive/60">{c.claim}</p>
+                    <p className="mt-1">{c.reality}</p>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+
+            {TOOLKIT.map((group) => (
+              <div key={group.id} className="space-y-3">
+                <div>
+                  <h2 className="font-medium">{group.title}</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">{group.intro}</p>
+                </div>
+
+                {group.tools.map((t) => (
+                  <Card key={t.id} className="p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <h3 className="font-medium">{t.name}</h3>
+                      <Badge variant={t.cost === "paid" ? "destructive" : t.cost === "free" ? "secondary" : "default"}>
+                        {t.cost}
+                      </Badge>
+                    </div>
+                    <p className="mt-2 text-sm text-muted-foreground">{t.what}</p>
+                    {t.fit && <p className="mt-2 text-sm">Fit: {t.fit}</p>}
+                    {t.caution && (
+                      <p className="mt-2 text-sm text-destructive">Caution: {t.caution}</p>
+                    )}
+                    {t.cmds && (
+                      <div className="mt-3 space-y-2">
+                        {t.cmds.map((c) => (
+                          <div key={c} className="flex items-start gap-2">
+                            <pre className="flex-1 overflow-x-auto rounded-md bg-muted p-2 text-xs">{c}</pre>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="min-h-11"
+                              onClick={() => {
+                                navigator.clipboard.writeText(c);
+                                toast.success("Command copied");
+                              }}
+                            >
+                              Copy
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {t.url && (
+                      <a
+                        href={t.url}
+                        target={t.url.startsWith("/") ? undefined : "_blank"}
+                        rel="noreferrer noopener"
+                        className="mt-3 inline-block min-h-11 text-sm underline underline-offset-4"
+                      >
+                        {t.url.startsWith("/") ? "Open in Jackie" : "Official source ↗"}
+                      </a>
+                    )}
+                  </Card>
+                ))}
+              </div>
+            ))}
+          </section>
+        )}
+
+
+
         {tab === "capture" && (
           <section className="space-y-4">
             <Card className="p-4 text-sm text-muted-foreground">
