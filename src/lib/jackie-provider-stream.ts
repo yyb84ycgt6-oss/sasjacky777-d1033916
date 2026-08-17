@@ -97,9 +97,11 @@ async function tryOne(
       !!err?.needs_secret ||
       resp.status === 429 ||
       resp.status === 402 ||
-      resp.status >= 500;
+      resp.status >= 500 ||
+      (LOCAL_PROVIDERS.includes(provider) && isRateLimitLike(msg));
     return retryable ? { kind: "retryable", reason: msg } : { kind: "fatal", reason: msg };
   }
+
 
   if (!resp.body) return { kind: "retryable", reason: "No stream body" };
 
