@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { PROVIDERS, OLLAMA_AGENTS, providersByTier, type ProviderId, type ProviderTier } from "@/lib/jackie-providers";
 import { streamProviderChat } from "@/lib/jackie-provider-stream";
+import { guardSwitch } from "@/lib/repair/contextGuard";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -73,12 +74,31 @@ export default function AIProviders() {
     });
   };
 
+  const snapshot = (to: string, reason: "provider-switch" | "model-switch") =>
+    guardSwitch(reason, {
+      from: `${providerId} · ${modelId}`,
+      to,
+      detail: "Switched from the Provider Hub",
+      extra: [
+        prompt ? `# prompt\n${prompt}` : "",
+        output ? `# output so far\n${output}` : "",
+        error ? `# last error\n${error}` : "",
+      ].filter(Boolean).join("\n\n"),
+    });
+
+  const switchModel = (id: string) => {
+    snapshot(`${providerId} · ${id}`, "model-switch");
+    setModelId(id);
+  };
+
   const switchProvider = (id: ProviderId) => {
+    snapshot(`${id}`, "provider-switch");
     setProviderId(id);
     const p = PROVIDERS.find((x) => x.id === id)!;
     setModelId(p.models[0].id);
     setOutput(""); setError(null); setServedBy(null); setFallbackNote(null);
   };
+
 
   const renderCard = (p: (typeof PROVIDERS)[number]) => {
     const Icon = ICONS[p.id];
@@ -162,7 +182,7 @@ export default function AIProviders() {
           <div className="grid md:grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Model</label>
-              <Select value={modelId} onValueChange={setModelId}>
+              <Select value={modelId} onValueChange={switchModel}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {provider.models.map((m) => (

@@ -13,18 +13,26 @@ import {
   loadFirmware, saveFirmware, loadCaptures, saveCaptures, newId, exportJson,
   type FirmwareEntry, type SessionCapture,
 } from "@/lib/repair/repairStore";
+import { scoreAll, VERDICT_LABEL, type RiskScore, type Verdict } from "@/lib/repair/firmwareRisk";
+import { VENTOY_STEPS, ISO_CHECKLIST, CHECKLIST_KEY } from "@/lib/repair/ventoy";
+import {
+  loadDraft, saveDraft, clearDraft, registerContextSource, guardSwitch,
+} from "@/lib/repair/contextGuard";
 import { orchestrate } from "@/lib/jackie-orchestrator";
 
-type Tab = "rig" | "playbooks" | "toolkit" | "firmware" | "capture" | "consult";
+type Tab = "rig" | "playbooks" | "toolkit" | "firmware" | "risk" | "bootstick" | "capture" | "consult";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "rig", label: "Rig Profile" },
   { id: "playbooks", label: "Repair Playbooks" },
   { id: "toolkit", label: "AI + Repair Toolkit" },
   { id: "firmware", label: "Firmware Log" },
+  { id: "risk", label: "Update Risk" },
+  { id: "bootstick", label: "Boot Stick Wizard" },
   { id: "capture", label: "Session Capture" },
   { id: "consult", label: "Consultant" },
 ];
+
 
 
 /** The factual rig brief every consultant answer is grounded in. */
@@ -52,6 +60,23 @@ function SeverityBadge({ s }: { s: Playbook["severity"] }) {
   return <Badge variant={variant as never}>{s}</Badge>;
 }
 
+const VERDICT_VARIANT: Record<Verdict, "default" | "secondary" | "destructive" | "outline"> = {
+  "flash-now": "default",
+  "flash-when-calm": "secondary",
+  postpone: "outline",
+  never: "destructive",
+  unknown: "outline",
+};
+
+function loadChecklist(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(CHECKLIST_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
 export default function RepairBay() {
   const [tab, setTab] = useState<Tab>("rig");
   const [query, setQuery] = useState("");
@@ -61,6 +86,8 @@ export default function RepairBay() {
   const [captures, setCaptures] = useState<SessionCapture[]>([]);
   const [capTitle, setCapTitle] = useState("");
   const [capBody, setCapBody] = useState("");
+  const [checklist, setChecklist] = useState<Record<string, boolean>>({});
+  const [openStep, setOpenStep] = useState<string | null>(VENTOY_STEPS[0]?.id ?? null);
 
   const [ask, setAsk] = useState("");
   const [answer, setAnswer] = useState("");
@@ -70,7 +97,55 @@ export default function RepairBay() {
   useEffect(() => {
     setFirmware(loadFirmware());
     setCaptures(loadCaptures());
+    setChecklist(loadChecklist());
+    const d = loadDraft();
+    setCapTitle(d.title);
+    setCapBody(d.body);
   }, []);
+
+  // Anything on this page is available to the Context Guard, so a provider or
+  // model switch anywhere in Jackie auto-saves it first.
+  useEffect(
+    () =>
+      registerContextSource("repair-bay", () =>
+        [
+          ask ? `question: ${ask}` : "",
+          answer ? `consultant answer (${modelUsed ?? "unknown model"}):\n${answer}` : "",
+          capBody ? `capture draft:\n${capBody}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+      ),
+    [ask, answer, modelUsed, capBody],
+  );
+
+  // Draft autosave — a refresh or a crash never eats a paste again.
+  useEffect(() => {
+    if (capTitle || capBody) saveDraft(capTitle, capBody);
+  }, [capTitle, capBody]);
+
+  // Pick up captures written automatically by the failover guard.
+  useEffect(() => {
+    if (tab === "capture") setCaptures(loadCaptures());
+  }, [tab]);
+
+  const riskScores = useMemo<RiskScore[]>(() => scoreAll(firmware), [firmware]);
+
+  const toggleCheck = (id: string) => {
+    setChecklist((prev) => {
+      const next = { ...prev, [id]: !prev[id] };
+      try {
+        localStorage.setItem(CHECKLIST_KEY, JSON.stringify(next));
+      } catch { /* storage blocked */ }
+      return next;
+    });
+  };
+
+  const copy = (text: string, label = "Copied") => {
+    navigator.clipboard.writeText(text);
+    toast.success(label);
+  };
+
 
   const filteredPlaybooks = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -176,7 +251,9 @@ Tell me: (1) is this update worth taking for MY use case, or is it risk with no 
     saveCaptures(next);
     setCapTitle("");
     setCapBody("");
+    clearDraft();
     toast.success("Saved on this device — survives closing the window.");
+
   };
 
   const removeCapture = (id: string) => {
@@ -530,14 +607,225 @@ Tell me: (1) is this update worth taking for MY use case, or is it risk with no 
           </section>
         )}
 
-
-
-        {tab === "capture" && (
+        {tab === "risk" && (
           <section className="space-y-4">
             <Card className="p-4 text-sm text-muted-foreground">
-              The clipboard is one slot and it dies with the window. Paste agent context, terminal output or
-              error text here before you switch tools — it persists on this device and the consultant reads
-              your two most recent captures automatically.
+              Scored from what you logged in the Firmware Log, against what the official changelog for that
+              part actually contains — plus how recoverable a failed flash is. No version is invented: if a
+              row says "Log a version", that is exactly what it needs.
+            </Card>
+
+            {riskScores.map((r) => (
+              <Card key={r.componentId} className="p-4">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <Badge variant={VERDICT_VARIANT[r.verdict]}>{VERDICT_LABEL[r.verdict]}</Badge>
+                    <h3 className="mt-2 font-medium">{r.componentName}</h3>
+                    <p className="mt-1 text-sm">{r.headline}</p>
+                  </div>
+                  <div className="text-right text-xs text-muted-foreground">
+                    <p>Risk {r.risk}/100</p>
+                    <p>Benefit {r.benefit}/100</p>
+                  </div>
+                </div>
+
+                {r.matchedChangelog && (
+                  <div className="mt-3 rounded-md border border-border p-3 text-sm">
+                    <p className="font-medium">Documented release {r.matchedChangelog.version}</p>
+                    <p className="mt-1 text-muted-foreground">{r.matchedChangelog.fixes}</p>
+                  </div>
+                )}
+
+                <ul className="mt-3 space-y-1 text-sm text-muted-foreground">
+                  {r.reasons.map((x) => <li key={x}>• {x}</li>)}
+                </ul>
+
+                <div className="mt-3 rounded-md border border-border p-3 text-sm">
+                  <p><span className="font-medium">Read first: </span><span className="text-muted-foreground">{r.readFirst}</span></p>
+                  <p className="mt-2"><span className="font-medium">If the flash fails: </span><span className="text-muted-foreground">{r.recovery}</span></p>
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {r.sourceUrl && (
+                    <a
+                      href={r.sourceUrl}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="inline-flex min-h-11 items-center text-sm underline underline-offset-4"
+                    >
+                      Official changelog ↗
+                    </a>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="min-h-11"
+                    disabled={busy}
+                    onClick={() => reviewFirmware(r.componentId)}
+                  >
+                    Ask Jackie to review
+                  </Button>
+                </div>
+              </Card>
+            ))}
+
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                className="min-h-11"
+                onClick={() => exportJson("jackie-firmware-risk.json", { rig: RIG_NAME, scored: riskScores })}
+              >
+                Export risk report (JSON)
+              </Button>
+              <Button variant="outline" className="min-h-11" onClick={() => setTab("firmware")}>
+                Log more versions
+              </Button>
+            </div>
+
+            <Card className="p-4">
+              <h3 className="font-medium">Flashing rules — non-negotiable</h3>
+              <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
+                {FLASH_RULES.map((x) => <li key={x}>• {x}</li>)}
+              </ul>
+            </Card>
+          </section>
+        )}
+
+        {tab === "bootstick" && (
+          <section className="space-y-4">
+            <Card className="p-4 text-sm text-muted-foreground">
+              Build this while the machine still works. Ventoy holds Win11 + Win10 + Ubuntu + Memtest on one
+              stick, and every ISO gets SHA-256 verified before you trust it. Jackie cannot host the images —
+              official vendor links and your own checksum check is the honest path.
+            </Card>
+
+            {VENTOY_STEPS.map((s) => {
+              const open = openStep === s.id;
+              return (
+                <Card key={s.id} className="p-4">
+                  <button className="w-full text-left" onClick={() => setOpenStep(open ? null : s.id)}>
+                    <h3 className="font-medium">{s.title}</h3>
+                    {!open && <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{s.body}</p>}
+                  </button>
+
+                  {open && (
+                    <div className="mt-3 space-y-3">
+                      <p className="text-sm text-muted-foreground">{s.body}</p>
+
+                      {s.warn && (
+                        <div className="rounded-md border border-destructive/40 p-3 text-sm text-destructive">
+                          {s.warn}
+                        </div>
+                      )}
+
+                      {s.cmds?.map((c) => (
+                        <div key={c.cmd} className="space-y-1">
+                          <div className="flex items-start gap-2">
+                            <pre className="flex-1 overflow-x-auto rounded-md bg-muted p-3 text-xs">
+                              <code>{c.cmd}</code>
+                            </pre>
+                            <Button size="sm" variant="outline" className="min-h-11" onClick={() => copy(c.cmd, "Command copied")}>
+                              Copy
+                            </Button>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            {c.shell}{c.note ? ` — ${c.note}` : ""}
+                          </p>
+                        </div>
+                      ))}
+
+                      {s.links && (
+                        <ul className="space-y-1 text-sm">
+                          {s.links.map((l) => (
+                            <li key={l.url}>
+                              <a
+                                href={l.url}
+                                target="_blank"
+                                rel="noreferrer noopener"
+                                className="inline-flex min-h-11 items-center underline underline-offset-4"
+                              >
+                                {l.label} ↗
+                              </a>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+                </Card>
+              );
+            })}
+
+            <Card className="p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="font-medium">Emergency stick checklist</h3>
+                <span className="text-xs text-muted-foreground">
+                  {ISO_CHECKLIST.filter((i) => checklist[i.id]).length}/{ISO_CHECKLIST.length} done
+                </span>
+              </div>
+              <ul className="mt-3 space-y-2">
+                {ISO_CHECKLIST.map((i) => (
+                  <li key={i.id}>
+                    <button
+                      onClick={() => toggleCheck(i.id)}
+                      className="flex min-h-11 w-full items-start gap-3 text-left text-sm"
+                    >
+                      <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border ${checklist[i.id] ? "border-primary bg-primary text-primary-foreground" : "border-border"}`}>
+                        {checklist[i.id] ? "✓" : ""}
+                      </span>
+                      <span>
+                        <span className={checklist[i.id] ? "line-through text-muted-foreground" : ""}>{i.label}</span>
+                        <span className="block text-xs text-muted-foreground">{i.detail}</span>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                className="min-h-11"
+                onClick={() =>
+                  copy(
+                    VENTOY_STEPS.map(
+                      (s) =>
+                        `## ${s.title}\n${s.body}${s.warn ? `\n! ${s.warn}` : ""}${
+                          s.cmds ? `\n${s.cmds.map((c) => `[${c.shell}] ${c.cmd}`).join("\n")}` : ""
+                        }${s.links ? `\n${s.links.map((l) => `${l.label}: ${l.url}`).join("\n")}` : ""}`,
+                    ).join("\n\n"),
+                    "Full wizard copied",
+                  )
+                }
+              >
+                Copy the whole wizard
+              </Button>
+              <Button
+                variant="outline"
+                className="min-h-11"
+                onClick={() => {
+                  guardSwitch("manual-checkpoint", { detail: "Boot stick wizard handoff" });
+                  setTab("consult");
+                  void runConsult(
+                    "I'm building the Ventoy emergency boot stick for my rig. Ask me for the outputs you need (disk number, Secure Boot state, BitLocker status) and check my plan step by step, including the Intel RST/VMD driver requirement for my NVMe drives.",
+                  );
+                }}
+              >
+                Walk this with Jackie
+              </Button>
+            </div>
+          </section>
+        )}
+
+        {tab === "capture" && (
+
+          <section className="space-y-4">
+            <Card className="p-4 text-sm text-muted-foreground">
+              The clipboard is one slot and it dies with the window. Two things now happen automatically:
+              this editor autosaves as you type, and every provider or model switch (including an Ollama
+              rate-limit failover) writes an <span className="font-medium">[auto]</span> capture of the live
+              context before the switch. Nothing you were working on leaves with the model.
             </Card>
 
             <Card className="p-4 space-y-3">
@@ -553,10 +841,29 @@ Tell me: (1) is this update worth taking for MY use case, or is it risk with no 
                 value={capBody}
                 onChange={(e) => setCapBody(e.target.value)}
               />
-              <Button className="min-h-11" onClick={addCapture} disabled={!capBody.trim()}>
-                Save capture
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button className="min-h-11" onClick={addCapture} disabled={!capBody.trim()}>
+                  Save capture
+                </Button>
+                <Button
+                  variant="outline"
+                  className="min-h-11"
+                  onClick={() => {
+                    const row = guardSwitch("manual-checkpoint", { detail: "Manual checkpoint from Repair Bay" });
+                    setCaptures(loadCaptures());
+                    toast[row ? "success" : "error"](
+                      row ? "Checkpoint saved on this device." : "Nothing open to checkpoint yet.",
+                    );
+                  }}
+                >
+                  Checkpoint everything now
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Draft autosaves locally — a refresh or a crash will not eat this paste.
+              </p>
             </Card>
+
 
             {captures.map((c) => (
               <Card key={c.id} className="p-4">

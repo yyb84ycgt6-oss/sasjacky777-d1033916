@@ -2,11 +2,44 @@
 // Every provider function returns OpenAI-compatible SSE (`data: {...}\n`).
 // Auto-fallback: on 429/402/5xx or missing-secret errors, cascades down
 // the FALLBACK_ORDER (Lovable → free → freemium → paid).
+//
+// Local runners (Ollama) always fail over, even with `fallback` off: a local
+// rate limit / overload / refused connection is never a reason for the main
+// assistant to stop. Context is auto-captured before every switch.
 import type { ProviderId } from "./jackie-providers";
 import { findProvider, FALLBACK_ORDER } from "./jackie-providers";
 import { supabase } from "@/integrations/supabase/client";
+import { captureContext } from "./repair/contextGuard";
 
 export type ChatMessage = { role: "user" | "assistant" | "system"; content: string };
+
+/** Providers that run on the operator's own machine — always worth failing over. */
+const LOCAL_PROVIDERS: ProviderId[] = ["ollama"];
+
+const RATE_LIMIT_PATTERNS =
+  /(429|rate ?limit|too many requests|overload|busy|model is loading|queue|timeout|timed out|connection refused|econnrefused|fetch failed|unavailable)/i;
+
+export function isRateLimitLike(reason: string) {
+  return RATE_LIMIT_PATTERNS.test(reason);
+}
+
+/** Auto-save the conversation before a provider/model switch takes it away. */
+function guard(args: StreamArgs, from: ProviderId, to: ProviderId, reason: string, partial: string) {
+  captureContext({
+    reason: "rate-limit-failover",
+    from: `${from} · ${args.model}`,
+    to,
+    detail: reason,
+    body: [
+      args.system ? `# system\n${args.system}` : "",
+      ...args.messages.map((m) => `# ${m.role}\n${m.content}`),
+      partial ? `# assistant (partial, before failover)\n${partial}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+  });
+}
+
 
 type StreamArgs = {
   provider: ProviderId;
@@ -31,6 +64,7 @@ async function tryOne(
   args: StreamArgs,
   provider: ProviderId,
   model: string,
+  sink: { text: string },
 ): Promise<SingleResult> {
   const def = findProvider(provider);
   if (!def) return { kind: "fatal", reason: `Unknown provider: ${provider}` };
@@ -63,9 +97,11 @@ async function tryOne(
       !!err?.needs_secret ||
       resp.status === 429 ||
       resp.status === 402 ||
-      resp.status >= 500;
+      resp.status >= 500 ||
+      (LOCAL_PROVIDERS.includes(provider) && isRateLimitLike(msg));
     return retryable ? { kind: "retryable", reason: msg } : { kind: "fatal", reason: msg };
   }
+
 
   if (!resp.body) return { kind: "retryable", reason: "No stream body" };
 
@@ -89,7 +125,7 @@ async function tryOne(
         try {
           const j = JSON.parse(payload);
           const c = j.choices?.[0]?.delta?.content;
-          if (c) { args.onDelta(c); gotAnyDelta = true; }
+          if (c) { args.onDelta(c); sink.text += c; gotAnyDelta = true; }
         } catch { /* partial */ }
       }
     }
@@ -105,13 +141,22 @@ async function tryOne(
 
 export async function streamProviderChat(args: StreamArgs) {
   const primary = args.provider;
-  const first = await tryOne(args, primary, args.model);
+  const sink = { text: "" };
+  const first = await tryOne(args, primary, args.model, sink);
 
   if (first.kind === "ok") {
     args.onDone({ servedBy: primary, model: args.model });
     return;
   }
-  if (first.kind === "fatal" || !args.fallback) {
+
+  // A local runner hitting a limit/overload must never stop the assistant:
+  // fail over even when the caller didn't ask for fallback.
+  const forceFailover =
+    first.kind === "retryable" &&
+    LOCAL_PROVIDERS.includes(primary) &&
+    isRateLimitLike(first.reason);
+
+  if (first.kind === "fatal" || (!args.fallback && !forceFailover)) {
     args.onError(first.reason);
     return;
   }
@@ -124,8 +169,10 @@ export async function streamProviderChat(args: StreamArgs) {
     if (!def) continue;
     const fallbackModel = def.models[0]?.id;
     if (!fallbackModel) continue;
+    // Auto-save the context before handing the session to another provider.
+    guard(args, primary, next, lastReason, sink.text);
     args.onFallback?.(primary, next, lastReason);
-    const r = await tryOne(args, next, fallbackModel);
+    const r = await tryOne(args, next, fallbackModel, sink);
     if (r.kind === "ok") {
       args.onDone({ servedBy: next, model: fallbackModel });
       return;
@@ -138,3 +185,4 @@ export async function streamProviderChat(args: StreamArgs) {
   }
   args.onError(`All providers failed. Last error: ${lastReason}`);
 }
+
