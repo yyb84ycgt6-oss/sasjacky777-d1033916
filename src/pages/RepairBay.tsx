@@ -20,6 +20,19 @@ import {
   type Cadence,
 } from "@/lib/repair/firmwareTargets";
 import {
+  REPORT_SOURCE,
+  REPORTED_SYSTEM,
+  REPORTED_GRAPHICS,
+  REPORTED_AUDIO,
+  REPORTED_NETWORK,
+  REPORTED_STORAGE,
+  DISCREPANCIES,
+  FILL_UNKNOWNS,
+  PRIORITY_READ,
+  detectedBrief,
+} from "@/lib/repair/detectedInventory";
+
+import {
   loadDraft, saveDraft, clearDraft, registerContextSource, guardSwitch,
 } from "@/lib/repair/contextGuard";
 import { orchestrate } from "@/lib/jackie-orchestrator";
