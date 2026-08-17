@@ -337,7 +337,156 @@ Tell me: (1) is this update worth taking for MY use case, or is it risk with no 
       </header>
 
       <main className="mx-auto max-w-5xl px-4 py-6">
+        {tab === "detected" && (
+          <section className="space-y-4">
+            <Card className="p-4">
+              <h2 className="font-medium">What the machine actually reported</h2>
+              <p className="mt-1 text-sm text-muted-foreground">{REPORT_SOURCE}</p>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Observed data, kept separate from the build sheet. Where the two disagree, the report
+                wins for diagnosis and the difference is listed below instead of quietly smoothed over.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  className="min-h-11"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(detectedBrief());
+                    toast.success("Detected inventory copied");
+                  }}
+                >
+                  Copy inventory brief
+                </Button>
+                <Button
+                  className="min-h-11"
+                  onClick={() => {
+                    setTab("consult");
+                    void runConsult(
+                      "Here is my machine's actual reported inventory (MS-7D30, Win 11 Home, i9-12900K, 128 GB, one 980 PRO 2TB, ST2000DM008, WD5000AAKX, BIOS/board/OS build all Unknown). Start with the storage discrepancy: tell me exactly what to run and check, in order, to find out where my other NVMe drives and the Crucial 4 TB are.",
+                    );
+                  }}
+                >
+                  Work this with Jackie
+                </Button>
+              </div>
+            </Card>
+
+            <Card className="p-4">
+              <h3 className="font-medium">Priority read</h3>
+              <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
+                {PRIORITY_READ.map((p) => <li key={p}>• {p}</li>)}
+              </ul>
+            </Card>
+
+            <Card className="p-4">
+              <h3 className="font-medium">Identification</h3>
+              <dl className="mt-2 grid gap-2 sm:grid-cols-2">
+                {REPORTED_SYSTEM.map((r) => (
+                  <div key={r.label} className="rounded-md border border-border p-3 text-sm">
+                    <dt className="text-muted-foreground">{r.label}</dt>
+                    <dd className={r.value === "Unknown" ? "mt-1 text-destructive" : "mt-1"}>{r.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </Card>
+
+            <Card className="p-4">
+              <h3 className="font-medium">Storage as reported</h3>
+              <ul className="mt-2 space-y-2 text-sm">
+                {REPORTED_STORAGE.map((s) => (
+                  <li key={s.model}>
+                    <span className="font-medium">{s.model}</span>
+                    <span className="block text-muted-foreground">{s.note}</span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+
+            <div className="grid gap-4 sm:grid-cols-3">
+              {[
+                { title: "Graphics", items: REPORTED_GRAPHICS },
+                { title: "Audio", items: REPORTED_AUDIO },
+                { title: "Network / I-O", items: REPORTED_NETWORK },
+              ].map((g) => (
+                <Card key={g.title} className="p-4">
+                  <h3 className="font-medium">{g.title}</h3>
+                  <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
+                    {g.items.map((i) => <li key={i}>• {i}</li>)}
+                  </ul>
+                </Card>
+              ))}
+            </div>
+
+            <Card className="p-4">
+              <h3 className="font-medium">Discrepancies vs the build sheet</h3>
+              <div className="mt-3 space-y-3">
+                {DISCREPANCIES.map((d) => (
+                  <div key={d.id} className="rounded-md border border-border p-3 text-sm">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="outline">{d.what}</Badge>
+                    </div>
+                    <p className="mt-2">
+                      Reported: <span className="text-muted-foreground">{d.reported}</span>
+                    </p>
+                    <p>
+                      Expected: <span className="text-muted-foreground">{d.expected}</span>
+                    </p>
+                    <p className="mt-2 text-muted-foreground">Why: {d.why}</p>
+                    <p className="mt-2">Resolve: <span className="text-muted-foreground">{d.resolve}</span></p>
+                  </div>
+                ))}
+              </div>
+            </Card>
+
+            <Card className="p-4">
+              <h3 className="font-medium">Fill in every "Unknown"</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Run these in an elevated terminal, then log the results in the Firmware Log. Update Risk
+                stays blank until a real version string exists — it will not guess one.
+              </p>
+              <div className="mt-3 space-y-3">
+                {FILL_UNKNOWNS.map((f) => (
+                  <div key={f.label} className="rounded-md border border-border p-3 text-sm">
+                    <p className="font-medium">{f.label}</p>
+                    <pre className="mt-2 overflow-x-auto rounded-md bg-muted p-3 text-xs">
+                      <code>{f.cmd}</code>
+                    </pre>
+                    <p className="mt-2 text-muted-foreground">{f.note}</p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-2 min-h-11"
+                      onClick={() => {
+                        void navigator.clipboard.writeText(f.cmd);
+                        toast.success("Command copied");
+                      }}
+                    >
+                      Copy command
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </Card>
+
+            <Card className="p-4">
+              <h3 className="font-medium">Next steps</h3>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button variant="outline" className="min-h-11" onClick={() => setTab("firmware")}>
+                  Log versions
+                </Button>
+                <Button variant="outline" className="min-h-11" onClick={() => setTab("risk")}>
+                  Update risk
+                </Button>
+                <Button variant="outline" className="min-h-11" onClick={() => setTab("playbooks")}>
+                  Repair playbooks
+                </Button>
+              </div>
+            </Card>
+          </section>
+        )}
+
         {tab === "rig" && (
+
           <section className="space-y-4">
             <Card className="p-4">
               <h2 className="font-medium">{RIG_NAME}</h2>
