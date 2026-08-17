@@ -727,6 +727,57 @@ export type Database = {
         }
         Relationships: []
       }
+      jackie_core_access: {
+        Row: {
+          created_at: string
+          email: string
+          id: string
+          note: string | null
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          id?: string
+          note?: string | null
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          id?: string
+          note?: string | null
+        }
+        Relationships: []
+      }
+      jackie_core_docs: {
+        Row: {
+          body: string
+          id: string
+          slug: string
+          sort_order: number
+          source_file: string | null
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          body: string
+          id?: string
+          slug: string
+          sort_order?: number
+          source_file?: string | null
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          body?: string
+          id?: string
+          slug?: string
+          sort_order?: number
+          source_file?: string | null
+          title?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       jackie_memory: {
         Row: {
           category: string
@@ -1006,11 +1057,44 @@ export type Database = {
         }
         Relationships: []
       }
+      user_roles: {
+        Row: {
+          granted_at: string
+          granted_by: string | null
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          granted_at?: string
+          granted_by?: string | null
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          granted_at?: string
+          granted_by?: string | null
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
+      claim_core_access: { Args: never; Returns: boolean }
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
+      is_admin: { Args: { _user_id: string }; Returns: boolean }
       match_pod_folds: {
         Args: {
           match_count?: number
@@ -1032,6 +1116,7 @@ export type Database = {
       }
     }
     Enums: {
+      app_role: "owner" | "admin" | "operator" | "auditor"
       design_entry_category:
         | "lore"
         | "mechanic"
@@ -1176,6 +1261,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      app_role: ["owner", "admin", "operator", "auditor"],
       design_entry_category: [
         "lore",
         "mechanic",
