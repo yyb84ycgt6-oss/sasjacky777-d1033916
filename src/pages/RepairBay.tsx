@@ -251,7 +251,9 @@ Tell me: (1) is this update worth taking for MY use case, or is it risk with no 
     saveCaptures(next);
     setCapTitle("");
     setCapBody("");
+    clearDraft();
     toast.success("Saved on this device — survives closing the window.");
+
   };
 
   const removeCapture = (id: string) => {
