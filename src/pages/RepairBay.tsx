@@ -16,6 +16,10 @@ import {
 import { scoreAll, VERDICT_LABEL, type RiskScore, type Verdict } from "@/lib/repair/firmwareRisk";
 import { VENTOY_STEPS, ISO_CHECKLIST, CHECKLIST_KEY } from "@/lib/repair/ventoy";
 import {
+  FIRMWARE_TARGETS, FLASH_SEQUENCE, SEQUENCE_RULES, CADENCE_LABEL, targetsBrief,
+  type Cadence,
+} from "@/lib/repair/firmwareTargets";
+import {
   loadDraft, saveDraft, clearDraft, registerContextSource, guardSwitch,
 } from "@/lib/repair/contextGuard";
 import { orchestrate } from "@/lib/jackie-orchestrator";
