@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { PROVIDERS, OLLAMA_AGENTS, providersByTier, type ProviderId, type ProviderTier } from "@/lib/jackie-providers";
 import { streamProviderChat } from "@/lib/jackie-provider-stream";
+import { guardSwitch } from "@/lib/repair/contextGuard";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
