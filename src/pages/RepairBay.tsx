@@ -822,9 +822,10 @@ Tell me: (1) is this update worth taking for MY use case, or is it risk with no 
 
           <section className="space-y-4">
             <Card className="p-4 text-sm text-muted-foreground">
-              The clipboard is one slot and it dies with the window. Paste agent context, terminal output or
-              error text here before you switch tools — it persists on this device and the consultant reads
-              your two most recent captures automatically.
+              The clipboard is one slot and it dies with the window. Two things now happen automatically:
+              this editor autosaves as you type, and every provider or model switch (including an Ollama
+              rate-limit failover) writes an <span className="font-medium">[auto]</span> capture of the live
+              context before the switch. Nothing you were working on leaves with the model.
             </Card>
 
             <Card className="p-4 space-y-3">
@@ -840,10 +841,29 @@ Tell me: (1) is this update worth taking for MY use case, or is it risk with no 
                 value={capBody}
                 onChange={(e) => setCapBody(e.target.value)}
               />
-              <Button className="min-h-11" onClick={addCapture} disabled={!capBody.trim()}>
-                Save capture
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button className="min-h-11" onClick={addCapture} disabled={!capBody.trim()}>
+                  Save capture
+                </Button>
+                <Button
+                  variant="outline"
+                  className="min-h-11"
+                  onClick={() => {
+                    const row = guardSwitch("manual-checkpoint", { detail: "Manual checkpoint from Repair Bay" });
+                    setCaptures(loadCaptures());
+                    toast[row ? "success" : "error"](
+                      row ? "Checkpoint saved on this device." : "Nothing open to checkpoint yet.",
+                    );
+                  }}
+                >
+                  Checkpoint everything now
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Draft autosaves locally — a refresh or a crash will not eat this paste.
+              </p>
             </Card>
+
 
             {captures.map((c) => (
               <Card key={c.id} className="p-4">
