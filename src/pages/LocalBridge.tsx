@@ -172,6 +172,29 @@ export default function LocalBridge() {
     }
   };
 
+  /** Runs a command and hands the result back — used by automated verification. */
+  const execForResult = async (cmd: string): Promise<ExecResult | null> => {
+    if (status.state !== "online") {
+      toast.error("Bridge is not connected — check Bridge Setup first");
+      setTab("setup");
+      return null;
+    }
+    setRunning(true);
+    try {
+      const r = await execOnBridge(cfg, cmd, { cwd: cwd || undefined });
+      setHistory((h) => [r, ...h].slice(0, 50));
+      if (autoLog) logEvidence(r);
+      return r;
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Command failed");
+      void check();
+      return null;
+    } finally {
+      setRunning(false);
+    }
+  };
+
+
   /** Read-only firmware boot listing, straight into the status screen. */
   const readBootStatus = async (): Promise<string> => {
     if (status.state !== "online") {
@@ -641,6 +664,8 @@ export default function LocalBridge() {
         <ConversionWizard
           platform={platform}
           onRun={status.state === "online" ? (c) => void run(c) : undefined}
+          onExec={status.state === "online" ? execForResult : undefined}
+
           onCopy={(c) => copy(c, "Command copied")}
           onDownload={(name, content, mime) => downloadFile(name, content, mime || "text/plain")}
           presetPath={selected?.path || (selected?.source === "ollama" ? selected.name : undefined)}
