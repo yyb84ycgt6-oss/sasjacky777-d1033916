@@ -311,6 +311,115 @@ export default function ConversionWizard({
         );
       })}
 
+      <Card className="p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-semibold">Automated post-conversion verification</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Loads the model in a target runner, sends one short prompt, and records the verbatim answer. A command that
+              runs but returns nothing is recorded as unproven, not as a pass.
+            </p>
+          </div>
+          {!onExec && <Badge variant="outline">Bridge offline — copy the commands instead</Badge>}
+        </div>
+
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <label className="space-y-1">
+            <span className="text-xs text-muted-foreground">Test prompt</span>
+            <Input
+              className="min-h-11 text-xs"
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder={DEFAULT_PROMPT}
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs text-muted-foreground">Model reference used in the test</span>
+            <Input className="min-h-11 font-mono text-xs" value={modelRef} readOnly placeholder="set a name or path above" />
+          </label>
+        </div>
+
+        {onExec && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button size="sm" className="min-h-11" disabled={!!verifying} onClick={() => void verify(target)}>
+              {verifying === target ? "Verifying…" : `Verify ${findRunner(target)?.label}`}
+            </Button>
+            <Button size="sm" variant="secondary" className="min-h-11" disabled={!!verifying} onClick={() => void verifyAll()}>
+              Verify every target
+            </Button>
+          </div>
+        )}
+
+        <div className="mt-4 space-y-3">
+          {RUNNERS.map((r) => {
+            const rec = latest[r.id];
+            const test = smokeTestCommand(r.id, modelRef, platform, prompt || DEFAULT_PROMPT);
+            return (
+              <div key={r.id} className="rounded-lg border border-border/60 p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-medium">{r.label}</span>
+                  {rec ? (
+                    <Badge className={VERDICT_CLASS[rec.verdict]}>{VERDICT_LABEL[rec.verdict]}</Badge>
+                  ) : (
+                    <Badge variant="outline">Not verified</Badge>
+                  )}
+                  {rec && <span className="text-xs text-muted-foreground">{new Date(rec.ts).toLocaleString()}</span>}
+                </div>
+                <Mono>{test.command}</Mono>
+                <p className="mt-1 text-xs text-muted-foreground">{test.note}</p>
+                {rec && (
+                  <>
+                    <p className="mt-2 text-xs">{rec.reason}</p>
+                    {rec.output && <Mono>{rec.output.slice(0, 1200)}</Mono>}
+                  </>
+                )}
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Button size="sm" variant="secondary" className="min-h-11" onClick={() => onCopy(test.command)}>
+                    Copy
+                  </Button>
+                  {onExec && (
+                    <Button size="sm" className="min-h-11" disabled={!!verifying} onClick={() => void verify(r.id)}>
+                      {verifying === r.id ? "Verifying…" : "Run verification"}
+                    </Button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            variant="secondary"
+            className="min-h-11"
+            onClick={() => onDownload("post-conversion-verification.md", checksMarkdown(checks), "text/markdown")}
+          >
+            Download results (MD)
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            className="min-h-11"
+            onClick={() => onDownload("post-conversion-verification.csv", checksCsv(checks), "text/csv")}
+          >
+            Download results (CSV)
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="min-h-11"
+            onClick={() => {
+              clearChecks();
+              setChecks([]);
+            }}
+          >
+            Clear results
+          </Button>
+        </div>
+      </Card>
+
+
       {plan.warnings.length > 0 && (
         <Card className="p-4">
           <h3 className="text-sm font-semibold">Read before you write</h3>
