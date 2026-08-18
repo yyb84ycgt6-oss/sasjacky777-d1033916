@@ -172,6 +172,29 @@ export default function LocalBridge() {
     }
   };
 
+  /** Runs a command and hands the result back — used by automated verification. */
+  const execForResult = async (cmd: string): Promise<ExecResult | null> => {
+    if (status.state !== "online") {
+      toast.error("Bridge is not connected — check Bridge Setup first");
+      setTab("setup");
+      return null;
+    }
+    setRunning(true);
+    try {
+      const r = await execOnBridge(cfg, cmd, { cwd: cwd || undefined });
+      setHistory((h) => [r, ...h].slice(0, 50));
+      if (autoLog) logEvidence(r);
+      return r;
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Command failed");
+      void check();
+      return null;
+    } finally {
+      setRunning(false);
+    }
+  };
+
+
   /** Read-only firmware boot listing, straight into the status screen. */
   const readBootStatus = async (): Promise<string> => {
     if (status.state !== "online") {
