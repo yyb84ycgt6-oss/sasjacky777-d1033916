@@ -11,6 +11,20 @@ import {
   saveWizardRun, wizardMarkdown, wizardProgress,
   type SourceId, type WizardRun,
 } from "@/lib/repair/conversionWizard";
+import {
+  DEFAULT_PROMPT, VERDICT_LABEL, checksCsv, checksMarkdown, clearChecks, judgeSmokeTest,
+  latestByTarget, loadChecks, newCheckId, recordCheck, smokeTestCommand,
+  type CheckRecord,
+} from "@/lib/repair/postConvertCheck";
+
+export type WizardExecResult = {
+  command: string;
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  startedAt: string;
+  durationMs: number;
+};
 
 function Mono({ children }: { children: React.ReactNode }) {
   return (
@@ -20,17 +34,26 @@ function Mono({ children }: { children: React.ReactNode }) {
   );
 }
 
+const VERDICT_CLASS: Record<CheckRecord["verdict"], string> = {
+  pass: "bg-emerald-500/15 text-emerald-500",
+  fail: "bg-destructive/15 text-destructive",
+  unclear: "bg-amber-500/15 text-amber-500",
+};
+
 export default function ConversionWizard({
-  platform, onRun, onCopy, onDownload, presetPath, presetSource, presetSize,
+  platform, onRun, onExec, onCopy, onDownload, presetPath, presetSource, presetSize,
 }: {
   platform: Platform;
   onRun?: (c: string) => void;
+  /** Runs a command through the bridge and returns its result, for automated verification. */
+  onExec?: (c: string) => Promise<WizardExecResult | null>;
   onCopy: (c: string) => void;
   onDownload: (name: string, content: string, mime?: string) => void;
   presetPath?: string;
   presetSource?: SourceId;
   presetSize?: number;
 }) {
+
   const saved = useMemo(() => loadWizardRun(), []);
   const [source, setSource] = useState<SourceId>(presetSource ?? saved?.input.source ?? "lmstudio");
   const [target, setTarget] = useState<RunnerId>(saved?.input.target ?? "ollama");
