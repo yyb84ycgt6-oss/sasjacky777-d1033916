@@ -664,6 +664,8 @@ export default function LocalBridge() {
         <ConversionWizard
           platform={platform}
           onRun={status.state === "online" ? (c) => void run(c) : undefined}
+          onExec={status.state === "online" ? execForResult : undefined}
+
           onCopy={(c) => copy(c, "Command copied")}
           onDownload={(name, content, mime) => downloadFile(name, content, mime || "text/plain")}
           presetPath={selected?.path || (selected?.source === "ollama" ? selected.name : undefined)}
