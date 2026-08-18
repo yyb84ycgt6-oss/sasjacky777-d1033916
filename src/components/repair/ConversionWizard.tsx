@@ -88,6 +88,47 @@ export default function ConversionWizard({
     clearWizardRun();
   };
 
+  /* ---- automated post-conversion verification ---- */
+  const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
+  const [checks, setChecks] = useState<CheckRecord[]>(() => loadChecks());
+  const [verifying, setVerifying] = useState<RunnerId | null>(null);
+  const latest = useMemo(() => latestByTarget(checks), [checks]);
+
+  const modelRef = (name.trim() || assetPath.trim() || "").trim();
+
+  const verify = async (runner: RunnerId) => {
+    if (!onExec) return;
+    const test = smokeTestCommand(runner, modelRef, platform, prompt || DEFAULT_PROMPT);
+    setVerifying(runner);
+    try {
+      const r = await onExec(test.command);
+      if (!r) return;
+      const judged = judgeSmokeTest(r);
+      const rec: CheckRecord = {
+        id: newCheckId(),
+        ts: r.startedAt || new Date().toISOString(),
+        target: runner,
+        modelRef,
+        prompt: prompt || DEFAULT_PROMPT,
+        command: test.command,
+        exitCode: r.exitCode,
+        output: [r.stdout, r.stderr].filter(Boolean).join("\n--- stderr ---\n").slice(0, 8000),
+        durationMs: r.durationMs ?? 0,
+        verdict: judged.verdict,
+        reason: judged.reason,
+      };
+      setChecks(recordCheck(rec));
+    } finally {
+      setVerifying(null);
+    }
+  };
+
+  const verifyAll = async () => {
+    for (const r of RUNNERS) await verify(r.id);
+  };
+
+
+
   return (
     <div className="space-y-4">
       <Card className="p-4">
