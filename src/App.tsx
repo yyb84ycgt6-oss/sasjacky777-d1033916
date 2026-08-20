@@ -51,6 +51,7 @@ import JackieCore from "./pages/JackieCore";
 import GithubSync from "./pages/GithubSync";
 import { ERU_ALIASES } from "./lib/routeManifest";
 import RouteDebugOverlay from "./components/RouteDebugOverlay";
+import { UniversalFloatingNavBar } from "./components/UniversalFloatingNavBar";
 
 const EruRouter = lazy(() => import("./eru/EruRouter"));
 
@@ -278,6 +279,7 @@ const App = () => (
             <RouteDebugOverlay />
 
             </SandboxCatcher>
+            <UniversalFloatingNavBar />
           </BrowserRouter>
           </TooltipProvider>
         </I18nProvider>
