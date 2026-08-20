@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useMemo } from "react";
 import { DraggableToolbar } from "./DraggableToolbar";
-import { Plus, Pin, X, StickyNote } from "lucide-react";
+import { Plus, Pin, X, StickyNote, Link as LinkIcon } from "lucide-react";
+import { routerNS, FilingSystem } from "@/lib/routerNervousSystem";
 
 type Note = {
   id: string;
@@ -32,16 +33,17 @@ export function GlobalStickyNotes() {
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(notes));
+      notes.forEach(n => FilingSystem.write('note', n.id, n));
     } catch {}
   }, [notes]);
 
   const addNote = () => {
     const id = Math.random().toString(36).slice(2);
     const color = COLORS[Math.floor(Math.random() * COLORS.length)];
-    setNotes((n) => [
-      ...n,
-      { id, text: "New thought...", color, x: 120 + Math.random() * 200, y: 120 + Math.random() * 200, pinned: false },
-    ]);
+    const note: Note = { id, text: "New thought...", color, x: 120 + Math.random() * 200, y: 120 + Math.random() * 200, pinned: false };
+    setNotes((n) => [...n, note]);
+    routerNS.emit('notes:create', { note });
+    if (navigator.vibrate) navigator.vibrate(15);
   };
 
   const updateText = (id: string, text: string) => {
@@ -49,11 +51,31 @@ export function GlobalStickyNotes() {
   };
 
   const togglePin = (id: string) => {
-    setNotes((n) => n.map((note) => (note.id === id ? { ...note, pinned: !note.pinned } : note)));
+    setNotes((n) => n.map((note) => {
+      if (note.id !== id) return note;
+      const pinned = !note.pinned;
+      routerNS.emit('notes:pin', { id, pinned });
+      if (navigator.vibrate) navigator.vibrate(pinned ? 30 : 10);
+      return { ...note, pinned };
+    }));
   };
 
   const removeNote = (id: string) => {
     setNotes((n) => n.filter((note) => note.id !== id));
+  };
+
+  const linkToPod = (id: string) => {
+    const pod = prompt("Link to Pod ID:");
+    if (!pod) return;
+    setNotes(n => n.map(note => note.id === id ? { ...note, pod } : note));
+    routerNS.emit('notes:link:pod', { noteId: id, podId: pod });
+  };
+
+  const linkToAgent = (id: string) => {
+    const agent = prompt("Link to Agent ID:");
+    if (!agent) return;
+    setNotes(n => n.map(note => note.id === id ? { ...note, agent } : note));
+    routerNS.emit('notes:link:agent', { noteId: id, agentId: agent });
   };
 
   const startDrag = (e: React.MouseEvent, id: string, note: Note) => {
@@ -109,7 +131,7 @@ export function GlobalStickyNotes() {
             <div
               key={note.id}
               style={{ left: note.x, top: note.y, background: note.color }}
-              className="pointer-events-auto absolute w-[220px] rounded-lg shadow-lg border border-border p-2"
+              className="pointer-events-auto absolute w-[240px] rounded-lg shadow-lg border border-border p-2"
             >
               <div
                 className="flex items-center justify-between cursor-move mb-1"
@@ -117,6 +139,12 @@ export function GlobalStickyNotes() {
               >
                 <span className="text-[10px] uppercase tracking-wide text-muted-foreground">thought</span>
                 <div className="flex items-center gap-0.5">
+                  <button onClick={() => linkToPod(note.id)} className="p-0.5 hover:text-foreground text-muted-foreground" title="Link Pod">
+                    <LinkIcon size={12} />
+                  </button>
+                  <button onClick={() => linkToAgent(note.id)} className="p-0.5 hover:text-foreground text-muted-foreground" title="Link Agent">
+                    <LinkIcon size={12} />
+                  </button>
                   <button onClick={() => togglePin(note.id)} className="p-0.5 hover:text-foreground text-muted-foreground">
                     <Pin size={12} className={note.pinned ? "text-primary" : ""} />
                   </button>
@@ -128,8 +156,14 @@ export function GlobalStickyNotes() {
               <textarea
                 value={note.text}
                 onChange={(e) => updateText(note.id, e.target.value)}
-                className="w-full h-[100px] bg-transparent outline-none resize-none text-sm leading-relaxed"
+                className="w-full h-[90px] bg-transparent outline-none resize-none text-sm leading-relaxed"
               />
+              {(note.pod || note.agent) && (
+                <div className="mt-1 text-[10px] text-muted-foreground">
+                  {note.pod && <div>Pod: {note.pod}</div>}
+                  {note.agent && <div>Agent: {note.agent}</div>}
+                </div>
+              )}
             </div>
           ))}
         </div>
