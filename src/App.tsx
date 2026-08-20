@@ -52,6 +52,7 @@ import GithubSync from "./pages/GithubSync";
 import { ERU_ALIASES } from "./lib/routeManifest";
 import RouteDebugOverlay from "./components/RouteDebugOverlay";
 import { UniversalFloatingNavBar } from "./components/UniversalFloatingNavBar";
+import { GlobalStickyNotes } from "./components/GlobalStickyNotes";
 
 const EruRouter = lazy(() => import("./eru/EruRouter"));
 
@@ -280,6 +281,7 @@ const App = () => (
 
             </SandboxCatcher>
             <UniversalFloatingNavBar />
+            <GlobalStickyNotes />
           </BrowserRouter>
           </TooltipProvider>
         </I18nProvider>
