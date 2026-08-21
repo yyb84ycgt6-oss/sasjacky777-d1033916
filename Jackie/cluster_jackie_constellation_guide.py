@@ -1,4 +1,4 @@
-"""JackieConstellationGuide — highest operational persona."""
+"""JackieConstellationGuide — sovereign guide persona++++++."""
 
 
 class JackieConstellationGuide:
