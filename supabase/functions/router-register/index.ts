@@ -29,22 +29,39 @@ Deno.serve(async (req) => {
 
     const body = await req.json();
     const name = String(body?.name ?? '').trim().slice(0, 80);
-    const capabilities = Array.isArray(body?.capabilities) ? body.capabilities.slice(0, 20).map((c: any) => String(c).slice(0, 40)) : [];
+    let capabilities = Array.isArray(body?.capabilities) ? body.capabilities.slice(0, 20).map((c: any) => String(c).slice(0, 40)) : [];
+    const pod_id = body?.pod_id ? String(body.pod_id) : null;
     if (!name) return new Response(JSON.stringify({ error: 'name required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
     const secret = randomSecret();
     const secret_hash = await sha256(secret);
 
     const admin = createClient(url, service);
+
+    // Pod binding: the router inherits its seed pod's capability and nothing else.
+    let bound: { id: string; capability: string; version: number } | null = null;
+    if (pod_id) {
+      const { data: pod } = await admin
+        .from('eye_pod_registry')
+        .select('id,capability,version,user_id')
+        .eq('id', pod_id)
+        .eq('user_id', userData.user.id)
+        .maybeSingle();
+      if (!pod) return new Response(JSON.stringify({ error: 'seed pod not found for this account' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      bound = { id: pod.id, capability: pod.capability, version: pod.version };
+      capabilities = [pod.capability];
+    }
+
     const { data, error } = await admin.from('mesh_routers').insert({
       user_id: userData.user.id,
       name,
       capabilities,
       secret_hash,
+      pod_id: bound?.id ?? null,
     }).select('id').single();
     if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
-    return new Response(JSON.stringify({ router_id: data.id, secret }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ router_id: data.id, secret, pod: bound }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (e) {
     return new Response(JSON.stringify({ error: String(e) }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
