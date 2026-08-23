@@ -13,10 +13,12 @@ Deno.serve(async (req) => {
     const body = await req.json();
     const router_id = String(body?.router_id ?? '');
     const secret = String(body?.secret ?? '');
+    // Optional: the pod version this router currently holds locally.
+    const pod_version = Number.isFinite(Number(body?.pod_version)) ? Number(body.pod_version) : null;
     if (!router_id || !secret) return new Response(JSON.stringify({ error: 'router_id + secret required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-    const { data: router } = await admin.from('mesh_routers').select('id,user_id,secret_hash,capabilities,status').eq('id', router_id).maybeSingle();
+    const { data: router } = await admin.from('mesh_routers').select('id,user_id,secret_hash,capabilities,status,pod_id').eq('id', router_id).maybeSingle();
     const secret_hash = await sha256(secret);
     if (!router || router.secret_hash !== secret_hash || router.status !== 'active') {
       return new Response(JSON.stringify({ error: 'invalid credentials' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -24,8 +26,32 @@ Deno.serve(async (req) => {
 
     await admin.from('mesh_routers').update({ last_seen_at: new Date().toISOString() }).eq('id', router.id);
 
-    // Claim oldest queued job matching one of the router's capabilities.
-    const caps: string[] = router.capabilities ?? [];
+    // Pod-bound routers: the seed pod IS the application slice this router knows.
+    let seed: { capability: string; version: number; content_hash: string | null; color: string | null; glyph: string | null } | null = null;
+    let seed_update: { pod_id: string; version: number; hash: string | null; url: string } | null = null;
+    if (router.pod_id) {
+      const { data: pod } = await admin
+        .from('eye_pod_registry')
+        .select('id,capability,version,content_hash,color,glyph')
+        .eq('id', router.pod_id)
+        .maybeSingle();
+      if (pod) {
+        seed = { capability: pod.capability, version: pod.version, content_hash: pod.content_hash, color: pod.color, glyph: pod.glyph };
+        if (pod_version !== null && pod.version > pod_version) {
+          seed_update = {
+            pod_id: pod.id,
+            version: pod.version,
+            hash: pod.content_hash,
+            url: `${Deno.env.get('SUPABASE_URL')}/functions/v1/pod-fetch`,
+          };
+        }
+      }
+    }
+
+    // Capability set: pod-bound routers are narrowed to their pod's capability.
+    const declared: string[] = router.capabilities ?? [];
+    const caps = seed ? [seed.capability] : declared;
+
     const { data: job } = await admin
       .from('mesh_jobs')
       .select('id,capability_required,prompt')
@@ -36,7 +62,9 @@ Deno.serve(async (req) => {
       .limit(1)
       .maybeSingle();
 
-    if (!job) return new Response(JSON.stringify({ job: null }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    const base = { seed, seed_update };
+
+    if (!job) return new Response(JSON.stringify({ job: null, ...base }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
     const { data: claimed, error: claimErr } = await admin
       .from('mesh_jobs')
@@ -46,8 +74,8 @@ Deno.serve(async (req) => {
       .select('id,capability_required,prompt')
       .maybeSingle();
 
-    if (claimErr || !claimed) return new Response(JSON.stringify({ job: null }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-    return new Response(JSON.stringify({ job: claimed }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    if (claimErr || !claimed) return new Response(JSON.stringify({ job: null, ...base }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ job: claimed, ...base }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (e) {
     return new Response(JSON.stringify({ error: String(e) }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }

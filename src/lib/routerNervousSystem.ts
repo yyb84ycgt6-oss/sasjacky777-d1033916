@@ -32,7 +32,10 @@ type EventName =
   | 'agent:activate'
   | 'agent:deactivate'
   | 'pod:enter'
-  | 'pod:leave';
+  | 'pod:leave'
+  | 'nav:custom'
+  | 'pod:fold'
+  | 'pod:slice';
 
 type EventPayload = Record<string, any>;
 
