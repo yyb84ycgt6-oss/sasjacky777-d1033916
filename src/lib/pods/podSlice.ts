@@ -38,7 +38,7 @@ export async function chunkedGunzip(blob: Blob, opts: SliceOptions = {}): Promis
       await reader.cancel();
       throw new Error("slice aborted");
     }
-    const { done, value } = await reader.read();
+    const { done, value } = (await reader.read()) as { done: boolean; value?: Uint8Array };
     if (done) break;
     if (value) {
       parts.push(value);
