@@ -159,7 +159,10 @@ export default function PodStation() {
               24 compression pods · gzip · SHA-256 integrity · offline-safe
             </p>
           </div>
-          <div className="ml-auto text-right text-[10px] font-mono text-muted-foreground">
+          <Link to="/pods/surface" className="ml-auto text-[11px] text-primary underline">
+            Fold surface →
+          </Link>
+          <div className="text-right text-[10px] font-mono text-muted-foreground">
             <div>{fmtBytes(totalCompressed)} / {fmtBytes(capacity)}</div>
             <div>raw {fmtBytes(totalRaw)} · ratio {totalRaw ? ((totalCompressed / totalRaw) * 100).toFixed(1) : "0.0"}%</div>
           </div>
@@ -170,6 +173,7 @@ export default function PodStation() {
         {pods.map((p) => {
           const style = STATUS_STYLE[p.status];
           const meta = registryFor(p.id);
+          const seed = seedIdentity(p.slot);
           const usage = p.bytesCompressed / POD_CAPACITY_BYTES;
           const isSelected = selected === p.id;
           return (
@@ -179,6 +183,7 @@ export default function PodStation() {
               className={`text-left border rounded-md p-3 bg-card/40 hover:bg-card/70 transition-colors ${
                 isSelected ? "border-primary" : "border-border"
               }`}
+              style={{ boxShadow: `inset 3px 0 0 0 ${seed.color}` }}
             >
               <div className="flex items-center justify-between mb-2">
                 <span className="font-mono text-[10px] text-muted-foreground">
@@ -186,17 +191,22 @@ export default function PodStation() {
                 </span>
                 <span className={`w-2 h-2 rounded-full ${style.dot}`} title={style.label} />
               </div>
-              <div className="font-medium text-sm truncate">{p.name}</div>
-              <div className="text-[10px] text-muted-foreground truncate">{meta?.domain}</div>
+              <div className="font-medium text-sm truncate">
+                <span aria-hidden className="mr-1" style={{ color: seed.color }}>{seed.glyph}</span>
+                {p.name}
+              </div>
+              <div className="text-[10px] font-mono truncate" style={{ color: seed.color }}>
+                {meta ? capabilityFor(meta.domain) : ""}
+              </div>
               <div className="mt-2 h-1 bg-muted/40 rounded">
                 <div
-                  className="h-full bg-primary/60 rounded"
-                  style={{ width: `${Math.min(100, usage * 100).toFixed(1)}%` }}
+                  className="h-full rounded"
+                  style={{ width: `${Math.min(100, usage * 100).toFixed(1)}%`, background: seed.color }}
                 />
               </div>
               <div className="mt-1 flex justify-between text-[10px] font-mono text-muted-foreground">
                 <span>{fmtBytes(p.bytesCompressed)}</span>
-                <span>{p.ratio ? `${(p.ratio * 100).toFixed(0)}%` : "—"}</span>
+                <span>v{p.version} · {p.ratio ? `${(p.ratio * 100).toFixed(0)}%` : "—"}</span>
               </div>
             </button>
           );
