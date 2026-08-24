@@ -44,18 +44,54 @@ export default function PodStation() {
   const [pods, setPods] = useState<PodRecord[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  /** pod_key -> server registry id (needed for QR + router binding) */
+  const [registryIds, setRegistryIds] = useState<Record<string, string>>({});
+  const [slicePath, setSlicePath] = useState("");
+  const [folding, setFolding] = useState(false);
 
   async function refresh() {
     // Ensure all 24 slots exist
     await Promise.all(
       POD_SLOTS.map((s) => initPod({ id: s.id, slot: s.slot, name: s.name, domain: s.domain }))
     );
-    setPods(await listPods());
+    const list = await listPods();
+    setPods(list);
+    const map = await syncPodRegistry(list);
+    if (Object.keys(map).length) setRegistryIds(map);
   }
 
   useEffect(() => { void refresh(); }, []);
 
   const registryFor = (id: string) => POD_SLOTS.find((s) => s.id === id);
+
+  /** Slice one JSON path out of a sealed pod and fold it into the shared surface. */
+  async function foldSlice(p: PodRecord) {
+    const meta = registryFor(p.id);
+    if (!meta) return;
+    setFolding(true);
+    try {
+      const slice = await openSlice(p.id, slicePath.trim());
+      if (!slice.found) throw new Error(`Path "${slicePath.trim() || "(root)"}" not present in this pod`);
+      const text = typeof slice.value === "string" ? slice.value : JSON.stringify(slice.value);
+      const id = seedIdentity(p.slot);
+      const { error } = await supabase.functions.invoke("pod-fold", {
+        body: {
+          text,
+          pod_id: registryIds[p.id] ?? null,
+          capability: capabilityFor(meta.domain),
+          source_ref: `${p.id}:${slicePath.trim() || "root"}`,
+          color: id.color,
+          glyph: id.glyph,
+        },
+      });
+      if (error) throw new Error(error.message);
+      toast({ title: `Folded ${slice.bytesRead ? `${slice.bytesRead} B read` : "slice"}`, description: "Vector added to the fold surface. Payload stayed on this device." });
+    } catch (e: any) {
+      toast({ title: "Fold failed", description: e?.message ?? String(e), variant: "destructive" });
+    } finally {
+      setFolding(false);
+    }
+  }
 
   async function withPod(id: string, label: string, fn: () => Promise<void>) {
     setBusy(id);
