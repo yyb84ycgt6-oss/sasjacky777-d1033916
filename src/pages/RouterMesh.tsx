@@ -146,8 +146,16 @@ export default function RouterMesh() {
                   <div>
                     <div className="font-medium">{r.name} <Badge variant="outline" className="ml-2">{r.status}</Badge></div>
                     <div className="text-xs text-slate-400 mt-1 font-mono">{r.id}</div>
-                    <div className="flex gap-1 mt-2 flex-wrap">
+                    <div className="flex gap-1 mt-2 flex-wrap items-center">
                       {r.capabilities.map(c => <Badge key={c} variant="secondary">{c}</Badge>)}
+                      {r.pod_id && (() => {
+                        const p = pods.find(x => x.id === r.pod_id);
+                        return (
+                          <Badge variant="outline" style={p ? { borderColor: p.color, color: p.color } : undefined}>
+                            {p ? `${p.glyph} ${p.name} v${p.version}` : "pod-bound"}
+                          </Badge>
+                        );
+                      })()}
                     </div>
                     <div className="text-xs text-slate-500 mt-2">last seen: {r.last_seen_at ? new Date(r.last_seen_at).toLocaleString() : "never"}</div>
                   </div>
