@@ -269,15 +269,46 @@ export default function PodStation() {
                 <Button size="sm" variant="ghost" className="text-destructive" disabled={disabled || p.status === "empty"} onClick={() => withPod(p.id, "Purged", () => purgePod(p.id))}>
                   <Trash2 className="w-3 h-3 mr-1" /> Purge
                 </Button>
+                {registryIds[p.id] && (
+                  <SeedQrButton
+                    row={{
+                      id: registryIds[p.id],
+                      pod_key: p.id,
+                      capability: capabilityFor(meta.domain),
+                      version: p.version || 1,
+                      content_hash: p.fingerprint ?? null,
+                    }}
+                    color={seedIdentity(p.slot).color}
+                    glyph={seedIdentity(p.slot).glyph}
+                    name={p.name}
+                  />
+                )}
               </div>
               <div className="text-[11px] font-mono text-muted-foreground leading-relaxed">
                 <div>capacity {fmtBytes(POD_CAPACITY_BYTES)} · payload cap 30 MB</div>
                 <div>raw {fmtBytes(p.bytesRaw)}</div>
                 <div>compressed {fmtBytes(p.bytesCompressed)}</div>
                 <div>items {p.itemCount}</div>
+                <div className="mt-2 flex items-center gap-2">
+                  <Input
+                    value={slicePath}
+                    onChange={(e) => setSlicePath(e.target.value)}
+                    placeholder="slice path (e.g. rules.mitre)"
+                    className="h-8 text-[11px]"
+                  />
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={folding || p.status === "empty"}
+                    onClick={() => foldSlice(p)}
+                  >
+                    <Orbit className="w-3 h-3 mr-1" /> {folding ? "Folding…" : "Fold"}
+                  </Button>
+                </div>
                 <div className="mt-2 text-muted-foreground/70">
                   Sealing is non-destructive · live data remains intact · integrity
-                  is verified on every open.
+                  is verified on every open. Folding ships only a vector + hash —
+                  the payload never leaves this device.
                 </div>
               </div>
             </div>
