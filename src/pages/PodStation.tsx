@@ -15,9 +15,15 @@ import {
 } from "@/lib/pods/podEngine";
 import { POD_SLOTS } from "@/lib/pods/podRegistry";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { toast } from "@/hooks/use-toast";
 import { Link } from "react-router-dom";
-import { ArrowLeft, Download, Upload, Lock, Unlock, ShieldCheck, Trash2, Power } from "lucide-react";
+import { ArrowLeft, Download, Upload, Lock, Unlock, ShieldCheck, Trash2, Power, Orbit } from "lucide-react";
+import { seedIdentity, capabilityFor } from "@/lib/pods/seedIdentity";
+import { syncPodRegistry } from "@/lib/pods/podSync";
+import { SeedQrButton } from "@/components/pods/SeedCard";
+import { openSlice } from "@/lib/pods/podSlice";
+import { supabase } from "@/integrations/supabase/client";
 
 const STATUS_STYLE: Record<PodStatus, { dot: string; label: string }> = {
   empty:   { dot: "bg-muted",           label: "Standby" },
@@ -38,18 +44,54 @@ export default function PodStation() {
   const [pods, setPods] = useState<PodRecord[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  /** pod_key -> server registry id (needed for QR + router binding) */
+  const [registryIds, setRegistryIds] = useState<Record<string, string>>({});
+  const [slicePath, setSlicePath] = useState("");
+  const [folding, setFolding] = useState(false);
 
   async function refresh() {
     // Ensure all 24 slots exist
     await Promise.all(
       POD_SLOTS.map((s) => initPod({ id: s.id, slot: s.slot, name: s.name, domain: s.domain }))
     );
-    setPods(await listPods());
+    const list = await listPods();
+    setPods(list);
+    const map = await syncPodRegistry(list);
+    if (Object.keys(map).length) setRegistryIds(map);
   }
 
   useEffect(() => { void refresh(); }, []);
 
   const registryFor = (id: string) => POD_SLOTS.find((s) => s.id === id);
+
+  /** Slice one JSON path out of a sealed pod and fold it into the shared surface. */
+  async function foldSlice(p: PodRecord) {
+    const meta = registryFor(p.id);
+    if (!meta) return;
+    setFolding(true);
+    try {
+      const slice = await openSlice(p.id, slicePath.trim());
+      if (!slice.found) throw new Error(`Path "${slicePath.trim() || "(root)"}" not present in this pod`);
+      const text = typeof slice.value === "string" ? slice.value : JSON.stringify(slice.value);
+      const id = seedIdentity(p.slot);
+      const { error } = await supabase.functions.invoke("pod-fold", {
+        body: {
+          text,
+          pod_id: registryIds[p.id] ?? null,
+          capability: capabilityFor(meta.domain),
+          source_ref: `${p.id}:${slicePath.trim() || "root"}`,
+          color: id.color,
+          glyph: id.glyph,
+        },
+      });
+      if (error) throw new Error(error.message);
+      toast({ title: `Folded ${slice.bytesRead ? `${slice.bytesRead} B read` : "slice"}`, description: "Vector added to the fold surface. Payload stayed on this device." });
+    } catch (e: any) {
+      toast({ title: "Fold failed", description: e?.message ?? String(e), variant: "destructive" });
+    } finally {
+      setFolding(false);
+    }
+  }
 
   async function withPod(id: string, label: string, fn: () => Promise<void>) {
     setBusy(id);
@@ -117,7 +159,10 @@ export default function PodStation() {
               24 compression pods · gzip · SHA-256 integrity · offline-safe
             </p>
           </div>
-          <div className="ml-auto text-right text-[10px] font-mono text-muted-foreground">
+          <Link to="/pods/surface" className="ml-auto text-[11px] text-primary underline">
+            Fold surface →
+          </Link>
+          <div className="text-right text-[10px] font-mono text-muted-foreground">
             <div>{fmtBytes(totalCompressed)} / {fmtBytes(capacity)}</div>
             <div>raw {fmtBytes(totalRaw)} · ratio {totalRaw ? ((totalCompressed / totalRaw) * 100).toFixed(1) : "0.0"}%</div>
           </div>
@@ -128,6 +173,7 @@ export default function PodStation() {
         {pods.map((p) => {
           const style = STATUS_STYLE[p.status];
           const meta = registryFor(p.id);
+          const seed = seedIdentity(p.slot);
           const usage = p.bytesCompressed / POD_CAPACITY_BYTES;
           const isSelected = selected === p.id;
           return (
@@ -137,6 +183,7 @@ export default function PodStation() {
               className={`text-left border rounded-md p-3 bg-card/40 hover:bg-card/70 transition-colors ${
                 isSelected ? "border-primary" : "border-border"
               }`}
+              style={{ boxShadow: `inset 3px 0 0 0 ${seed.color}` }}
             >
               <div className="flex items-center justify-between mb-2">
                 <span className="font-mono text-[10px] text-muted-foreground">
@@ -144,17 +191,22 @@ export default function PodStation() {
                 </span>
                 <span className={`w-2 h-2 rounded-full ${style.dot}`} title={style.label} />
               </div>
-              <div className="font-medium text-sm truncate">{p.name}</div>
-              <div className="text-[10px] text-muted-foreground truncate">{meta?.domain}</div>
+              <div className="font-medium text-sm truncate">
+                <span aria-hidden className="mr-1" style={{ color: seed.color }}>{seed.glyph}</span>
+                {p.name}
+              </div>
+              <div className="text-[10px] font-mono truncate" style={{ color: seed.color }}>
+                {meta ? capabilityFor(meta.domain) : ""}
+              </div>
               <div className="mt-2 h-1 bg-muted/40 rounded">
                 <div
-                  className="h-full bg-primary/60 rounded"
-                  style={{ width: `${Math.min(100, usage * 100).toFixed(1)}%` }}
+                  className="h-full rounded"
+                  style={{ width: `${Math.min(100, usage * 100).toFixed(1)}%`, background: seed.color }}
                 />
               </div>
               <div className="mt-1 flex justify-between text-[10px] font-mono text-muted-foreground">
                 <span>{fmtBytes(p.bytesCompressed)}</span>
-                <span>{p.ratio ? `${(p.ratio * 100).toFixed(0)}%` : "—"}</span>
+                <span>v{p.version} · {p.ratio ? `${(p.ratio * 100).toFixed(0)}%` : "—"}</span>
               </div>
             </button>
           );
@@ -217,15 +269,46 @@ export default function PodStation() {
                 <Button size="sm" variant="ghost" className="text-destructive" disabled={disabled || p.status === "empty"} onClick={() => withPod(p.id, "Purged", () => purgePod(p.id))}>
                   <Trash2 className="w-3 h-3 mr-1" /> Purge
                 </Button>
+                {registryIds[p.id] && (
+                  <SeedQrButton
+                    row={{
+                      id: registryIds[p.id],
+                      pod_key: p.id,
+                      capability: capabilityFor(meta.domain),
+                      version: p.version || 1,
+                      content_hash: p.fingerprint ?? null,
+                    }}
+                    color={seedIdentity(p.slot).color}
+                    glyph={seedIdentity(p.slot).glyph}
+                    name={p.name}
+                  />
+                )}
               </div>
               <div className="text-[11px] font-mono text-muted-foreground leading-relaxed">
                 <div>capacity {fmtBytes(POD_CAPACITY_BYTES)} · payload cap 30 MB</div>
                 <div>raw {fmtBytes(p.bytesRaw)}</div>
                 <div>compressed {fmtBytes(p.bytesCompressed)}</div>
                 <div>items {p.itemCount}</div>
+                <div className="mt-2 flex items-center gap-2">
+                  <Input
+                    value={slicePath}
+                    onChange={(e) => setSlicePath(e.target.value)}
+                    placeholder="slice path (e.g. rules.mitre)"
+                    className="h-8 text-[11px]"
+                  />
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={folding || p.status === "empty"}
+                    onClick={() => foldSlice(p)}
+                  >
+                    <Orbit className="w-3 h-3 mr-1" /> {folding ? "Folding…" : "Fold"}
+                  </Button>
+                </div>
                 <div className="mt-2 text-muted-foreground/70">
                   Sealing is non-destructive · live data remains intact · integrity
-                  is verified on every open.
+                  is verified on every open. Folding ships only a vector + hash —
+                  the payload never leaves this device.
                 </div>
               </div>
             </div>

@@ -10,25 +10,30 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
 
-type Router = { id: string; name: string; capabilities: string[]; status: string; last_seen_at: string | null; created_at: string };
+type Router = { id: string; name: string; capabilities: string[]; status: string; last_seen_at: string | null; created_at: string; pod_id: string | null };
 type Job = { id: string; capability_required: string; prompt: string; status: string; result: string | null; error: string | null; router_id: string | null; created_at: string; finished_at: string | null };
+type Pod = { id: string; name: string; capability: string; color: string; glyph: string; version: number };
 
 export default function RouterMesh() {
   const [routers, setRouters] = useState<Router[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [pods, setPods] = useState<Pod[]>([]);
   const [newName, setNewName] = useState("");
   const [newCaps, setNewCaps] = useState("groq,ollama");
+  const [newPodId, setNewPodId] = useState("");
   const [issued, setIssued] = useState<{ router_id: string; secret: string } | null>(null);
   const [jobPrompt, setJobPrompt] = useState("");
   const [jobCap, setJobCap] = useState("groq");
 
   async function load() {
-    const [r, j] = await Promise.all([
+    const [r, j, p] = await Promise.all([
       supabase.from("mesh_routers").select("*").order("created_at", { ascending: false }),
       supabase.from("mesh_jobs").select("*").order("created_at", { ascending: false }).limit(200),
+      supabase.from("eye_pod_registry").select("id,name,capability,color,glyph,version").order("pod_key"),
     ]);
     if (r.data) setRouters(r.data as Router[]);
     if (j.data) setJobs(j.data as Job[]);
+    if (p.data) setPods(p.data as Pod[]);
   }
 
   useEffect(() => {
@@ -41,10 +46,13 @@ export default function RouterMesh() {
     const name = newName.trim();
     if (!name) return toast.error("Name required");
     const capabilities = newCaps.split(",").map(s => s.trim()).filter(Boolean);
-    const { data, error } = await supabase.functions.invoke("router-register", { body: { name, capabilities } });
+    const { data, error } = await supabase.functions.invoke("router-register", {
+      body: { name, capabilities, pod_id: newPodId || null },
+    });
     if (error) return toast.error(error.message);
     setIssued(data as any);
     setNewName("");
+    setNewPodId("");
     load();
   }
 
@@ -95,7 +103,28 @@ export default function RouterMesh() {
                 {!issued ? (
                   <div className="space-y-3">
                     <Input placeholder="Name (e.g. pi-kitchen)" value={newName} onChange={e => setNewName(e.target.value)} />
-                    <Input placeholder="Capabilities (comma-separated: groq, ollama, chatgpt-web)" value={newCaps} onChange={e => setNewCaps(e.target.value)} />
+                    <div className="space-y-1">
+                      <label htmlFor="bind-pod" className="text-xs text-slate-400">Bind to seed pod (optional)</label>
+                      <select
+                        id="bind-pod"
+                        value={newPodId}
+                        onChange={e => setNewPodId(e.target.value)}
+                        className="w-full h-10 rounded-md bg-slate-950 border border-slate-700 px-3 text-sm"
+                      >
+                        <option value="">No binding — use capabilities below</option>
+                        {pods.map(p => (
+                          <option key={p.id} value={p.id}>{p.glyph} {p.name} · {p.capability} · v{p.version}</option>
+                        ))}
+                      </select>
+                      {!pods.length && <p className="text-[11px] text-slate-500">No seed pods synced yet — open eYe Pod Station once to publish the registry.</p>}
+                    </div>
+                    <Input
+                      placeholder="Capabilities (comma-separated: groq, ollama, chatgpt-web)"
+                      value={newPodId ? (pods.find(p => p.id === newPodId)?.capability ?? "") : newCaps}
+                      disabled={!!newPodId}
+                      onChange={e => setNewCaps(e.target.value)}
+                    />
+                    {newPodId && <p className="text-[11px] text-slate-500">Pod-bound routers only wake for their pod's capability.</p>}
                     <Button onClick={registerRouter} className="w-full">Generate secret</Button>
                   </div>
                 ) : (
@@ -117,8 +146,16 @@ export default function RouterMesh() {
                   <div>
                     <div className="font-medium">{r.name} <Badge variant="outline" className="ml-2">{r.status}</Badge></div>
                     <div className="text-xs text-slate-400 mt-1 font-mono">{r.id}</div>
-                    <div className="flex gap-1 mt-2 flex-wrap">
+                    <div className="flex gap-1 mt-2 flex-wrap items-center">
                       {r.capabilities.map(c => <Badge key={c} variant="secondary">{c}</Badge>)}
+                      {r.pod_id && (() => {
+                        const p = pods.find(x => x.id === r.pod_id);
+                        return (
+                          <Badge variant="outline" style={p ? { borderColor: p.color, color: p.color } : undefined}>
+                            {p ? `${p.glyph} ${p.name} v${p.version}` : "pod-bound"}
+                          </Badge>
+                        );
+                      })()}
                     </div>
                     <div className="text-xs text-slate-500 mt-2">last seen: {r.last_seen_at ? new Date(r.last_seen_at).toLocaleString() : "never"}</div>
                   </div>

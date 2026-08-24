@@ -39,6 +39,7 @@ import GrokStudio from "./pages/GrokStudio";
 import RepairBay from "./pages/RepairBay";
 import LocalBridge from "./pages/LocalBridge";
 import PodStation from "./pages/PodStation";
+import FoldSurface from "./pages/FoldSurface";
 import JackyLive from "./pages/JackyLive";
 import AgentLab from "./pages/AgentLab";
 import AgentCompare from "./pages/AgentCompare";
@@ -240,6 +241,9 @@ const App = () => (
               <Route path="/repair" element={<ProtectedRoute><RepairBay /></ProtectedRoute>} />
               <Route path="/bridge" element={<ProtectedRoute><LocalBridge /></ProtectedRoute>} />
               <Route path="/pods" element={<ProtectedRoute><PodStation /></ProtectedRoute>} />
+              <Route path="/eyepod" element={<ProtectedRoute><PodStation /></ProtectedRoute>} />
+              <Route path="/pods/surface" element={<ProtectedRoute><FoldSurface /></ProtectedRoute>} />
+              <Route path="/eyepod/surface" element={<ProtectedRoute><FoldSurface /></ProtectedRoute>} />
               <Route path="/jacky-live" element={<ProtectedRoute><JackyLive /></ProtectedRoute>} />
               <Route path="/agent-lab" element={<ProtectedRoute><AgentLab /></ProtectedRoute>} />
               <Route path="/agent-compare" element={<ProtectedRoute><AgentCompare /></ProtectedRoute>} />
