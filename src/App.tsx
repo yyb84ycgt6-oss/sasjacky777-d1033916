@@ -39,6 +39,7 @@ import GrokStudio from "./pages/GrokStudio";
 import RepairBay from "./pages/RepairBay";
 import LocalBridge from "./pages/LocalBridge";
 import PodStation from "./pages/PodStation";
+import FoldSurface from "./pages/FoldSurface";
 import JackyLive from "./pages/JackyLive";
 import AgentLab from "./pages/AgentLab";
 import AgentCompare from "./pages/AgentCompare";
