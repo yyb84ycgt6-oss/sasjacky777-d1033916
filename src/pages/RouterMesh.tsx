@@ -26,12 +26,14 @@ export default function RouterMesh() {
   const [jobCap, setJobCap] = useState("groq");
 
   async function load() {
-    const [r, j] = await Promise.all([
+    const [r, j, p] = await Promise.all([
       supabase.from("mesh_routers").select("*").order("created_at", { ascending: false }),
       supabase.from("mesh_jobs").select("*").order("created_at", { ascending: false }).limit(200),
+      supabase.from("eye_pod_registry").select("id,name,capability,color,glyph,version").order("pod_key"),
     ]);
     if (r.data) setRouters(r.data as Router[]);
     if (j.data) setJobs(j.data as Job[]);
+    if (p.data) setPods(p.data as Pod[]);
   }
 
   useEffect(() => {
@@ -44,10 +46,13 @@ export default function RouterMesh() {
     const name = newName.trim();
     if (!name) return toast.error("Name required");
     const capabilities = newCaps.split(",").map(s => s.trim()).filter(Boolean);
-    const { data, error } = await supabase.functions.invoke("router-register", { body: { name, capabilities } });
+    const { data, error } = await supabase.functions.invoke("router-register", {
+      body: { name, capabilities, pod_id: newPodId || null },
+    });
     if (error) return toast.error(error.message);
     setIssued(data as any);
     setNewName("");
+    setNewPodId("");
     load();
   }
 
