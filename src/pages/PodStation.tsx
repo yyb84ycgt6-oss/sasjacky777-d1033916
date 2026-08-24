@@ -15,9 +15,15 @@ import {
 } from "@/lib/pods/podEngine";
 import { POD_SLOTS } from "@/lib/pods/podRegistry";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { toast } from "@/hooks/use-toast";
 import { Link } from "react-router-dom";
-import { ArrowLeft, Download, Upload, Lock, Unlock, ShieldCheck, Trash2, Power } from "lucide-react";
+import { ArrowLeft, Download, Upload, Lock, Unlock, ShieldCheck, Trash2, Power, Orbit } from "lucide-react";
+import { seedIdentity, capabilityFor } from "@/lib/pods/seedIdentity";
+import { syncPodRegistry } from "@/lib/pods/podSync";
+import { SeedQrButton } from "@/components/pods/SeedCard";
+import { openSlice } from "@/lib/pods/podSlice";
+import { supabase } from "@/integrations/supabase/client";
 
 const STATUS_STYLE: Record<PodStatus, { dot: string; label: string }> = {
   empty:   { dot: "bg-muted",           label: "Standby" },
