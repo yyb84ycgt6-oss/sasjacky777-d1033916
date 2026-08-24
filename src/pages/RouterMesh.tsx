@@ -103,7 +103,28 @@ export default function RouterMesh() {
                 {!issued ? (
                   <div className="space-y-3">
                     <Input placeholder="Name (e.g. pi-kitchen)" value={newName} onChange={e => setNewName(e.target.value)} />
-                    <Input placeholder="Capabilities (comma-separated: groq, ollama, chatgpt-web)" value={newCaps} onChange={e => setNewCaps(e.target.value)} />
+                    <div className="space-y-1">
+                      <label htmlFor="bind-pod" className="text-xs text-slate-400">Bind to seed pod (optional)</label>
+                      <select
+                        id="bind-pod"
+                        value={newPodId}
+                        onChange={e => setNewPodId(e.target.value)}
+                        className="w-full h-10 rounded-md bg-slate-950 border border-slate-700 px-3 text-sm"
+                      >
+                        <option value="">No binding — use capabilities below</option>
+                        {pods.map(p => (
+                          <option key={p.id} value={p.id}>{p.glyph} {p.name} · {p.capability} · v{p.version}</option>
+                        ))}
+                      </select>
+                      {!pods.length && <p className="text-[11px] text-slate-500">No seed pods synced yet — open eYe Pod Station once to publish the registry.</p>}
+                    </div>
+                    <Input
+                      placeholder="Capabilities (comma-separated: groq, ollama, chatgpt-web)"
+                      value={newPodId ? (pods.find(p => p.id === newPodId)?.capability ?? "") : newCaps}
+                      disabled={!!newPodId}
+                      onChange={e => setNewCaps(e.target.value)}
+                    />
+                    {newPodId && <p className="text-[11px] text-slate-500">Pod-bound routers only wake for their pod's capability.</p>}
                     <Button onClick={registerRouter} className="w-full">Generate secret</Button>
                   </div>
                 ) : (
