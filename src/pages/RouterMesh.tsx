@@ -10,14 +10,17 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
 
-type Router = { id: string; name: string; capabilities: string[]; status: string; last_seen_at: string | null; created_at: string };
+type Router = { id: string; name: string; capabilities: string[]; status: string; last_seen_at: string | null; created_at: string; pod_id: string | null };
 type Job = { id: string; capability_required: string; prompt: string; status: string; result: string | null; error: string | null; router_id: string | null; created_at: string; finished_at: string | null };
+type Pod = { id: string; name: string; capability: string; color: string; glyph: string; version: number };
 
 export default function RouterMesh() {
   const [routers, setRouters] = useState<Router[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [pods, setPods] = useState<Pod[]>([]);
   const [newName, setNewName] = useState("");
   const [newCaps, setNewCaps] = useState("groq,ollama");
+  const [newPodId, setNewPodId] = useState("");
   const [issued, setIssued] = useState<{ router_id: string; secret: string } | null>(null);
   const [jobPrompt, setJobPrompt] = useState("");
   const [jobCap, setJobCap] = useState("groq");
