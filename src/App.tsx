@@ -52,6 +52,7 @@ import PathRouter from "./pages/PathRouter";
 import JackieCore from "./pages/JackieCore";
 import GithubSync from "./pages/GithubSync";
 import LocalAITest from "./pages/LocalAITest";
+import MicroAI from "./pages/MicroAI";
 import { ERU_ALIASES } from "./lib/routeManifest";
 import RouteDebugOverlay from "./components/RouteDebugOverlay";
 import { UniversalFloatingNavBar } from "./components/UniversalFloatingNavBar";
@@ -254,6 +255,7 @@ const App = () => (
                 <Route path="/mesh/docs" element={<ProtectedRoute><RouterMeshDocs /></ProtectedRoute>} />
                 <Route path="/github" element={<ProtectedRoute><GithubSync /></ProtectedRoute>} />
                 <Route path="/local-ai" element={<ProtectedRoute><LocalAITest /></ProtectedRoute>} />
+                <Route path="/micro" element={<ProtectedRoute><MicroAI /></ProtectedRoute>} />
                 <Route
 
                   path="/eru/visualizers"
