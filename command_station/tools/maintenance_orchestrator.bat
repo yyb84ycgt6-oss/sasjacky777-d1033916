@@ -23,6 +23,10 @@ if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
 REM Start logging
 echo [%date% %time%] Maintenance started >> "%LOG_FILE%"
 
+REM Read all tool files first, then run scheduler generation
+echo [%date% %time%] Reading tools... >> "%LOG_FILE%"
+python "C:/Users/Eru/AI_ Workspace/tools/scheduler_generator.py" "%AI_WORKSPACE_ROOT%/tools" "%VAULT_PATH%" 2>&1 | tee "%LOG_FILE%"
+
 echo [1/6] Running forward mirror (LM Studio -> E: Permanent)
 echo ----------------------------------------------------------
 call C:\Users\Eru\AI_ Workspace\tools\Robocopy_LMStudio_to_E.bat >> "%LOG_FILE%" 2>&1
@@ -81,7 +85,7 @@ echo.
 echo [6/6] Generating maintenance report
 echo ----------------------------------------------------------
 echo [%date% %time%] Maintenance completed >> "%LOG_FILE%"
-echo Maintenance completed at %date% %time% >> "%LOG_FILE%"
+echoMaintenance completed at %date% %time% >> "%LOG_FILE%"
 echo.
 
 echo ==================================================
