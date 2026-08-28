@@ -1,0 +1,128 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<DuplicateCleanerProfile>
+    <Metadata>
+        <Name>AI_Workstation_Duplicate_Cleaner</Name>
+        <Description>Detect and manage duplicate model files across LM Studio and E: permanent storage.</Description>
+        <Version>1.0.0</Version>
+        <Author>System Organizer AI</Author>
+        <Date>2025-08-27</Date>
+    </Metadata>
+
+    <Settings>
+        <!-- Search Directories -->
+        <SearchDirectories>
+            <Directory path='C:/Users/Eru/AI_ Workspace/models/LM_Studio/Models'/>
+            <Directory path='E:/AI_Permanent/Models'/>
+            <Directory path='C:/Users/Eru/AI_ Workspace/models/OpenAI/Models'/>
+        </SearchDirectories>
+
+        <!-- Detection Settings -->
+        <DetectionSettings>
+            <HashAlgorithm sha256='true'/>
+            <MinFileSizeBytes>1048576</MinFileSizeBytes> <!-- 1 MB minimum -->
+            <MaxFileSizeBytes>931320928768</MaxFileSizeBytes> <!-- ~800 GB max -->
+            <IgnoreExtensions>
+                <Extension>.gguf</Extension>
+                <Extension>.json</Extension>
+                <Extension>.csv</Extension>
+                <Extension>.txt</Extension>
+                <Extension>.log</Extension>
+                <Extension>.md</Extension>
+                <Extension>.txt</Extension>
+            </IgnoreExtensions>
+
+            <!-- Ignore hidden and system files -->
+            <IgnorePatterns>
+                <Pattern>\.gitignore</Pattern>
+                <Pattern>\.DS_Store</Pattern>
+                <Pattern>\.*</Pattern>
+                <Pattern>\.swp$</Pattern>
+            </IgnorePatterns>
+        </DetectionSettings>
+
+        <!-- Duplicate Handling -->
+        <DuplicateHandling>
+            <Action type='report' default='true'/>
+            <KeepOldest>true</KeepOldest>
+            <BackupDuplicates>true</BackupDuplicates>
+            <DeleteDuplicates>false</DeleteDuplicates>
+            <ArchiveDuplicates>true</ArchiveDuplicates>
+            <ArchivePath>C:/Users/Eru/AI_ Workspace/backups/duplicates_archive/></ArchivePath>
+        </DuplicateHandling>
+
+        <!-- Performance Settings -->
+        <PerformanceSettings>
+            <MaxThreads>32</MaxThreads>
+            <MemoryLimitMB>8192</MemoryLimitMB>
+            <CacheSizeMB>4096</CacheSizeMB>
+            <CheckIntervalMinutes>15</CheckIntervalMinutes>
+        </PerformanceSettings>
+
+        <!-- Logging Settings -->
+        <LoggingSettings>
+            <LogDirectory>C:/Users/Eru/AI_ Workspace/logs/duplicate_cleaner/></LogDirectory>
+            <LogFile>duplicate_cleaner.log</LogFile>
+            <LogLevel>info</LogLevel>
+            <MaxFileSizeMB>100</MaxFileSizeMB>
+        </LoggingSettings>
+
+        <!-- Notification Settings -->
+        <NotificationSettings>
+            <EnableNotifications>true</EnableNotifications>
+            <NotifyOnFindDuplicates>true</NotifyOnFindDuplicates>
+            <NotifyOnCleanup>false</NotifyOnCleanup>
+            <Method type='desktop'>
+                <Sound>SystemBeep.wav</Sound>
+                <Message>Duplicate files detected!</Message>
+            </Method>
+        </NotificationSettings>
+
+        <!-- Schedule Settings -->
+        <ScheduleSettings>
+            <EnableScheduledRuns>true</EnableScheduledRuns>
+            <RunFrequency>daily</RunFrequency>
+            <TimeOfDay>02:00</TimeOfDay>
+            <DaysOfWeek>monday,tuesday,wednesday,thursday,friday,saturday,sunday</DaysOfWeek>
+        </ScheduleSettings>
+
+        <!-- Exclusions -->
+        <Exclusions>
+            <Directory path='C:/Users/Eru/AI_ Workspace/models/LM_Studio/Models/.git'/>
+            <Directory path='E:/AI_Permanent/Models/.git'/>
+            <Pattern>\.tmp</Pattern>
+            <Pattern>\.bak</Pattern>
+            <Pattern>\.*</Pattern>
+        </Exclusions>
+    </Settings>
+
+    <Models>
+        <!-- QWYTHOS 9B Claude Mythos 5 -->
+        <Model name='QWYTHOS-9B-Claude-Mythos-5'>
+            <Formats>
+                <Format type='gguf' extension='.gguf'/>
+                <Format type='q4_k_m' extension='.q4_k_m.gguf'/>
+                <Format type='f16' extension='.f16.gguf'/>
+            </Formats>
+        </Model>
+
+        <!-- Muse Glimmer 30B -->
+        <Model name='Muse-Glimmer-30B'>
+            <Formats>
+                <Format type='gguf' extension='.gguf'/>
+            </Formats>
+        </Model>
+
+        <!-- GPT OSS variants -->
+        <Model name='GPT-OSS-variants'>
+            <Formats>
+                <Format type='gguf' extension='.gguf'/>
+            </Formats>
+        </Model>
+    </Models>
+
+    <IntegrityChecks>
+        <SHA256Verification>true</SHA256Verification>
+        <ChecksumFrequency>daily</ChecksumFrequency>
+        <ReportToUserOnMismatch>true</ReportToUserOnMismatch>
+    </IntegrityChecks>
+</DuplicateCleanerProfile>
