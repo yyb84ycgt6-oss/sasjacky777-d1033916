@@ -1,10 +1,19 @@
 import { useEffect, useState, useRef, useMemo } from "react";
 import { DraggableToolbar } from "./DraggableToolbar";
-import { Plus, Pin, X, StickyNote, Link as LinkIcon } from "lucide-react";
+import { Plus, Pin, X, StickyNote, Link as LinkIcon, Palette, Edit2 } from "lucide-react";
 import { routerNS, FilingSystem } from "@/lib/routerNervousSystem";
+
+const getContrastText = (bg: string): string => {
+  const r = parseInt(bg.substr(1,2),16);
+  const g = parseInt(bg.substr(3,2),16);
+  const b = parseInt(bg.substr(5,2),16);
+  const luminance = (0.299*r + 0.587*g + 0.114*b)/255;
+  return luminance > 0.5 ? '#000' : '#fff';
+};
 
 type Note = {
   id: string;
+  title?: string;
   text: string;
   color: string;
   x: number;
@@ -78,6 +87,18 @@ export function GlobalStickyNotes() {
     routerNS.emit('notes:link:agent', { noteId: id, agentId: agent });
   };
 
+  const changeColor = (id: string) => {
+    const newColor = prompt("Enter hex color");
+    if (!newColor) return;
+    setNotes(n => n.map(note => note.id === id ? { ...note, color: newColor } : note));
+  };
+
+  const renameNote = (id: string) => {
+    const title = prompt("Rename note");
+    if (!title) return;
+    setNotes(n => n.map(note => note.id === id ? { ...note, title } : note));
+  };
+
   const startDrag = (e: React.MouseEvent, id: string, note: Note) => {
     setDragId(id);
     offset.current = { x: e.clientX - note.x, y: e.clientY - note.y };
@@ -137,8 +158,14 @@ export function GlobalStickyNotes() {
                 className="flex items-center justify-between cursor-move mb-1"
                 onMouseDown={(e) => startDrag(e, note.id, note)}
               >
-                <span className="text-[10px] uppercase tracking-wide text-muted-foreground">thought</span>
+                <span style={{ color: getContrastText(note.color) }} className={`text-[10px] ${note.title ? 'font-bold' : ''}`}>{note.title || 'Thought'}</span>
                 <div className="flex items-center gap-0.5">
+                  <button onClick={() => changeColor(note.id)} className="p-0.5 hover:text-foreground text-muted-foreground" title="Change Color">
+                    <Palette size={12} />
+                  </button>
+                  <button onClick={() => renameNote(note.id)} className="p-0.5 hover:text-foreground text-muted-foreground" title="Rename Note">
+                    <Edit2 size={12} />
+                  </button>
                   <button onClick={() => linkToPod(note.id)} className="p-0.5 hover:text-foreground text-muted-foreground" title="Link Pod">
                     <LinkIcon size={12} />
                   </button>
@@ -154,6 +181,7 @@ export function GlobalStickyNotes() {
                 </div>
               </div>
               <textarea
+                style={{ color: getContrastText(note.color) }}
                 value={note.text}
                 onChange={(e) => updateText(note.id, e.target.value)}
                 className="w-full h-[90px] bg-transparent outline-none resize-none text-sm leading-relaxed"
