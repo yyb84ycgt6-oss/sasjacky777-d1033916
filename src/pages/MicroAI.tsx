@@ -9,24 +9,20 @@ import { useToast } from "@/hooks/use-toast";
 import { ModelSelector } from "@/components/microai/ModelSelector";
 import { PerfMonitor } from "@/components/microai/PerfMonitor";
 import { routeMicroPrompt, readMicroLog, clearMicroLog, type MicroRunMetrics, type MicroLogEntry } from "@/lib/microai/router";
-import { FALLBACK_MODEL } from "@/lib/microai/models";
+import { readSettings, writeSettings } from "@/lib/microai/settings";
 import { Terminal, Brain, Trash2, ClipboardPaste } from "lucide-react";
-
-const MODEL_KEY = "jacky.microai.model";
-const SEEDLING_KEY = "jacky.microai.seedling";
 
 interface TermLine { role: "in" | "out" | "sys"; text: string; }
 
 export default function MicroAI() {
   const { toast } = useToast();
-  const [activeModel, setActiveModel] = useState<string>(() => {
-    try { return localStorage.getItem(MODEL_KEY) || FALLBACK_MODEL.id; } catch { return FALLBACK_MODEL.id; }
-  });
-  const [seedling, setSeedling] = useState<boolean>(() => {
-    try { return localStorage.getItem(SEEDLING_KEY) === "on"; } catch { return false; }
-  });
+  const initial = readSettings();
+  const [activeModel, setActiveModel] = useState<string>(initial.modelId);
+  const [seedling, setSeedling] = useState<boolean>(initial.seedling);
+  const [temperature, setTemperature] = useState<number>(initial.temperature);
+  const [maxTokens, setMaxTokens] = useState<number>(initial.maxTokens);
   const [termInput, setTermInput] = useState("");
-  const [termLines, setTermLines] = useState<TermLine[]>([{ role: "sys", text: "micro terminal ready. Seedling lock: OFF." }]);
+  const [termLines, setTermLines] = useState<TermLine[]>([{ role: "sys", text: `micro terminal ready. active: ${initial.modelId} · temp ${initial.temperature} · ${initial.maxTokens} tokens · Seedling lock: ${initial.seedling ? "ON" : "OFF"}.` }]);
   const [assistantInput, setAssistantInput] = useState("");
   const [assistantReply, setAssistantReply] = useState("");
   const [busy, setBusy] = useState(false);
@@ -40,16 +36,18 @@ export default function MicroAI() {
 
   const locked = seedling;
 
+  useEffect(() => {
+    writeSettings({ modelId: activeModel, temperature, maxTokens, seedling });
+  }, [activeModel, temperature, maxTokens, seedling]);
+
   const switchModel = (id: string) => {
     if (locked) return;
     setActiveModel(id);
-    try { localStorage.setItem(MODEL_KEY, id); } catch { /* noop */ }
-    setTermLines(l => [...l, { role: "sys", text: `active model → ${id}` }]);
+    setTermLines(l => [...l, { role: "sys", text: `active model → ${id} (saved)` }]);
   };
 
   const toggleSeedling = (on: boolean) => {
     setSeedling(on);
-    try { localStorage.setItem(SEEDLING_KEY, on ? "on" : "off"); } catch { /* noop */ }
     setTermLines(l => [...l, { role: "sys", text: `Seedling lock: ${on ? "ON — terminal + switching locked" : "OFF"}` }]);
   };
 
@@ -59,7 +57,7 @@ export default function MicroAI() {
     setBusy(true);
     setTermLines(l => [...l, { role: "in", text: cmd }]);
     setTermInput("");
-    const res = await routeMicroPrompt(cmd, activeModel);
+    const res = await routeMicroPrompt(cmd, activeModel, undefined, { temperature, maxTokens });
     setMetrics(res.metrics);
     setLog(readMicroLog());
     setTermLines(l => [...l, { role: res.metrics.error ? "sys" : "out", text: res.metrics.error ? `error: ${res.metrics.error}` : res.text || "(empty response)" }]);
@@ -84,7 +82,8 @@ export default function MicroAI() {
     setBusy(true);
     setAssistantReply("");
     const res = await routeMicroPrompt(q, activeModel,
-      "You are Jacky, a small local assistant. Answer briefly and factually. Never claim to modify files; describe steps only. Confirmation is required before any file write.");
+      "You are Jacky, a small local assistant. Answer briefly and factually. Never claim to modify files; describe steps only. Confirmation is required before any file write.",
+      { temperature, maxTokens });
     setMetrics(res.metrics);
     setLog(readMicroLog());
     setAssistantReply(res.metrics.error ? `⚠ ${res.metrics.error}` : res.text);
@@ -108,6 +107,38 @@ export default function MicroAI() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="space-y-4">
           <ModelSelector activeModel={activeModel} locked={locked} onSelect={switchModel} />
+
+          <Card className="bg-card/80 border-border/40">
+            <CardHeader className="p-3 pb-2">
+              <CardTitle className="text-xs font-mono uppercase tracking-wider">Model Settings (saved)</CardTitle>
+            </CardHeader>
+            <CardContent className="p-3 pt-0 space-y-3">
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-[11px] font-mono text-muted-foreground">
+                  <span>temperature</span><span className="text-foreground">{temperature.toFixed(2)}</span>
+                </div>
+                <input
+                  type="range" min={0} max={2} step={0.05} value={temperature}
+                  disabled={locked}
+                  onChange={e => setTemperature(Number(e.target.value))}
+                  className="w-full accent-primary"
+                />
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-[11px] font-mono text-muted-foreground">
+                  <span>max tokens</span><span className="text-foreground">{maxTokens}</span>
+                </div>
+                <input
+                  type="range" min={32} max={2048} step={32} value={maxTokens}
+                  disabled={locked}
+                  onChange={e => setMaxTokens(Number(e.target.value))}
+                  className="w-full accent-primary"
+                />
+              </div>
+              <p className="text-[10px] text-muted-foreground">Model, temperature, max tokens and the Seedling lock are remembered on this device.</p>
+            </CardContent>
+          </Card>
+
           <PerfMonitor metrics={metrics} />
         </div>
 
