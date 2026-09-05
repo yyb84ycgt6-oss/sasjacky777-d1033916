@@ -62,13 +62,19 @@ export async function routeMicroPrompt(
   prompt: string,
   modelId: string,
   system?: string,
+  opts: { temperature?: number; maxTokens?: number } = {},
 ): Promise<MicroRunResult> {
   const model: MicroModel = findModel(modelId);
   const t0 = performance.now();
 
   const attempt = async (m: MicroModel, fellBack: boolean): Promise<MicroRunResult> => {
     const loadStart = performance.now();
-    const res = await runLocalModel(prompt, { model: m.id, system, max_tokens: 512, temperature: 0.7 });
+    const res = await runLocalModel(prompt, {
+      model: m.id,
+      system,
+      max_tokens: opts.maxTokens ?? 512,
+      temperature: opts.temperature ?? 0.7,
+    });
     const loadMs = performance.now() - loadStart;
     const inferenceMs = res.tokens > 0 ? loadMs : 0;
     const metrics: MicroRunMetrics = {

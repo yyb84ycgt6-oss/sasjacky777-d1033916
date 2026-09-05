@@ -19,6 +19,7 @@ export const MICRO_MODELS: MicroModel[] = [
   { id: "axl-micro-8m",         name: "AXL Micro 8M",       family: "axl-micro series",   sizeLabel: "~15 MB", sizeMB: 15,  type: "reasoning" },
   { id: "awa-micro-1m",         name: "AWA Micro 1M",       family: "awa-micro series",   sizeLabel: "~3 MB",  sizeMB: 3,   type: "chat" },
   { id: "awa-micro-4m",         name: "AWA Micro 4M",       family: "awa-micro series",   sizeLabel: "~8 MB",  sizeMB: 8,   type: "general" },
+  { id: "bonsai-1.7b",          name: "Bonsai 1.7B",        family: "bonsai",             sizeLabel: "~1.1 GB", sizeMB: 1100, type: "reasoning" },
 ];
 
 export const FALLBACK_MODEL = MICRO_MODELS[0];
