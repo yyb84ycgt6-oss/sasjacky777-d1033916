@@ -9,24 +9,20 @@ import { useToast } from "@/hooks/use-toast";
 import { ModelSelector } from "@/components/microai/ModelSelector";
 import { PerfMonitor } from "@/components/microai/PerfMonitor";
 import { routeMicroPrompt, readMicroLog, clearMicroLog, type MicroRunMetrics, type MicroLogEntry } from "@/lib/microai/router";
-import { FALLBACK_MODEL } from "@/lib/microai/models";
+import { readSettings, writeSettings } from "@/lib/microai/settings";
 import { Terminal, Brain, Trash2, ClipboardPaste } from "lucide-react";
-
-const MODEL_KEY = "jacky.microai.model";
-const SEEDLING_KEY = "jacky.microai.seedling";
 
 interface TermLine { role: "in" | "out" | "sys"; text: string; }
 
 export default function MicroAI() {
   const { toast } = useToast();
-  const [activeModel, setActiveModel] = useState<string>(() => {
-    try { return localStorage.getItem(MODEL_KEY) || FALLBACK_MODEL.id; } catch { return FALLBACK_MODEL.id; }
-  });
-  const [seedling, setSeedling] = useState<boolean>(() => {
-    try { return localStorage.getItem(SEEDLING_KEY) === "on"; } catch { return false; }
-  });
+  const initial = readSettings();
+  const [activeModel, setActiveModel] = useState<string>(initial.modelId);
+  const [seedling, setSeedling] = useState<boolean>(initial.seedling);
+  const [temperature, setTemperature] = useState<number>(initial.temperature);
+  const [maxTokens, setMaxTokens] = useState<number>(initial.maxTokens);
   const [termInput, setTermInput] = useState("");
-  const [termLines, setTermLines] = useState<TermLine[]>([{ role: "sys", text: "micro terminal ready. Seedling lock: OFF." }]);
+  const [termLines, setTermLines] = useState<TermLine[]>([{ role: "sys", text: `micro terminal ready. active: ${initial.modelId} · temp ${initial.temperature} · ${initial.maxTokens} tokens · Seedling lock: ${initial.seedling ? "ON" : "OFF"}.` }]);
   const [assistantInput, setAssistantInput] = useState("");
   const [assistantReply, setAssistantReply] = useState("");
   const [busy, setBusy] = useState(false);
