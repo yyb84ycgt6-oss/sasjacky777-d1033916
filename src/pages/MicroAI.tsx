@@ -107,6 +107,38 @@ export default function MicroAI() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="space-y-4">
           <ModelSelector activeModel={activeModel} locked={locked} onSelect={switchModel} />
+
+          <Card className="bg-card/80 border-border/40">
+            <CardHeader className="p-3 pb-2">
+              <CardTitle className="text-xs font-mono uppercase tracking-wider">Model Settings (saved)</CardTitle>
+            </CardHeader>
+            <CardContent className="p-3 pt-0 space-y-3">
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-[11px] font-mono text-muted-foreground">
+                  <span>temperature</span><span className="text-foreground">{temperature.toFixed(2)}</span>
+                </div>
+                <input
+                  type="range" min={0} max={2} step={0.05} value={temperature}
+                  disabled={locked}
+                  onChange={e => setTemperature(Number(e.target.value))}
+                  className="w-full accent-primary"
+                />
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-[11px] font-mono text-muted-foreground">
+                  <span>max tokens</span><span className="text-foreground">{maxTokens}</span>
+                </div>
+                <input
+                  type="range" min={32} max={2048} step={32} value={maxTokens}
+                  disabled={locked}
+                  onChange={e => setMaxTokens(Number(e.target.value))}
+                  className="w-full accent-primary"
+                />
+              </div>
+              <p className="text-[10px] text-muted-foreground">Model, temperature, max tokens and the Seedling lock are remembered on this device.</p>
+            </CardContent>
+          </Card>
+
           <PerfMonitor metrics={metrics} />
         </div>
 
