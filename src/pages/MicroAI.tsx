@@ -36,16 +36,18 @@ export default function MicroAI() {
 
   const locked = seedling;
 
+  useEffect(() => {
+    writeSettings({ modelId: activeModel, temperature, maxTokens, seedling });
+  }, [activeModel, temperature, maxTokens, seedling]);
+
   const switchModel = (id: string) => {
     if (locked) return;
     setActiveModel(id);
-    try { localStorage.setItem(MODEL_KEY, id); } catch { /* noop */ }
-    setTermLines(l => [...l, { role: "sys", text: `active model → ${id}` }]);
+    setTermLines(l => [...l, { role: "sys", text: `active model → ${id} (saved)` }]);
   };
 
   const toggleSeedling = (on: boolean) => {
     setSeedling(on);
-    try { localStorage.setItem(SEEDLING_KEY, on ? "on" : "off"); } catch { /* noop */ }
     setTermLines(l => [...l, { role: "sys", text: `Seedling lock: ${on ? "ON — terminal + switching locked" : "OFF"}` }]);
   };
 
