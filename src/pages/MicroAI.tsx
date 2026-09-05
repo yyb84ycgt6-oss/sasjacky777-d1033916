@@ -57,7 +57,7 @@ export default function MicroAI() {
     setBusy(true);
     setTermLines(l => [...l, { role: "in", text: cmd }]);
     setTermInput("");
-    const res = await routeMicroPrompt(cmd, activeModel);
+    const res = await routeMicroPrompt(cmd, activeModel, undefined, { temperature, maxTokens });
     setMetrics(res.metrics);
     setLog(readMicroLog());
     setTermLines(l => [...l, { role: res.metrics.error ? "sys" : "out", text: res.metrics.error ? `error: ${res.metrics.error}` : res.text || "(empty response)" }]);
@@ -82,7 +82,8 @@ export default function MicroAI() {
     setBusy(true);
     setAssistantReply("");
     const res = await routeMicroPrompt(q, activeModel,
-      "You are Jacky, a small local assistant. Answer briefly and factually. Never claim to modify files; describe steps only. Confirmation is required before any file write.");
+      "You are Jacky, a small local assistant. Answer briefly and factually. Never claim to modify files; describe steps only. Confirmation is required before any file write.",
+      { temperature, maxTokens });
     setMetrics(res.metrics);
     setLog(readMicroLog());
     setAssistantReply(res.metrics.error ? `⚠ ${res.metrics.error}` : res.text);
