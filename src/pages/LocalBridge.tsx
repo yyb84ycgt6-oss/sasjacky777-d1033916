@@ -689,6 +689,10 @@ export default function LocalBridge() {
           platform={platform}
           onRun={status.state === "online" ? (c) => void run(c) : undefined}
           onReadStatus={readBootStatus}
+          onReadCommand={async (c) => {
+            const r = await execForResult(c);
+            return r ? [r.stdout, r.stderr].filter(Boolean).join("\n") : "";
+          }}
           onCopy={(c) => copy(c, "Command copied")}
         />
       )}
