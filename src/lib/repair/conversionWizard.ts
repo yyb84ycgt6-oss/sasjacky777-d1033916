@@ -142,7 +142,111 @@ export type WizardInput = {
   /** Friendly name; defaults to the file name. */
   name?: string;
   sizeBytes?: number;
+  /** Optional known-model preset id, e.g. "bonsai-1.7b". */
+  modelPreset?: ModelPresetId;
 };
+
+/* ------------------------------------------------------------------ */
+/* Known-model presets                                                 */
+/* ------------------------------------------------------------------ */
+
+export type ModelPresetId = "bonsai-1.7b";
+
+export type ModelPreset = {
+  id: ModelPresetId;
+  label: string;
+  /** Sources this preset knows how to start from. */
+  sources: SourceId[];
+  /** Suggested register-as name. */
+  name: string;
+  /** Where the asset usually sits for each supported source. */
+  hint: Partial<Record<SourceId, { windows: string; linux: string }>>;
+  /** Quantisations that are worth keeping for this model, smallest first. */
+  quants: { tag: string; approxSize: string; note: string }[];
+  /** Runner the load check is written for. */
+  loadCheckTarget: RunnerId;
+  summary: string;
+};
+
+export const MODEL_PRESETS: ModelPreset[] = [
+  {
+    id: "bonsai-1.7b",
+    label: "Bonsai 1.7B",
+    sources: ["lmstudio", "ollama"],
+    name: "bonsai-1.7b",
+    hint: {
+      lmstudio: {
+        windows: "%USERPROFILE%\\.lmstudio\\models\\bonsai\\bonsai-1.7b-Q4_K_M.gguf",
+        linux: "~/.lmstudio/models/bonsai/bonsai-1.7b-Q4_K_M.gguf",
+      },
+      ollama: { windows: "bonsai:1.7b", linux: "bonsai:1.7b" },
+    },
+    quants: [
+      { tag: "Q4_K_M", approxSize: "~1.1 GB", note: "The balance point. Start here — it fits entirely in VRAM with room for a long context." },
+      { tag: "Q5_K_M", approxSize: "~1.3 GB", note: "Slightly better reasoning at 1.7B scale. Worth it on a 3090; pointless on a phone." },
+      { tag: "Q8_0", approxSize: "~1.9 GB", note: "Near-lossless. Only useful as a reference to compare the smaller quants against." },
+    ],
+    loadCheckTarget: "ollama",
+    summary:
+      "A 1.7B reasoning model small enough to stay resident. At this size the quantisation choice changes answer quality noticeably, so the file you register is checked and named by its quant.",
+  },
+];
+
+export const findModelPreset = (id?: ModelPresetId) => MODEL_PRESETS.find((p) => p.id === id);
+
+function presetPhase(input: WizardInput): ChecklistPhase | null {
+  const preset = findModelPreset(input.modelPreset);
+  if (!preset) return null;
+  const win = input.platform === "windows";
+  const p = input.assetPath || "<path>";
+  const regName = (input.name?.trim() || preset.name).replace(/[^a-z0-9._-]+/gi, "-").toLowerCase();
+  const items: ChecklistItem[] = [
+    {
+      id: "pre-quant",
+      title: "Identify which quantisation you actually have",
+      command:
+        input.source === "ollama"
+          ? `ollama show ${input.assetPath || preset.name} --modelfile`
+          : win
+            ? `Get-Item ${q(p)} | Select-Object Name,Length`
+            : `ls -l ${q(p)}`,
+      note:
+        "The quant is in the file name or the modelfile FROM line. " +
+        preset.quants.map((x) => `${x.tag} ${x.approxSize} — ${x.note}`).join(" "),
+      required: true,
+    },
+    {
+      id: "pre-name",
+      title: `Register it with the quant in the name (${regName})`,
+      note: "At 1.7B two quants behave differently enough that an unlabelled copy becomes a mystery a week later. Put the quant in the tag.",
+      required: true,
+    },
+    {
+      id: "pre-load",
+      title: `Load check in ${findRunner(preset.loadCheckTarget)?.label ?? preset.loadCheckTarget}`,
+      command:
+        preset.loadCheckTarget === "ollama"
+          ? `ollama run ${regName} "In one sentence, why is a 1.7B model useful offline?"`
+          : `llama-cli -m ${q(p)} -ngl 999 -n 48 -p "In one sentence, why is a 1.7B model useful offline?"`,
+      note: "A coherent sentence means the weights and chat template are both good. Word salad at this size is almost always a wrong or missing template, not bad weights.",
+      required: true,
+    },
+    {
+      id: "pre-vram",
+      title: "Confirm it stayed resident instead of spilling to CPU",
+      command: win ? "nvidia-smi --query-gpu=memory.used,memory.total --format=csv" : "nvidia-smi --query-gpu=memory.used,memory.total --format=csv",
+      note: "Run this while the model is loaded. If usage barely moved, layers went to CPU and the speed you measure is not the speed you'd get.",
+      required: false,
+    },
+  ];
+  return {
+    id: "preset",
+    title: `· ${preset.label} — quantisation and load check`,
+    purpose: preset.summary,
+    items,
+  };
+}
+
 
 const q = (p: string) => `"${p}"`;
 
