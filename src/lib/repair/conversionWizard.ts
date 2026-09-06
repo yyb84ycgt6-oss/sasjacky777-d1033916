@@ -576,6 +576,9 @@ export function buildWizardPlan(input: WizardInput): WizardPlan {
     ],
   });
 
+  const extra = presetPhase(input);
+  if (extra) phases.push(extra);
+
   const allIds = phases.flatMap((p) => p.items.map((i) => i.id));
   return {
     input,
