@@ -21,6 +21,8 @@ export type RouteEntry = {
  */
 export const CORE_ROUTES: RouteEntry[] = [
   { path: "/", label: "Home", group: "core" },
+  { path: "/workstation", label: "Workstation (the whole system, one flow)", group: "core" },
+  { path: "/work", label: "Workstation (alias)", group: "core", alias: true },
   { path: "/path", label: "Path Router", group: "core" },
   { path: "/core", label: "Jackie Core (owner only)", group: "core" },
   { path: "/pc", label: "The PC", group: "core" },
@@ -32,6 +34,7 @@ export const CORE_ROUTES: RouteEntry[] = [
   { path: "/vault", label: "Vault", group: "core" },
   { path: "/sandbox", label: "Sandbox", group: "core" },
   { path: "/auth", label: "Sign in", group: "core" },
+  { path: "/index", label: "Home (alias)", group: "core", alias: true },
 
   { path: "/bots", label: "Bot Foundry", group: "ai" },
   { path: "/swarm", label: "Bot Swarm", group: "ai" },
@@ -39,6 +42,8 @@ export const CORE_ROUTES: RouteEntry[] = [
   { path: "/providers", label: "AI Providers", group: "ai" },
   { path: "/grok", label: "Grok Studio", group: "ai" },
   { path: "/agent-lab", label: "Agent Lab", group: "ai" },
+  { path: "/agent-compare", label: "Agent Compare", group: "ai" },
+  { path: "/local-ai", label: "Local AI Test (Ollama on this machine)", group: "ai" },
   { path: "/jacky-live", label: "Jacky Live", group: "ai" },
   { path: "/keys", label: "API Keys", group: "ai" },
   { path: "/micro", label: "Jacky Micro-AI", group: "ai" },

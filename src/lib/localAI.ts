@@ -12,7 +12,8 @@ export interface LocalAIResult {
   model: string;
 }
 
-const OLLAMA_HOST = "http://localhost:11434";
+/** The local Ollama host. Exported so the station probe checks the same address the runner uses. */
+export const OLLAMA_HOST = "http://localhost:11434";
 
 export async function runLocalModel(
   prompt: string,
