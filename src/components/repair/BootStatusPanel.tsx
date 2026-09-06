@@ -9,17 +9,23 @@ import {
   rollbackCommands, statusCommand,
   type BootCommand, type BootSnapshot, type BootStatus,
 } from "@/lib/repair/bootEntries";
+import {
+  EMPTY_WALK, lastBootCommand, parseLastBoot, walkVerdict, type BootWalk,
+} from "@/lib/repair/bootWalk";
 
 const LS_KEY = "jackie.bootstatus.v1";
 
-type Saved = { raw: string; snapshot: BootSnapshot | null };
+type Saved = { raw: string; snapshot: BootSnapshot | null; walk: BootWalk };
 
 function load(): Saved {
   try {
     const r = localStorage.getItem(LS_KEY);
-    return r ? { raw: "", snapshot: null, ...(JSON.parse(r) as Partial<Saved>) } : { raw: "", snapshot: null };
+    const base: Saved = { raw: "", snapshot: null, walk: { ...EMPTY_WALK } };
+    if (!r) return base;
+    const parsed = JSON.parse(r) as Partial<Saved>;
+    return { ...base, ...parsed, walk: { ...EMPTY_WALK, ...(parsed.walk ?? {}) } };
   } catch {
-    return { raw: "", snapshot: null };
+    return { raw: "", snapshot: null, walk: { ...EMPTY_WALK } };
   }
 }
 
@@ -64,17 +70,20 @@ function CmdRow({
 }
 
 export default function BootStatusPanel({
-  platform, onRun, onReadStatus, onCopy,
+  platform, onRun, onReadStatus, onReadCommand, onCopy,
 }: {
   platform: Platform;
   onRun?: (c: string) => void;
   /** Runs the read-only status command and returns its raw stdout. */
   onReadStatus?: () => Promise<string>;
+  /** Runs any read-only command through the bridge and returns its raw stdout. */
+  onReadCommand?: (c: string) => Promise<string>;
   onCopy: (c: string) => void;
 }) {
   const [state, setState] = useState<Saved>(() => load());
   const [reading, setReading] = useState(false);
   const [showRollback, setShowRollback] = useState(false);
+  const [readingBoot, setReadingBoot] = useState(false);
 
   useEffect(() => {
     try {
@@ -87,6 +96,23 @@ export default function BootStatusPanel({
   const status: BootStatus | null = useMemo(() => parseBootStatus(state.raw), [state.raw]);
   const verdict = bootVerdict(status);
   const statusCmd = statusCommand(platform);
+  const bootCmd = lastBootCommand(platform);
+  const walk = state.walk;
+  const walkV = walkVerdict(walk, status ? Boolean(status.jackie) : null);
+
+  const setWalk = (patch: Partial<BootWalk>) =>
+    setState((s) => ({ ...s, walk: { ...s.walk, ...patch } }));
+
+  const readLastBoot = async () => {
+    if (!onReadCommand) return;
+    setReadingBoot(true);
+    try {
+      const out = await onReadCommand(bootCmd.command);
+      setWalk({ lastBootRaw: out, lastBootAt: parseLastBoot(out) });
+    } finally {
+      setReadingBoot(false);
+    }
+  };
 
   const readNow = async () => {
     if (!onReadStatus) return;
@@ -138,6 +164,84 @@ export default function BootStatusPanel({
             ? "Needs an Administrator terminal — bcdedit refuses NVRAM reads otherwise."
             : "Needs sudo — efibootmgr reads the EFI variables through the kernel."}
         </p>
+      </Card>
+
+      <Card className="p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="text-sm font-semibold">Did it survive a real restart?</h3>
+          <Badge className={TONE[walkV.tone]}>{walkV.tone}</Badge>
+        </div>
+        <p className="mt-1 text-sm text-muted-foreground">
+          An entry that exists in a listing you took before restarting proves nothing — some boards drop added entries on
+          the next power cycle. This compares the moment the entry was created against the machine&apos;s own last boot time.
+        </p>
+
+        <div className="mt-3 rounded-lg border border-border/60 p-3">
+          <p className="text-sm font-medium">{walkV.headline}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{walkV.detail}</p>
+        </div>
+
+        <div className="mt-3 grid gap-2 text-xs text-muted-foreground md:grid-cols-2">
+          <p>
+            Entry created:{" "}
+            <span className="font-mono text-foreground">
+              {walk.createdAt ? new Date(walk.createdAt).toLocaleString() : "not recorded"}
+            </span>
+          </p>
+          <p>
+            Machine last booted:{" "}
+            <span className="font-mono text-foreground">
+              {walk.lastBootAt ? new Date(walk.lastBootAt).toLocaleString() : "not read"}
+            </span>
+          </p>
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            className="min-h-11"
+            onClick={() => setWalk({ createdAt: new Date().toISOString() })}
+          >
+            {walk.createdAt ? "Re-record creation as now" : "I just ran the create command"}
+          </Button>
+          {onReadCommand && (
+            <Button
+              size="sm"
+              variant="secondary"
+              className="min-h-11"
+              disabled={readingBoot}
+              onClick={() => void readLastBoot()}
+            >
+              {readingBoot ? "Reading…" : "Read last boot time"}
+            </Button>
+          )}
+          <Button size="sm" variant="secondary" className="min-h-11" onClick={() => onCopy(bootCmd.command)}>
+            Copy last-boot command
+          </Button>
+          {(walk.createdAt || walk.lastBootRaw) && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="min-h-11"
+              onClick={() => setWalk({ createdAt: null, lastBootRaw: "", lastBootAt: null })}
+            >
+              Clear walk-through
+            </Button>
+          )}
+        </div>
+        <p className="mt-2 text-xs text-muted-foreground">{bootCmd.note}</p>
+
+        <Textarea
+          className="mt-3 min-h-[70px] font-mono text-xs"
+          placeholder={platform === "windows" ? "Or paste the LastBootUpTime output here" : "Or paste the output of: uptime -s"}
+          value={walk.lastBootRaw}
+          onChange={(e) => setWalk({ lastBootRaw: e.target.value, lastBootAt: parseLastBoot(e.target.value) })}
+        />
+        {walk.lastBootRaw.trim() && !walk.lastBootAt && (
+          <p className="mt-2 text-xs text-destructive">
+            No readable date in that output, so no restart can be confirmed from it.
+          </p>
+        )}
       </Card>
 
       <Card className="p-4">
