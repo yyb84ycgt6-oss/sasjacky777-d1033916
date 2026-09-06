@@ -140,7 +140,21 @@ export function suggestRoutes(pathname: string, limit = 5): RouteSuggestion[] {
     if (segments.some((s) => s.length > 2 && (candidate.includes(s) || label.includes(s)))) {
       score -= 12;
     }
-    if (candidate.includes(target) || target.includes(candidate)) score -= 6;
+    if (candidate.includes(target) || target.includes(candidate)) {
+      // Weighted by how much of the longer string the shorter one actually
+      // covers. A flat bonus let any short route that happened to be a prefix
+      // of a typo outrank the route the person meant: "/workstaton" contains
+      // "/work", so the four-character alias beat "/workstation" despite being
+      // six edits further away. Full credit for a near-exact containment,
+      // proportionally less for a fragment.
+      const overlap =
+        Math.min(candidate.length, target.length) / Math.max(candidate.length, target.length, 1);
+      score -= 6 * overlap;
+    }
+    // An alias only redirects to the real page. Both land correctly, but the
+    // canonical path is the one worth showing and worth learning, so it wins a
+    // tie.
+    if (entry.alias) score += 0.5;
     return { ...entry, score };
   })
     .sort((a, b) => a.score - b.score)
