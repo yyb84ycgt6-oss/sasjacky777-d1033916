@@ -274,6 +274,75 @@ Verified live against a real build: SPA fallback 200, missing asset 404, raw
 traversal 404 with `--path-as-is`, `sw.js` `no-store`, and a 206 with a correct
 `content-range`.
 
+## Localization
+
+Six languages as a first-class layer, not a wrapper over English.
+
+### What was there before
+
+Three i18n systems that did not know about each other, and one of them did not
+work at all:
+
+- `src/game/i18n.tsx` did `const translations = en` and exposed a `setLocale`
+  documented as a no-op. Beside it sat `ru.ts`, `uk.ts` and `zh.ts` — written,
+  complete, and unreachable. `LanguageSwitcher` was `return null`. So there were
+  four language files, a language switcher, and no way to change language, and
+  none of that was visible without reading three files together.
+- Eru had its own provider — a good one — with its own locale state, its own
+  storage key, and its own writes to `<html lang>`.
+- Nothing else was localized.
+
+All three now read one service. Eru keeps its own catalogs; the bridge maps the
+tags the two spell differently (`zh` against `zh-Hans`) and migrates a choice
+saved under the old key, so nobody's language is lost by the change.
+
+### Plurals, which is where this usually breaks
+
+English has two forms. Russian and Ukrainian have four, and the rule is not
+"large numbers differ": **21 is `one`, 11 is `many`, 22 is `few`, 12 is `many`,
+and 1.0 is `other`.** A message written with `one` and `other` renders "5
+станция" forever, in a build whose tests passed because they were written in
+English.
+
+`Intl.PluralRules` *is* the CLDR table, so it is used rather than restated. The
+work here is making the failure impossible: `auditCatalog` asks the runtime
+which categories a locale requires and fails the build when a message does not
+supply them.
+
+That audit caught two real omissions in this repo's own catalogs. Modern CLDR
+gives **Spanish and French a `many` category** for exact millions, because both
+languages genuinely change there — "un millón **de** registros", "un million
+**d'**enregistrements". Both were missing. No reviewer of six languages would
+have caught it by eye.
+
+### What the audit blocks
+
+| Issue | Why it must not ship |
+|---|---|
+| `missing-plural-category` | Renders grammatically wrong text on every count |
+| `placeholder-mismatch` | A dropped `{count}` renders a literal brace to the user |
+| `untranslated` | Counted, not blocked — some strings are correctly identical |
+| `expansion-risk` | Advisory: a string far past its predicted length will overflow |
+
+`LOCALE_SPECS` carries expansion factors as measured data — Chinese runs ~40%
+short, Slavic ~15% long — so overflow is flagged before a device shows it.
+
+### Decisions worth naming
+
+- **Ukrainian never falls back to Russian.** A technically convenient fallback
+  that a large part of the audience reads as a political one. It falls to
+  English.
+- **A fallback string renders with the plural rules of the language it came
+  from**, not the one requested — otherwise a French string reached by fallback
+  is selected against Russian's table.
+- **Currency is never inferred from the interface language.** A French user
+  paying in USD must see dollars; showing euros because their UI is French is a
+  financial error, not a preference.
+- **The picker lists every language in its own name.** "Ukrainian" is useless to
+  someone who reads only Ukrainian.
+- **A missing key renders as the key**, which is ugly and therefore gets fixed —
+  unlike an empty string, which looks like a deliberately blank label.
+
 ## Not in the constellation
 
 `awesome-go`, `awesome-selfhosted`, `terraform-google-cloud-storage`,

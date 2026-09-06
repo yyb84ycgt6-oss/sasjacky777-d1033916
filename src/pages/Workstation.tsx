@@ -19,6 +19,8 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { useConstellation } from "@/hooks/useConstellation";
+import { useTranslation } from "@/hooks/useTranslation";
+import { LocalePicker } from "@/components/LocalePicker";
 import { useSquads } from "@/hooks/useSquads";
 import { SquadBoard } from "@/components/squad/SquadBoard";
 import { constellation } from "@/lib/constellation/service";
@@ -69,11 +71,9 @@ const STATE_STYLE: Record<StationState, { label: string; className: string }> = 
   unknown: { label: "checking", className: "border-muted-foreground/30 text-muted-foreground" },
 };
 
-const formatBytes = (bytes: number) =>
-  bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-
 export default function Workstation() {
   const { flow, online, checking, lastCheckedAt, refresh } = useConstellation();
+  const { t, time, bytes } = useTranslation();
   const [plan, setPlan] = useState<BudgetPlan | null>(null);
   const [budgetError, setBudgetError] = useState<string | null>(null);
   const [usage, setUsage] = useState<PartitionUsage[]>([]);
@@ -158,27 +158,28 @@ export default function Workstation() {
         <div className="mx-auto max-w-5xl px-4 py-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h1 className="text-xl font-semibold">Workstation</h1>
+              <h1 className="text-xl font-semibold">{t("workstation.title")}</h1>
               <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-                The whole system as one walk. {flow.liveCount} of {flow.checkableCount} checkable
-                stations answered{lastCheckedAt ? ` at ${new Date(lastCheckedAt).toLocaleTimeString()}` : ""}.
+                {t("workstation.subtitle", { live: flow.liveCount, total: flow.checkableCount })}
+                {lastCheckedAt ? ` · ${t("common.lastChecked", { when: time(lastCheckedAt) })}` : ""}
               </p>
             </div>
             <div className="flex items-center gap-2">
               <Badge variant="outline" className={online ? "border-emerald-500/40 text-emerald-500" : "border-amber-500/40 text-amber-500"}>
                 {online ? <Wifi className="mr-1 h-3 w-3" /> : <CloudOff className="mr-1 h-3 w-3" />}
-                {online ? "online · sync available" : "offline · fully operational"}
+                {online ? t("workstation.online") : t("workstation.offline")}
               </Badge>
               <Button variant="outline" size="sm" className="min-h-11" onClick={refresh} disabled={checking}>
                 {checking ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-1 h-4 w-4" />}
-                Check
+                {t("workstation.check")}
               </Button>
+              <LocalePicker compact />
             </div>
           </div>
 
           <Card className="mt-4 flex flex-wrap items-center justify-between gap-3 border-primary/30 p-4">
             <div className="min-w-0">
-              <p className="text-xs uppercase tracking-wide text-muted-foreground">Next step</p>
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">{t("workstation.next")}</p>
               <p className="mt-1 text-sm font-medium">{flow.next.label}</p>
               <p className="mt-1 text-sm text-muted-foreground">{flow.next.why}</p>
             </div>
@@ -264,25 +265,29 @@ export default function Workstation() {
         <section>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="flex items-center gap-2 text-base font-medium">
-              <HardDrive className="h-4 w-4" /> Offline partitions
+              <HardDrive className="h-4 w-4" /> {t("partitions.title")}
             </h2>
             <div className="flex items-center gap-2">
               {durable !== null && (
                 <Badge variant="outline" className={durable ? "border-emerald-500/40 text-emerald-500" : "border-amber-500/40 text-amber-500"}>
                   <ShieldCheck className="mr-1 h-3 w-3" />
-                  {durable ? "eviction-protected" : "evictable"}
+                  {durable ? t("partitions.durable") : t("partitions.evictable")}
                 </Badge>
               )}
               <Button variant="outline" size="sm" className="min-h-11" onClick={() => void sync()} disabled={syncing}>
                 {syncing ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Database className="mr-1 h-4 w-4" />}
-                Back up & sync
+                {t("partitions.sync")}
               </Button>
             </div>
           </div>
 
           <p className="mt-2 text-sm text-muted-foreground">
             {plan
-              ? `${plan.budgetMB} MB granted, ${MINIMUM_BUDGET_MB} MB needed for every floor, ${plan.headroomMB} MB spare.`
+              ? t("partitions.budget", {
+                  granted: `${plan.budgetMB} MB`,
+                  needed: `${MINIMUM_BUDGET_MB} MB`,
+                  spare: `${plan.headroomMB} MB`,
+                })
               : budgetError
                 ? `Storage quota unavailable: ${budgetError}`
                 : "Reading the device's storage quota…"}
@@ -303,14 +308,15 @@ export default function Workstation() {
                     </p>
                     <p className="font-mono text-xs text-muted-foreground">
                       {granted ? `${granted.grantedMB} MB granted · ` : ""}
-                      floor {spec.floorMB} MB · {row.records} records · {formatBytes(row.bytes)} ·{" "}
-                      {row.backups}/{spec.backupCopies} backups
+                      floor {spec.floorMB} MB · {t("partitions.records", { count: row.records })} ·{" "}
+                      {bytes(row.bytes)} ·{" "}
+                      {t("partitions.backups", { count: row.backups, depth: spec.backupCopies })}
                     </p>
                   </div>
                   <p className="mt-1 text-sm text-muted-foreground">{spec.purpose}</p>
                   {granted && !granted.satisfied && (
                     <p className="mt-1 text-sm text-destructive">
-                      Below its floor — this partition cannot do its job on this device.
+                      {t("partitions.belowFloor")}
                     </p>
                   )}
                 </li>
@@ -335,7 +341,7 @@ export default function Workstation() {
         </section>
 
         <section>
-          <h2 className="text-base font-medium">Micro-AI context routers</h2>
+          <h2 className="text-base font-medium">{t("routers.title")}</h2>
           <p className="mt-1 text-sm text-muted-foreground">
             Each router pairs one small model with the partitions it is expert in, and answers from
             the nearest engine it can reach. Keeper has no network rung at any budget.
@@ -366,12 +372,12 @@ export default function Workstation() {
             <Input
               value={question}
               onChange={(event) => setQuestion(event.target.value)}
-              placeholder="Ask a router — it picks itself from what you asked"
+              placeholder={t("routers.ask")}
               className="min-h-11 flex-1"
             />
             <Button type="submit" className="min-h-11" disabled={asking || !question.trim()}>
               {asking ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
-              Ask
+              {t("routers.askButton")}
             </Button>
           </form>
 
@@ -380,15 +386,14 @@ export default function Workstation() {
               <p className="font-mono text-xs text-muted-foreground">{answer.reason}</p>
               {answer.context.length > 0 && (
                 <p className="mt-1 font-mono text-xs text-muted-foreground">
-                  context: {answer.context.map((c) => `${c.partition}/${c.key}`).join(", ")}
+                  {t("routers.context")}: {answer.context.map((c) => `${c.partition}/${c.key}`).join(", ")}
                 </p>
               )}
               {answer.text ? (
                 <p className="mt-2 whitespace-pre-wrap text-sm">{answer.text}</p>
               ) : (
                 <p className="mt-2 text-sm text-muted-foreground">
-                  Nothing local was ready to answer. Start Ollama, or bring a network up for the
-                  routers that are allowed to use one.
+                  {t("routers.nothingReady")}
                 </p>
               )}
             </Card>
@@ -396,7 +401,7 @@ export default function Workstation() {
         </section>
 
         <section>
-          <h2 className="text-base font-medium">Squads</h2>
+          <h2 className="text-base font-medium">{t("squads.title")}</h2>
           <p className="mb-3 mt-1 text-sm text-muted-foreground">
             Routers combined into units with a lead and support. Each unit plans once from one
             shared look at the world, then holds that route while a short list of conditions still
@@ -407,7 +412,7 @@ export default function Workstation() {
         </section>
 
         <section>
-          <h2 className="text-base font-medium">Crew</h2>
+          <h2 className="text-base font-medium">{t("crew.title")}</h2>
           <p className="mt-1 text-sm text-muted-foreground">
             One specialist per area rather than one tool stretched across all of them.{" "}
             {crew.filter((c) => c.ready).length} of {crew.length} would start on this machine right
@@ -423,7 +428,7 @@ export default function Workstation() {
                   </p>
                   {!ready && (
                     <p className="mt-1 font-mono text-xs text-muted-foreground">
-                      needs {missing.join(", ")}
+                      {t("crew.needs", { capabilities: missing.join(", ") })}
                     </p>
                   )}
                 </div>
@@ -431,7 +436,7 @@ export default function Workstation() {
                   variant="outline"
                   className={ready ? "border-emerald-500/40 text-emerald-500" : "border-muted-foreground/30 text-muted-foreground"}
                 >
-                  {ready ? "ready" : "blocked"}
+                  {ready ? t("crew.ready") : t("crew.blocked")}
                 </Badge>
               </li>
             ))}
