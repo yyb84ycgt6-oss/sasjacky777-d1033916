@@ -19,6 +19,8 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { useConstellation } from "@/hooks/useConstellation";
+import { useSquads } from "@/hooks/useSquads";
+import { SquadBoard } from "@/components/squad/SquadBoard";
 import { constellation } from "@/lib/constellation/service";
 import {
   buildCompatibilityReport,
@@ -81,6 +83,7 @@ export default function Workstation() {
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState<RoutedAnswer | null>(null);
   const [asking, setAsking] = useState(false);
+  const { survey, refresh: resurvey } = useSquads(online);
 
   const loadStorage = useCallback(async () => {
     setUsage(await partitions.usageAll());
@@ -390,6 +393,17 @@ export default function Workstation() {
               )}
             </Card>
           )}
+        </section>
+
+        <section>
+          <h2 className="text-base font-medium">Squads</h2>
+          <p className="mb-3 mt-1 text-sm text-muted-foreground">
+            Routers combined into units with a lead and support. Each unit plans once from one
+            shared look at the world, then holds that route while a short list of conditions still
+            holds — it re-derives when an engine drops, when a shorter path opens, or when
+            connectivity flips, and not on every question.
+          </p>
+          <SquadBoard survey={survey} onRefresh={resurvey} />
         </section>
 
         <section>

@@ -8,24 +8,35 @@
  * conversations partition so the next question can recall it — with no network
  * involved at any step.
  *
- * Engines are injected. Availability is asked once per ask and handed to the
- * selector as data, so the decision stays the pure function that is tested, and
- * an engine that lies about being ready shows up as a failed run rather than as
- * a silently different route.
+ * Engines are injected. Availability comes from the shared observer rather than
+ * from a fresh probe per request, and the route comes from a plan that is
+ * reused while its invariants hold. So the common case — ask, ask again — costs
+ * a few set lookups instead of a full re-derivation, and the decision itself
+ * stays the pure function that is tested.
  */
 import type { PartitionService } from "@/lib/partitions/service";
 import type { PartitionId } from "@/lib/partitions/types";
 import { OLLAMA_HOST, runLocalModel } from "@/lib/localAI";
+import { advancePlan, type PathPlan } from "@/lib/squad/pathPlanner";
+import { WorldObserver } from "@/lib/squad/observer";
 import {
   routeIntent,
   routerModel,
-  selectEngine,
   type ContextRouterSpec,
   type InferenceEngine,
 } from "./contextRouter";
 
 /** Most recent records pulled from each partition a router reads. */
 export const CONTEXT_DEPTH = 6;
+
+export interface RouterStats {
+  asks: number;
+  /** Asks that reused the standing plan. */
+  held: number;
+  /** Asks that re-derived it, and why the last one did. */
+  replanned: number;
+  lastReplanReason: string;
+}
 
 export interface RoutedAnswer {
   router: ContextRouterSpec;
@@ -36,6 +47,8 @@ export interface RoutedAnswer {
   text: string;
   /** Records that went into the prompt, newest first. */
   context: Array<{ partition: PartitionId; key: string }>;
+  /** True when this ask re-derived the route rather than holding the plan. */
+  replanned: boolean;
 }
 
 export function ollamaEngine(
@@ -64,11 +77,27 @@ export function ollamaEngine(
 }
 
 export class ContextRouterService {
+  private plans = new Map<string, PathPlan>();
+  private stats: RouterStats = { asks: 0, held: 0, replanned: 0, lastReplanReason: "no plan yet" };
+  private readonly observer: WorldObserver;
+
   constructor(
     private readonly partitions: PartitionService,
     private readonly engines: InferenceEngine[],
     private readonly now: () => number = () => Date.now(),
-  ) {}
+    observer?: WorldObserver,
+  ) {
+    this.observer = observer ?? new WorldObserver(engines, now);
+  }
+
+  getStats(): RouterStats & { looks: number; reuses: number } {
+    return { ...this.stats, ...this.observer.getStats() };
+  }
+
+  /** The standing plan for a router, if it has one. */
+  getPlan(routerId: ContextRouterSpec["id"]): PathPlan | null {
+    return this.plans.get(routerId) ?? null;
+  }
 
   /** Newest records from the partitions this router is expert in. */
   private async gather(router: ContextRouterSpec) {
@@ -89,24 +118,29 @@ export class ContextRouterService {
     return found.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, CONTEXT_DEPTH);
   }
 
-  /** Which engines say they can answer right now. */
-  private async ready(): Promise<Set<string>> {
-    const results = await Promise.all(
-      this.engines.map(async (engine) => {
-        try {
-          return (await engine.available()) ? engine.id : null;
-        } catch {
-          return null;
-        }
-      }),
-    );
-    return new Set(results.filter((id): id is string => id !== null));
-  }
-
   async ask(intent: string, online: boolean): Promise<RoutedAnswer> {
     const router = routeIntent(intent);
     const context = await this.gather(router);
-    const { engine, reason } = selectEngine(router, this.engines, await this.ready(), online);
+
+    // One look, shared with every other caller; then the plan, reused while it
+    // holds. Neither the probe nor the ladder walk repeats on an unchanged
+    // world, which is the ordinary case.
+    const observation = await this.observer.observe(online);
+    const advanced = advancePlan(this.plans.get(router.id) ?? null, router, this.engines, observation);
+    this.plans.set(router.id, advanced.plan);
+
+    this.stats.asks += 1;
+    if (advanced.replanned) {
+      this.stats.replanned += 1;
+      this.stats.lastReplanReason = advanced.reason;
+    } else {
+      this.stats.held += 1;
+    }
+
+    const engine = advanced.plan.engineId
+      ? (this.engines.find((e) => e.id === advanced.plan.engineId) ?? null)
+      : null;
+    const reason = advanced.plan.reason;
 
     if (!engine) {
       return {
@@ -115,6 +149,7 @@ export class ContextRouterService {
         reason,
         text: "",
         context: context.map(({ partition, key }) => ({ partition, key })),
+        replanned: advanced.replanned,
       };
     }
 
@@ -142,6 +177,7 @@ export class ContextRouterService {
       reason,
       text,
       context: context.map(({ partition, key }) => ({ partition, key })),
+      replanned: advanced.replanned,
     };
   }
 }

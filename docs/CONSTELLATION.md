@@ -110,6 +110,68 @@ overwrite good local state with bad remote state and have nothing to go back to.
 The backup step names any partition it passed over as damaged, so a sync that
 copied less than the whole system says so rather than reporting a clean run.
 
+## Squads and predictive routing
+
+The routers used to answer the same question on every request: probe every
+engine, walk the ladder, pick one. That is a full recalculation to arrive,
+almost always, at the answer it had a second ago — work spent proving nothing
+changed. And a squad of four routers paid for it four times.
+
+Two pieces fix that.
+
+**One look, shared.** `WorldObserver` owns availability. It takes a real look
+when there is reason to — first time, window lapsed, connectivity flipped, or
+asked to — and otherwise hands back the one it has. Connectivity flipping always
+forces a fresh look, because that is exactly when the cached answer is most
+likely wrong. `looks` and `reuses` are counted, so the saving is a number on the
+page rather than a claim in a comment.
+
+**Plan once, then watch.** `planPath` derives a route *and the short list of
+conditions that would make it wrong*:
+
+| Invariant | Breaks when |
+|---|---|
+| `engine-ready` | the chosen engine stops answering |
+| `no-better-engine` | something the router ranks higher comes up |
+| `engine-absent` | anything usable appears, for a plan that had no path |
+| `online` | connectivity flips |
+
+Afterwards `checkPlan` evaluates those — a handful of set lookups — instead of
+re-deriving. `no-better-engine` is the one that earns its keep: watching only
+"is my engine still up" would hold a plan on a LAN engine forever while the
+device engine came back. Predicting the optimal path means noticing when a
+better one opens, not only when the current one closes.
+
+Measured: ten questions against an unchanged world cost **one** probe and
+**one** derivation. The other nine are set lookups. That is a test, not an
+estimate — `src/test/squad-units.test.ts`.
+
+### The units
+
+| Squad | Doctrine | Lead + support | Formation |
+|---|---|---|---|
+| **Recon** | Find out what is true right now | recall + operator | lead-and-support |
+| **Armory** | Get a model running inside the budget | operator + recall | lead-and-support |
+| **Vault Guard** | Identity, keys, backups — never leaves the device | keeper | lead-and-support |
+| **Workshop** | Build the thing, with what was built before as reference | maker + recall + operator | relay |
+
+A squad is operational only when its **lead** has a path. Support that cannot
+reach an engine degrades the answer; a lead that cannot reach one means there is
+no answer to degrade. Reporting a squad ready on two of three members is the
+kind of green light that gets acted on and then fails.
+
+Vault Guard is never reached by fallback, only by explicit match — a task
+landing there by accident would be asking the strictest unit in the system a
+question it was not meant to hold.
+
+`SquadCommander` carries one plan per router across every unit that fields it.
+Recall sits in both Recon and Workshop; two copies of its plan would be two
+chances to disagree about which engine is answering, surfacing as one unit
+reporting ready and the other grounded, on the same router, at the same instant.
+The first version derived per unit, and a test caught it — `planAllSquads` now
+carries plans forward through the pass, so a router derives once and later units
+hold it.
+
 ## Crew
 
 `src/lib/constellation/integrations.ts` holds the roster: seventy-odd tools

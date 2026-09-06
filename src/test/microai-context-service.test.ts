@@ -134,6 +134,67 @@ describe("ContextRouterService", () => {
     expect(device.prompts[0]).not.toContain("note body 0");
   });
 
+  it("asks the engines once across repeated questions, then holds the route", async () => {
+    const available = vi.fn(async () => true);
+    const device: InferenceEngine = {
+      id: "micro",
+      name: "micro",
+      locality: "device",
+      available,
+      run: async (prompt, model) => ({ text: "ok", model: model ?? "micro" }),
+    };
+    const { service } = build([device]);
+
+    await service.ask("first question", false);
+    await service.ask("second question", false);
+    await service.ask("third question", false);
+
+    // One probe and one route derivation for three answers. Deleting the plan
+    // cache makes this three and three.
+    expect(available).toHaveBeenCalledTimes(1);
+    expect(service.getStats()).toMatchObject({ asks: 3, held: 2, replanned: 1, looks: 1 });
+  });
+
+  it("re-derives the route when the engine it was holding goes away", async () => {
+    let up = true;
+    const device: InferenceEngine = {
+      id: "micro",
+      name: "micro",
+      locality: "device",
+      available: async () => up,
+      run: async () => ({ text: "ok", model: "micro" }),
+    };
+    const clock = { t: 1_000 };
+    const { service } = build([device], clock);
+
+    const first = await service.ask("question one", false);
+    expect(first.engine).toBe(device);
+    expect(first.replanned).toBe(true);
+
+    // Move past the observation window so the next ask genuinely looks again.
+    up = false;
+    clock.t += 60_000;
+
+    const second = await service.ask("question two", false);
+
+    expect(second.replanned).toBe(true);
+    expect(second.engine).toBeNull();
+    expect(service.getStats().lastReplanReason).toMatch(/expired|stopped answering/);
+  });
+
+  it("exposes the standing plan and what it is watching", async () => {
+    const device = engineStub("micro", "device");
+    const lan = engineStub("ollama", "lan");
+    const { service } = build([lan, device]);
+
+    await service.ask("what did we decide", false);
+    const plan = service.getPlan("recall");
+
+    expect(plan?.engineId).toBe("micro");
+    expect(plan?.invariants).toContainEqual({ kind: "engine-ready", engineId: "micro" });
+    expect(service.getPlan("keeper")).toBeNull();
+  });
+
   it("treats an engine that throws while reporting availability as not ready", async () => {
     const flaky: InferenceEngine = {
       id: "flaky",
