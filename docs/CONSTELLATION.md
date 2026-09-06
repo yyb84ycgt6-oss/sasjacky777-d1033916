@@ -236,6 +236,44 @@ src/hooks/useConstellation.ts
 - **A new kind of check**: a new probe in `probes.ts`. The service does not
   learn about it.
 
+## Hosting itself
+
+`host/` is an attachment: drop the folder beside a build and run it.
+
+```sh
+npm run host          # or: node host/serve.mjs ./dist
+```
+
+No dependencies, no install, no network, one file. A system whose claim is that
+it works with the radio off cannot depend on a hosting service being reachable,
+so the last piece of the offline story is the product serving itself from disk.
+
+It registers as the `self-host` station and is probed like anything else, via
+`GET /__host/health`. Absent is the ordinary answer when the app is behind some
+other server; it is optional and never blocks the walk.
+
+The decisions that can be wrong quietly are pure functions exported from
+`host/serve.mjs`, and `src/test/host-attachment.test.ts` imports that same file —
+no second copy to drift:
+
+- **Path traversal is refused, not rewritten.** The `..` check runs on the
+  decoded path and *before* normalization. Checking before decoding misses
+  `%2e%2e`; checking after normalizing misses everything, because `normalize`
+  turns `/../../etc/passwd` into `/etc/passwd` — the segments are gone by the
+  time you look. A test caught exactly that, and the guard moved.
+- **A traversal never falls back to the shell.** 200 with the app shell reads as
+  success to anything probing.
+- **`sw.js` is `no-store`.** A worker cached for a year cannot be replaced, and
+  the app is frozen at that build on every device that loaded it.
+- **`/pc-os/` falls back to its own shell**, not Jackie's, or the PC cannot start
+  in its own tab offline.
+- **Range requests are served**, because model weights are gigabytes and a
+  resumed download must not start over.
+
+Verified live against a real build: SPA fallback 200, missing asset 404, raw
+traversal 404 with `--path-as-is`, `sw.js` `no-store`, and a 206 with a correct
+`content-range`.
+
 ## Not in the constellation
 
 `awesome-go`, `awesome-selfhosted`, `terraform-google-cloud-storage`,

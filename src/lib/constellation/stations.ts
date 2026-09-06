@@ -113,6 +113,24 @@ export function buildStations(boundaries: StationBoundaries): Station[] {
       probe: withTimeout(budgetProbe(storageBudgetMB)),
     },
     {
+      id: "self-host",
+      name: "Self Host",
+      repo: "yyb84ycgt6-oss/sasjacky777-d1033916",
+      purpose:
+        "The host attachment: a folder dropped beside a build that serves the whole system with no dependencies and no network.",
+      stage: "ignition",
+      href: "/workstation",
+      offline: "full",
+      probe: withTimeout(
+        serviceProbe("GET /__host/health", async (signal) => {
+          const res = await fetchImpl("/__host/health", { signal });
+          if (!res.ok) throw new Error(`host → HTTP ${res.status}`);
+          const body = (await res.json()) as { root?: string };
+          return `serving from ${body.root ?? "an unnamed root"}`;
+        }),
+      ),
+    },
+    {
       id: "vault",
       name: "Vault",
       repo: "yyb84ycgt6-oss/core-light-vault",

@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "host": "node host/serve.mjs ./dist"
   },
   "dependencies": {
     "@base44/sdk": "^0.8.32",

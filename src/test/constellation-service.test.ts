@@ -60,6 +60,16 @@ describe("ConstellationService", () => {
     expect(snapshot.flow.current).toBe("workstation");
   });
 
+  it("reports the self-host station absent when nothing is serving its health endpoint", async () => {
+    // The ordinary case: the app is behind some other server, so /__host/health
+    // is not there. That is not a failure — the station is optional — but it
+    // must read as absent rather than as a host that answered.
+    const service = new ConstellationService(stationsWith({ asset: 404 }), () => true);
+    await service.refresh();
+
+    expect(service.getStatus("self-host")?.state).toBe("absent");
+  });
+
   it("holds ignition when the device grants too little storage to be offline", async () => {
     const service = new ConstellationService(stationsWith({ budgetMB: 300 }), () => true);
     const snapshot = await service.refresh();
