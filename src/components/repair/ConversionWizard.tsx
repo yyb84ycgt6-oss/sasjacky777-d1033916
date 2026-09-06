@@ -7,9 +7,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
 import { RUNNERS, findRunner, humanSize, type Platform, type RunnerId } from "@/lib/repair/modelBridge";
 import {
-  ASSET_LABEL, SOURCES, buildWizardPlan, clearWizardRun, findSource, loadWizardRun,
-  saveWizardRun, wizardMarkdown, wizardProgress,
-  type SourceId, type WizardRun,
+  ASSET_LABEL, MODEL_PRESETS, SOURCES, buildWizardPlan, clearWizardRun, findModelPreset, findSource,
+  loadWizardRun, saveWizardRun, wizardMarkdown, wizardProgress,
+  type ModelPresetId, type SourceId, type WizardRun,
 } from "@/lib/repair/conversionWizard";
 import {
   DEFAULT_PROMPT, VERDICT_LABEL, checksCsv, checksMarkdown, clearChecks, judgeSmokeTest,
@@ -61,24 +61,41 @@ export default function ConversionWizard({
   const [name, setName] = useState(saved?.input.name ?? "");
   const [done, setDone] = useState<string[]>(saved?.done ?? []);
   const [startedAt] = useState(saved?.startedAt ?? new Date().toISOString());
+  const [modelPreset, setModelPreset] = useState<ModelPresetId | undefined>(saved?.input.modelPreset);
 
   const plan = useMemo(
-    () => buildWizardPlan({ source, target, platform, assetPath, name, sizeBytes: presetSize ?? saved?.input.sizeBytes }),
-    [source, target, platform, assetPath, name, presetSize, saved],
+    () => buildWizardPlan({ source, target, platform, assetPath, name, sizeBytes: presetSize ?? saved?.input.sizeBytes, modelPreset }),
+    [source, target, platform, assetPath, name, presetSize, saved, modelPreset],
   );
   const progress = wizardProgress(plan, done);
   const srcDef = findSource(source);
 
   useEffect(() => {
     const run: WizardRun = {
-      input: { source, target, platform, assetPath, name, sizeBytes: presetSize ?? saved?.input.sizeBytes },
+      input: { source, target, platform, assetPath, name, sizeBytes: presetSize ?? saved?.input.sizeBytes, modelPreset },
       done,
       startedAt,
       updatedAt: new Date().toISOString(),
     };
     saveWizardRun(run);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [source, target, assetPath, name, done]);
+  }, [source, target, assetPath, name, done, modelPreset]);
+
+  const applyPreset = (id: ModelPresetId) => {
+    const pre = findModelPreset(id);
+    if (!pre) return;
+    if (modelPreset === id) {
+      setModelPreset(undefined);
+      return;
+    }
+    setModelPreset(id);
+    const src = pre.sources.includes(source) ? source : pre.sources[0];
+    setSource(src);
+    setTarget(pre.loadCheckTarget);
+    setName(pre.name);
+    const hint = pre.hint[src];
+    if (hint) setAssetPath(platform === "windows" ? hint.windows : hint.linux);
+  };
 
   const toggle = (id: string) =>
     setDone((d) => (d.includes(id) ? d.filter((x) => x !== id) : [...d, id]));
@@ -145,6 +162,28 @@ export default function ConversionWizard({
         </p>
 
         <div className="mt-4 space-y-3">
+          <div>
+            <p className="text-xs text-muted-foreground">Known model presets</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {MODEL_PRESETS.map((pre) => (
+                <Button
+                  key={pre.id}
+                  size="sm"
+                  variant={modelPreset === pre.id ? "default" : "outline"}
+                  className="min-h-11"
+                  onClick={() => applyPreset(pre.id)}
+                >
+                  {pre.label}
+                </Button>
+              ))}
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              {findModelPreset(modelPreset)
+                ? `${findModelPreset(modelPreset)!.label} selected — sources, name and target filled in, with its quantisation and load-check steps added at the end of the checklist. Tap again to clear.`
+                : "Optional. Fills in the usual location, the register-as name, and adds model-specific quantisation and load-check steps."}
+            </p>
+          </div>
+
           <div>
             <p className="text-xs text-muted-foreground">1. Where the asset is now</p>
             <div className="mt-2 flex flex-wrap gap-2">
