@@ -14,6 +14,7 @@
 // Returns: { ok, status, data } — data is the upstream JSON.
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { checkJackyPath } from "../_shared/jackyPath.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -59,8 +60,14 @@ serve(async (req) => {
   }
 
   const payload = await req.json().catch(() => ({} as Record<string, unknown>));
-  const rawPath = String((payload as any).path || "").replace(/^\/+/, "");
-  if (!rawPath) return json({ error: "missing 'path'" }, 400);
+
+  // The path is the security boundary: this proxy reaches a host that is not on
+  // the internet and attaches the server's token to whatever it sends. It is
+  // checked against an allowlist of the calls the client actually makes, so a
+  // traversal cannot walk off the /api prefix onto the rest of the rig.
+  const verdict = checkJackyPath((payload as any).path);
+  if (!verdict.ok) return json({ error: verdict.reason }, 400);
+  const rawPath = verdict.path!;
   const method = String((payload as any).method || "GET").toUpperCase();
   if (!ALLOWED.has(method)) return json({ error: `method ${method} not allowed` }, 405);
 

@@ -21,6 +21,8 @@ export type RouteEntry = {
  */
 export const CORE_ROUTES: RouteEntry[] = [
   { path: "/", label: "Home", group: "core" },
+  { path: "/workstation", label: "Workstation (the whole system, one flow)", group: "core" },
+  { path: "/work", label: "Workstation (alias)", group: "core", alias: true },
   { path: "/path", label: "Path Router", group: "core" },
   { path: "/core", label: "Jackie Core (owner only)", group: "core" },
   { path: "/pc", label: "The PC", group: "core" },
@@ -32,6 +34,7 @@ export const CORE_ROUTES: RouteEntry[] = [
   { path: "/vault", label: "Vault", group: "core" },
   { path: "/sandbox", label: "Sandbox", group: "core" },
   { path: "/auth", label: "Sign in", group: "core" },
+  { path: "/index", label: "Home (alias)", group: "core", alias: true },
 
   { path: "/bots", label: "Bot Foundry", group: "ai" },
   { path: "/swarm", label: "Bot Swarm", group: "ai" },
@@ -39,6 +42,8 @@ export const CORE_ROUTES: RouteEntry[] = [
   { path: "/providers", label: "AI Providers", group: "ai" },
   { path: "/grok", label: "Grok Studio", group: "ai" },
   { path: "/agent-lab", label: "Agent Lab", group: "ai" },
+  { path: "/agent-compare", label: "Agent Compare", group: "ai" },
+  { path: "/local-ai", label: "Local AI Test (Ollama on this machine)", group: "ai" },
   { path: "/jacky-live", label: "Jacky Live", group: "ai" },
   { path: "/keys", label: "API Keys", group: "ai" },
   { path: "/micro", label: "Jacky Micro-AI", group: "ai" },
@@ -135,7 +140,21 @@ export function suggestRoutes(pathname: string, limit = 5): RouteSuggestion[] {
     if (segments.some((s) => s.length > 2 && (candidate.includes(s) || label.includes(s)))) {
       score -= 12;
     }
-    if (candidate.includes(target) || target.includes(candidate)) score -= 6;
+    if (candidate.includes(target) || target.includes(candidate)) {
+      // Weighted by how much of the longer string the shorter one actually
+      // covers. A flat bonus let any short route that happened to be a prefix
+      // of a typo outrank the route the person meant: "/workstaton" contains
+      // "/work", so the four-character alias beat "/workstation" despite being
+      // six edits further away. Full credit for a near-exact containment,
+      // proportionally less for a fragment.
+      const overlap =
+        Math.min(candidate.length, target.length) / Math.max(candidate.length, target.length, 1);
+      score -= 6 * overlap;
+    }
+    // An alias only redirects to the real page. Both land correctly, but the
+    // canonical path is the one worth showing and worth learning, so it wins a
+    // tie.
+    if (entry.alias) score += 0.5;
     return { ...entry, score };
   })
     .sort((a, b) => a.score - b.score)
