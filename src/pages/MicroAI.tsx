@@ -29,6 +29,7 @@ export default function MicroAI() {
   const [assistantInput, setAssistantInput] = useState("");
   const [assistantReply, setAssistantReply] = useState("");
   const [busy, setBusy] = useState(false);
+  const [folding, setFolding] = useState(false);
   const [metrics, setMetrics] = useState<MicroRunMetrics | null>(null);
   const [log, setLog] = useState<MicroLogEntry[]>(() => readMicroLog());
   const termRef = useRef<HTMLDivElement>(null);
