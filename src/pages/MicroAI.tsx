@@ -93,6 +93,34 @@ export default function MicroAI() {
     setBusy(false);
   };
 
+  /** Fold the current answer into the shared knowledge circle at /pods/surface. */
+  const foldReply = async () => {
+    const text = assistantReply.trim();
+    if (!text || text.startsWith("⚠")) return;
+    setFolding(true);
+    const model = findModel(activeModel);
+    const { data, error } = await supabase.functions.invoke("pod-fold", {
+      body: {
+        text: `Q: ${assistantInput.trim()}\n\nA: ${text}`,
+        capability: `micro:${model.id}`.slice(0, 60),
+        source_ref: `/micro · ${model.name} · temp ${temperature} · ${maxTokens} tokens`,
+        color: "#22d3ee",
+        glyph: "◈",
+      },
+    });
+    setFolding(false);
+    if (error) {
+      toast({ title: "Fold failed", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({
+      title: "Folded into the circle",
+      description: `${model.name}'s answer is now one point on /pods/surface (${String((data as { source_hash?: string } | null)?.source_hash ?? "").slice(0, 12)}…).`,
+    });
+  };
+
+
+
   return (
     <div className="min-h-screen bg-background p-4 space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
