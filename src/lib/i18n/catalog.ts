@@ -18,6 +18,11 @@ import { DEFAULT_LOCALE, fallbackChain, localeSpec, type Locale } from "./locale
 import { formsIn, placeholdersIn, renderMessage, type MessageValues } from "./message";
 import { missingCategories } from "./plurals";
 import { en, type MessageKey } from "./messages/en";
+
+// `MessageKey` is defined alongside the English catalog, which is the key set of
+// record. Re-exported here because this module is the catalog API everything
+// else imports; `service.ts` already expected to find it on this path.
+export type { MessageKey };
 import { ru } from "./messages/ru";
 import { uk } from "./messages/uk";
 import { zhHans } from "./messages/zh";
