@@ -103,6 +103,8 @@ ${detectedBrief()}
 
 ${lastStartupBrief()}
 
+${microBrief()}
+
 ${evidenceBrief(evidence)}
 
 Update/firmware targets on this machine, with the verified rules for each:
