@@ -190,9 +190,23 @@ export default function MicroAI() {
               className="min-h-[70px] text-xs"
               disabled={busy}
             />
-            <Button size="sm" onClick={runAssistant} disabled={busy || !assistantInput.trim()}>
-              {busy ? "Thinking…" : "Ask"}
-            </Button>
+            <div className="flex gap-2">
+              <Button size="sm" onClick={runAssistant} disabled={busy || !assistantInput.trim()}>
+                {busy ? "Thinking…" : "Ask"}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={foldReply}
+                disabled={folding || !assistantReply || assistantReply.startsWith("⚠")}
+                title="Add this answer to the shared knowledge circle"
+              >
+                <CircleDot className="h-3.5 w-3.5 mr-1" /> {folding ? "Folding…" : "Fold into circle"}
+              </Button>
+              <Button size="sm" variant="ghost" asChild>
+                <Link to="/pods/surface" className="text-[11px]">Open circle</Link>
+              </Button>
+            </div>
             <div className="rounded-md bg-muted/30 border border-border/40 p-2 text-[12px] text-foreground whitespace-pre-wrap min-h-[120px]">
               {assistantReply || <span className="text-muted-foreground">Assistant replies here. It never writes files without your confirmation.</span>}
             </div>
