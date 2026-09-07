@@ -10,7 +10,10 @@ import { ModelSelector } from "@/components/microai/ModelSelector";
 import { PerfMonitor } from "@/components/microai/PerfMonitor";
 import { routeMicroPrompt, readMicroLog, clearMicroLog, type MicroRunMetrics, type MicroLogEntry } from "@/lib/microai/router";
 import { readSettings, writeSettings } from "@/lib/microai/settings";
-import { Terminal, Brain, Trash2, ClipboardPaste } from "lucide-react";
+import { Terminal, Brain, Trash2, ClipboardPaste, CircleDot } from "lucide-react";
+import { Link } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
+import { findModel } from "@/lib/microai/models";
 
 interface TermLine { role: "in" | "out" | "sys"; text: string; }
 
