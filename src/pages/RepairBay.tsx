@@ -42,6 +42,8 @@ import {
   loadDraft, saveDraft, clearDraft, registerContextSource, guardSwitch,
 } from "@/lib/repair/contextGuard";
 import { orchestrate } from "@/lib/jackie-orchestrator";
+import { readSettings as readMicroSettings } from "@/lib/microai/settings";
+import { findModel as findMicroModel } from "@/lib/microai/models";
 
 type Tab =
   | "detected"
