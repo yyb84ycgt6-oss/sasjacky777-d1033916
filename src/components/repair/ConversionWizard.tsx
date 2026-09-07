@@ -459,6 +459,29 @@ export default function ConversionWizard({
       </Card>
 
 
+      {findModelPreset(modelPreset) && (
+        <Card className="p-4">
+          <h3 className="text-sm font-semibold">Then actually use it — {findModelPreset(modelPreset)!.label}</h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            The checklist above ends at "the runner answered once". These three steps turn that into a model you use daily.
+          </p>
+          <ol className="mt-2 list-decimal space-y-1 pl-5 text-xs text-muted-foreground">
+            <li>Finish the required steps, including the load check — an answer you read with your own eyes.</li>
+            <li>
+              Leave the runner up (Ollama, or LM Studio's local server) on{" "}
+              <span className="font-mono">localhost:11434</span>. Nothing on this page starts it for you.
+            </li>
+            <li>
+              Open Micro-AI, make <span className="font-mono">{findModelPreset(modelPreset)!.name}</span> the active model,
+              and ask it something. The reply and its timing there are the real proof it loaded.
+            </li>
+          </ol>
+          <Button asChild size="sm" variant="secondary" className="mt-3 min-h-11">
+            <Link to="/micro">Open Micro-AI</Link>
+          </Button>
+        </Card>
+      )}
+
       {plan.warnings.length > 0 && (
         <Card className="p-4">
           <h3 className="text-sm font-semibold">Read before you write</h3>
