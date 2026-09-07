@@ -49,6 +49,7 @@ import RouterMeshDocs from "./pages/RouterMeshDocs";
 import PCDesktop from "./pages/PCDesktop";
 import PcApps from "./pages/PcApps";
 import PathRouter from "./pages/PathRouter";
+import Workstation from "./pages/Workstation";
 import JackieCore from "./pages/JackieCore";
 import GithubSync from "./pages/GithubSync";
 import LocalAITest from "./pages/LocalAITest";
@@ -148,6 +149,15 @@ const App = () => (
                     </ProtectedRoute>
                   }
                 />
+                <Route
+                  path="/workstation"
+                  element={
+                    <ProtectedRoute>
+                      <Workstation />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route path="/work" element={<Navigate to="/workstation" replace />} />
                 <Route
                   path="/pc"
                   element={

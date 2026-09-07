@@ -1,13 +1,18 @@
-import { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import { createContext, useContext, useEffect, useCallback, useMemo, useSyncExternalStore } from 'react';
 import translations from '@/eru/lib/translations.json';
+import { i18n } from '@/lib/i18n/service';
+import { fromEruLang, toEruLang } from '@/lib/i18n/eruBridge';
 
 /**
  * Central i18n provider for the entire ERU application.
  *
  * Production rules:
  * - Single source of truth: lib/translations.json (categorized by domain).
- * - Persistence: selected language saved in localStorage and reflected on
- *   <html lang> for screen readers, browser auto-translate, and SEO.
+ * - Persistence: the choice lives in the shared locale service, not here.
+ *   This provider used to hold its own state and its own storage key while the
+ *   rest of the app held another, so switching language on an Eru screen left
+ *   everything else as it was and <html lang> described whichever wrote last.
+ *   It now reads and writes the one service, and keeps its own catalogs.
  * - Fallback chain: current language → English → caller fallback → key path.
  * - Interpolation: `{{token}}` placeholders are replaced from a `vars` object.
  * - Dev guard: missing keys are reported (warn-once per key) on
@@ -64,26 +69,26 @@ function reportMissing(key, lang) {
 }
 
 export function LanguageProvider({ children }) {
-  const [lang, setLangState] = useState(() => {
-    const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('app_language') : null;
-    if (saved && translations[saved]) return saved;
-    if (typeof navigator !== 'undefined') {
-      const browserLang = (navigator.language || 'en').split('-')[0];
-      if (translations[browserLang]) return browserLang;
-    }
-    return 'en';
-  });
+  const { locale } = useSyncExternalStore(i18n.subscribe, i18n.getSnapshot, i18n.getSnapshot);
+  // Eru tags differ from the service's (zh vs zh-Hans), and a locale the
+  // service offers may have no Eru catalog — both are resolved by the bridge,
+  // which falls to English rather than rendering keys.
+  const lang = translations[toEruLang(locale)] ? toEruLang(locale) : 'en';
 
-  // Persist + sync <html lang> for screen readers, browser auto-translate, SEO.
+  // One writer for <html lang>: the service. Migrate a choice made under the
+  // old key once, so nobody's saved language is lost by this change.
   useEffect(() => {
-    try { localStorage.setItem('app_language', lang); } catch {}
-    if (typeof document !== 'undefined' && document.documentElement) {
-      document.documentElement.setAttribute('lang', lang);
-    }
-  }, [lang]);
+    if (typeof localStorage === 'undefined') return;
+    try {
+      const legacy = localStorage.getItem('app_language');
+      if (legacy && !localStorage.getItem('jackie.locale.v1')) {
+        i18n.setLocale(fromEruLang(legacy));
+      }
+    } catch { /* private window: nothing to migrate */ }
+  }, []);
 
   const setLang = useCallback((next) => {
-    if (translations[next]) setLangState(next);
+    if (translations[next]) i18n.setLocale(fromEruLang(next));
   }, []);
 
   // t(key, vars?, fallback?)

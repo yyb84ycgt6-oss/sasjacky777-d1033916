@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local env. The committed .env holds only publishable keys, but nothing
+# stops the next one holding a secret — so new env files stay untracked.
+.env.local
+.env.*.local
