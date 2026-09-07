@@ -10,7 +10,10 @@ import { ModelSelector } from "@/components/microai/ModelSelector";
 import { PerfMonitor } from "@/components/microai/PerfMonitor";
 import { routeMicroPrompt, readMicroLog, clearMicroLog, type MicroRunMetrics, type MicroLogEntry } from "@/lib/microai/router";
 import { readSettings, writeSettings } from "@/lib/microai/settings";
-import { Terminal, Brain, Trash2, ClipboardPaste } from "lucide-react";
+import { Terminal, Brain, Trash2, ClipboardPaste, CircleDot } from "lucide-react";
+import { Link } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
+import { findModel } from "@/lib/microai/models";
 
 interface TermLine { role: "in" | "out" | "sys"; text: string; }
 
@@ -26,6 +29,7 @@ export default function MicroAI() {
   const [assistantInput, setAssistantInput] = useState("");
   const [assistantReply, setAssistantReply] = useState("");
   const [busy, setBusy] = useState(false);
+  const [folding, setFolding] = useState(false);
   const [metrics, setMetrics] = useState<MicroRunMetrics | null>(null);
   const [log, setLog] = useState<MicroLogEntry[]>(() => readMicroLog());
   const termRef = useRef<HTMLDivElement>(null);
@@ -89,6 +93,34 @@ export default function MicroAI() {
     setAssistantReply(res.metrics.error ? `⚠ ${res.metrics.error}` : res.text);
     setBusy(false);
   };
+
+  /** Fold the current answer into the shared knowledge circle at /pods/surface. */
+  const foldReply = async () => {
+    const text = assistantReply.trim();
+    if (!text || text.startsWith("⚠")) return;
+    setFolding(true);
+    const model = findModel(activeModel);
+    const { data, error } = await supabase.functions.invoke("pod-fold", {
+      body: {
+        text: `Q: ${assistantInput.trim()}\n\nA: ${text}`,
+        capability: `micro:${model.id}`.slice(0, 60),
+        source_ref: `/micro · ${model.name} · temp ${temperature} · ${maxTokens} tokens`,
+        color: "#22d3ee",
+        glyph: "◈",
+      },
+    });
+    setFolding(false);
+    if (error) {
+      toast({ title: "Fold failed", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({
+      title: "Folded into the circle",
+      description: `${model.name}'s answer is now one point on /pods/surface (${String((data as { source_hash?: string } | null)?.source_hash ?? "").slice(0, 12)}…).`,
+    });
+  };
+
+
 
   return (
     <div className="min-h-screen bg-background p-4 space-y-4">
@@ -190,9 +222,23 @@ export default function MicroAI() {
               className="min-h-[70px] text-xs"
               disabled={busy}
             />
-            <Button size="sm" onClick={runAssistant} disabled={busy || !assistantInput.trim()}>
-              {busy ? "Thinking…" : "Ask"}
-            </Button>
+            <div className="flex gap-2">
+              <Button size="sm" onClick={runAssistant} disabled={busy || !assistantInput.trim()}>
+                {busy ? "Thinking…" : "Ask"}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={foldReply}
+                disabled={folding || !assistantReply || assistantReply.startsWith("⚠")}
+                title="Add this answer to the shared knowledge circle"
+              >
+                <CircleDot className="h-3.5 w-3.5 mr-1" /> {folding ? "Folding…" : "Fold into circle"}
+              </Button>
+              <Button size="sm" variant="ghost" asChild>
+                <Link to="/pods/surface" className="text-[11px]">Open circle</Link>
+              </Button>
+            </div>
             <div className="rounded-md bg-muted/30 border border-border/40 p-2 text-[12px] text-foreground whitespace-pre-wrap min-h-[120px]">
               {assistantReply || <span className="text-muted-foreground">Assistant replies here. It never writes files without your confirmation.</span>}
             </div>

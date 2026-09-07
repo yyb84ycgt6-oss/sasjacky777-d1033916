@@ -42,6 +42,8 @@ import {
   loadDraft, saveDraft, clearDraft, registerContextSource, guardSwitch,
 } from "@/lib/repair/contextGuard";
 import { orchestrate } from "@/lib/jackie-orchestrator";
+import { readSettings as readMicroSettings } from "@/lib/microai/settings";
+import { findModel as findMicroModel } from "@/lib/microai/models";
 
 type Tab =
   | "detected"
@@ -90,6 +92,20 @@ function lastStartupBrief() {
 }
 
 /** Built per question so freshly logged evidence is always in the grounding. */
+/** The local micro-model the operator actually has selected on /micro, with its saved settings. */
+function microBrief() {
+  const s = readMicroSettings();
+  const m = findMicroModel(s.modelId);
+  return `Operator's selected local micro-model (saved on /micro, this device):
+- Model: ${m.name} (id ${m.id}, ${m.family}, ${m.sizeLabel}, type ${m.type})
+- Creativity (temperature): ${s.temperature}
+- Answer length cap (max tokens): ${s.maxTokens}
+- Seedling lock: ${s.seedling ? "ON — switching and terminal are locked" : "OFF"}
+- Runtime: local Ollama/LM Studio at http://localhost:11434 only.
+
+When a step could be run by that local model, cite it by name and note whether its size, creativity setting and length cap are actually suitable for the task. Do not assume any other local model is installed.`;
+}
+
 function consultSystem(evidence: EvidenceEntry[]) {
   return `You are Jackie, acting as this operator's computer repair and maintenance crew.
 
@@ -100,6 +116,8 @@ ${rigBrief()}
 ${detectedBrief()}
 
 ${lastStartupBrief()}
+
+${microBrief()}
 
 ${evidenceBrief(evidence)}
 
