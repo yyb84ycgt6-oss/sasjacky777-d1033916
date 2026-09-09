@@ -69,7 +69,6 @@ import {
 } from "@/lib/jackie-files";
 import AnimatedCanvas from "@/components/backgrounds/AnimatedCanvas";
 import NeutronBackgroundSettings, { loadNeutronSettings, type NeutronBackgroundSettings as NSSettings } from "@/components/backgrounds/NeutronBackgroundSettings";
-import { DraggableToolbar } from "@/components/DraggableToolbar";
 import { ScrollNav } from "@/components/ScrollNav";
 import { Button } from "@/components/ui/button";
 
@@ -178,13 +177,18 @@ const Sidebar = ({
               </span>
             </div>
             <div className="flex items-center gap-1">
-              <button
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
                 onClick={onNew}
-                className="p-1.5 rounded-sm text-muted-foreground hover:text-foreground hover:bg-secondary btn-mechanical transition-colors duration-150"
+                className="h-9 rounded-sm px-2 font-mono text-xs text-primary hover:bg-primary/10 hover:text-primary"
                 title="New conversation"
+                aria-label="Start a new chat"
               >
-                <Plus size={14} />
-              </button>
+                <Plus size={16} />
+                New
+              </Button>
               <button
                 onClick={onToggleTheme}
                 className="p-1.5 rounded-sm text-muted-foreground hover:text-foreground hover:bg-secondary btn-mechanical transition-colors duration-150"
@@ -1273,6 +1277,83 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
         {/* Command input */}
         <div className="border-t border-border p-4 flex-shrink-0">
           <div className="max-w-[768px]">
+            <div className="mb-2 flex min-h-9 items-center gap-1 border-b border-border pb-2">
+              <button
+                onClick={saveCurrentAsPreset}
+                className={`p-2 rounded-sm transition-colors ${
+                  presetModel === selectedModel ? "text-primary" : "text-muted-foreground hover:text-primary"
+                }`}
+                title={presetModel === selectedModel ? "Default model for new chats" : "Pin as default"}
+                aria-label={presetModel === selectedModel ? "Default model for new chats" : "Pin model as default"}
+              >
+                <Pin size={14} className={presetModel === selectedModel ? "fill-primary" : ""} />
+              </button>
+              <div className="relative">
+                <button
+                  onClick={() => setModelMenuOpen((prev) => !prev)}
+                  className="flex h-9 items-center gap-1 rounded-sm px-2 font-mono text-xs text-foreground hover:bg-secondary transition-colors"
+                  aria-label="Choose AI model"
+                  aria-expanded={modelMenuOpen}
+                >
+                  {JACKIE_MODELS.find((m) => m.id === selectedModel)?.label ?? "Model"}
+                  <ChevronDown size={12} />
+                </button>
+                {modelMenuOpen && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setModelMenuOpen(false)} />
+                    <div className="absolute bottom-full left-0 mb-2 z-50 bg-popover border border-border rounded-md shadow-lg py-1 min-w-[260px] max-w-[calc(100vw-2rem)]">
+                      {JACKIE_MODELS.map((m) => {
+                        const costLabel = ["$", "$$", "$$$"][m.cost - 1];
+                        const speedDots = Array.from({ length: 3 }, (_, i) => i < m.speed);
+                        return (
+                          <button
+                            key={m.id}
+                            onClick={() => { changeModel(m.id); setModelMenuOpen(false); }}
+                            className={`w-full text-left px-3 py-2 font-mono text-xs hover:bg-secondary transition-colors flex items-center gap-3 ${
+                              selectedModel === m.id ? "text-primary bg-secondary/50" : "text-popover-foreground"
+                            }`}
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="font-semibold">{m.label}</span>
+                                {selectedModel === m.id && <span className="text-[9px] text-primary">●</span>}
+                              </div>
+                              <span className="text-[10px] text-muted-foreground">{m.description}</span>
+                            </div>
+                            <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
+                              <span className={`text-[10px] font-semibold ${m.cost === 1 ? "text-green-500" : m.cost === 2 ? "text-yellow-500" : "text-orange-500"}`}>
+                                {costLabel}
+                              </span>
+                              <div className="flex gap-0.5" title={`Speed: ${m.speed}/3`}>
+                                {speedDots.map((active, i) => (
+                                  <Zap key={i} size={8} className={active ? "text-primary fill-primary" : "text-muted-foreground/30"} />
+                                ))}
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                      <a
+                        href="/providers"
+                        className="block px-3 py-2 border-t border-border font-mono text-[10px] text-muted-foreground hover:text-primary hover:bg-secondary transition-colors"
+                      >
+                        → More providers (Groq, OpenRouter, Ollama…)
+                      </a>
+                    </div>
+                  </>
+                )}
+              </div>
+              {messages.length > 0 && (
+                <button
+                  onClick={exportChat}
+                  className="ml-auto p-2 rounded-sm text-muted-foreground hover:text-primary transition-colors"
+                  title="Export chat"
+                  aria-label="Export chat"
+                >
+                  <Download size={14} />
+                </button>
+              )}
+            </div>
             <ChatMediaBar
               pendingFiles={pendingFiles}
               onFilesAdded={(files) => setPendingFiles((prev) => [...prev, ...files])}
@@ -1323,80 +1404,6 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
           </div>
         </div>
 
-        {/* Floating draggable toolbar — hold grip 1s to move */}
-        <DraggableToolbar>
-          <button
-            onClick={saveCurrentAsPreset}
-            className={`p-1 rounded-full transition-colors ${
-              presetModel === selectedModel ? "text-primary" : "text-muted-foreground hover:text-primary"
-            }`}
-            title={presetModel === selectedModel ? "Default model for new chats" : "Pin as default"}
-          >
-            <Pin size={12} className={presetModel === selectedModel ? "fill-primary" : ""} />
-          </button>
-          <div className="relative">
-            <button
-              onClick={() => setModelMenuOpen((prev) => !prev)}
-              className="flex items-center gap-1 px-2 py-1 rounded-full font-mono text-[10px] text-foreground hover:bg-secondary transition-colors"
-            >
-              {JACKIE_MODELS.find((m) => m.id === selectedModel)?.label ?? "Model"}
-              <ChevronDown size={10} />
-            </button>
-            {modelMenuOpen && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setModelMenuOpen(false)} />
-                <div className="absolute bottom-full right-0 mb-2 z-50 bg-popover border border-border rounded-md shadow-lg py-1 min-w-[260px]">
-                  {JACKIE_MODELS.map((m) => {
-                    const costLabel = ["$", "$$", "$$$"][m.cost - 1];
-                    const speedDots = Array.from({ length: 3 }, (_, i) => i < m.speed);
-                    return (
-                      <button
-                        key={m.id}
-                        onClick={() => { changeModel(m.id); setModelMenuOpen(false); }}
-                        className={`w-full text-left px-3 py-2 font-mono text-xs hover:bg-secondary transition-colors flex items-center gap-3 ${
-                          selectedModel === m.id ? "text-primary bg-secondary/50" : "text-popover-foreground"
-                        }`}
-                      >
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="font-semibold">{m.label}</span>
-                            {selectedModel === m.id && <span className="text-[9px] text-primary">●</span>}
-                          </div>
-                          <span className="text-[10px] text-muted-foreground">{m.description}</span>
-                        </div>
-                        <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
-                          <span className={`text-[10px] font-semibold ${m.cost === 1 ? "text-green-500" : m.cost === 2 ? "text-yellow-500" : "text-orange-500"}`}>
-                            {costLabel}
-                          </span>
-                          <div className="flex gap-0.5" title={`Speed: ${m.speed}/3`}>
-                            {speedDots.map((active, i) => (
-                              <Zap key={i} size={8} className={active ? "text-primary fill-primary" : "text-muted-foreground/30"} />
-                            ))}
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                  <a
-                    href="/providers"
-                    className="block px-3 py-2 border-t border-border font-mono text-[10px] text-muted-foreground hover:text-primary hover:bg-secondary transition-colors"
-                  >
-                    → More providers (Groq, OpenRouter, Ollama…)
-                  </a>
-                </div>
-              </>
-            )}
-          </div>
-          {messages.length > 0 && (
-            <button
-              onClick={exportChat}
-              className="p-1 rounded-full text-muted-foreground hover:text-primary transition-colors"
-              title="Export chat"
-            >
-              <Download size={12} />
-            </button>
-          )}
-        </DraggableToolbar>
       </main>
 
       <style>{`
