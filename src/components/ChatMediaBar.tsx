@@ -1,7 +1,8 @@
 import { useState, useRef, useCallback } from "react";
-import { Paperclip, Camera, Video, X, Image, FileText, Film } from "lucide-react";
+import { Plus, Camera, Video, X, FileText, Film } from "lucide-react";
 import { isImageType, isVideoType, formatFileSize } from "@/lib/jackie-attachments";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 
 export interface PendingFile {
   file: File;
@@ -183,7 +184,7 @@ export const ChatMediaBar = ({
       )}
 
       {/* Action buttons */}
-      <div className="flex items-center gap-1">
+      <div className="flex min-h-11 items-center gap-1 pb-2">
         <input
           ref={fileInputRef}
           type="file"
@@ -208,30 +209,42 @@ export const ChatMediaBar = ({
           disabled={disabled}
         />
 
-        <button
+        <Button
+          type="button"
+          variant="outline"
           onClick={() => fileInputRef.current?.click()}
           disabled={disabled}
-          className="p-2 rounded-sm text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors disabled:opacity-30"
+          className="h-11 min-w-20 rounded-sm border-primary/60 px-3 font-mono text-xs text-primary hover:bg-primary/10 hover:text-primary"
           title="Attach file"
+          aria-label="Add a file"
         >
-          <Paperclip size={16} />
-        </button>
-        <button
+          <Plus size={18} />
+          <span>Add</span>
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
           onClick={openCamera}
           disabled={disabled}
-          className="p-2 rounded-sm text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors disabled:opacity-30"
+          className="h-11 w-11 rounded-sm text-muted-foreground hover:text-foreground"
           title="Take photo"
+          aria-label="Take a photo"
         >
           <Camera size={16} />
-        </button>
-        <button
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
           onClick={startRecording}
           disabled={disabled}
-          className="p-2 rounded-sm text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors disabled:opacity-30"
+          className="h-11 w-11 rounded-sm text-muted-foreground hover:text-foreground"
           title="Record video"
+          aria-label="Record a video"
         >
           <Video size={16} />
-        </button>
+        </Button>
       </div>
 
       {/* Pending files preview */}

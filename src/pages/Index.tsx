@@ -71,6 +71,7 @@ import AnimatedCanvas from "@/components/backgrounds/AnimatedCanvas";
 import NeutronBackgroundSettings, { loadNeutronSettings, type NeutronBackgroundSettings as NSSettings } from "@/components/backgrounds/NeutronBackgroundSettings";
 import { DraggableToolbar } from "@/components/DraggableToolbar";
 import { ScrollNav } from "@/components/ScrollNav";
+import { Button } from "@/components/ui/button";
 
 
 interface DisplayMessage {
@@ -1210,6 +1211,17 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
           <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">Jackie</span>
           
           <div className="flex-1" />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={startNewConversation}
+            className="h-9 rounded-sm border-primary/60 px-3 font-mono text-xs text-primary hover:bg-primary/10 hover:text-primary"
+            aria-label="Start a new chat"
+          >
+            <Plus size={16} />
+            New chat
+          </Button>
           {messages.length > 0 && (
             <button
               onClick={exportChat}
