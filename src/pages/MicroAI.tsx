@@ -22,6 +22,7 @@ export default function MicroAI() {
   const initial = readSettings();
   const [activeModel, setActiveModel] = useState<string>(initial.modelId);
   const [seedling, setSeedling] = useState<boolean>(initial.seedling);
+  const [autoFold, setAutoFold] = useState<boolean>(initial.autoFold);
   const [temperature, setTemperature] = useState<number>(initial.temperature);
   const [maxTokens, setMaxTokens] = useState<number>(initial.maxTokens);
   const [termInput, setTermInput] = useState("");
@@ -41,8 +42,8 @@ export default function MicroAI() {
   const locked = seedling;
 
   useEffect(() => {
-    writeSettings({ modelId: activeModel, temperature, maxTokens, seedling });
-  }, [activeModel, temperature, maxTokens, seedling]);
+    writeSettings({ modelId: activeModel, temperature, maxTokens, seedling, autoFold });
+  }, [activeModel, temperature, maxTokens, seedling, autoFold]);
 
   const switchModel = (id: string) => {
     if (locked) return;
@@ -66,6 +67,9 @@ export default function MicroAI() {
     setLog(readMicroLog());
     setTermLines(l => [...l, { role: res.metrics.error ? "sys" : "out", text: res.metrics.error ? `error: ${res.metrics.error}` : res.text || "(empty response)" }]);
     setBusy(false);
+    if (autoFold && !res.metrics.error && res.text.trim()) {
+      await foldAnswer(cmd, res.text, "/micro terminal", true);
+    }
   };
 
   const quickPaste = async () => {
@@ -92,35 +96,44 @@ export default function MicroAI() {
     setLog(readMicroLog());
     setAssistantReply(res.metrics.error ? `⚠ ${res.metrics.error}` : res.text);
     setBusy(false);
+    if (autoFold && !res.metrics.error && res.text.trim()) {
+      await foldAnswer(q, res.text, "/micro assistant", true);
+    }
   };
 
-  /** Fold the current answer into the shared knowledge circle at /pods/surface. */
-  const foldReply = async () => {
-    const text = assistantReply.trim();
-    if (!text || text.startsWith("⚠")) return;
+  /** Fold an answer into the shared knowledge circle at /pods/surface. */
+  const foldAnswer = async (question: string, answer: string, origin: string, quiet = false) => {
+    const text = answer.trim();
+    if (!text || text.startsWith("\u26a0")) return;
     setFolding(true);
     const model = findModel(activeModel);
     const { data, error } = await supabase.functions.invoke("pod-fold", {
       body: {
-        text: `Q: ${assistantInput.trim()}\n\nA: ${text}`,
+        text: `Q: ${question.trim()}\n\nA: ${text}`,
         capability: `micro:${model.id}`.slice(0, 60),
-        source_ref: `/micro · ${model.name} · temp ${temperature} · ${maxTokens} tokens`,
+        source_ref: `${origin} · ${model.name} · temp ${temperature} · ${maxTokens} tokens`,
         color: "#22d3ee",
-        glyph: "◈",
+        glyph: "\u25c8",
       },
     });
     setFolding(false);
     if (error) {
-      toast({ title: "Fold failed", description: error.message, variant: "destructive" });
+      if (!quiet) toast({ title: "Fold failed", description: error.message, variant: "destructive" });
+      else setTermLines(l => [...l, { role: "sys", text: `circle: fold failed — ${error.message}` }]);
       return;
     }
-    toast({
-      title: "Folded into the circle",
-      description: `${model.name}'s answer is now one point on /pods/surface (${String((data as { source_hash?: string } | null)?.source_hash ?? "").slice(0, 12)}…).`,
-    });
+    const hash = String((data as { source_hash?: string } | null)?.source_hash ?? "").slice(0, 12);
+    if (quiet) {
+      setTermLines(l => [...l, { role: "sys", text: `circle: answer folded (${hash}…)` }]);
+    } else {
+      toast({
+        title: "Folded into the circle",
+        description: `${model.name}'s answer is now one point on /pods/surface (${hash}…).`,
+      });
+    }
   };
 
-
+  const foldReply = () => foldAnswer(assistantInput, assistantReply, "/micro assistant");
 
   return (
     <div className="min-h-screen bg-background p-4 space-y-4">
@@ -133,6 +146,9 @@ export default function MicroAI() {
           <span className="text-[11px] font-mono text-muted-foreground">Seedling {seedling ? "ON" : "OFF"}</span>
           <Switch checked={seedling} onCheckedChange={toggleSeedling} />
           <Badge variant="outline" className="text-[10px] font-mono">active: {activeModel}</Badge>
+          <Button size="sm" variant="outline" className="min-h-11" asChild>
+            <Link to="/micro/board" className="text-[11px]">Compare models</Link>
+          </Button>
         </div>
       </div>
 
@@ -167,7 +183,14 @@ export default function MicroAI() {
                   className="w-full accent-primary"
                 />
               </div>
-              <p className="text-[10px] text-muted-foreground">Model, temperature, max tokens and the Seedling lock are remembered on this device.</p>
+              <div className="flex items-center justify-between gap-2 rounded-md border border-border/40 bg-muted/20 p-2">
+                <div>
+                  <p className="text-[11px] font-mono text-foreground">Share answers to the circle</p>
+                  <p className="text-[10px] text-muted-foreground">Every answer is folded into /pods/surface automatically.</p>
+                </div>
+                <Switch checked={autoFold} onCheckedChange={setAutoFold} />
+              </div>
+              <p className="text-[10px] text-muted-foreground">Model, temperature, max tokens, sharing and the Seedling lock are remembered on this device.</p>
             </CardContent>
           </Card>
 
