@@ -25,6 +25,8 @@ export interface MicroLogEntry {
   latencyMs: number;
   fellBack: boolean;
   error?: string;
+  tokens?: number;
+  tokensPerSec?: number;
 }
 
 const LOG_KEY = "jacky.microai.log";
@@ -91,12 +93,16 @@ export async function routeMicroPrompt(
 
   try {
     const out = await attempt(model, false);
-    appendMicroLog({ ts: Date.now(), model: model.id, prompt, response: out.text, latencyMs: out.metrics.loadMs, fellBack: false });
+    appendMicroLog({
+      ts: Date.now(), model: model.id, prompt, response: out.text,
+      latencyMs: out.metrics.loadMs, fellBack: false,
+      tokens: out.metrics.tokens, tokensPerSec: out.metrics.tokensPerSec,
+    });
     return out;
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     if (model.id === FALLBACK_MODEL.id) {
-      appendMicroLog({ ts: Date.now(), model: model.id, prompt, response: "", latencyMs: performance.now() - t0, fellBack: false, error: errMsg });
+      appendMicroLog({ ts: Date.now(), model: model.id, prompt, response: "", latencyMs: performance.now() - t0, fellBack: false, error: errMsg, tokens: 0, tokensPerSec: 0 });
       return {
         text: "",
         metrics: { loadMs: performance.now() - t0, inferenceMs: 0, tokens: 0, tokensPerSec: 0, memoryApproxMB: model.sizeMB, model: model.id, fellBack: false, error: errMsg },
@@ -104,11 +110,15 @@ export async function routeMicroPrompt(
     }
     try {
       const out = await attempt(FALLBACK_MODEL, true);
-      appendMicroLog({ ts: Date.now(), model: FALLBACK_MODEL.id, prompt, response: out.text, latencyMs: out.metrics.loadMs, fellBack: true, error: `primary failed: ${errMsg}` });
+      appendMicroLog({
+        ts: Date.now(), model: FALLBACK_MODEL.id, prompt, response: out.text,
+        latencyMs: out.metrics.loadMs, fellBack: true, error: `primary failed: ${errMsg}`,
+        tokens: out.metrics.tokens, tokensPerSec: out.metrics.tokensPerSec,
+      });
       return out;
     } catch (err2) {
       const err2Msg = err2 instanceof Error ? err2.message : String(err2);
-      appendMicroLog({ ts: Date.now(), model: FALLBACK_MODEL.id, prompt, response: "", latencyMs: performance.now() - t0, fellBack: true, error: `${errMsg}; fallback failed: ${err2Msg}` });
+      appendMicroLog({ ts: Date.now(), model: FALLBACK_MODEL.id, prompt, response: "", latencyMs: performance.now() - t0, fellBack: true, error: `${errMsg}; fallback failed: ${err2Msg}`, tokens: 0, tokensPerSec: 0 });
       return {
         text: "",
         metrics: { loadMs: performance.now() - t0, inferenceMs: 0, tokens: 0, tokensPerSec: 0, memoryApproxMB: FALLBACK_MODEL.sizeMB, model: FALLBACK_MODEL.id, fellBack: true, error: `${errMsg}; fallback failed: ${err2Msg}` },

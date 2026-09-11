@@ -3,6 +3,8 @@ export interface MicroSettings {
   temperature: number;
   maxTokens: number;
   seedling: boolean;
+  /** Automatically fold every micro answer into the shared knowledge circle. */
+  autoFold: boolean;
 }
 
 const KEY = "jacky.microai.settings.v1";
@@ -12,6 +14,7 @@ export const DEFAULT_SETTINGS: MicroSettings = {
   temperature: 0.7,
   maxTokens: 512,
   seedling: false,
+  autoFold: false,
 };
 
 export function readSettings(): MicroSettings {
@@ -29,6 +32,7 @@ export function readSettings(): MicroSettings {
       temperature: Number.isFinite(p.temperature) ? Math.min(2, Math.max(0, p.temperature)) : DEFAULT_SETTINGS.temperature,
       maxTokens: Number.isFinite(p.maxTokens) ? Math.min(4096, Math.max(32, Math.round(p.maxTokens))) : DEFAULT_SETTINGS.maxTokens,
       seedling: !!p.seedling,
+      autoFold: !!p.autoFold,
     };
   } catch {
     return DEFAULT_SETTINGS;
