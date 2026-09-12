@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { GripVertical } from "lucide-react";
 
 /**
@@ -11,15 +11,28 @@ import { GripVertical } from "lucide-react";
 interface Pos { x: number; y: number }
 const STORAGE_KEY = "jackie.toolbar.pos.v1";
 const HOLD_MS = 800;
+/** Vertical spacing between stacked toolbars at their default position. */
+const ROW_HEIGHT = 60;
 
-export function DraggableToolbar({ children, storageKey = STORAGE_KEY }: { children: ReactNode; storageKey?: string }) {
+export function DraggableToolbar({
+  children,
+  storageKey = STORAGE_KEY,
+  // Rows above the bottom resting place. Two toolbars that both default to row
+  // 0 land on exactly the same spot and the later one hides the other's
+  // buttons, so each additional toolbar takes the next row up.
+  defaultRow = 0,
+}: {
+  children: ReactNode;
+  storageKey?: string;
+  defaultRow?: number;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<Pos>(() => {
     try {
       const raw = localStorage.getItem(storageKey);
       if (raw) return JSON.parse(raw);
     } catch {}
-    return { x: window.innerWidth - 320, y: window.innerHeight - 180 };
+    return { x: window.innerWidth - 320, y: window.innerHeight - 180 - defaultRow * ROW_HEIGHT };
   });
   const [armed, setArmed] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -88,10 +101,25 @@ export function DraggableToolbar({ children, storageKey = STORAGE_KEY }: { child
     };
   }, [armed]);
 
-  useEffect(() => {
-    const onResize = () => setPos((p) => clamp(p));
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
+  // Clamp against the toolbar's real size, not just when the window changes.
+  //
+  // The starting position guesses a 320px bar, but the bar is the grip plus its
+  // content — the nav bar alone is ~370px — so the default put a strip of it
+  // past the right edge of the screen, and a stored position from a wider window
+  // or a wider bar did the same. clamp() only ever ran while dragging, so the
+  // clipped icons stayed unreachable. Measure on mount, and again whenever the
+  // element or the window changes size.
+  useLayoutEffect(() => {
+    const fit = () => setPos((p) => clamp(p));
+    fit();
+    window.addEventListener("resize", fit);
+    const el = ref.current;
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(fit) : null;
+    if (el && observer) observer.observe(el);
+    return () => {
+      window.removeEventListener("resize", fit);
+      observer?.disconnect();
+    };
   }, []);
 
   return (

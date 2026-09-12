@@ -339,7 +339,7 @@ function BattleScreen({ playerFaction, onExit, onRewards, forcedEnemy, difficult
 
   const endTurn = useCallback(() => {
     setBattle(prev => {
-      let s = { ...prev };
+      const s = { ...prev };
       addLog('── End turn ──');
 
       const tickBoard = (board: BoardState): BoardState => {

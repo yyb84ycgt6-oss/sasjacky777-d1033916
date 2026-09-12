@@ -126,7 +126,7 @@ export function GlobalStickyNotes() {
 
   return (
     <>
-      <DraggableToolbar storageKey="jackie.notes.toolbar.v1">
+      <DraggableToolbar storageKey="jackie.notes.toolbar.v1" defaultRow={1}>
         <div className="flex items-center gap-1">
           <button
             onClick={() => setOpen((v) => !v)}

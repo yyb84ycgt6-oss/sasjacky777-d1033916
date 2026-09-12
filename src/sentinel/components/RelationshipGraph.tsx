@@ -118,7 +118,7 @@ export function RelationshipGraph({ nodes: inNodes, edges, height = 560, onSelec
       for (let i = 0; i < N.length; i++) {
         for (let j = i + 1; j < N.length; j++) {
           const a = N[i], b = N[j];
-          let dx = a.x! - b.x!, dy = a.y! - b.y!;
+          const dx = a.x! - b.x!, dy = a.y! - b.y!;
           let d2 = dx * dx + dy * dy;
           if (d2 < 1) d2 = 1;
           const f = repulsion / d2;

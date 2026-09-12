@@ -1772,3 +1772,18 @@ cd <repository-name>
 npm i
 npm run dev
 ```
+
+### Checks
+
+```sh
+npm test          # unit tests (vitest)
+npm run lint      # eslint
+npm run build     # production build
+npm run smoke     # open every route in a real browser against ./dist
+```
+
+`npm run smoke` needs a build first. It serves `dist/` with the host attachment,
+walks every path in the route manifest, and fails on any route that comes up
+blank or throws — the class of breakage unit tests cannot see. Backend calls that
+cannot be reached are reported separately from app errors, so it is still
+meaningful with no network.

@@ -78,7 +78,7 @@ export default function GunitChat() {
 
         let nl: number;
         while ((nl = buffer.indexOf("\n")) !== -1) {
-          let line = buffer.slice(0, nl).trim();
+          const line = buffer.slice(0, nl).trim();
           buffer = buffer.slice(nl + 1);
           if (!line.startsWith("data: ")) continue;
           const json = line.slice(6);
