@@ -70,6 +70,7 @@ export type StationId =
   | "router-mesh"
   | "pod-station"
   | "ollama"
+  | "lm-studio"
   | "off-grid-mobile"
   | "llmfarm"
   | "mobile-llm"

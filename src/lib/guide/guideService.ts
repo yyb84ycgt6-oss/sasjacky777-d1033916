@@ -28,6 +28,8 @@ export interface GuideAnswer {
   fromModel: boolean;
   /** Which engine answered, or why none did. */
   reason: string;
+  /** The model that actually answered, as the runtime named it. Null when none did. */
+  model: string | null;
   /** Paths the model named that the app does not serve. Dropped, and reported. */
   dropped: string[];
 }
@@ -79,7 +81,7 @@ export async function askGuide(question: string, deps: GuideDeps): Promise<Guide
   );
 
   if (!engine) {
-    return { text: fallback, routes, fromModel: false, reason, dropped: [] };
+    return { text: fallback, routes, fromModel: false, reason, model: null, dropped: [] };
   }
 
   const prompt = [
@@ -89,9 +91,14 @@ export async function askGuide(question: string, deps: GuideDeps): Promise<Guide
   ].join("\n\n");
 
   try {
-    const { text } = await engine.run(prompt, GUIDANCE_MODEL.id);
+    // The preferred model is a request, not a requirement: LM Studio answers
+    // with whatever the operator has loaded, and reports which. Guidance names
+    // the model that actually spoke rather than the one it asked for.
+    const { text, model } = await engine.run(prompt, GUIDANCE_MODEL.id);
     const clean = text.trim();
-    if (!clean) return { text: fallback, routes, fromModel: false, reason: `${reason} — empty answer`, dropped: [] };
+    if (!clean) {
+      return { text: fallback, routes, fromModel: false, reason: `${reason} — empty answer`, model: null, dropped: [] };
+    }
 
     const dropped = unservedPaths(clean);
     if (dropped.length) {
@@ -103,12 +110,13 @@ export async function askGuide(question: string, deps: GuideDeps): Promise<Guide
         routes,
         fromModel: false,
         reason: `${reason} — answer named ${dropped.join(", ")}, which the app does not serve`,
+        model,
         dropped,
       };
     }
-    return { text: clean, routes, fromModel: true, reason, dropped: [] };
+    return { text: clean, routes, fromModel: true, reason, model, dropped: [] };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return { text: fallback, routes, fromModel: false, reason: `${reason} — ${message}`, dropped: [] };
+    return { text: fallback, routes, fromModel: false, reason: `${reason} — ${message}`, model: null, dropped: [] };
   }
 }

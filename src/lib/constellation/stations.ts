@@ -12,6 +12,7 @@
 import { jacky } from "@/lib/jackyClient";
 import { checkGuideWeights, GUIDE_WEIGHTS_PATH } from "@/lib/guide/weights";
 import { OLLAMA_HOST } from "@/lib/localAI";
+import { LM_STUDIO_HOST } from "@/lib/lmStudio";
 import { estimateStorageBudgetMB } from "@/lib/partitions/budget";
 import { MINIMUM_BUDGET_MB, planBudget } from "@/lib/partitions/registry";
 import {
@@ -247,6 +248,26 @@ export function buildStations(boundaries: StationBoundaries): Station[] {
           if (!res.ok) throw new Error(`ollama → HTTP ${res.status}`);
           const body = (await res.json()) as { models?: unknown[] };
           return `${body.models?.length ?? 0} models loaded locally`;
+        }),
+      ),
+    },
+    {
+      id: "lm-studio",
+      name: "LM Studio Hub",
+      repo: "yyb84ycgt6-oss/jacky",
+      purpose:
+        "The operator's weights, served where they already live. One file, one server, every client — no second copy on disk.",
+      stage: "field",
+      href: "/bridge",
+      offline: "full",
+      probe: withTimeout(
+        serviceProbe(`GET ${LM_STUDIO_HOST}/v1/models`, async (signal) => {
+          const res = await fetchImpl(`${LM_STUDIO_HOST}/v1/models`, { signal });
+          if (!res.ok) throw new Error(`lm studio → HTTP ${res.status}`);
+          const body = (await res.json()) as { data?: unknown[] };
+          const count = body.data?.length ?? 0;
+          if (!count) throw new Error("server is up but no model is loaded");
+          return `${count} model${count === 1 ? "" : "s"} loaded in the hub`;
         }),
       ),
     },

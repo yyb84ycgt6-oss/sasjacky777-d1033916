@@ -17,6 +17,7 @@
 import type { PartitionService } from "@/lib/partitions/service";
 import type { PartitionId } from "@/lib/partitions/types";
 import { OLLAMA_HOST, runLocalModel } from "@/lib/localAI";
+import { listModels, runLmStudio } from "@/lib/lmStudio";
 import { advancePlan, type PathPlan } from "@/lib/squad/pathPlanner";
 import { WorldObserver } from "@/lib/squad/observer";
 import {
@@ -71,6 +72,34 @@ export function ollamaEngine(
     },
     run: async (prompt, model) => {
       const result = await runLocalModel(prompt, model ? { model } : {});
+      return { text: result.text, model: result.model };
+    },
+  };
+}
+
+/**
+ * The LM Studio hub as an engine.
+ *
+ * Listed before Ollama wherever both are offered, because the operator's
+ * weights already live here: pointing at them costs nothing, while Ollama
+ * copies a blob into its own store. Same locality as Ollama — it is the same
+ * machine — so the offline-first ladder treats them identically and simply
+ * prefers whichever is ready first in the list.
+ */
+export function lmStudioEngine(
+  // Wrapped for the same reason Ollama's is: a detached `fetch` throws
+  // "Illegal invocation" in a browser, which would read as the hub being down.
+  fetchImpl: (input: string, init?: RequestInit) => Promise<Response> = (input, init) => fetch(input, init),
+): InferenceEngine {
+  return {
+    id: "lm-studio",
+    name: "LM Studio",
+    locality: "lan",
+    // A hub with nothing loaded cannot answer, so "available" means a model is
+    // loaded — not merely that something is listening on the port.
+    available: async () => (await listModels(fetchImpl)).length > 0,
+    run: async (prompt, model) => {
+      const result = await runLmStudio(prompt, { model }, fetchImpl);
       return { text: result.text, model: result.model };
     },
   };
