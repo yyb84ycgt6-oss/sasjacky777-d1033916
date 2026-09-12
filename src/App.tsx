@@ -56,6 +56,7 @@ import GithubSync from "./pages/GithubSync";
 import LocalAITest from "./pages/LocalAITest";
 import MicroAI from "./pages/MicroAI";
 import MicroBoard from "./pages/MicroBoard";
+import NervousSystem from "./pages/NervousSystem";
 import { ERU_ALIASES } from "./lib/routeManifest";
 import RouteDebugOverlay from "./components/RouteDebugOverlay";
 import { UniversalFloatingNavBar } from "./components/UniversalFloatingNavBar";
@@ -274,6 +275,7 @@ const App = () => (
                 <Route path="/agent-compare" element={<ProtectedRoute><AgentCompare /></ProtectedRoute>} />
                 <Route path="/mesh" element={<ProtectedRoute><RouterMesh /></ProtectedRoute>} />
                 <Route path="/mesh/docs" element={<ProtectedRoute><RouterMeshDocs /></ProtectedRoute>} />
+                <Route path="/nervous" element={<ProtectedRoute><NervousSystem /></ProtectedRoute>} />
                 <Route path="/github" element={<ProtectedRoute><GithubSync /></ProtectedRoute>} />
                 <Route path="/local-ai" element={<ProtectedRoute><LocalAITest /></ProtectedRoute>} />
                 <Route path="/micro" element={<ProtectedRoute><MicroAI /></ProtectedRoute>} />

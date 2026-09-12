@@ -1,5 +1,16 @@
 # Seed Pods + Micro-Routers — Bridge Layer
 
+> **Shipped — all five parts (verified 12 Sep 2026).** Kept as the design record.
+>
+> | Part | Where it landed |
+> |---|---|
+> | 1 · Seed identity (colors + QR) | `src/components/pods/SeedCard.tsx` |
+> | 2 · Pod-bound routers | `supabase/functions/router-register`, `router-poll` |
+> | 3 · Lazy / streaming decompression | `src/lib/pods/podSlice.ts` — `openSlice()` |
+> | 4 · Y-axis fold | `supabase/functions/pod-fold`, `pod-search`, `pod-fetch` |
+> | 5 · Merge surface | `src/pages/FoldSurface.tsx` at `/pods/surface` |
+
+
 Connect the three pieces that already exist (`/eyepod`, `/mesh`, `/providers`) into the vision: **color-coded QR seeds, pod-bound routers, lazy decompression, and Y-axis folding**.
 
 Nothing gets rebuilt. Only bridges are added.

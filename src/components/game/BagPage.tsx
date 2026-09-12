@@ -21,7 +21,7 @@ const TABS: { key: string; label: string }[] = [
 ];
 
 export default function BagPage() {
-  const { state, setState, saveState, useGachaItem } = useGame();
+  const { state, setState, saveState, consumeGachaItem } = useGame();
   const [tab, setTab] = useState('all');
 
   const bag = state.bag || [];
@@ -35,9 +35,9 @@ export default function BagPage() {
 
   const filtered = tab === 'all' ? allItems : allItems.filter(i => i.category === tab);
 
-  const useBagItem = (item: typeof allItems[0]) => {
+  const consumeBagItem = (item: typeof allItems[0]) => {
     if (item.source === 'gacha') {
-      const ok = useGachaItem(item.id);
+      const ok = consumeGachaItem(item.id);
       if (ok) toast.success(`Used ${item.icon} ${item.name}`);
       else toast.error('Cannot use this item');
       return;
@@ -100,7 +100,7 @@ export default function BagPage() {
                   <p className="text-xs text-muted-foreground truncate">{item.description}</p>
                 </div>
                 {(item.category === 'resources' || item.source === 'gacha') && (
-                  <Button size="sm" className="h-7 text-xs shrink-0" onClick={() => useBagItem(item)}>Use</Button>
+                  <Button size="sm" className="h-7 text-xs shrink-0" onClick={() => consumeBagItem(item)}>Use</Button>
                 )}
               </CardContent>
             </Card>

@@ -6,36 +6,27 @@
  * Every navigation action is an impulse traveling through the OS.
  */
 
-type EventName = 
-  | 'nav:back'
-  | 'nav:home'
-  | 'nav:pods'
-  | 'nav:agents'
-  | 'nav:files'
-  | 'nav:time'
-  | 'nav:notif'
-  | 'nav:settings'
-  | 'nav:notes:new'
-  | 'nav:notes:open'
-  | 'nav:notes:save'
-  | 'ufnb:drag'
-  | 'ufnb:dock'
-  | 'ufnb:resize'
-  | 'notes:create'
-  | 'notes:update'
-  | 'notes:pin'
-  | 'notes:link:pod'
-  | 'notes:link:agent'
-  | 'filing:write'
-  | 'filing:read'
-  | 'filing:archive'
-  | 'agent:activate'
-  | 'agent:deactivate'
-  | 'pod:enter'
-  | 'pod:leave'
-  | 'nav:custom'
-  | 'pod:fold'
-  | 'pod:slice';
+/**
+ * Every impulse the system can send, in one list.
+ *
+ * Exported as values, not just as a type, because an inspector cannot subscribe
+ * to a type — and until one could enumerate these, the bus had exactly one
+ * consumer and no way to see what was travelling through it.
+ */
+export const EVENT_NAMES = [
+  'nav:back', 'nav:home', 'nav:pods', 'nav:agents', 'nav:files', 'nav:time',
+  'nav:notif', 'nav:settings', 'nav:notes:new', 'nav:notes:open', 'nav:notes:save',
+  'ufnb:drag', 'ufnb:dock', 'ufnb:resize',
+  'notes:create', 'notes:update', 'notes:pin', 'notes:link:pod', 'notes:link:agent',
+  'filing:write', 'filing:read', 'filing:archive',
+  'agent:activate', 'agent:deactivate',
+  'pod:enter', 'pod:leave',
+  'nav:custom', 'pod:fold', 'pod:slice',
+] as const;
+
+export type EventName = (typeof EVENT_NAMES)[number];
+
+
 
 type EventPayload = Record<string, any>;
 
@@ -75,6 +66,17 @@ class RouterNervousSystem {
     }
   }
 
+  /**
+   * Watch every event with one subscription.
+   *
+   * Returns a single unsubscribe that detaches all of them, so an inspector
+   * cannot leak a listener per event name when it unmounts.
+   */
+  onAny(listener: Listener) {
+    const offs = EVENT_NAMES.map((event) => this.on(event, listener));
+    return () => offs.forEach((off) => off());
+  }
+
   getHistory(filter?: EventName) {
     return filter 
       ? this.history.filter(h => h.event === filter)
@@ -90,6 +92,18 @@ class RouterNervousSystem {
 
 export const routerNS = new RouterNervousSystem();
 
+const FILING_PREFIX = 'jackie.filing.';
+const ARCHIVE_PREFIX = 'jackie.filing.archived.';
+
+export interface FiledRecord {
+  key: string;
+  entityType: string;
+  id: string;
+  archived: boolean;
+  bytes: number;
+  data: unknown;
+}
+
 /**
  * Filing System Bridge – every note/pod/agent is a file
  */
@@ -97,19 +111,72 @@ export const FilingSystem = {
   write: (entityType: 'note' | 'pod' | 'agent' | 'task', id: string, data: any) => {
     routerNS.emit('filing:write', { entityType, id, data, ts: Date.now() });
     try {
-      const key = `jackie.filing.${entityType}.${id}`;
+      const key = `${FILING_PREFIX}${entityType}.${id}`;
       localStorage.setItem(key, JSON.stringify(data));
     } catch {}
   },
   read: (entityType: string, id: string) => {
     try {
-      const raw = localStorage.getItem(`jackie.filing.${entityType}.${id}`);
+      const raw = localStorage.getItem(`${FILING_PREFIX}${entityType}.${id}`);
       return raw ? JSON.parse(raw) : null;
     } catch { return null; }
   },
+  /**
+   * Every record the filing system holds, live and archived.
+   *
+   * There was no way to read these back without already knowing an id, so the
+   * writes below piled up unseen. Enumerating the keys is what lets a person
+   * look at their own filing cabinet.
+   */
+  list: (): FiledRecord[] => {
+    const found: FiledRecord[] = [];
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key) continue;
+        // Order matters: the archive prefix extends the live one, so a key has
+        // to be tested for archived first or every archived record reads as
+        // live, filed under an entity type of "archived".
+        const archived = key.startsWith(ARCHIVE_PREFIX);
+        const live = !archived && key.startsWith(FILING_PREFIX);
+        if (!live && !archived) continue;
+        const [entityType, ...rest] = key.slice((archived ? ARCHIVE_PREFIX : FILING_PREFIX).length).split('.');
+        const raw = localStorage.getItem(key) ?? '';
+        let data: unknown = null;
+        try { data = JSON.parse(raw); } catch { data = raw; }
+        found.push({ key, entityType, id: rest.join('.'), archived, bytes: raw.length, data });
+      }
+    } catch { /* storage unavailable */ }
+    return found.sort((a, b) => a.entityType.localeCompare(b.entityType) || a.id.localeCompare(b.id));
+  },
+  /**
+   * Archiving used to emit an event and leave the record exactly where it was,
+   * so nothing was ever actually archived. It now moves the record out of the
+   * live drawer and into the archive one, which is what the word promises.
+   */
   archive: (entityType: string, id: string) => {
     routerNS.emit('filing:archive', { entityType, id });
-  }
+    try {
+      const key = `${FILING_PREFIX}${entityType}.${id}`;
+      const raw = localStorage.getItem(key);
+      if (raw === null) return false;
+      localStorage.setItem(`${ARCHIVE_PREFIX}${entityType}.${id}`, raw);
+      localStorage.removeItem(key);
+      return true;
+    } catch { return false; }
+  },
+  /** Puts an archived record back in the live drawer. */
+  restore: (entityType: string, id: string) => {
+    try {
+      const key = `${ARCHIVE_PREFIX}${entityType}.${id}`;
+      const raw = localStorage.getItem(key);
+      if (raw === null) return false;
+      localStorage.setItem(`${FILING_PREFIX}${entityType}.${id}`, raw);
+      localStorage.removeItem(key);
+      routerNS.emit('filing:write', { entityType, id, restored: true, ts: Date.now() });
+      return true;
+    } catch { return false; }
+  },
 };
 
 export default routerNS;

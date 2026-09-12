@@ -68,6 +68,7 @@ export const CORE_ROUTES: RouteEntry[] = [
   { path: "/eyepod/surface", label: "Fold Surface (alias)", group: "ops", alias: true },
   { path: "/mesh", label: "Router Mesh", group: "ops" },
   { path: "/mesh/docs", label: "Router Mesh Docs", group: "ops" },
+  { path: "/nervous", label: "Nervous System (impulses + filing cabinet)", group: "ops" },
   { path: "/github", label: "GitHub Sync", group: "ops" },
   { path: "/eru/visualizers", label: "Visualizer Lab", group: "eru" },
 ];

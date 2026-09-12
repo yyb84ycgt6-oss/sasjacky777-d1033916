@@ -9,6 +9,7 @@ import {
   Scale, BarChart3, User, Archive, Trophy, Shield, Layers,
   ChevronRight, Wallet, Lock, AlertTriangle, Mail
 } from 'lucide-react';
+import { toast } from 'sonner';
 
 export interface RoomDef {
   id: string;
@@ -85,7 +86,15 @@ export default function RoomHub({ onNavigate }: RoomHubProps) {
             <p className="text-[10px] text-muted-foreground">Your digital command center</p>
           </div>
           <button
-            onClick={() => wallet.status === 'connected' ? onNavigate('security') : connectWallet()}
+            onClick={() => {
+              if (wallet.status === 'connected') return onNavigate('security');
+              // Pressing it explains why nothing happens, instead of leaving a
+              // person to press it again.
+              if (wallet.status === 'unavailable') {
+                return toast(wallet.detail ?? 'Wallet connection is not available in this build.');
+              }
+              return connectWallet();
+            }}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border/50 bg-card/80 text-xs font-medium transition-colors active:scale-95 min-h-[44px]"
           >
             <Wallet size={14} className={wallet.status === 'connected' ? 'text-primary' : 'text-muted-foreground'} />
@@ -93,6 +102,8 @@ export default function RoomHub({ onNavigate }: RoomHubProps) {
               ? <span className="text-foreground">{formatAddress(wallet.address)}</span>
               : wallet.status === 'connecting'
               ? <span className="text-muted-foreground animate-pulse">Connecting...</span>
+              : wallet.status === 'unavailable'
+              ? <span className="text-muted-foreground">Wallet not wired up</span>
               : <span className="text-muted-foreground">Connect Wallet</span>
             }
           </button>
