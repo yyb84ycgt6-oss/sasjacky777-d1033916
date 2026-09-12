@@ -145,6 +145,27 @@ function save(key, val) { localStorage.setItem('vse_' + key, JSON.stringify(val)
 const ThemeCtx = createContext(null);
 
 export function ThemeProvider({ children }) {
+  // Inside Jackie this provider is mounted over the Eru subtree only, while
+  // Jackie owns the theme everywhere else. Every effect below writes inline
+  // custom properties onto <html> and <body>, and nothing ever took them off
+  // again — so one visit to an Eru page used to repaint the whole app in Eru's
+  // palette for the rest of the session. Snapshot the inline style on mount and
+  // put it back on unmount, so the Eru theme engine stays scoped to Eru.
+  // Jackie's own theming is class-based, so nothing of its own is lost here.
+  useEffect(() => {
+    const root = document.documentElement;
+    const rootStyle = root.getAttribute('style');
+    const bodyStyle = document.body.getAttribute('style');
+    const bgDensity = document.body.getAttribute('data-bg-density');
+    return () => {
+      const restore = (el, attr, value) =>
+        value === null ? el.removeAttribute(attr) : el.setAttribute(attr, value);
+      restore(root, 'style', rootStyle);
+      restore(document.body, 'style', bodyStyle);
+      restore(document.body, 'data-bg-density', bgDensity);
+    };
+  }, []);
+
   const [colorMode,      setColorModeRaw]= useState(() => load('colorMode'));
   const [bg,             setBgRaw]       = useState(() => load('bg'));
   const [bgOpacity,      setBgOpacity]   = useState(() => load('bgOpacity'));

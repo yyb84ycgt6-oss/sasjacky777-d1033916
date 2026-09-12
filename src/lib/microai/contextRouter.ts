@@ -142,7 +142,10 @@ export interface EngineChoice {
  * waited for on a train.
  */
 export function selectEngine(
-  router: ContextRouterSpec,
+  // Only the name and the ladder are consulted, so anything that declares a
+  // ladder can be routed — the Guide reads the app's own manifest rather than a
+  // partition, and still has to obey the same offline-first order.
+  router: { name: string; ladder: EngineLocality[] },
   engines: InferenceEngine[],
   ready: ReadonlySet<string>,
   online: boolean,

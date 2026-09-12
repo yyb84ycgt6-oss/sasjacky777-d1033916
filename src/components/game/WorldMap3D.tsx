@@ -248,7 +248,7 @@ function loadChunksAround(
 
   // Velocity-based prefetch: extend the load region in the direction of travel
   // so chunks generate before the player crosses into them.
-  let prefetchCells: Array<[number, number]> = [];
+  const prefetchCells: Array<[number, number]> = [];
   if (velocity) {
     const speed = Math.hypot(velocity.vx, velocity.vz);
     // Only prefetch when actually moving — convert world units/s to chunk lookahead

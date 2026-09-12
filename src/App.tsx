@@ -50,6 +50,7 @@ import PCDesktop from "./pages/PCDesktop";
 import PcApps from "./pages/PcApps";
 import PathRouter from "./pages/PathRouter";
 import Workstation from "./pages/Workstation";
+import Guide from "./pages/Guide";
 import JackieCore from "./pages/JackieCore";
 import GithubSync from "./pages/GithubSync";
 import LocalAITest from "./pages/LocalAITest";
@@ -59,6 +60,7 @@ import { ERU_ALIASES } from "./lib/routeManifest";
 import RouteDebugOverlay from "./components/RouteDebugOverlay";
 import { UniversalFloatingNavBar } from "./components/UniversalFloatingNavBar";
 import { GlobalStickyNotes } from "./components/GlobalStickyNotes";
+import { GuideDock } from "./components/GuideDock";
 
 const EruRouter = lazy(() => import("./eru/EruRouter"));
 
@@ -159,6 +161,14 @@ const App = () => (
                   }
                 />
                 <Route path="/work" element={<Navigate to="/workstation" replace />} />
+                <Route
+                  path="/guide"
+                  element={
+                    <ProtectedRoute>
+                      <Guide />
+                    </ProtectedRoute>
+                  }
+                />
                 <Route
                   path="/pc"
                   element={
@@ -304,6 +314,7 @@ const App = () => (
               </SandboxCatcher>
               <UniversalFloatingNavBar />
               <GlobalStickyNotes />
+              <GuideDock />
             </BrowserRouter>
             </TooltipProvider>
           </I18nProvider>

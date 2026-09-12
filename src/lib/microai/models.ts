@@ -19,10 +19,20 @@ export const MICRO_MODELS: MicroModel[] = [
   { id: "axl-micro-8m",         name: "AXL Micro 8M",       family: "axl-micro series",   sizeLabel: "~15 MB", sizeMB: 15,  type: "reasoning" },
   { id: "awa-micro-1m",         name: "AWA Micro 1M",       family: "awa-micro series",   sizeLabel: "~3 MB",  sizeMB: 3,   type: "chat" },
   { id: "awa-micro-4m",         name: "AWA Micro 4M",       family: "awa-micro series",   sizeLabel: "~8 MB",  sizeMB: 8,   type: "general" },
-  { id: "bonsai-1.7b",          name: "Bonsai 1.7B",        family: "bonsai",             sizeLabel: "~1.1 GB", sizeMB: 1100, type: "reasoning" },
+  { id: "bonsai-1.7b",          name: "Bonsai 1.7B",        family: "bonsai",             sizeLabel: "~248 MB", sizeMB: 248,  type: "reasoning" },
 ];
 
 export const FALLBACK_MODEL = MICRO_MODELS[0];
+
+/**
+ * The model that answers app guidance, everywhere, permanently.
+ *
+ * It is the largest entry in the registry by two orders of magnitude and that
+ * is the point: guidance is the one job where a 2 MB model cannot help, and the
+ * one job that has to work with the radio off. 248 MB is small enough to ship
+ * with the app and hold in the Model Bay, big enough to answer in sentences.
+ */
+export const GUIDANCE_MODEL = MICRO_MODELS.find((m) => m.id === "bonsai-1.7b")!;
 
 export function findModel(id: string): MicroModel {
   return MICRO_MODELS.find(m => m.id === id) ?? FALLBACK_MODEL;

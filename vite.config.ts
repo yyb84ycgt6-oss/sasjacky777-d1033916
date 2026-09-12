@@ -44,7 +44,12 @@ export default defineConfig(({ mode }) => ({
         // PC rebuild — and it hard-fails the build outright, because the
         // on-device AI wasm is 21.6 MB against workbox's per-file limit.
         // Runtime caching below still picks these up on demand.
-        globIgnores: ["**/pc-os/**"],
+        // models/** is the guidance model shipped with the app: one 248 MB GGUF.
+        // Workbox's per-file limit fails the build on it outright, the same way
+        // the PC's 21.6 MB wasm does, and precaching a quarter of a gigabyte
+        // nobody reads over HTTP would be wrong even if it fit — Ollama builds
+        // the model from the file once and answers from its own copy after that.
+        globIgnores: ["**/pc-os/**", "**/models/**"],
         navigateFallback: "/index.html",
         // /pc-os/index.html is a real navigation when the PC is opened in its
         // own tab. Without this it would fall back to Jackie's shell offline,

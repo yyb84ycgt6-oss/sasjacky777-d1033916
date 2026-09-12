@@ -519,7 +519,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
       // Gear drop on victory
       let newInventory = [...(prev.gearInventory || [])];
-      let newCraftMats = { ...(prev.craftingMaterials || {}) };
+      const newCraftMats = { ...(prev.craftingMaterials || {}) };
       if (report.victory) {
         const exp = EXPEDITIONS.find(e => e.id === march.expeditionId);
         const gear = rollGearDrop(exp?.difficulty || 1);
@@ -1086,7 +1086,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       // Buff-type items: for now just apply as resource bonus (future: proper buff system)
 
       // Remove or decrement from inventory
-      let newInv = [...(prev.gachaInventory || [])];
+      const newInv = [...(prev.gachaInventory || [])];
       const idx = newInv.findIndex(i => i.id === itemId);
       if (idx >= 0) {
         if (newInv[idx].quantity > 1) {
@@ -1116,7 +1116,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     }
 
     setState(prev => {
-      let newInv = [...(prev.gachaInventory || [])];
+      const newInv = [...(prev.gachaInventory || [])];
       // Deduct fragments
       for (const frag of recipe.fragments) {
         const idx = newInv.findIndex((i: GachaItem) => i.name === frag.name);
