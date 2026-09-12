@@ -1776,10 +1776,11 @@ npm run dev
 ### Checks
 
 ```sh
-npm test          # unit tests (vitest)
-npm run lint      # eslint
-npm run build     # production build
-npm run smoke     # open every route in a real browser against ./dist
+npm test              # unit tests (vitest)
+npm run lint          # eslint
+npm run build         # production build
+npm run smoke         # open every route in a real browser against ./dist
+npm run smoke:offline # the same walk with the network pulled
 ```
 
 `npm run smoke` needs a build first. It serves `dist/` with the host attachment,
@@ -1787,3 +1788,12 @@ walks every path in the route manifest, and fails on any route that comes up
 blank or throws — the class of breakage unit tests cannot see. Backend calls that
 cannot be reached are reported separately from app errors, so it is still
 meaningful with no network.
+
+`npm run smoke:offline` is the claim this system rests on, checked rather than
+asserted. It loads once, waits for the service worker to be **controlling** the
+page — not merely registered, which is the distinction that decides whether a
+route renders or dies on the browser's own error screen — then pulls the network
+and walks all of it again, ending on the guide, which must still answer. Note
+that a browser's offline mode also blocks loopback, which real airplane mode does
+not: a model served on 127.0.0.1 is unreachable under this check, so the guide is
+held to its manifest answer, the one that needs nothing at all.

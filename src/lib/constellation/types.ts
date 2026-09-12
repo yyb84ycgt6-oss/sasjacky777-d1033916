@@ -61,6 +61,7 @@ export type StationId =
   | "guide"
   | "partitions"
   | "self-host"
+  | "offline-shell"
   | "jacky-engine"
   | "jacky-console"
   | "core-keeper"

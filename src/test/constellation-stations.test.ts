@@ -14,6 +14,7 @@ const STATIONS = buildStations({
   fetch: async () => new Response("", { status: 200 }),
   jackyStatus: async () => "stub",
   storageBudgetMB: async () => 100_000,
+  shellWorker: async () => "shell worker controlling · 1283 files held locally",
 });
 
 describe("station table", () => {

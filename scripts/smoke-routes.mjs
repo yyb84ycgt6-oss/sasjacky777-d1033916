@@ -12,6 +12,7 @@
  *   npm run build
  *   npm run smoke                 # every route
  *   npm run smoke -- /eru/music   # just these
+ *   npm run smoke -- --offline    # every route with the network pulled
  *
  * It serves ./dist with the host attachment, drives Chromium through
  * Playwright, and exits non-zero if any route failed.
@@ -24,6 +25,13 @@
  * - Backend calls fail when the machine cannot reach Supabase. Those show up as
  *   "Failed to fetch" and are counted separately from app errors: a page that
  *   renders its empty state offline is working, a page that throws is not.
+ * - `--offline` is the claim this whole system rests on, checked rather than
+ *   asserted: load once, wait for the service worker to actually be controlling
+ *   the page, then pull the network and walk every route again. It fails if a
+ *   route stops rendering or the guide stops answering. Note the browser's
+ *   offline mode also blocks loopback, which real airplane mode does not — so a
+ *   local model on 127.0.0.1 is unreachable here and the guide is checked on
+ *   its manifest answer, the one that must never need anything at all.
  */
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -102,7 +110,10 @@ function fakeSession() {
 const NETWORK_NOISE = /Failed to fetch|ERR_TUNNEL_CONNECTION_FAILED|ERR_NAME_NOT_RESOLVED|ERR_INTERNET_DISCONNECTED|Failed to load resource|net::/;
 
 async function main() {
-  const routes = process.argv.slice(2).length ? process.argv.slice(2) : allRoutes();
+  const args = process.argv.slice(2);
+  const offline = args.includes("--offline");
+  const named = args.filter((a) => !a.startsWith("--"));
+  const routes = named.length ? named : allRoutes();
   if (!existsSync(join(ROOT, "dist/index.html"))) {
     console.error("No build to test. Run `npm run build` first.");
     process.exit(2);
@@ -118,6 +129,38 @@ async function main() {
     await context.addInitScript(([key, value]) => {
       try { localStorage.setItem(key, value); } catch { /* private mode */ }
     }, [`sb-${PROJECT_REF}-auth-token`, JSON.stringify(fakeSession())]);
+  }
+
+  if (offline) {
+    // One online load, so the worker installs and precaches. Waiting for
+    // `controller` rather than a timeout is the point: a worker that has
+    // installed but not claimed this page leaves the next navigation going to
+    // the network, and offline it dies there — which is exactly what a guessed
+    // timeout hid the first time this was measured.
+    const warm = await context.newPage();
+    await warm.goto(BASE + "/", { waitUntil: "domcontentloaded" });
+    const claimed = await warm.evaluate(async () => {
+      if (!("serviceWorker" in navigator)) return { ok: false, why: "no service worker support" };
+      const reg = await navigator.serviceWorker.ready;
+      const started = Date.now();
+      while (!navigator.serviceWorker.controller && Date.now() - started < 120000) {
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      return {
+        ok: !!navigator.serviceWorker.controller,
+        state: reg.active?.state,
+        waitedMs: Date.now() - started,
+      };
+    });
+    await warm.close();
+    if (!claimed.ok) {
+      console.error(`The service worker never took control (${claimed.why ?? claimed.state}), so nothing can work offline.`);
+      await browser.close();
+      host?.kill();
+      process.exit(1);
+    }
+    console.log(`Service worker ${claimed.state} and controlling after ${claimed.waitedMs}ms. Going offline.\n`);
+    await context.setOffline(true);
   }
 
   let failed = 0;
@@ -156,11 +199,32 @@ async function main() {
     for (const e of appErrors) console.log(`       ${e}`);
   }
 
+  // The guide is the one surface that must answer whatever else is missing, so
+  // it is checked as behaviour, not as a page that rendered.
+  let guideFailed = false;
+  const guidePage = await context.newPage();
+  try {
+    await guidePage.goto(BASE + "/workstation", { waitUntil: "domcontentloaded" });
+    await guidePage.waitForTimeout(2000);
+    await guidePage.getByLabel("Open the guide").click({ timeout: 15000 });
+    await guidePage.getByPlaceholder("How do I… / Where is…").fill("where do I manage my api keys");
+    await guidePage.keyboard.press("Enter");
+    await guidePage.waitForTimeout(3000);
+    const answered = await guidePage.locator("button", { hasText: "/keys" }).first().isVisible();
+    if (!answered) throw new Error("the guide offered no route for a question the manifest covers");
+    console.log(`ok   guide answered${offline ? " with the network pulled" : ""}`);
+  } catch (e) {
+    guideFailed = true;
+    console.log(`FAIL guide did not answer: ${String(e).split("\n")[0]}`);
+  }
+  await guidePage.close();
+
   await browser.close();
   host?.kill();
   console.log(`\n${routes.length - failed}/${routes.length} routes rendered clean` +
+    (offline ? " with the network pulled" : "") +
     (offlineOnly ? ` (${offlineOnly} of them with the backend unreachable)` : ""));
-  process.exit(failed ? 1 : 0);
+  process.exit(failed || guideFailed ? 1 : 0);
 }
 
 main().catch((e) => { console.error(e); process.exit(2); });
