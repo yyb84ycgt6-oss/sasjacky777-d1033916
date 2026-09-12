@@ -10,6 +10,7 @@
  * station cannot point at a path the router does not serve.
  */
 import { jacky } from "@/lib/jackyClient";
+import { checkGuideWeights, GUIDE_WEIGHTS_PATH } from "@/lib/guide/weights";
 import { OLLAMA_HOST } from "@/lib/localAI";
 import { estimateStorageBudgetMB } from "@/lib/partitions/budget";
 import { MINIMUM_BUDGET_MB, planBudget } from "@/lib/partitions/registry";
@@ -111,6 +112,25 @@ export function buildStations(boundaries: StationBoundaries): Station[] {
       offline: "full",
       required: true,
       probe: withTimeout(budgetProbe(storageBudgetMB)),
+    },
+    {
+      id: "guide",
+      name: "Guide Model",
+      repo: "yyb84ycgt6-oss/sasjacky777-d1033916",
+      purpose:
+        "Bonsai 1.7B, shipped with the app. The model that answers how to use this system, on every screen, with the radio off.",
+      stage: "core",
+      href: "/guide",
+      offline: "full",
+      probe: withTimeout(
+        serviceProbe(`HEAD ${GUIDE_WEIGHTS_PATH}`, async (signal) => {
+          const found = await checkGuideWeights(
+            (input, init) => fetchImpl(String(input), { ...init, signal }),
+          );
+          if (!found.present) throw new Error(found.detail);
+          return found.detail;
+        }),
+      ),
     },
     {
       id: "self-host",

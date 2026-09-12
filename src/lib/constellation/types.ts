@@ -58,6 +58,7 @@ export interface StationStatus extends StationProbeResult {
 
 export type StationId =
   | "jackie-shell"
+  | "guide"
   | "partitions"
   | "self-host"
   | "jacky-engine"

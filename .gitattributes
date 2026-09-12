@@ -4,3 +4,7 @@
 # repo-wide renormalisation would rewrite every tracked file in one diff.
 .githooks/* text eol=lf
 *.sh        text eol=lf
+
+# The guidance model ships with the app. GitHub rejects a plain blob over
+# 100 MB, so the weights are tracked with Git LFS (see public/models/README).
+public/models/**/*.gguf filter=lfs diff=lfs merge=lfs -text

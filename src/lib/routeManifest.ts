@@ -22,6 +22,7 @@ export type RouteEntry = {
 export const CORE_ROUTES: RouteEntry[] = [
   { path: "/", label: "Home", group: "core" },
   { path: "/workstation", label: "Workstation (the whole system, one flow)", group: "core" },
+  { path: "/guide", label: "Guide (how to use this app, answered on device)", group: "core" },
   { path: "/work", label: "Workstation (alias)", group: "core", alias: true },
   { path: "/path", label: "Path Router", group: "core" },
   { path: "/core", label: "Jackie Core (owner only)", group: "core" },
