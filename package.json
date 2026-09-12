@@ -13,6 +13,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "smoke": "node scripts/smoke-routes.mjs",
+    "smoke:offline": "node scripts/smoke-routes.mjs --offline",
     "host": "node host/serve.mjs ./dist"
   },
   "dependencies": {

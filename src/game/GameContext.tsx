@@ -54,7 +54,7 @@ interface GameContextType {
   getUnlockedTier: (lang: string) => 'bronze' | 'silver' | 'gold' | 'platinum' | 'mythic';
   pullGacha: (bannerId: string, count: number, skipCostDeduction?: boolean) => GachaItem[];
   receiveGachaItems: (items: GachaItem[], bannerId: string, costDeducted: number, costType: string, pity: number) => void;
-  useGachaItem: (itemId: string) => boolean;
+  consumeGachaItem: (itemId: string) => boolean;
   forgeFragments: (recipeId: string) => boolean;
   deductStars: (amount: number) => boolean;
   freeGachaPull: () => GachaItem[];
@@ -1065,7 +1065,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const useGachaItem = useCallback((itemId: string): boolean => {
+  const consumeGachaItem = useCallback((itemId: string): boolean => {
     const inv = state.gachaInventory || [];
     const item = inv.find(i => i.id === itemId);
     if (!item || item.category !== 'consumable' || !item.effect) return false;
@@ -1187,7 +1187,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       sendCreatureHunt, completeCreatureHunt,
       applyAIEvent,
       unlockSongTier, getUnlockedTier,
-      pullGacha, useGachaItem, forgeFragments, deductStars, receiveGachaItems,
+      pullGacha, consumeGachaItem, forgeFragments, deductStars, receiveGachaItems,
       freeGachaPull, addBattlePassXP, setState, saveState,
     }}>
       {children}

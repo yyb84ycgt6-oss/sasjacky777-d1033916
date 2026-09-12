@@ -12,6 +12,7 @@
 import { jacky } from "@/lib/jackyClient";
 import { checkGuideWeights, GUIDE_WEIGHTS_PATH } from "@/lib/guide/weights";
 import { OLLAMA_HOST } from "@/lib/localAI";
+import { LM_STUDIO_HOST } from "@/lib/lmStudio";
 import { estimateStorageBudgetMB } from "@/lib/partitions/budget";
 import { MINIMUM_BUDGET_MB, planBudget } from "@/lib/partitions/registry";
 import {
@@ -31,6 +32,13 @@ export interface StationBoundaries {
   jackyStatus: () => Promise<string>;
   /** Storage this device will actually grant, in MB. */
   storageBudgetMB: () => Promise<number>;
+  /**
+   * Resolves with a line describing the shell worker holding the app offline,
+   * or throws saying why the app is online-only right now. Injected like the
+   * rest: service workers and the cache API do not exist under test, and a
+   * station that could only be checked in a browser could not be checked at all.
+   */
+  shellWorker: () => Promise<string>;
 }
 
 /**
@@ -84,11 +92,39 @@ export function defaultBoundaries(): StationBoundaries {
         ? `engine ${status.status}, cpu ${status.cpu}%`
         : `engine ${status.status}, cpu ${status.cpu}%, gpu ${gpu}°C`;
     },
+    shellWorker: async () => {
+      const nav = typeof navigator === "undefined" ? undefined : navigator;
+      if (!nav || !("serviceWorker" in nav)) {
+        throw new Error("this browser has no service worker, so the app cannot be held offline");
+      }
+      const registrations = await nav.serviceWorker.getRegistrations();
+      const shell = registrations.find((r) =>
+        (r.active ?? r.installing ?? r.waiting)?.scriptURL.endsWith("/sw.js"),
+      );
+      if (!shell) throw new Error("no shell worker registered — the app is online-only until one is");
+      // Registered is not the same as ready. A worker still precaching, or one
+      // that has finished but not claimed this page, leaves the next navigation
+      // going to the network — where, offline, it dies on a browser error page.
+      if (!nav.serviceWorker.controller) {
+        const state = shell.installing
+          ? "still installing"
+          : shell.waiting
+            ? "waiting to activate"
+            : "not yet controlling this page";
+        throw new Error(`shell worker is ${state} — reload once it settles before relying on offline`);
+      }
+      const names = typeof caches === "undefined" ? [] : await caches.keys();
+      const counts = await Promise.all(
+        names.map(async (name) => (await (await caches.open(name)).keys()).length),
+      );
+      const held = counts.reduce((sum, n) => sum + n, 0);
+      return `shell worker controlling · ${held} files held locally`;
+    },
   };
 }
 
 export function buildStations(boundaries: StationBoundaries): Station[] {
-  const { fetch: fetchImpl, jackyStatus, storageBudgetMB } = boundaries;
+  const { fetch: fetchImpl, jackyStatus, storageBudgetMB, shellWorker } = boundaries;
 
   return [
     {
@@ -149,6 +185,18 @@ export function buildStations(boundaries: StationBoundaries): Station[] {
           return `serving from ${body.root ?? "an unnamed root"}`;
         }),
       ),
+    },
+    {
+      id: "offline-shell",
+      name: "Offline Shell",
+      repo: "yyb84ycgt6-oss/sasjacky777-d1033916",
+      purpose:
+        "The service worker holding the app itself. Until it is installed and controlling this page, closing the network closes the app.",
+      stage: "ignition",
+      required: true,
+      offline: "full",
+      href: "/workstation",
+      probe: withTimeout(serviceProbe("navigator.serviceWorker.controller", shellWorker)),
     },
     {
       id: "vault",
@@ -247,6 +295,26 @@ export function buildStations(boundaries: StationBoundaries): Station[] {
           if (!res.ok) throw new Error(`ollama → HTTP ${res.status}`);
           const body = (await res.json()) as { models?: unknown[] };
           return `${body.models?.length ?? 0} models loaded locally`;
+        }),
+      ),
+    },
+    {
+      id: "lm-studio",
+      name: "LM Studio Hub",
+      repo: "yyb84ycgt6-oss/jacky",
+      purpose:
+        "The operator's weights, served where they already live. One file, one server, every client — no second copy on disk.",
+      stage: "field",
+      href: "/bridge",
+      offline: "full",
+      probe: withTimeout(
+        serviceProbe(`GET ${LM_STUDIO_HOST}/v1/models`, async (signal) => {
+          const res = await fetchImpl(`${LM_STUDIO_HOST}/v1/models`, { signal });
+          if (!res.ok) throw new Error(`lm studio → HTTP ${res.status}`);
+          const body = (await res.json()) as { data?: unknown[] };
+          const count = body.data?.length ?? 0;
+          if (!count) throw new Error("server is up but no model is loaded");
+          return `${count} model${count === 1 ? "" : "s"} loaded in the hub`;
         }),
       ),
     },

@@ -1,7 +1,8 @@
-import { useEffect, useState, useRef, useMemo } from "react";
+import { useCallback, useEffect, useState, useRef, useMemo } from "react";
 import { DraggableToolbar } from "./DraggableToolbar";
-import { Plus, Pin, X, StickyNote, Link as LinkIcon, Palette, Edit2 } from "lucide-react";
+import { Plus, Pin, X, StickyNote, Link as LinkIcon, Palette, Edit2, Volume2, VolumeX } from "lucide-react";
 import { routerNS, FilingSystem } from "@/lib/routerNervousSystem";
+import { voiceManager } from "@/lib/voice-manager";
 
 const getContrastText = (bg: string): string => {
   const r = parseInt(bg.substr(1,2),16);
@@ -24,6 +25,7 @@ type Note = {
 };
 
 const STORAGE_KEY = "jackie.notes.v1";
+const VOICE_KEY = "jackie.notes.voice.v1";
 const COLORS = ["#FFF8C6", "#CDE7FF", "#FFD6E7", "#D6FFEA", "#FFE3C6"];
 
 export function GlobalStickyNotes() {
@@ -31,6 +33,33 @@ export function GlobalStickyNotes() {
   const [open, setOpen] = useState(true);
   const [dragId, setDragId] = useState<string | null>(null);
   const offset = useRef({ x: 0, y: 0 });
+  // Off until asked for. A surface that starts talking the first time you pin
+  // something is a worse surprise than one that never speaks — so the setting
+  // is opt-in, remembered, and hidden entirely where the browser has no voice.
+  const [speaks, setSpeaks] = useState(false);
+  const voiceSupported = useRef(voiceManager.isSupported());
+
+  useEffect(() => {
+    try { setSpeaks(localStorage.getItem(VOICE_KEY) === "on"); } catch { /* storage off */ }
+  }, []);
+
+  const confirm = useCallback((line: string) => {
+    if (!speaks || !voiceSupported.current) return;
+    // Confirmations must never break the action they are confirming, and the
+    // browser rejects speech for reasons of its own (no voices yet, autoplay
+    // policy), so a failure here is swallowed rather than surfaced.
+    voiceManager.speak(line).catch(() => {});
+  }, [speaks]);
+
+  const toggleVoice = useCallback(() => {
+    setSpeaks((on) => {
+      const next = !on;
+      try { localStorage.setItem(VOICE_KEY, next ? "on" : "off"); } catch { /* storage off */ }
+      if (next) voiceManager.speak("Voice confirmations on").catch(() => {});
+      else voiceManager.stop();
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     try {
@@ -52,6 +81,7 @@ export function GlobalStickyNotes() {
     const note: Note = { id, text: "New thought...", color, x: 120 + Math.random() * 200, y: 120 + Math.random() * 200, pinned: false };
     setNotes((n) => [...n, note]);
     routerNS.emit('notes:create', { note });
+    confirm("Note added");
     if (navigator.vibrate) navigator.vibrate(15);
   };
 
@@ -64,6 +94,7 @@ export function GlobalStickyNotes() {
       if (note.id !== id) return note;
       const pinned = !note.pinned;
       routerNS.emit('notes:pin', { id, pinned });
+      confirm(pinned ? "Pinned" : "Unpinned");
       if (navigator.vibrate) navigator.vibrate(pinned ? 30 : 10);
       return { ...note, pinned };
     }));
@@ -128,6 +159,16 @@ export function GlobalStickyNotes() {
     <>
       <DraggableToolbar storageKey="jackie.notes.toolbar.v1" defaultRow={1}>
         <div className="flex items-center gap-1">
+          {voiceSupported.current && (
+            <button
+              onClick={toggleVoice}
+              title={speaks ? "Voice confirmations on" : "Voice confirmations off"}
+              aria-pressed={speaks}
+              className={`p-1.5 rounded-full ${speaks ? "text-primary bg-secondary" : "text-muted-foreground hover:text-foreground hover:bg-secondary"}`}
+            >
+              {speaks ? <Volume2 size={16} /> : <VolumeX size={16} />}
+            </button>
+          )}
           <button
             onClick={() => setOpen((v) => !v)}
             title="Toggle Notes"

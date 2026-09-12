@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { isUsable, planRotation } from "../_shared/keyRotation.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -80,6 +81,95 @@ serve(async (req) => {
       return jsonResponse({ raw_key: rawKey, prefix, name, scopes, rate_limit: rateLimit });
     }
 
+    // ── POST /api-keys/rotate ──
+    //
+    // Issues a replacement that inherits the old key's name, scopes, rate limit
+    // and bot links, then retires the old one on a clock. The links are the part
+    // that is easy to forget and expensive to get wrong: a bot referencing the
+    // retired key through bot_api_keys would keep working right up to the grace
+    // deadline and then stop, which looks like the rotation broke it.
+    if (req.method === "POST" && action === "rotate") {
+      const body = await req.json();
+      const keyId = String(body.key_id || "");
+      if (!keyId) return jsonResponse({ error: "key_id required" }, 400);
+
+      const { data: existing, error: readErr } = await admin.from("api_keys")
+        .select("*")
+        .eq("id", keyId)
+        .eq("user_id", user.id)
+        .single();
+      if (readErr || !existing) return jsonResponse({ error: "Key not found" }, 404);
+      if (existing.superseded_by) {
+        return jsonResponse({ error: "This key has already been rotated" }, 409);
+      }
+
+      const plan = planRotation({ graceHours: Number(body.grace_hours), now: Date.now() });
+
+      const rawKey = generateRawKey();
+      const keyHash = await sha256(rawKey);
+      const prefix = rawKey.slice(0, 16);
+
+      const { data: replacement, error: insertErr } = await admin.from("api_keys").insert({
+        user_id: user.id,
+        name: existing.name,
+        key_hash: keyHash,
+        prefix,
+        scopes: existing.scopes,
+        rate_limit: existing.rate_limit,
+        rotated_from: existing.id,
+        rotated_at: plan.rotatedAt,
+      }).select("id").single();
+      if (insertErr || !replacement) throw insertErr ?? new Error("Could not issue the replacement key");
+
+      // Carry the bot links across before retiring the old key, so a bot is
+      // never pointing only at a key that is on its way out.
+      const { data: links } = await admin.from("bot_api_keys")
+        .select("bot_id")
+        .eq("api_key_id", existing.id)
+        .eq("user_id", user.id);
+
+      let linksCarried = 0;
+      if (links?.length) {
+        const { error: linkErr } = await admin.from("bot_api_keys").insert(
+          links.map((link: { bot_id: string }) => ({
+            bot_id: link.bot_id,
+            api_key_id: replacement.id,
+            user_id: user.id,
+          })),
+        );
+        // A failure here must not leave the new key orphaned and the old one
+        // retired, so the rotation is abandoned rather than half-applied.
+        if (linkErr) {
+          await admin.from("api_keys").delete().eq("id", replacement.id);
+          throw linkErr;
+        }
+        linksCarried = links.length;
+      }
+
+      const { error: retireErr } = await admin.from("api_keys")
+        .update({
+          superseded_by: replacement.id,
+          expires_at: plan.expiresAt,
+          is_active: !plan.immediate,
+        })
+        .eq("id", existing.id)
+        .eq("user_id", user.id);
+      if (retireErr) throw retireErr;
+
+      // Raw key returned ONCE, exactly as create does.
+      return jsonResponse({
+        raw_key: rawKey,
+        prefix,
+        name: existing.name,
+        scopes: existing.scopes,
+        rate_limit: existing.rate_limit,
+        replaced_key_id: existing.id,
+        expires_at: plan.expiresAt,
+        grace_hours: plan.graceHours,
+        bots_carried_over: linksCarried,
+      });
+    }
+
     // ── POST /api-keys/revoke ──
     if (req.method === "POST" && action === "revoke") {
       const { key_id } = await req.json();
@@ -96,7 +186,7 @@ serve(async (req) => {
     // ── GET /api-keys/list ──
     if (req.method === "GET" && action === "list") {
       const { data, error } = await admin.from("api_keys")
-        .select("id, name, prefix, scopes, rate_limit, is_active, created_at, last_used_at")
+        .select("id, name, prefix, scopes, rate_limit, is_active, created_at, last_used_at, expires_at, rotated_from, rotated_at, superseded_by")
         .eq("user_id", user.id)
         .order("created_at", { ascending: false });
       if (error) throw error;
@@ -115,6 +205,18 @@ serve(async (req) => {
         .eq("is_active", true)
         .single();
       if (error || !key) return jsonResponse({ error: "Invalid or revoked API key" }, 403);
+
+      // is_active alone stopped being sufficient the moment grace periods
+      // existed: a retiring key stays active on purpose, and this is the only
+      // thing that ever ends it.
+      if (!isUsable(key, Date.now())) {
+        return jsonResponse({
+          error: key.superseded_by
+            ? "This key was rotated and its grace period has ended. Use the key that replaced it."
+            : "This key has expired.",
+          rotated: !!key.superseded_by,
+        }, 403);
+      }
 
       // Rate limit check
       const windowStart = new Date(Date.now() - 60000).toISOString();

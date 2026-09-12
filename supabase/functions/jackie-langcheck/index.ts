@@ -66,7 +66,7 @@ Rules:
 
 function extractCode(text: string): string {
   // Prefer the first fenced block; fall back to whole text.
-  const fence = text.match(/```[a-zA-Z0-9_+#.\-]*\n([\s\S]*?)```/);
+  const fence = text.match(/```[a-zA-Z0-9_+#.-]*\n([\s\S]*?)```/);
   if (fence) return fence[1].trim();
   return text.trim();
 }

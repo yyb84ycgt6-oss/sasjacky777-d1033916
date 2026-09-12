@@ -68,6 +68,7 @@ export function checkJackyPath(raw: unknown): PathVerdict {
   if (decoded !== trimmed) {
     return { ok: false, reason: "path must not be percent-encoded" };
   }
+  // eslint-disable-next-line no-control-regex -- rejecting control characters is the whole purpose of this check
   if (/[\0-\x1f\x7f]/.test(decoded)) {
     return { ok: false, reason: "control characters in path" };
   }

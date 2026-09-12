@@ -19,6 +19,7 @@ function stationsWith(overrides: {
   asset?: number | Error;
   jacky?: string | Error;
   budgetMB?: number | Error;
+  shell?: string | Error;
 }): Station[] {
   return buildStations({
     fetch: async (url) => {
@@ -35,6 +36,10 @@ function stationsWith(overrides: {
     storageBudgetMB: async () => {
       if (overrides.budgetMB instanceof Error) throw overrides.budgetMB;
       return overrides.budgetMB ?? 100_000;
+    },
+    shellWorker: async () => {
+      if (overrides.shell instanceof Error) throw overrides.shell;
+      return overrides.shell ?? "shell worker controlling · 1283 files held locally";
     },
   });
 }
@@ -68,6 +73,34 @@ describe("ConstellationService", () => {
     await service.refresh();
 
     expect(service.getStatus("self-host")?.state).toBe("absent");
+  });
+
+  it("holds ignition while the shell worker is still installing, rather than promising offline", async () => {
+    // The failure this exists for was measured, not imagined: a worker that had
+    // precached most of the app but had not claimed the page left every offline
+    // navigation on the browser's own "No internet" screen. Registered is not
+    // ready, and the flow must not advance as though it were.
+    const service = new ConstellationService(
+      stationsWith({ shell: new Error("shell worker is still installing — reload once it settles before relying on offline") }),
+      () => true,
+      () => 42,
+    );
+    const snapshot = await service.refresh();
+
+    const shell = service.getStatus("offline-shell");
+    expect(shell?.state).toBe("absent");
+    expect(shell?.detail).toMatch(/still installing/);
+    expect(snapshot.flow.current).toBe("ignition");
+    expect(snapshot.flow.complete).toBe(false);
+  });
+
+  it("reports the shell worker holding the app once it controls the page", async () => {
+    const service = new ConstellationService(stationsWith({}), () => true, () => 42);
+    await service.refresh();
+
+    const shell = service.getStatus("offline-shell");
+    expect(shell?.state).toBe("live");
+    expect(shell?.detail).toMatch(/controlling/);
   });
 
   it("holds ignition when the device grants too little storage to be offline", async () => {
@@ -134,6 +167,7 @@ describe("ConstellationService", () => {
         fetch: async () => new Response("", { status: 200 }),
         jackyStatus: probed,
         storageBudgetMB: async () => 100_000,
+        shellWorker: async () => "shell worker controlling · 1283 files held locally",
       }),
       () => true,
     );

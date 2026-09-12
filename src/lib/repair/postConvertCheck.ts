@@ -93,7 +93,7 @@ const FAIL_PATTERNS: { re: RegExp; reason: string }[] = [
   { re: /unable to load model|failed to load model|invalid magic|unknown model architecture/i, reason: "the runner could not load the file" },
   { re: /out of memory|cuda error|insufficient memory/i, reason: "the load ran out of memory" },
   { re: /permission denied|access is denied/i, reason: "the file could not be read with these privileges" },
-  { re: /\"error\"\s*:/i, reason: "the runner returned an error object" },
+  { re: /"error"\s*:/i, reason: "the runner returned an error object" },
 ];
 
 /** Judge a finished smoke test from its own output. Never optimistic. */

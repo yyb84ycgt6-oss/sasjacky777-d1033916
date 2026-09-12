@@ -32,12 +32,29 @@
   - `docs/MUSE_SYSTEM_COMMAND_JACKIE_OS.md`
   - `docs/UFNB_MUSE_GLIMMER_SPEC.md`
 
-## Next Steps
-1. Integrate `GlobalStickyNotes` into `src/App.tsx` render tree
-2. Audit remaining pages for top-left Back fallback – UFNB provides universal fallback
-3. Implement voice confirmation hooks for notes
-4. Build Router Nervous System UI inspector
-5. Add filing system visual browser
+## Next Steps — all five done (12 Sep 2026)
+
+Kept here with what closed them, so the list reads as a record rather than a
+backlog someone has to re-derive.
+
+1. ~~Integrate `GlobalStickyNotes` into the `src/App.tsx` render tree~~ —
+   mounted beside the router, so it is present on every route.
+2. ~~Audit remaining pages for top-left Back fallback~~ — moot by construction:
+   `UniversalFloatingNavBar` is mounted globally and carries Back everywhere but
+   the root.
+3. ~~Voice confirmation hooks for notes~~ — `src/components/GlobalStickyNotes.tsx`
+   speaks through `src/lib/voice-manager.ts` on create and pin. Opt-in, remembered
+   in `jackie.notes.voice.v1`, and the control is hidden where the browser has no
+   speech synthesis. Off by default: a surface that starts talking unasked is a
+   worse surprise than one that never speaks.
+4. ~~Router Nervous System UI inspector~~ — `/nervous`
+   (`src/pages/NervousSystem.tsx`). Live impulses filtered by family, opening with
+   the bus's own history rather than an empty pane. Needed `EVENT_NAMES` and
+   `onAny()` on the bus, which is why nothing could watch it before.
+5. ~~Filing system visual browser~~ — same page. Reads the `jackie.filing.*` keys
+   back, grouped by entity type, with archive and restore. Building it surfaced a
+   real bug: `FilingSystem.archive()` emitted an event and left the record exactly
+   where it was, so nothing was ever archived. It moves the record now.
 
 ## Architecture Notes
 UFNB = spine  

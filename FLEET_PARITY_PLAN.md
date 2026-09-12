@@ -27,13 +27,19 @@ feel-identical** supersets.
 - **Eru** — a large Base44 super-app already (~90 pages, ~150 entities, ~70 functions:
   bots, trading, TCG, security, media). Rich, but a *different* app; needs PC's app
   set + a shared shell/theme, expressed in Base44 primitives.
+> **Note on the companion docs.** `FEATURE_AUDIT.md` is referenced throughout this plan as
+> the source of the PC app roster and the porting rankings, and it **does not exist in this
+> repository**. Either it lives in the `PC` repo, or it was never written. Until that is
+> settled, every section that depends on a per-app list — §3's matrix and §6's tracker — is
+> unscopable, and readers should not go looking for a file that is not here.
+
 - **Jackie (ocd-jacky-777)** — the furthest along structurally: it **already embeds the
   whole PC OS** (`public/pc-os/` via `PCDesktop.tsx` at `/pc`) and **already has all 91
   Eru pages** copied into `src/eru/`, on Supabase with real edge functions
   (`jackie-orchestrate/chat/groq/ollama/openrouter`). Parity here is mostly *native
   integration* (bridge, shared auth/theme, wire the real backend) rather than re-cloning.
 
-**The unlock (from the audit):** none of the three currently talk to the real `jacky`
+**The unlock (from `FEATURE_AUDIT.md` — see the note at the end of §1):** none of the three currently talk to the real `jacky`
 Flask engine — they simulate telemetry or hit cloud LLMs. The App Commander is the first
 that does. A shared **`jackyClient`** shim is therefore Wave 1 for all three.
 
@@ -137,17 +143,26 @@ Each item is independently shippable; waves are sequence, not a single commit.
 ## 6. Parity tracker (living matrix)
 
 A checklist mapping every PC app → status in Eru and Jackie (`todo / in-progress / native /
-via-embed / n-a`). Maintained as `PARITY_MATRIX.md` (or a board), updated each wave. Seeded
-from the PC app roster in `FEATURE_AUDIT.md`.
+via-embed / n-a`), updated each wave.
+
+**Status:** `PARITY_MATRIX.md` now exists and is *generated* — `node
+scripts/gen-parity-matrix.mjs` rebuilds it from the route manifest, so it cannot drift from
+what the app serves. Jackie's column is filled in (45 native routes, 84 imported Eru
+modules); the Eru and PC columns need someone with those repos open.
+
+**Blocked on:** `FEATURE_AUDIT.md`, the PC app roster this was to be seeded from, **is not in
+this repo** — see the note in §1.
 
 ---
 
 ## 7. Immediate next step
 
-Greenlight **Wave 1**: build the `jackyClient` shim (generalized from the App Commander) in
-PC, plus the Base44 `jackyProxy` function and the Supabase `jacky-proxy` edge function — so
-all three apps show **real** RTX-3090 telemetry and route real inference. That single unlock
-turns the most dashboards from demo into live, and everything else layers on top.
+**Wave 1 has shipped on Jackie's side** (12 Sep 2026): `src/lib/jackyClient.ts` is the
+shim and `supabase/functions/jacky-proxy` is the CORS-dodging edge function, covered by
+`src/test/edge-jacky-proxy-path.test.ts`. What remains of Wave 1 is the other two
+platforms: the Base44 `jackyProxy` function for Eru, and the same shim in PC.
+
+Next after that is **Wave 2**, which cannot be scoped until the two documents below exist.
 
 ---
 *Companion docs: `FEATURE_AUDIT.md` (what to port + rankings), `app-commander.html` (the

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { rotationStatus } from "../../supabase/functions/_shared/keyRotation";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
@@ -17,6 +18,10 @@ interface ApiKey {
   is_active: boolean;
   created_at: string;
   last_used_at: string | null;
+  expires_at?: string | null;
+  rotated_from?: string | null;
+  rotated_at?: string | null;
+  superseded_by?: string | null;
 }
 
 interface UsageLog {
@@ -83,6 +88,8 @@ export default function ApiKeyManager() {
   const [newKeyScopes, setNewKeyScopes] = useState<string[]>(["bot:create"]);
   const [newKeyRateLimit, setNewKeyRateLimit] = useState(60);
   const [revealedKey, setRevealedKey] = useState<string | null>(null);
+  const [rotatingId, setRotatingId] = useState<string | null>(null);
+  const [graceHours, setGraceHours] = useState(24);
   const [activeTab, setActiveTab] = useState<"keys" | "usage" | "bots">("keys");
   const [selectedKeyId, setSelectedKeyId] = useState<string | null>(null);
 
@@ -147,6 +154,30 @@ export default function ApiKeyManager() {
       setCreating(false);
     }
   };
+
+  const handleRotate = useCallback(async (key: ApiKey, graceHours: number) => {
+    // The old secret keeps working for the grace window, so this is safe to do
+    // before redeploying anything that holds it — which is the whole point of
+    // having a window.
+    try {
+      setRotatingId(key.id);
+      const data = await apiCall("rotate", "POST", { key_id: key.id, grace_hours: graceHours });
+      setRevealedKey(data.raw_key);
+      const carried = data.bots_carried_over
+        ? ` ${data.bots_carried_over} bot link${data.bots_carried_over === 1 ? "" : "s"} moved across.`
+        : "";
+      toast.success(
+        graceHours > 0
+          ? `Rotated — copy the new key now. The old one works for ${graceHours}h.${carried}`
+          : `Rotated — copy the new key now. The old one stopped working immediately.${carried}`,
+      );
+      await fetchKeys();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not rotate the key");
+    } finally {
+      setRotatingId(null);
+    }
+  }, [fetchKeys]);
 
   const handleRevoke = async (id: string) => {
     try {
@@ -295,13 +326,63 @@ export default function ApiKeyManager() {
                 </div>
               )}
 
+              <div className="flex flex-wrap items-center gap-2 mb-2 font-mono text-[10px] text-muted-foreground">
+                <label htmlFor="grace-hours">Rotation grace</label>
+                <select
+                  id="grace-hours"
+                  value={graceHours}
+                  onChange={(e) => setGraceHours(Number(e.target.value))}
+                  className="min-h-11 rounded-md border border-border bg-background px-2 text-foreground"
+                >
+                  <option value={0}>none — old key dies at once</option>
+                  <option value={1}>1 hour</option>
+                  <option value={24}>24 hours</option>
+                  <option value={72}>3 days</option>
+                  <option value={168}>7 days (max)</option>
+                </select>
+                <span>how long a replaced key keeps working, so nothing holding it breaks mid-flight</span>
+              </div>
+
               <div className="space-y-2">
-                {keys.map((k) => (
-                  <div key={k.id} className={`p-3 rounded-md border transition-all ${k.is_active ? "border-border bg-secondary/10" : "border-destructive/30 bg-destructive/5 opacity-60"}`}>
+                {keys.map((k) => {
+                  // A key nobody is told the age of never gets rotated, so the
+                  // age is on the row rather than behind a detail view.
+                  const status = rotationStatus(k, Date.now());
+                  const wants = status.state === "due" || status.state === "stale";
+                  return (
+                  <div key={k.id} className={`p-3 rounded-md border transition-all ${
+                    !k.is_active ? "border-destructive/30 bg-destructive/5 opacity-60"
+                      : status.state === "stale" ? "border-destructive/50 bg-destructive/5"
+                      : wants ? "border-amber-500/40 bg-amber-500/5"
+                      : status.state === "retiring" ? "border-amber-500/30 bg-secondary/10"
+                      : "border-border bg-secondary/10"
+                  }`}>
                     <div className="flex items-center gap-2 mb-2">
                       <Key size={14} className={k.is_active ? "text-primary" : "text-destructive"} />
                       <span className="font-mono text-xs font-bold flex-1">{k.name}</span>
+                      {status.state === "retiring" && (
+                        <span className="font-mono text-[9px] text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">
+                          RETIRING · {status.graceHoursLeft}H
+                        </span>
+                      )}
+                      {wants && k.is_active && (
+                        <span className={`font-mono text-[9px] px-1.5 py-0.5 rounded ${
+                          status.state === "stale" ? "text-destructive bg-destructive/10" : "text-amber-400 bg-amber-500/10"
+                        }`}>
+                          ROTATE
+                        </span>
+                      )}
                       {!k.is_active && <span className="font-mono text-[9px] text-destructive bg-destructive/10 px-1.5 py-0.5 rounded">REVOKED</span>}
+                      {k.is_active && !k.superseded_by && (
+                        <button
+                          onClick={() => handleRotate(k, graceHours)}
+                          disabled={rotatingId === k.id}
+                          className="p-1 rounded-md text-muted-foreground hover:text-primary transition-colors disabled:opacity-40"
+                          title={`Issue a replacement, keep this one working for ${graceHours}h`}
+                        >
+                          <RefreshCw size={12} className={rotatingId === k.id ? "animate-spin" : ""} />
+                        </button>
+                      )}
                       {k.is_active && (
                         <button
                           onClick={() => handleRevoke(k.id)}
@@ -312,6 +393,11 @@ export default function ApiKeyManager() {
                         </button>
                       )}
                     </div>
+                    <p className={`font-mono text-[10px] mb-2 ${
+                      status.state === "stale" ? "text-destructive"
+                        : status.state === "due" || status.state === "retiring" ? "text-amber-400"
+                        : "text-muted-foreground"
+                    }`}>{status.detail}</p>
                     <div className="grid grid-cols-2 gap-1 font-mono text-[10px]">
                       <span className="text-muted-foreground">Prefix:</span>
                       <code className="text-foreground">{k.prefix}...</code>
@@ -332,7 +418,8 @@ export default function ApiKeyManager() {
                       ))}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
                 {keys.length === 0 && (
                   <div className="text-center py-12 text-muted-foreground font-mono text-xs">
                     No API keys yet. Create one to get started.

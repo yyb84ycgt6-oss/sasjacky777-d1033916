@@ -80,6 +80,19 @@ sasjacky777-d1033916/
 
 ## Integration Steps
 
+> **All four phases complete (verified 12 Sep 2026).**
+>
+> 1. `Jackie/core/engine/fs/` — `path_sanitizer.py`, `resolver.py`, `vault_router.py`,
+>    `tool_runner.py`, `manifest_locator.py`, with `__init__.py`
+> 2. `command_station/` — manifests, tools and docs at the top level
+> 3. `.env.example` — `AI_WORKSPACE_ROOT` and `PERMANENT_STORAGE` declared
+> 4. `command_station/models/manifests/E_PERMANENT_MASTER_MANIFEST.json`
+>
+> One caveat worth carrying forward: nothing runs the Python side. There are 42 `.py`
+> files here and in `Jackie/`, `Jackie/tests/` is empty, and `npm test` covers only
+> `src/`. Whether that code is live, reference or archive is still an open question.
+
+
 ### Phase 1 - Engine/fs Layer Sync
 1. Create `Jackie/core/engine/fs/` in repo
 2. Push existing local files

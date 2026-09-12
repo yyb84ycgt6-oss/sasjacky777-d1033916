@@ -1,4 +1,7 @@
-// @ts-nocheck
+// @ts-nocheck -- 20 type errors, mostly unknown-typed values off Object.entries
+// and three component prop mismatches. Known debt, deliberately left: this is a
+// 2200-line file of single-line dense JSX, and fixing them blind is how a threat
+// console quietly starts lying. Remove this line to see the list.
 // VeilOps — Threat Intelligence Reference Console
 // Imported from external Lovable-built project. Reframed inside Jackie as a
 // FACTUAL, non-game knowledge surface (MITRE ATT&CK, CISA KEV, APT profiles).

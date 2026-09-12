@@ -3,9 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { DraggableToolbar } from "./DraggableToolbar";
 import { Compass, CornerDownLeft, Loader2, X } from "lucide-react";
 import { askGuide, type GuideAnswer } from "@/lib/guide/guideService";
-import { ollamaEngine } from "@/lib/microai/contextRouterService";
+import { lmStudioEngine, ollamaEngine } from "@/lib/microai/contextRouterService";
 import { checkGuideWeights, GUIDE_INSTALL_COMMAND, GUIDE_WEIGHTS_MB } from "@/lib/guide/weights";
-import { GUIDANCE_MODEL } from "@/lib/microai/models";
 
 /**
  * The guide, on every screen.
@@ -23,7 +22,10 @@ export function GuideDock() {
   const [asking, setAsking] = useState(false);
   const [model, setModel] = useState<{ ready: boolean; detail: string } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const engineRef = useRef(ollamaEngine());
+  // LM Studio first: the operator's weights already live in the hub, so
+  // guidance points at them rather than asking for a second copy. Ollama is the
+  // fallback for a machine that runs one and not the other.
+  const enginesRef = useRef([lmStudioEngine(), ollamaEngine()]);
 
   // One probe per open, not per keystroke: the answer is the same until someone
   // installs the model, and the panel should not poll a host that is not there.
@@ -31,18 +33,20 @@ export function GuideDock() {
     if (!open) return;
     let live = true;
     (async () => {
-      const [weights, engineUp] = await Promise.all([
+      const engines = enginesRef.current;
+      const [weights, ...up] = await Promise.all([
         checkGuideWeights(),
-        engineRef.current.available(),
+        ...engines.map((engine) => engine.available()),
       ]);
       if (!live) return;
+      const readyEngine = engines.find((_, i) => up[i]);
       setModel({
-        ready: engineUp,
-        detail: engineUp
-          ? `${GUIDANCE_MODEL.name} via Ollama`
+        ready: !!readyEngine,
+        detail: readyEngine
+          ? `answering through ${readyEngine.name}`
           : weights.present
-            ? `Weights are here (${GUIDE_WEIGHTS_MB} MB) — install them: ${GUIDE_INSTALL_COMMAND}`
-            : weights.detail,
+            ? `No runner is up. Weights ship with the app (${GUIDE_WEIGHTS_MB} MB) — ${GUIDE_INSTALL_COMMAND}`
+            : "No local runner is up. Start LM Studio's server (lms server start) or Ollama, and load a model.",
       });
     })();
     inputRef.current?.focus();
@@ -54,10 +58,10 @@ export function GuideDock() {
     if (!asked || asking) return;
     setAsking(true);
     try {
-      const engine = engineRef.current;
-      const ready = new Set<string>();
-      if (await engine.available()) ready.add(engine.id);
-      setAnswer(await askGuide(asked, { engines: [engine], ready }));
+      const engines = enginesRef.current;
+      const up = await Promise.all(engines.map((engine) => engine.available()));
+      const ready = new Set(engines.filter((_, i) => up[i]).map((engine) => engine.id));
+      setAnswer(await askGuide(asked, { engines, ready }));
     } finally {
       setAsking(false);
     }
@@ -86,7 +90,7 @@ export function GuideDock() {
             <Compass size={14} className="text-primary" />
             <span className="font-mono text-[11px] uppercase tracking-wider text-foreground">Guide</span>
             <span className="ml-auto truncate text-[10px] text-muted-foreground" title={model?.detail}>
-              {model ? (model.ready ? GUIDANCE_MODEL.name : "map only") : "checking…"}
+              {model ? (model.ready ? "local model" : "map only") : "checking…"}
             </span>
             <button
               type="button"
@@ -137,7 +141,7 @@ export function GuideDock() {
                   </div>
                 )}
                 <p className="font-mono text-[10px] text-muted-foreground">
-                  {answer.fromModel ? "answered by " + GUIDANCE_MODEL.name : "from the route manifest"} · {answer.reason}
+                  {answer.fromModel ? `answered by ${answer.model ?? "a local model"}` : "from the route manifest"} · {answer.reason}
                 </p>
               </div>
             )}

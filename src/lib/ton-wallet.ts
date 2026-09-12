@@ -2,7 +2,13 @@
 // Production TON Connect integration placeholder with full type safety
 // Real implementation requires @tonconnect/ui-react SDK
 
-export type WalletConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
+export type WalletConnectionStatus =
+  | 'disconnected'
+  | 'connecting'
+  | 'connected'
+  | 'error'
+  /** No TON Connect SDK is wired up, so a connection cannot be attempted at all. */
+  | 'unavailable';
 
 export interface WalletState {
   status: WalletConnectionStatus;
@@ -10,7 +16,23 @@ export interface WalletState {
   balance: string | null;
   network: 'mainnet' | 'testnet' | null;
   lastConnected: number | null;
+  /** Why the wallet is in this state, in words a person can act on. */
+  detail?: string;
 }
+
+/**
+ * Whether a real wallet connection can be made.
+ *
+ * False until `@tonconnect/ui-react` is a dependency and initialised here. The
+ * UI reads this rather than offering a Connect button that spins and quietly
+ * fails — an affordance that does nothing is worse than one that is honestly
+ * absent, and this one had been spinning for 1.5 seconds before giving up
+ * without saying why.
+ */
+export const TON_CONNECT_AVAILABLE = false;
+
+export const TON_CONNECT_DETAIL =
+  'TON Connect is not wired up in this build — no wallet SDK is installed, so nothing can be connected yet.';
 
 export interface TransactionRequest {
   to: string;

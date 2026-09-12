@@ -12,8 +12,9 @@ import {
   GUIDE_WEIGHTS_PATH,
   type WeightsPresence,
 } from "@/lib/guide/weights";
-import { ollamaEngine } from "@/lib/microai/contextRouterService";
+import { lmStudioEngine, ollamaEngine } from "@/lib/microai/contextRouterService";
 import { GUIDANCE_MODEL } from "@/lib/microai/models";
+import { listModels, LM_STUDIO_HOST } from "@/lib/lmStudio";
 import type { RouteEntry } from "@/lib/routeManifest";
 
 const GROUP_TITLES: Record<RouteEntry["group"], string> = {
@@ -25,16 +26,19 @@ const GROUP_TITLES: Record<RouteEntry["group"], string> = {
 
 export default function Guide() {
   const [weights, setWeights] = useState<WeightsPresence | null>(null);
-  const [engineUp, setEngineUp] = useState<boolean | null>(null);
+  const [hub, setHub] = useState<string[] | null>(null);
+  const [ollamaUp, setOllamaUp] = useState<boolean | null>(null);
 
   useEffect(() => {
     let live = true;
-    const engine = ollamaEngine();
-    Promise.all([checkGuideWeights(), engine.available()]).then(([found, up]) => {
-      if (!live) return;
-      setWeights(found);
-      setEngineUp(up);
-    });
+    Promise.all([checkGuideWeights(), listModels(), ollamaEngine().available()]).then(
+      ([found, loaded, up]) => {
+        if (!live) return;
+        setWeights(found);
+        setHub(loaded);
+        setOllamaUp(up);
+      },
+    );
     return () => { live = false; };
   }, []);
 
@@ -46,7 +50,7 @@ export default function Guide() {
     return [...byGroup.entries()];
   }, []);
 
-  const installed = engineUp === true;
+  const installed = (hub?.length ?? 0) > 0 || ollamaUp === true;
 
   return (
     <div className="min-h-screen bg-background p-4 space-y-4">
@@ -55,8 +59,8 @@ export default function Guide() {
           <Compass className="h-5 w-5 text-primary" /> Guide
         </h1>
         <p className="text-xs text-muted-foreground">
-          {GUIDANCE_MODEL.name} · {GUIDE_WEIGHTS_MB} MB · ships with the app · answers on every screen from the
-          compass in the floating bar.
+          Answers on every screen from the compass in the floating bar. Uses whichever model your machine already
+          serves — the LM Studio hub first, then Ollama.
         </p>
       </div>
 
@@ -64,7 +68,7 @@ export default function Guide() {
         <CardHeader className="p-3 pb-2">
           <CardTitle className="text-xs font-mono uppercase tracking-wider flex items-center gap-2">
             {installed ? (
-              <><CheckCircle2 className="h-3.5 w-3.5 text-primary" /> Model installed</>
+              <><CheckCircle2 className="h-3.5 w-3.5 text-primary" /> A local model is answering</>
             ) : (
               <><AlertTriangle className="h-3.5 w-3.5 text-muted-foreground" /> Answering from the map</>
             )}
@@ -72,24 +76,37 @@ export default function Guide() {
         </CardHeader>
         <CardContent className="p-3 pt-0 space-y-2 text-xs text-muted-foreground">
           <p className="font-mono">
-            weights: {weights ? weights.detail : "checking…"}
+            lm studio ({LM_STUDIO_HOST}):{" "}
+            {hub === null
+              ? "checking…"
+              : hub.length
+                ? `${hub.length} loaded — ${hub.slice(0, 3).join(", ")}${hub.length > 3 ? "…" : ""}`
+                : "no model loaded, or the server is not running"}
           </p>
           <p className="font-mono">
-            ollama: {engineUp === null ? "checking…" : engineUp ? "reachable" : "not reachable on this machine"}
+            ollama: {ollamaUp === null ? "checking…" : ollamaUp ? "reachable" : "not reachable on this machine"}
           </p>
           {!installed && (
             <>
               <p>
-                The guide never goes silent: without the model it answers from the route manifest, which is exact but
-                short. To have it answer in sentences, build it from the copy that shipped with the app — no network
-                involved:
+                The guide never goes silent: with no runner it answers from the route manifest, which is exact but
+                short. To have it answer in sentences, serve a model your machine already holds — the hub is the
+                cheapest route, since nothing is copied:
               </p>
               <pre className="overflow-x-auto rounded-md border border-border/60 bg-background p-2 font-mono text-[11px] text-foreground">
-{GUIDE_INSTALL_COMMAND}
+{`lms server start   # LM Studio, OpenAI-compatible on ${LM_STUDIO_HOST}/v1
+# then load any model in LM Studio — the guide uses whatever is loaded`}
               </pre>
               <p>
-                Weights: <code className="font-mono">{GUIDE_WEIGHTS_PATH}</code> · Modelfile:{" "}
-                <code className="font-mono">{GUIDE_MODELFILE_PATH}</code>
+                LM Studio must allow requests from this page: turn on CORS in its server settings, or the browser
+                blocks the call and the guide falls back to the map.
+              </p>
+              <p>
+                No hub on this machine? The app can carry its own copy instead —{" "}
+                <code className="font-mono">{GUIDE_WEIGHTS_PATH}</code> with{" "}
+                <code className="font-mono">{GUIDE_MODELFILE_PATH}</code>, installed by{" "}
+                <code className="font-mono">{GUIDE_INSTALL_COMMAND}</code> ({GUIDANCE_MODEL.name},{" "}
+                {GUIDE_WEIGHTS_MB} MB): {weights ? weights.detail : "checking…"}
               </p>
             </>
           )}

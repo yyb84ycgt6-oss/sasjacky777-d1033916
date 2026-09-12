@@ -79,6 +79,7 @@ describe("the default sync steps", () => {
         fetch: async () => new Response("", { status: 200 }),
         jackyStatus: async () => "engine ok",
         storageBudgetMB: async () => 100_000,
+        shellWorker: async () => "shell worker controlling · 1283 files held locally",
       }),
       () => false,
     );

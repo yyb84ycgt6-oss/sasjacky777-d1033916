@@ -1,6 +1,12 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { initTelegramWebApp, isTelegramWebApp, getTelegramUser, type TelegramUser } from '@/lib/telegram';
-import { getPersistedWalletState, persistWalletState, type WalletState } from '@/lib/ton-wallet';
+import {
+  getPersistedWalletState,
+  persistWalletState,
+  TON_CONNECT_AVAILABLE,
+  TON_CONNECT_DETAIL,
+  type WalletState,
+} from '@/lib/ton-wallet';
 
 interface TelegramContextValue {
   isTelegram: boolean;
@@ -32,20 +38,25 @@ export function TelegramProvider({ children }: { children: ReactNode }) {
   }, [isTg]);
 
   const connectWallet = async () => {
-    setWallet(prev => ({ ...prev, status: 'connecting' }));
-    // TODO: Replace with real TON Connect SDK integration
-    // For now, set to error state to show the UI flow works
-    setTimeout(() => {
+    // TODO: wire @tonconnect/ui-react here; until then this reports honestly
+    // rather than staging a connection attempt.
+    //
+    // It used to show "Connecting…" for 1.5 seconds and then land back on the
+    // same "Connect Wallet" label, having done nothing and explained nothing.
+    // A button that cannot work should say so the moment it is pressed.
+    if (!TON_CONNECT_AVAILABLE) {
       const state: WalletState = {
-        status: 'error',
+        status: 'unavailable',
         address: null,
         balance: null,
         network: null,
         lastConnected: null,
+        detail: TON_CONNECT_DETAIL,
       };
       setWallet(state);
       persistWalletState(state);
-    }, 1500);
+      return;
+    }
   };
 
   const disconnectWallet = () => {
