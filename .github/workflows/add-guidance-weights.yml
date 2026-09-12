@@ -1,0 +1,180 @@
+# Put the guidance model's weights in the repo, from a machine that has git-lfs
+# and a network — which is what a GitHub runner is.
+#
+# The .gguf is 248 MB. GitHub refuses a normal blob over 100 MB, so it has to
+# arrive as an LFS object, and LFS has to push from somewhere with the binary in
+# hand. Rather than requiring a laptop set up for both, this does it on a runner:
+# you give it a URL, it fetches, checks the file is really a GGUF of roughly the
+# right size, commits it through LFS and opens a pull request.
+#
+#   Actions → Add guidance weights → Run workflow → paste the URL
+#
+# Nothing here runs on its own: workflow_dispatch only, so the 248 MB download
+# and the LFS quota it spends happen when a person asks for them.
+name: Add guidance weights
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Direct download URL of the Bonsai 1.7B GGUF (must serve the file itself, not an HTML page)"
+        required: true
+        type: string
+      sha256:
+        description: "Expected SHA-256 of the file. Strongly recommended — without it nothing checks you got the file you meant."
+        required: false
+        type: string
+      branch:
+        description: "Branch to commit the weights to"
+        required: false
+        default: add-guidance-weights
+        type: string
+
+# The workflow writes a branch and opens a PR. It never pushes to the default
+# branch: a quarter of a gigabyte of binary is worth one human look first.
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  add-weights:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Read the expected size from the app itself
+        id: expected
+        run: |
+          # The size lives in one place — the model registry — so this workflow
+          # cannot drift from what the app tells its users the file weighs.
+          mb=$(grep -oP 'id: "bonsai-1\.7b".*?sizeMB:\s*\K[0-9]+' src/lib/microai/models.ts)
+          if [ -z "$mb" ]; then
+            echo "::error::Could not read sizeMB for bonsai-1.7b from src/lib/microai/models.ts"
+            exit 1
+          fi
+          echo "mb=$mb" >> "$GITHUB_OUTPUT"
+          echo "The app expects about ${mb} MB."
+
+      - name: Download the weights
+        env:
+          URL: ${{ inputs.url }}
+        run: |
+          set -euo pipefail
+          # --fail so an error page is an error, not a 400-byte "model".
+          curl --fail --location --retry 3 --retry-delay 5 \
+               --output weights.gguf "$URL"
+          ls -l weights.gguf
+
+      - name: Check it is a GGUF of the right size
+        id: check
+        env:
+          EXPECTED_MB: ${{ steps.expected.outputs.mb }}
+          EXPECTED_SHA: ${{ inputs.sha256 }}
+        run: |
+          set -euo pipefail
+
+          # A GGUF file starts with the four bytes "GGUF". An HTML error page,
+          # an LFS pointer or a ZIP does not, and any of those would otherwise
+          # be committed as 248 MB of nothing.
+          magic=$(head -c 4 weights.gguf)
+          if [ "$magic" != "GGUF" ]; then
+            echo "::error::Not a GGUF file — it starts with '${magic}'. Check the URL serves the file directly."
+            exit 1
+          fi
+
+          bytes=$(stat -c%s weights.gguf)
+          mb=$((bytes / 1024 / 1024))
+          echo "mb=$mb" >> "$GITHUB_OUTPUT"
+          echo "Downloaded ${mb} MB."
+
+          if [ "$mb" -lt 100 ]; then
+            echo "::error::${mb} MB is too small to be the model. Refusing to commit it."
+            exit 1
+          fi
+
+          # A size far from what the app claims means one of the two is wrong,
+          # and the app's number is the one users read. Warn loudly, do not fail:
+          # a different quantisation is a legitimate reason to be off by a little.
+          low=$(( EXPECTED_MB * 80 / 100 ))
+          high=$(( EXPECTED_MB * 120 / 100 ))
+          if [ "$mb" -lt "$low" ] || [ "$mb" -gt "$high" ]; then
+            echo "::warning::${mb} MB is well off the ${EXPECTED_MB} MB the app advertises. Update sizeMB in src/lib/microai/models.ts to match, or this file is mislabelled everywhere it is described."
+          fi
+
+          if [ -n "$EXPECTED_SHA" ]; then
+            echo "${EXPECTED_SHA}  weights.gguf" | sha256sum --check --strict
+            echo "SHA-256 matches."
+          else
+            echo "::warning::No sha256 given, so nothing verified this is the file you meant."
+            sha256sum weights.gguf
+          fi
+
+      - name: Commit it through Git LFS
+        env:
+          BRANCH: ${{ inputs.branch }}
+          SIZE_MB: ${{ steps.check.outputs.mb }}
+        run: |
+          set -euo pipefail
+          git lfs install --local
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git checkout -b "$BRANCH"
+          mkdir -p public/models/bonsai-1.7b
+          mv weights.gguf public/models/bonsai-1.7b/bonsai-1.7b.gguf
+
+          # .gitattributes already tracks public/models/**/*.gguf. Verify rather
+          # than assume: a plain blob this size is refused at push time with an
+          # error that does not name the cause.
+          if ! git check-attr filter -- public/models/bonsai-1.7b/bonsai-1.7b.gguf | grep -q "filter: lfs"; then
+            echo "::error::The .gguf is not covered by an LFS filter — check .gitattributes."
+            exit 1
+          fi
+
+          git add public/models/bonsai-1.7b/bonsai-1.7b.gguf
+          git commit -m "Add the Bonsai 1.7B guidance weights (${SIZE_MB} MB, via Git LFS)
+
+          Downloaded and verified by the add-guidance-weights workflow: GGUF
+          magic bytes, size against the app's own registry, and the SHA-256 if
+          one was given.
+
+          The Guide answers from the route manifest with or without this file.
+          With it installed — ollama create bonsai-1.7b -f
+          public/models/bonsai-1.7b/Modelfile — it answers in sentences."
+
+          git push --set-upstream origin "$BRANCH"
+
+      - name: Open a pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ inputs.branch }}
+          SIZE_MB: ${{ steps.check.outputs.mb }}
+        run: |
+          set -euo pipefail
+          gh pr create \
+            --base "${{ github.event.repository.default_branch }}" \
+            --head "$BRANCH" \
+            --title "Add the Bonsai 1.7B guidance weights (${SIZE_MB} MB)" \
+            --body "$(cat <<EOF
+          The guidance model's weights, fetched and verified on a runner.
+
+          - **Size:** ${SIZE_MB} MB, stored as a Git LFS object
+          - **Checked:** GGUF magic bytes, size against \`sizeMB\` in \`src/lib/microai/models.ts\`, SHA-256 if one was supplied
+          - **Source:** the URL given when the workflow was run
+
+          Merging this makes \`/guide\` report the weights present. To have the Guide
+          answer in sentences rather than from the route manifest alone, build the
+          model once on the machine that runs the app:
+
+          \`\`\`sh
+          ollama create bonsai-1.7b -f public/models/bonsai-1.7b/Modelfile
+          \`\`\`
+
+          Anyone cloning after this merges needs \`git lfs install\` and \`git lfs pull\`
+          to get the real file; without it they get a pointer, and the Guide panel
+          says so rather than claiming the model is installed.
+          EOF
+          )"

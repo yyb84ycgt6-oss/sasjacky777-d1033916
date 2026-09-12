@@ -11,6 +11,19 @@ public/models/bonsai-1.7b/
 └── bonsai-1.7b.gguf     # 248 MB, tracked with Git LFS
 ```
 
+## Putting the weights in, without a machine of your own
+
+A GitHub runner is a machine with git-lfs and a network, so the repo can fetch
+its own model:
+
+**Actions → Add guidance weights → Run workflow**, paste the direct download URL
+of the GGUF (and its SHA-256 if you have it). The workflow downloads it, refuses
+anything that is not a real GGUF of roughly the advertised size, commits it as an
+LFS object and opens a pull request. Nothing runs on a schedule — it only does
+this when someone asks, because the download spends LFS quota.
+
+The rest of this file is the same job done by hand.
+
 ## Getting the weights
 
 `bonsai-1.7b.gguf` is tracked with **Git LFS**, because GitHub rejects any single
