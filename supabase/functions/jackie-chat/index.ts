@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.58.0";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -20,7 +20,15 @@ async function requireUser(req: Request): Promise<Response | null> {
     { global: { headers: { Authorization: authHeader } } },
   );
   const token = authHeader.replace("Bearer ", "");
-  const { data, error } = await supabase.auth.getClaims(token);
+  // getClaims exists only in supabase-js >= 2.58 (auth-js >= 2.70). On 2.49.1 it threw here,
+  // outside the handler's try/catch: a CORS-less 500 that browsers report as "Failed to fetch".
+  let data: { claims?: unknown } | null = null;
+  let error: unknown = null;
+  try {
+    ({ data, error } = await supabase.auth.getClaims(token));
+  } catch (e) {
+    error = e;
+  }
   if (error || !data?.claims) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },

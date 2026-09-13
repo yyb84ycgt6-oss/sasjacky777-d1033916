@@ -1,3 +1,5 @@
+import { supabase } from "@/integrations/supabase/client";
+
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/jackie-chat`;
 
 export type ChatMessage = { role: "user" | "assistant"; content: string };
@@ -29,11 +31,19 @@ export async function streamChat({
   context?: string;
 }) {
   try {
+    // jackie-chat verifies a signed-in user's JWT (getClaims). The publishable key
+    // (sb_publishable_…) is not a JWT, so sending it can only ever be rejected.
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      onError("Please sign in to chat with Jackie.");
+      return;
+    }
+
     const resp = await fetch(CHAT_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+        Authorization: `Bearer ${session.access_token}`,
       },
       body: JSON.stringify({ messages, ...(model ? { model } : {}), ...(context ? { context } : {}) }),
     });

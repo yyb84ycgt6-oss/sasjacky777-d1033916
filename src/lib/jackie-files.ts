@@ -85,11 +85,15 @@ export async function buildFileContext(conversationId: string): Promise<string> 
 const IMAGE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/jackie-image`;
 
 export async function generateImage(prompt: string): Promise<{ image: string; text: string }> {
+  // jackie-image verifies a signed-in user's JWT; the publishable key is not one.
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error("Please sign in to generate images.");
+
   const resp = await fetch(IMAGE_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+      Authorization: `Bearer ${session.access_token}`,
     },
     body: JSON.stringify({ prompt }),
   });
