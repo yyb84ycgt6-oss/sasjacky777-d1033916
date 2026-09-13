@@ -1,4 +1,4 @@
-const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/jackie-chat`;
+import { callEdgeFunction, describeEdgeFailure } from "@/lib/edgeFunction";
 
 export type ChatMessage = { role: "user" | "assistant"; content: string };
 
@@ -29,13 +29,10 @@ export async function streamChat({
   context?: string;
 }) {
   try {
-    const resp = await fetch(CHAT_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-      },
-      body: JSON.stringify({ messages, ...(model ? { model } : {}), ...(context ? { context } : {}) }),
+    const resp = await callEdgeFunction("jackie-chat", {
+      messages,
+      ...(model ? { model } : {}),
+      ...(context ? { context } : {}),
     });
 
     if (!resp.ok) {
@@ -111,6 +108,8 @@ export async function streamChat({
 
     onDone();
   } catch (e) {
-    onError(e instanceof Error ? e.message : "Connection failed.");
+    // "Failed to fetch" is what the user used to be shown here, which names
+    // neither the cause nor anything they could do about it.
+    onError(describeEdgeFailure(e, "jackie-chat"));
   }
 }
