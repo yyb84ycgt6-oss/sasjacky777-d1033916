@@ -1,7 +1,8 @@
 // Grounded answers from the operator's own Gemini Enterprise engine.
 // Routed through the Lovable connector gateway; never calls Google directly.
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.58.0";
+import { verifyAccessToken } from "../_shared/authGate.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -17,7 +18,7 @@ async function requireUser(req: Request): Promise<Response | null> {
   const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {
     global: { headers: { Authorization: auth } },
   });
-  const { data, error } = await sb.auth.getClaims(auth.replace("Bearer ", ""));
+  const { data, error } = await verifyAccessToken(sb.auth, auth.replace("Bearer ", ""));
   if (error || !data?.claims) return json({ error: "Unauthorized" }, 401);
   return null;
 }
