@@ -53,10 +53,25 @@ export const QUANT_PREFERENCE = [
   "q3_k_m",
   "q3_k_s",
   "q2_k",
+  "iq4_xs",
+  "iq3_xxs",
+  "iq2_xxs",
+  "q1_0",
+  "iq1_s",
   "f16",
   "bf16",
   "f32",
 ];
+
+/**
+ * Bigger than this and it is not shipping inside a web app's `public/`.
+ *
+ * A full-precision 1.7B GGUF is several gigabytes. Committing one through LFS
+ * is slow, spends real quota, and produces an app nobody can clone — and it
+ * would happen silently, because a full-precision file is a perfectly valid
+ * GGUF of a perfectly plausible size. So it has to be asked for by name.
+ */
+export const MAX_AUTO_BYTES = 2 * 1024 * 1024 * 1024;
 
 /** The Hugging Face API URL that lists what a repo contains. */
 export function apiUrl(repo = HF_REPO) {
@@ -121,21 +136,53 @@ export function chooseWeights(siblings, preferred) {
     return { ok: true, file: match.name, size: match.size, quant: want };
   }
 
+  // A file carrying no quantisation tag at all is the full-precision build the
+  // others were made from. It is the largest thing in the repo and the worst
+  // possible automatic choice, so it ranks below even the tags we do not
+  // recognise — which is how `prism-ml/Bonsai-1.7B-gguf` reads: it publishes
+  // `Bonsai-1.7B-Q1_0.gguf` and `Bonsai-1.7B.gguf`, and before this the two
+  // tied and the winner was decided by alphabetical order.
+  const UNKNOWN = QUANT_PREFERENCE.length;
+  const UNTAGGED = QUANT_PREFERENCE.length + 1;
+
   const rank = (name) => {
     const lower = name.toLowerCase();
     const i = QUANT_PREFERENCE.findIndex((q) => lower.includes(q));
-    return i === -1 ? QUANT_PREFERENCE.length : i;
+    if (i !== -1) return i;
+    return /[-_.]q\d|[-_.]iq\d|[-_.]f\d\d|[-_.]bf\d\d/i.test(lower) ? UNKNOWN : UNTAGGED;
   };
 
-  // Sorted by preference, then by name, so a repo publishing two equally
-  // preferred files resolves the same way on every run rather than depending on
-  // the order the API happened to return.
-  const sorted = [...whole].sort((a, b) => rank(a.name) - rank(b.name) || a.name.localeCompare(b.name));
+  // Ties break on size first — among builds we cannot rank by name, the smaller
+  // one is the safer guess — and then on the name, so a repo publishing two
+  // equally ranked files of equal size resolves the same way on every run
+  // rather than depending on the order the API happened to return.
+  const sorted = [...whole].sort(
+    (a, b) =>
+      rank(a.name) - rank(b.name) ||
+      (Number(a.size) || Infinity) - (Number(b.size) || Infinity) ||
+      a.name.localeCompare(b.name),
+  );
   const picked = sorted[0];
   const lower = picked.name.toLowerCase();
   const quant = QUANT_PREFERENCE.find((q) => lower.includes(q));
 
-  return { ok: true, file: picked.name, size: picked.size, quant: quant ?? "unknown", alternatives: sorted.slice(1).map((f) => f.name) };
+  if (Number(picked.size) > MAX_AUTO_BYTES) {
+    return {
+      ok: false,
+      reason:
+        `the smallest build published is ${picked.name} at ${toMB(picked.size)} MB, ` +
+        `which is too large to ship inside the app. Ask for it by name with ` +
+        `--quant, or point --url at a smaller build.`,
+    };
+  }
+
+  return {
+    ok: true,
+    file: picked.name,
+    size: picked.size,
+    quant: quant ?? "unknown",
+    alternatives: sorted.slice(1).map((f) => f.name),
+  };
 }
 
 /** Bytes to whole megabytes, the unit the app advertises. */

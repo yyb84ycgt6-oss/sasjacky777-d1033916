@@ -9,6 +9,7 @@ import {
   apiUrl,
   chooseWeights,
   downloadUrl,
+  MAX_AUTO_BYTES,
   toMB,
   withRegistrySize,
 } from "../../scripts/guidance-weights-source.mjs";
@@ -118,8 +119,16 @@ describe("choosing which build to download", () => {
 
   it("accepts an unfamiliar quantisation rather than calling the repo broken", () => {
     // A new tag is a likelier explanation than a broken repository.
-    const picked = chooseWeights([file("Bonsai-1.7B-IQ3_XXS.gguf")]);
-    expect(picked).toMatchObject({ ok: true, file: "Bonsai-1.7B-IQ3_XXS.gguf", quant: "unknown" });
+    const picked = chooseWeights([file("Bonsai-1.7B-XQ9_Z.gguf")]);
+    expect(picked).toMatchObject({ ok: true, file: "Bonsai-1.7B-XQ9_Z.gguf", quant: "unknown" });
+  });
+
+  it("knows the tags this model is actually published at", () => {
+    // IQ3_XXS used to fall through to "unknown". It is a real quantisation and
+    // is now ranked as one, so it is chosen on its merits rather than by
+    // alphabetical accident.
+    expect(chooseWeights([file("Bonsai-1.7B-IQ3_XXS.gguf")]).quant).toBe("iq3_xxs");
+    expect(chooseWeights([file("Bonsai-1.7B-Q1_0.gguf")]).quant).toBe("q1_0");
   });
 
   it("ranks a known quantisation ahead of an unknown one", () => {
@@ -144,8 +153,83 @@ describe("choosing which build to download", () => {
   });
 });
 
+/**
+ * What `prism-ml/Bonsai-1.7B-gguf` actually publishes, and the bug it exposed.
+ *
+ * Two files: `Bonsai-1.7B-Q1_0.gguf` (237 MB) and `Bonsai-1.7B.gguf`, the
+ * full-precision build it was quantised from. Neither tag was in the
+ * preference list, so both ranked "unknown", tied, and the winner was decided
+ * by `localeCompare`. It picked the right one — because "Q" sorts before ".".
+ * Rename either file and a multi-gigabyte full-precision build gets committed
+ * through LFS instead, silently, because it is a perfectly valid GGUF.
+ */
+const REAL_REPO = [
+  file("Bonsai-1.7B-Q1_0.gguf", 248_302_272),
+  file("Bonsai-1.7B.gguf", 3_400_000_000),
+];
+
+describe("the repository this is actually pinned to", () => {
+  it("takes the quantised build, and knows why", () => {
+    expect(chooseWeights(REAL_REPO)).toMatchObject({
+      ok: true,
+      file: "Bonsai-1.7B-Q1_0.gguf",
+      quant: "q1_0",
+    });
+  });
+
+  it("takes it whichever order the API lists them in", () => {
+    // The old tie-break made this a coin toss dressed up as a decision.
+    expect(chooseWeights([...REAL_REPO].reverse()).file).toBe("Bonsai-1.7B-Q1_0.gguf");
+  });
+
+  it("ranks an untagged full-precision build below even an unfamiliar tag", () => {
+    const picked = chooseWeights([
+      file("Bonsai-1.7B.gguf", 3_400_000_000),
+      file("Bonsai-1.7B-XQ9_Z.gguf", 500_000_000),
+    ]);
+    expect(picked.file).toBe("Bonsai-1.7B-XQ9_Z.gguf");
+  });
+
+  it("prefers the smaller of two builds it cannot rank by name", () => {
+    const picked = chooseWeights([
+      file("model-XQ9_Z.gguf", 900_000_000),
+      file("model-XQ1_A.gguf", 300_000_000),
+    ]);
+    expect(picked.file).toBe("model-XQ1_A.gguf");
+  });
+
+  it("refuses to install something that cannot ship inside the app", () => {
+    // A full-precision GGUF has the right magic bytes and a plausible size.
+    // Nothing downstream would have objected; it would just have produced a
+    // repository nobody can clone.
+    const picked = chooseWeights([file("Bonsai-1.7B.gguf", MAX_AUTO_BYTES + 1)]);
+    expect(picked.ok).toBe(false);
+    expect(picked.reason).toMatch(/too large/i);
+    expect(picked.reason).toMatch(/--quant/);
+  });
+
+  it("still installs it when it is asked for by name", () => {
+    const picked = chooseWeights([file("Bonsai-1.7B.gguf", MAX_AUTO_BYTES + 1)], "bonsai-1.7b.gguf");
+    expect(picked.ok).toBe(true);
+  });
+
+  it("counts the real file the way the app's own probe counts it", () => {
+    // checkGuideWeights does Math.round(length / 1024 / 1024) on the served
+    // content-length. Anything else here and the panel and the registry would
+    // print two numbers for one file.
+    expect(toMB(248_302_272)).toBe(237);
+  });
+});
+
 describe("keeping the advertised size honest", () => {
   const registry = readFileSync(join(process.cwd(), REGISTRY_PATH), "utf8");
+  // Read rather than hardcoded: this number changes whenever the weights are
+  // re-fetched at a different quantisation, which is the entire point of it.
+  const declared = Number(/id: "bonsai-1\.7b".*?sizeMB:\s*(\d+)/.exec(registry)?.[1]);
+
+  it("reads a size out of the registry at all", () => {
+    expect(declared).toBeGreaterThan(0);
+  });
 
   it("rewrites both the number and the label users read", () => {
     // sizeMB feeds the Model Bay budget, the station probe and the Guide panel.
@@ -155,11 +239,21 @@ describe("keeping the advertised size honest", () => {
     const updated = withRegistrySize(registry, 1071);
     expect(updated).toContain("sizeMB: 1071");
     expect(updated).toContain('sizeLabel: "~1071 MB"');
-    expect(updated).not.toContain("sizeMB: 248");
+    expect(updated).not.toContain(`sizeMB: ${declared},`);
   });
 
   it("leaves the file alone when the size already matches", () => {
-    expect(withRegistrySize(registry, 248)).toBeNull();
+    expect(withRegistrySize(registry, declared)).toBeNull();
+  });
+
+  it("matches the weights that are actually committed", () => {
+    // The registry and the LFS pointer describe the same file. They disagreed
+    // before: the registry said 248 — correct in decimal MB — while the app's
+    // own probe divides by 1024 twice and computed 237 from the same bytes.
+    const pointer = readFileSync(join(process.cwd(), WEIGHTS_PATH), "utf8");
+    const bytes = Number(/^size (\d+)$/m.exec(pointer)?.[1]);
+    if (!bytes) return; // weights not fetched in this checkout — nothing to compare
+    expect(toMB(bytes)).toBe(declared);
   });
 
   it("touches nothing but the bonsai entry", () => {

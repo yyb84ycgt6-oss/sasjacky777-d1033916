@@ -86,7 +86,11 @@ jobs:
           set -euo pipefail
           path=public/models/bonsai-1.7b/bonsai-1.7b.gguf
           bytes=$(stat -c%s "$path")
-          echo "mb=$((bytes / 1024 / 1024))" >> "$GITHUB_OUTPUT"
+          # Rounded, not truncated, because this is the same file the script
+          # rounds when it writes sizeMB. Shell integer division reported 236
+          # for the 237 the registry had just been given — two numbers for one
+          # file, which is the whole thing this change exists to stop.
+          echo "mb=$(( (bytes + 512 * 1024) / 1024 / 1024 ))" >> "$GITHUB_OUTPUT"
           echo "sha=$(sha256sum "$path" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Commit it through Git LFS
@@ -128,7 +132,15 @@ jobs:
 
           git push --set-upstream origin "$BRANCH"
 
+      # The weights are already pushed by the time this runs. Many repositories
+      # forbid Actions from opening pull requests (Settings → Actions → "Allow
+      # GitHub Actions to create and approve pull requests"), and this one does
+      # — so `gh pr create` failed and painted the whole run red over work that
+      # had entirely succeeded. A red run over a delivered branch teaches people
+      # to ignore red runs. The PR is a convenience; the branch is the product.
       - name: Open a pull request
+        id: pr
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           BRANCH: ${{ inputs.branch }}
@@ -165,3 +177,31 @@ jobs:
           says so rather than claiming the model is installed.
           EOF
           )"
+
+      - name: Say what happened
+        env:
+          BRANCH: ${{ inputs.branch }}
+          SIZE_MB: ${{ steps.weights.outputs.mb }}
+          SHA: ${{ steps.weights.outputs.sha }}
+          PR: ${{ steps.pr.outcome }}
+        run: |
+          set -euo pipefail
+          repo="${{ github.server_url }}/${{ github.repository }}"
+          {
+            echo "### Guidance weights installed"
+            echo
+            echo "- **Source:** \`prism-ml/Bonsai-1.7B-gguf\`"
+            echo "- **Size:** ${SIZE_MB} MB, as a Git LFS object"
+            echo "- **sha256:** \`${SHA}\`"
+            echo "- **Branch:** [\`${BRANCH}\`](${repo}/tree/${BRANCH})"
+            echo
+            if [ "$PR" = "success" ]; then
+              echo "A pull request was opened."
+            else
+              echo "This repository does not let Actions open pull requests, so"
+              echo "the branch is pushed and waiting: [open the PR yourself](${repo}/compare/${{ github.event.repository.default_branch }}...${BRANCH}?expand=1)."
+              echo
+              echo "To let it do this itself: Settings → Actions → General → Workflow permissions →"
+              echo "\"Allow GitHub Actions to create and approve pull requests\"."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
