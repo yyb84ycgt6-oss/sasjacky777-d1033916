@@ -8,48 +8,62 @@ been online.
 public/models/bonsai-1.7b/
 ├── Modelfile            # how Ollama builds the model from the weights here
 ├── README.md            # this file
-└── bonsai-1.7b.gguf     # 248 MB, tracked with Git LFS
+└── bonsai-1.7b.gguf     # tracked with Git LFS — not in a fresh clone
 ```
 
-## Putting the weights in, without a machine of your own
+## Where the model comes from
 
-A GitHub runner is a machine with git-lfs and a network, so the repo can fetch
-its own model:
+**`prism-ml/Bonsai-1.7B-gguf`** on Hugging Face.
 
-**Actions → Add guidance weights → Run workflow**, paste the direct download URL
-of the GGUF (and its SHA-256 if you have it). The workflow downloads it, refuses
-anything that is not a real GGUF of roughly the advertised size, commits it as an
-LFS object and opens a pull request. Nothing runs on a schedule — it only does
-this when someone asks, because the download spends LFS quota.
-
-The rest of this file is the same job done by hand.
+That is pinned in `scripts/guidance-weights-source.mjs`, and the same string is
+declared to the app as `GUIDE_WEIGHTS_SOURCE` in `src/lib/guide/weights.ts`. A
+test asserts the two agree, so "which model is Jackie's guide" has one answer
+however you come at it.
 
 ## Getting the weights
 
-`bonsai-1.7b.gguf` is tracked with **Git LFS**, because GitHub rejects any single
-file over 100 MB pushed as a normal blob. A clone without LFS gets a few hundred
-byte pointer file instead of the model — the Guide panel detects exactly that and
-says so rather than claiming the model is installed.
+On a machine with a network:
+
+```sh
+npm run weights
+```
+
+It reads what the repository publishes, takes the best quantisation it finds,
+checks the file really is a GGUF of a plausible size, writes it here, and
+updates the size the app advertises to match what it actually got.
+
+```sh
+npm run weights -- --list             # what is published, download nothing
+npm run weights -- --quant q5_k_m     # take a specific quantisation
+npm run weights -- --url https://…    # a build from somewhere else entirely
+npm run weights -- --sha256 <hex>     # check you got the file you meant
+```
+
+Quantisations are not interchangeable. The smallest is a few hundred megabytes
+and noticeably worse; the largest is several gigabytes and will not ship inside
+a web app's `public/`. `q4_k_m` is taken by default as the smallest that still
+answers in coherent sentences.
+
+## Without a machine of your own
+
+A GitHub runner has git-lfs and a network, so the repo can fetch its own model:
+
+**Actions → Add guidance weights → Run workflow.** No inputs needed — the source
+is pinned. It runs the same `npm run weights`, commits the result as an LFS
+object and opens a pull request. Nothing runs on a schedule: the download and
+the LFS quota it spends happen when someone asks.
+
+## Why it is not in a fresh clone
+
+The `.gguf` is tracked with **Git LFS**, because GitHub rejects any single file
+over 100 MB pushed as a normal blob. A clone without LFS gets a few hundred byte
+pointer instead of the model — the Guide panel detects exactly that and says so
+rather than claiming the model is installed.
 
 ```sh
 git lfs install          # once per machine
 git lfs pull             # fetch the weights for this clone
 ```
-
-To add or replace the weights:
-
-```sh
-git lfs install
-git lfs track "public/models/**/*.gguf"        # already in .gitattributes
-cp /path/to/bonsai-1.7b.gguf public/models/bonsai-1.7b/
-git add .gitattributes public/models/bonsai-1.7b/bonsai-1.7b.gguf
-git commit -m "Add Bonsai 1.7B guidance weights"
-```
-
-The file must be a GGUF build of Bonsai 1.7B of about 248 MB. The size the app
-expects is declared once, in `src/lib/microai/models.ts`, and everything else —
-the Model Bay budget, the station probe, the install command, the panel — reads
-it from there.
 
 ## Installing it into Ollama
 
@@ -65,6 +79,6 @@ the app. Until then it still answers — from the route manifest, deterministica
 ## Why it is not precached by the service worker
 
 `vite.config.ts` excludes `models/**` from the PWA precache. Workbox has a
-per-file limit and a 248 MB entry fails the build outright, the same way the
+per-file limit and an entry this size fails the build outright, the same way the
 embedded PC's on-device AI wasm does. The file is still served, and still
 available offline once Ollama has built the model from it.
