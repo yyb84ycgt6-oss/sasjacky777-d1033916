@@ -6,7 +6,9 @@ import { Compass, CheckCircle2, AlertTriangle } from "lucide-react";
 import { GUIDE_DESTINATIONS } from "@/lib/guide/appMap";
 import {
   checkGuideWeights,
+  GUIDE_FETCH_COMMAND,
   GUIDE_INSTALL_COMMAND,
+  GUIDE_WEIGHTS_SOURCE,
   GUIDE_MODELFILE_PATH,
   GUIDE_WEIGHTS_MB,
   GUIDE_WEIGHTS_PATH,
@@ -107,6 +109,13 @@ export default function Guide() {
                 <code className="font-mono">{GUIDE_MODELFILE_PATH}</code>, installed by{" "}
                 <code className="font-mono">{GUIDE_INSTALL_COMMAND}</code> ({GUIDANCE_MODEL.name},{" "}
                 {GUIDE_WEIGHTS_MB} MB): {weights ? weights.detail : "checking…"}
+              </p>
+              <p>
+                The weights are the one part of the app a clone does not bring with it. They come
+                from <code className="font-mono">{GUIDE_WEIGHTS_SOURCE}</code>, and{" "}
+                <code className="font-mono">{GUIDE_FETCH_COMMAND}</code> fetches them into this
+                repo — on a machine with no network, Actions → Add guidance weights does the same
+                job on a runner and opens a pull request.
               </p>
             </>
           )}

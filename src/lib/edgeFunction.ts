@@ -45,6 +45,8 @@ export interface EdgeHeaderOptions {
   /** Refuse rather than send an unauthenticated request. Default true. */
   requireSession?: boolean;
   extra?: Record<string, string>;
+  /** Lets a caller cancel a request in flight — a streaming chat needs it. */
+  signal?: AbortSignal;
 }
 
 export async function edgeHeaders({
@@ -77,6 +79,7 @@ export async function callEdgeFunction(
     method: "POST",
     headers: await edgeHeaders(options),
     body: JSON.stringify(body),
+    signal: options.signal,
   });
 }
 

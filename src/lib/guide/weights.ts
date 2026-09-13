@@ -16,6 +16,26 @@ export const GUIDE_WEIGHTS_PATH = "/models/bonsai-1.7b/bonsai-1.7b.gguf";
 /** Served path of the Ollama Modelfile that builds the guide from those weights. */
 export const GUIDE_MODELFILE_PATH = "/models/bonsai-1.7b/Modelfile";
 
+/**
+ * Which published build these weights are.
+ *
+ * The repo could describe the model it wanted long before it could go and get
+ * one: the file's path, its size and the Modelfile that installs it were all
+ * declared here, and the one fact that would have closed the gap — which
+ * published build is the right one — lived in the head of whoever ran the
+ * fetch workflow and nowhere in the repo.
+ *
+ * It is `prism-ml/Bonsai-1.7B-gguf`. The resolver in
+ * `scripts/guidance-weights-source.mjs` holds the same string for the fetch
+ * script and the workflow, which cannot import this file; a test asserts the
+ * two agree, so "which model is Jackie's guide" has exactly one answer however
+ * you come at it.
+ */
+export const GUIDE_WEIGHTS_SOURCE = "prism-ml/Bonsai-1.7B-gguf";
+
+/** The one command that fetches the weights from that source into this repo. */
+export const GUIDE_FETCH_COMMAND = "npm run weights";
+
 /** What the registry says this model weighs. */
 export const GUIDE_WEIGHTS_MB = GUIDANCE_MODEL.sizeMB;
 
@@ -51,13 +71,19 @@ export async function checkGuideWeights(
   try {
     const res = await fetchImpl(path, { method: "HEAD" });
     if (!res.ok) {
-      return { present: false, detail: `${path} → HTTP ${res.status}` };
+      // Naming the command matters more here than anywhere else in this file:
+      // the weights are the one part of the app that does not ship in a clone,
+      // so "HTTP 404" is the expected state of a fresh checkout, not a fault.
+      return {
+        present: false,
+        detail: `${path} → HTTP ${res.status}. Fetch them from ${GUIDE_WEIGHTS_SOURCE}: ${GUIDE_FETCH_COMMAND}`,
+      };
     }
     const length = Number(res.headers.get("content-length") ?? 0);
     if (length > 0 && length < 1024 * 1024) {
       return {
         present: false,
-        detail: `${path} is ${length} bytes — an LFS pointer, not the weights. Run: git lfs pull`,
+        detail: `${path} is ${length} bytes — an LFS pointer, not the weights. Run: git lfs pull (or ${GUIDE_FETCH_COMMAND} to fetch them fresh from ${GUIDE_WEIGHTS_SOURCE})`,
       };
     }
     if (!length) {
@@ -68,6 +94,6 @@ export async function checkGuideWeights(
     return { present: true, detail: `${path} — ${Math.round(length / (1024 * 1024))} MB on disk` };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return { present: false, detail: `${path} → ${message}` };
+    return { present: false, detail: `${path} → ${message}. Fetch them with ${GUIDE_FETCH_COMMAND}` };
   }
 }

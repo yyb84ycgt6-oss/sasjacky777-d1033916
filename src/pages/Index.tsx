@@ -2,7 +2,14 @@ import { callEdgeFunction } from "@/lib/edgeFunction";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
-import { streamChat, JACKIE_MODELS, type ChatMessage, type JackieModelId } from "@/lib/jackie-stream";
+import {
+  streamChat,
+  isKnownModel,
+  DEFAULT_CHAT_MODEL,
+  JACKIE_MODELS,
+  type ChatMessage,
+  type JackieModelId,
+} from "@/lib/jackie-stream";
 import {
   listConversations,
   createConversation,
@@ -33,7 +40,7 @@ import { toast } from "sonner";
 import { SidebarNav } from "@/components/SidebarNav";
 
 import { getGameStateContext } from "@/lib/game-state-context";
-import { Plus, Trash2, MessageSquare, LogOut, Send, Menu, X, Sun, Moon, Volume2, VolumeX, Download, Mic, ChevronDown, Zap, DollarSign, Search, Tag, XCircle, Pin, Upload, Archive as ArchiveIcon } from "lucide-react";
+import { Plus, Trash2, MessageSquare, LogOut, Send, Menu, X, Sun, Moon, Volume2, VolumeX, Download, Mic, ChevronDown, Zap, DollarSign, Search, Tag, XCircle, Pin, Upload, Archive as ArchiveIcon, Square } from "lucide-react";
 import {
   listTags,
   createTag,
@@ -541,9 +548,14 @@ const Index = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [bgSettings, setBgSettings] = useState<NSSettings>(() => loadNeutronSettings());
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
-  const [selectedModel, setSelectedModel] = useState<JackieModelId>(
-    () => (getChatPreset().model as JackieModelId) || "google/gemini-2.5-pro"
-  );
+  // A model id persisted by an older build can outlive the list that contains
+  // it. Handing an unknown id to the function meant a silent fall back to
+  // whatever its own default was, so the label said one thing and the answer
+  // came from another. Unknown ids resolve to the shared default instead.
+  const [selectedModel, setSelectedModel] = useState<JackieModelId>(() => {
+    const saved = getChatPreset().model;
+    return isKnownModel(saved) ? saved : DEFAULT_CHAT_MODEL;
+  });
   const [presetModel, setPresetModel] = useState<string>(() => getChatPreset().model);
 
   const saveCurrentAsPreset = useCallback(() => {
@@ -556,6 +568,9 @@ const Index = () => {
   const [activeTagFilter, setActiveTagFilter] = useState<string | null>(null);
   const [rateLimitCooldown, setRateLimitCooldown] = useState(0);
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Holds the answer in flight so it can be stopped. Without this the composer
+  // stayed locked until the model finished or the tab was reloaded.
+  const abortRef = useRef<AbortController | null>(null);
 
   const changeModel = useCallback(async (model: JackieModelId) => {
     setSelectedModel(model);
@@ -663,7 +678,7 @@ const Index = () => {
       loadMessages(id);
       try {
         const model = await getConversationModel(id);
-        if (model) setSelectedModel(model as JackieModelId);
+        if (isKnownModel(model)) setSelectedModel(model);
       } catch { /* use current */ }
     },
     [loadMessages]
@@ -676,7 +691,7 @@ const Index = () => {
     setInput("");
     // Apply saved preset model for every new chat.
     const preset = getChatPreset();
-    setSelectedModel(preset.model as JackieModelId);
+    setSelectedModel(isKnownModel(preset.model) ? preset.model : DEFAULT_CHAT_MODEL);
   };
 
   const handleExportArchive = async () => {
@@ -990,10 +1005,19 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
       jackieContext = [gameContext, memCtx, taskCtx, fileCtx].filter(Boolean).join("\n");
     } catch { /* graceful degradation */ }
 
+    const controller = new AbortController();
+    abortRef.current = controller;
+    // `streamChat` calls exactly one of onDone/onError, or neither when the
+    // user stopped it. This records which happened, so the stopped-answer
+    // handling below cannot also fire if a stop lands in the same tick as a
+    // completion and save the answer twice.
+    let settled = false;
+
     await streamChat({
       messages: newHistory,
       model: selectedModel,
       context: jackieContext,
+      signal: controller.signal,
       onDelta: (chunk) => {
         assistantContent += chunk;
         setMessages((prev) =>
@@ -1002,6 +1026,8 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
         scrollToBottom();
       },
       onDone: async () => {
+        settled = true;
+        abortRef.current = null;
         const securityFlag = detectSecurityFlag(assistantContent);
         const memoryTier = detectMemoryTier(assistantContent, userText);
 
@@ -1041,6 +1067,8 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
         setIsProcessing(false);
       },
       onError: (err) => {
+        settled = true;
+        abortRef.current = null;
         if (err.includes("Rate limit") || err.includes("rate limit")) {
           const seconds = 30;
           setRateLimitCooldown(seconds);
@@ -1062,6 +1090,33 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
         setIsProcessing(false);
       },
     });
+
+    // Stopping is neither success nor failure, so `streamChat` calls neither
+    // callback. What already streamed is still worth keeping — throwing away a
+    // half-written answer the moment someone stops it is the wrong instinct.
+    if (controller.signal.aborted && !settled) {
+      abortRef.current = null;
+      if (assistantContent.trim()) {
+        setChatHistory((prev) => [...prev, { role: "assistant", content: assistantContent }]);
+        try {
+          await saveMessage({
+            conversation_id: convId!,
+            role: "assistant",
+            content: assistantContent,
+            memory_tier: 1,
+          });
+        } catch { /* the message is on screen either way */ }
+      } else {
+        setMessages((prev) => prev.filter((m) => m.id !== assistantTempId));
+      }
+      setIsProcessing(false);
+    }
+  };
+
+  /** Stops the answer in flight, keeping whatever has already arrived. */
+  const handleStop = () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1383,10 +1438,19 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
                   <Zap size={14} />
                   {rateLimitCooldown}s
                 </div>
+              ) : isProcessing ? (
+                <button
+                  onClick={handleStop}
+                  className="p-3 rounded-sm bg-destructive/20 border border-destructive/40 text-destructive hover:bg-destructive/30 transition-colors btn-mechanical flex-shrink-0"
+                  title="Stop generating"
+                  aria-label="Stop generating"
+                >
+                  <Square size={16} />
+                </button>
               ) : (
                 <button
                   onClick={handleSubmit}
-                  disabled={isProcessing || (!input.trim() && pendingFiles.length === 0)}
+                  disabled={!input.trim() && pendingFiles.length === 0}
                   className="p-3 rounded-sm bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-30 transition-opacity btn-mechanical flex-shrink-0"
                   title="Send (Enter)"
                 >

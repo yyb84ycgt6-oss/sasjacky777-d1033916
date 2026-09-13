@@ -118,10 +118,18 @@ describe("asking the guide", () => {
 });
 
 describe("the shipped weights", () => {
-  it("is the registry's Bonsai entry at the size the app ships", () => {
+  it("is the registry's Bonsai entry, and says one size rather than two", () => {
+    // This used to assert the literal 248. That number is now written by
+    // `npm run weights` from the file it actually fetched, so pinning it in a
+    // test meant re-fetching at a different quantisation broke the suite for
+    // doing exactly what it is supposed to do. What must hold is that the
+    // number and the label users read agree with each other — which is the
+    // thing that can silently be wrong.
     expect(GUIDANCE_MODEL.id).toBe("bonsai-1.7b");
-    expect(GUIDE_WEIGHTS_MB).toBe(248);
-    expect(MICRO_MODELS.find((m) => m.id === "bonsai-1.7b")?.sizeLabel).toBe("~248 MB");
+    expect(GUIDE_WEIGHTS_MB).toBeGreaterThan(0);
+    expect(MICRO_MODELS.find((m) => m.id === "bonsai-1.7b")?.sizeLabel).toBe(
+      `~${GUIDE_WEIGHTS_MB} MB`,
+    );
   });
 
   it("installs from the copy in the repo, never from a registry", () => {

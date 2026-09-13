@@ -2,7 +2,8 @@
 // Requires OLLAMA_BASE_URL (e.g. https://ollama.mydomain.com or a Cloudflare Tunnel URL).
 // Optional OLLAMA_API_KEY if the endpoint is protected.
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.58.0";
+import { verifyAccessToken } from "../_shared/authGate.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -22,7 +23,7 @@ async function requireUser(req: Request): Promise<Response | null> {
     Deno.env.get("SUPABASE_ANON_KEY")!,
     { global: { headers: { Authorization: auth } } },
   );
-  const { data, error } = await sb.auth.getClaims(auth.replace("Bearer ", ""));
+  const { data, error } = await verifyAccessToken(sb.auth, auth.replace("Bearer ", ""));
   if (error || !data?.claims) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },

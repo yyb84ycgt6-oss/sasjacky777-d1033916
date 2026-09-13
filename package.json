@@ -14,7 +14,8 @@
     "test:watch": "vitest",
     "smoke": "node scripts/smoke-routes.mjs",
     "smoke:offline": "node scripts/smoke-routes.mjs --offline",
-    "host": "node host/serve.mjs ./dist"
+    "host": "node host/serve.mjs ./dist",
+    "weights": "node scripts/fetch-guidance-weights.mjs"
   },
   "dependencies": {
     "@base44/sdk": "^0.8.32",
