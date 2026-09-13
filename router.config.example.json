@@ -1,0 +1,56 @@
+{
+  "horizon_seconds": 30,
+  "risk_policy": "migrate",
+  "briefing_max_chars": 2000,
+  "budget": {
+    "per_hour": 0.50,
+    "per_day": 5.00
+  },
+  "providers": [
+    {
+      "name": "local/qwen",
+      "kind": "ollama",
+      "model": "qwen3.5:latest",
+      "base_url": "http://localhost:11434",
+      "tier": 0,
+      "max_context": 32768,
+      "capabilities": ["chat"]
+    },
+    {
+      "name": "local/gemma-code",
+      "kind": "ollama",
+      "model": "gemma4:26b",
+      "base_url": "http://localhost:11434",
+      "tier": 0,
+      "max_context": 32768,
+      "capabilities": ["code", "chat", "long-context"]
+    },
+    {
+      "name": "groq/llama-70b",
+      "kind": "openai",
+      "model": "llama-3.3-70b-versatile",
+      "base_url": "https://api.groq.com/openai/v1",
+      "api_key_env": "GROQ_API_KEY",
+      "tier": 1,
+      "max_context": 128000,
+      "capabilities": ["chat", "code", "long-context"],
+      "limits": [
+        { "window_seconds": 60, "requests": 30, "label": "rpm" },
+        { "window_seconds": 60, "tokens": 12000, "label": "tpm" },
+        { "window_seconds": 86400, "tokens": 500000, "label": "daily-tokens" }
+      ]
+    },
+    {
+      "name": "anthropic/sonnet",
+      "kind": "openai",
+      "model": "claude-sonnet-5",
+      "base_url": "https://api.anthropic.com/v1",
+      "api_key_env": "ANTHROPIC_API_KEY",
+      "tier": 2,
+      "max_context": 200000,
+      "capabilities": ["chat", "code", "long-context"],
+      "cost_per_1k_input": 0.003,
+      "cost_per_1k_output": 0.015
+    }
+  ]
+}

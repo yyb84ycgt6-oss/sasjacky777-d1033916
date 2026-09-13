@@ -28,6 +28,34 @@ command_station/
 
 See `command_station/README.md` for full details.
 
+## jackierouter
+
+`jackierouter/` is the routing library that sits behind the gateway — the piece
+that is worth installing on its own.
+
+- **Predictive quota forecasting.** A sliding-window ledger measures burn rate
+  per provider and predicts seconds-to-exhaustion, so the router migrates while
+  headroom remains instead of discovering a 429.
+- **Cost-tiered failover.** Tier 0 is your own hardware. A paid provider is
+  never reached for while a free one is healthy, and rolling hourly/daily spend
+  caps are the hard stop behind that.
+- **Context-preserving handoff.** Each failover attaches a briefing built from
+  the interrupted turn — the task, what was established, the tail of the partial
+  output — so the next model continues mid-thought rather than starting cold.
+
+Zero third-party dependencies in the core. Full docs: `jackierouter/README.md`.
+
+```bash
+cp router.config.example.json router.config.json   # declare your ladder
+export JACKIEROUTER_CONFIG=$PWD/router.config.json
+python examples/demo_failover.py                   # offline proof, no API keys
+python -m pytest                                   # 78 tests, no network
+```
+
+`router_final.py` is now a thin HTTP shell over it (`pip install fastapi uvicorn`),
+serving the same `/api/generate`, `/ready` and `/health` as before, plus
+`/status` for live quota and spend.
+
 ## Jackie Core
 
 Persistent personal AI assistant built to be grounded, useful, protective, modular, and adaptable.
