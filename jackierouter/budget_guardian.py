@@ -12,7 +12,9 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
+
+from .persistence import from_wall, to_wall
 
 # Money in binary floats does not compare cleanly: 0.50 - 0.45 is 0.049999...,
 # which would refuse a spend that exactly fits. A sub-micro-cent tolerance is
@@ -101,6 +103,42 @@ class BudgetGuardian:
             return
         with self._lock:
             self._charges.append((self._time(), amount))
+
+    def export_state(self, wall_clock: Callable[[], float] = time.time) -> Dict[str, Any]:
+        now_internal, now_wall = self._time(), wall_clock()
+        with self._lock:
+            charges = list(self._charges)
+        return {
+            "charges": [
+                {"at": to_wall(at, now_internal, now_wall), "amount": amount}
+                for at, amount in charges
+            ]
+        }
+
+    def import_state(
+        self,
+        state: Dict[str, Any],
+        wall_clock: Callable[[], float] = time.time,
+        max_age_seconds: float = 86400.0,
+    ) -> None:
+        """Restore spend. Dropping a charge means under-counting, so keep them
+        all within the widest window rather than pruning aggressively."""
+        now_internal, now_wall = self._time(), wall_clock()
+        restored = []
+        for charge in state.get("charges") or []:
+            try:
+                at_wall = float(charge["at"])
+                amount = float(charge["amount"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if now_wall - at_wall > max_age_seconds:
+                continue
+            restored.append((from_wall(at_wall, now_internal, now_wall), amount))
+
+        if not restored:
+            return
+        with self._lock:
+            self._charges = sorted(self._charges + restored, key=lambda c: c[0])
 
     def snapshot(self) -> Dict[str, Dict[str, float]]:
         return {

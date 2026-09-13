@@ -63,6 +63,71 @@ class AdapterResult:
 
 
 @dataclass
+class HardwareRequirements:
+    """What a provider needs from the local machine before it is worth trying.
+
+    This is what makes "prefer local hardware" an honest claim rather than a
+    hope: a box that is asleep, thermally gated, out of VRAM, or missing the
+    model is skipped before the call, not after a timeout.
+    """
+
+    require_gpu: bool = False
+    min_free_vram_mb: int = 0
+    min_free_ram_mb: int = 0
+    max_gpu_temp_c: Optional[float] = None
+    require_ollama_model: bool = False
+    require_ollama: bool = False
+
+    def unmet(self, profile, model: str = "") -> Optional[str]:
+        """Return why this machine cannot serve the provider, or None if it can.
+
+        A probe that could not measure something returns ``None`` for it, and an
+        unmeasurable value is never treated as a failure — refusing to route
+        because a sensor is missing would be worse than routing.
+        """
+        if self.require_gpu and not profile.has_gpu:
+            return "no GPU detected on this machine"
+
+        if self.min_free_vram_mb:
+            free = profile.free_vram_mb
+            if free is not None and free < self.min_free_vram_mb:
+                return f"only {free}MB VRAM free, needs {self.min_free_vram_mb}MB"
+
+        if self.min_free_ram_mb:
+            free = profile.ram_available_mb
+            if free is not None and free < self.min_free_ram_mb:
+                return f"only {free}MB RAM free, needs {self.min_free_ram_mb}MB"
+
+        if self.max_gpu_temp_c is not None:
+            hottest = profile.hottest_gpu_c
+            if hottest is not None and hottest > self.max_gpu_temp_c:
+                return f"GPU at {hottest:.0f}C, gated above {self.max_gpu_temp_c:.0f}C"
+
+        if (self.require_ollama or self.require_ollama_model) and not profile.ollama_reachable:
+            return "ollama is not reachable"
+
+        if self.require_ollama_model and model and not profile.has_ollama_model(model):
+            return f"model {model!r} is not pulled on this machine"
+
+        return None
+
+
+@dataclass
+class StreamEvent:
+    """One step of a streamed completion.
+
+    Adapters yield text deltas as they arrive and a final ``done`` event
+    carrying whatever token counts the provider reported.
+    """
+
+    text: str = ""
+    done: bool = False
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
+    raw: Any = None
+
+
+@dataclass
 class Provider:
     """A callable model endpoint plus everything needed to route around it.
 
@@ -81,6 +146,7 @@ class Provider:
     capabilities: frozenset = frozenset()
     max_context: int = 8192
     enabled: bool = True
+    requires: Optional[HardwareRequirements] = None
 
     @property
     def is_free(self) -> bool:

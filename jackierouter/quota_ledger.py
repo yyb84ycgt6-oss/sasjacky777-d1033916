@@ -18,8 +18,9 @@ import math
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
+from .persistence import from_wall, to_wall
 from .types import Limit, Provider, Usage
 
 INFINITE = math.inf
@@ -186,6 +187,67 @@ class QuotaLedger:
             limiting_window=worst.limit.name(),
             windows=windows,
         )
+
+    # -- persistence -------------------------------------------------------
+
+    def export_state(self, wall_clock: Callable[[], float] = time.time) -> Dict[str, Any]:
+        """Serialize to wall clock so the state survives a restart."""
+        now_internal, now_wall = self._time(), wall_clock()
+        with self._lock:
+            return {
+                "providers": {
+                    name: [
+                        {
+                            "at": to_wall(event.at, now_internal, now_wall),
+                            "requests": event.requests,
+                            "tokens": event.tokens,
+                        }
+                        for event in events
+                    ]
+                    for name, events in self._events.items()
+                }
+            }
+
+    def import_state(
+        self,
+        state: Dict[str, Any],
+        wall_clock: Callable[[], float] = time.time,
+        max_age_seconds: float = 86400.0,
+    ) -> None:
+        """Restore persisted usage, dropping anything too old to matter."""
+        now_internal, now_wall = self._time(), wall_clock()
+        providers = state.get("providers") or {}
+        restored: Dict[str, List[_Event]] = {}
+
+        for name, events in providers.items():
+            if not isinstance(events, list):
+                continue
+            kept = []
+            for event in events:
+                try:
+                    at_wall = float(event["at"])
+                    requests = int(event.get("requests", 0))
+                    tokens = int(event.get("tokens", 0))
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if now_wall - at_wall > max_age_seconds:
+                    continue  # older than any window we track
+                kept.append(
+                    _Event(
+                        at=from_wall(at_wall, now_internal, now_wall),
+                        requests=requests,
+                        tokens=tokens,
+                    )
+                )
+            if kept:
+                restored[name] = sorted(kept, key=lambda e: e.at)
+
+        with self._lock:
+            for name, events in restored.items():
+                self._events.setdefault(name, [])
+                self._events[name] = sorted(
+                    self._events[name] + events, key=lambda e: e.at
+                )
 
     def would_exceed(self, provider: Provider, tokens: int, requests: int = 1) -> bool:
         """True when a call of this size cannot fit inside a declared window."""

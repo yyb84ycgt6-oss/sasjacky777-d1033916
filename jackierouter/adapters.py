@@ -16,10 +16,10 @@ import json
 import os
 import urllib.error
 import urllib.request
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, Iterator, List, Optional, Sequence
 
 from .errors import ProviderError, RateLimited
-from .types import AdapterResult, Message, RouteRequest
+from .types import AdapterResult, Message, RouteRequest, StreamEvent
 
 DEFAULT_TIMEOUT = 120.0
 
@@ -32,6 +32,16 @@ def _post_json(url: str, payload: Dict[str, Any], headers: Dict[str, str], timeo
         request.add_header(key, value)
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def _open_stream(url: str, payload: Dict[str, Any], headers: Dict[str, str], timeout: float):
+    """Open a streaming POST. The caller iterates the response line by line."""
+    body = json.dumps(payload).encode("utf-8")
+    request = urllib.request.Request(url, data=body, method="POST")
+    request.add_header("Content-Type", "application/json")
+    for key, value in headers.items():
+        request.add_header(key, value)
+    return urllib.request.urlopen(request, timeout=timeout)
 
 
 def _retry_after(exc: urllib.error.HTTPError, default: float) -> float:
@@ -92,6 +102,44 @@ class OllamaAdapter:
             output_tokens=data.get("eval_count"),
             raw=data,
         )
+
+    def stream(self, messages: Sequence[Message], request: RouteRequest) -> Iterator[StreamEvent]:
+        """Ollama streams newline-delimited JSON, one object per token batch."""
+        payload = {
+            "model": self.model,
+            "prompt": flatten(messages),
+            "stream": True,
+            "options": {"num_predict": request.max_output_tokens},
+        }
+        try:
+            response = _open_stream(f"{self.base_url}/api/generate", payload, {}, self.timeout)
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", "replace")[:500]
+            if exc.code == 429:
+                raise RateLimited(detail, provider=self.name, retry_after=_retry_after(exc, 30.0))
+            raise ProviderError(f"HTTP {exc.code}: {detail}", provider=self.name)
+        except (urllib.error.URLError, OSError) as exc:
+            raise ProviderError(f"unreachable: {exc}", provider=self.name, retry_after=15.0)
+
+        input_tokens = output_tokens = None
+        with response:
+            for raw_line in response:
+                line = raw_line.decode("utf-8", "replace").strip()
+                if not line:
+                    continue
+                try:
+                    chunk = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if chunk.get("error"):
+                    raise ProviderError(str(chunk["error"]), provider=self.name)
+                if chunk.get("response"):
+                    yield StreamEvent(text=chunk["response"])
+                if chunk.get("done"):
+                    input_tokens = chunk.get("prompt_eval_count")
+                    output_tokens = chunk.get("eval_count")
+
+        yield StreamEvent(done=True, input_tokens=input_tokens, output_tokens=output_tokens)
 
 
 class OpenAICompatAdapter:
@@ -155,6 +203,60 @@ class OpenAICompatAdapter:
             raw=data,
         )
 
+    def stream(self, messages: Sequence[Message], request: RouteRequest) -> Iterator[StreamEvent]:
+        """Server-sent events: ``data: {json}`` lines terminated by ``[DONE]``."""
+        headers = {}
+        key = self._key()
+        if key:
+            headers["Authorization"] = f"Bearer {key}"
+        payload = {
+            "model": self.model,
+            "messages": list(messages),
+            "max_tokens": request.max_output_tokens,
+            "stream": True,
+            # Ask for usage on the final chunk; servers that do not know this
+            # option ignore it, and the router falls back to its estimate.
+            "stream_options": {"include_usage": True},
+        }
+        try:
+            response = _open_stream(
+                f"{self.base_url}/chat/completions", payload, headers, self.timeout
+            )
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", "replace")[:500]
+            if exc.code == 429:
+                raise RateLimited(detail, provider=self.name, retry_after=_retry_after(exc, 60.0))
+            retry_after = 10.0 if exc.code in (500, 502, 503, 504) else 300.0
+            raise ProviderError(
+                f"HTTP {exc.code}: {detail}", provider=self.name, retry_after=retry_after
+            )
+        except (urllib.error.URLError, OSError) as exc:
+            raise ProviderError(f"unreachable: {exc}", provider=self.name, retry_after=30.0)
+
+        input_tokens = output_tokens = None
+        with response:
+            for raw_line in response:
+                line = raw_line.decode("utf-8", "replace").strip()
+                if not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+                usage = chunk.get("usage")
+                if usage:
+                    input_tokens = usage.get("prompt_tokens", input_tokens)
+                    output_tokens = usage.get("completion_tokens", output_tokens)
+                for choice in chunk.get("choices") or []:
+                    delta = (choice.get("delta") or {}).get("content")
+                    if delta:
+                        yield StreamEvent(text=delta)
+
+        yield StreamEvent(done=True, input_tokens=input_tokens, output_tokens=output_tokens)
+
 
 class EchoAdapter:
     """Deterministic offline adapter, for tests and for proving a route works."""
@@ -165,3 +267,8 @@ class EchoAdapter:
 
     def complete(self, messages: Sequence[Message], request: RouteRequest) -> AdapterResult:
         return AdapterResult(text=self.reply, raw={"messages": list(messages)})
+
+    def stream(self, messages: Sequence[Message], request: RouteRequest) -> Iterator[StreamEvent]:
+        for index, word in enumerate(self.reply.split()):
+            yield StreamEvent(text=word if index == 0 else f" {word}")
+        yield StreamEvent(done=True)

@@ -58,3 +58,56 @@ def test_probes_and_status(client):
     assert client.get("/health").json() == {"status": "ok"}
     assert client.get("/ready").json()["providers"] == ["dead", "backup"]
     assert {p["name"] for p in client.get("/status").json()["providers"]} == {"dead", "backup"}
+
+
+class DiesMidStream:
+    def stream(self, messages, request):
+        from jackierouter.types import StreamEvent
+
+        yield StreamEvent(text="BEGIN; ")
+        raise RateLimited("quota spent", provider="dead", retry_after=60)
+
+
+def test_stream_endpoint_emits_sse_and_hides_the_failover():
+    router = Router(
+        [
+            Provider(name="dead", model="d", adapter=DiesMidStream(), tier=0),
+            Provider(name="backup", model="b", adapter=EchoAdapter(reply="COMMIT;"), tier=1),
+        ]
+    )
+    response = TestClient(create_app(router)).post(
+        "/api/generate/stream", json={"prompt": "down-migration"}
+    )
+    assert response.status_code == 200
+
+    import json as _json
+
+    payloads = [
+        _json.loads(line[5:].strip())
+        for line in response.text.splitlines()
+        if line.startswith("data:") and line[5:].strip() != "[DONE]"
+    ]
+    deltas = [p["delta"] for p in payloads if "delta" in p]
+    final = next(p for p in payloads if p.get("done"))
+
+    assert "".join(deltas) == "BEGIN; COMMIT;"
+    assert final["provider"] == "backup"
+    assert final["handoffs"] == 1
+    assert response.text.rstrip().endswith("data: [DONE]")
+
+
+def test_stream_endpoint_reports_an_unroutable_request_in_band():
+    router = Router([Provider(name="off", model="m", adapter=EchoAdapter(), enabled=False)])
+    response = TestClient(create_app(router)).post("/api/generate/stream", json={"prompt": "x"})
+    assert response.status_code == 200  # the stream already started; errors ride in it
+    assert "disabled" in response.text
+
+
+def test_system_endpoint_describes_the_machine(client):
+    body = client.get("/system").json()
+    assert "accelerator" in body and "ollama_reachable" in body
+
+
+def test_ready_still_reports_gpu_presence(client):
+    body = client.get("/ready").json()
+    assert set(body) >= {"status", "gpu_available", "gpus", "npu_available", "providers"}

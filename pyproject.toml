@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jackierouter"
-version = "0.1.0"
-description = "Predictive, cost-tiered AI routing with context-preserving failover"
+version = "0.2.0"
+description = "Predictive, hardware-aware, cost-tiered AI routing with context-preserving failover"
 readme = "jackierouter/README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
-keywords = ["llm", "routing", "rate-limit", "failover", "ollama", "openai"]
+keywords = ["llm", "routing", "rate-limit", "failover", "ollama", "openai", "anthropic", "gpu"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Topic :: Software Development :: Libraries",
@@ -23,5 +23,9 @@ dev = ["pytest>=7"]
 [tool.setuptools]
 packages = ["jackierouter"]
 
+[project.scripts]
+jackierouter = "jackierouter.__main__:main"
+
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+# The command_station suite drives the real HybridRouter, so it runs here too.
+testpaths = ["tests", "command_station/tools"]

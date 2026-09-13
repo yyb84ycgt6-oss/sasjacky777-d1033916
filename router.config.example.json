@@ -2,6 +2,13 @@
   "horizon_seconds": 30,
   "risk_policy": "migrate",
   "briefing_max_chars": 2000,
+  "max_attempts": 4,
+  "state_path": "jackierouter-state.json",
+  "system_probe": {
+    "enabled": true,
+    "ttl_seconds": 30,
+    "ollama_url": "http://localhost:11434"
+  },
   "budget": {
     "per_hour": 0.50,
     "per_day": 5.00
@@ -14,7 +21,12 @@
       "base_url": "http://localhost:11434",
       "tier": 0,
       "max_context": 32768,
-      "capabilities": ["chat"]
+      "capabilities": ["chat"],
+      "requires": {
+        "require_ollama_model": true,
+        "max_gpu_temp_c": 75,
+        "min_free_vram_mb": 6000
+      }
     },
     {
       "name": "local/gemma-code",
@@ -23,7 +35,13 @@
       "base_url": "http://localhost:11434",
       "tier": 0,
       "max_context": 32768,
-      "capabilities": ["code", "chat", "long-context"]
+      "capabilities": ["code", "chat", "long-context"],
+      "requires": {
+        "require_gpu": true,
+        "require_ollama_model": true,
+        "max_gpu_temp_c": 75,
+        "min_free_vram_mb": 17000
+      }
     },
     {
       "name": "groq/llama-70b",
@@ -41,16 +59,13 @@
       ]
     },
     {
-      "name": "anthropic/sonnet",
-      "kind": "openai",
-      "model": "claude-sonnet-5",
-      "base_url": "https://api.anthropic.com/v1",
+      "name": "anthropic/opus-5",
+      "kind": "anthropic",
+      "model": "claude-opus-5",
       "api_key_env": "ANTHROPIC_API_KEY",
       "tier": 2,
       "max_context": 200000,
-      "capabilities": ["chat", "code", "long-context"],
-      "cost_per_1k_input": 0.003,
-      "cost_per_1k_output": 0.015
+      "capabilities": ["chat", "code", "long-context"]
     }
   ]
 }

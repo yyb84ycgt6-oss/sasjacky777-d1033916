@@ -5,12 +5,13 @@ Jackie to talk to. Everything except the route declarations is plain functions
 so the request handling is testable without FastAPI installed.
 """
 
+import json
 import logging
-import subprocess
 from typing import Any, Dict, List, Optional
 
 from .errors import NoProviderAvailable
 from .router import Router
+from .system_profile import probe
 from .types import Message, RouteRequest, RoutingResult
 
 logger = logging.getLogger("jackierouter.gateway")
@@ -20,23 +21,18 @@ LONG_PROMPT_CHARS = 1500
 
 
 def detect_gpu() -> Dict[str, Any]:
-    """Report local GPU presence — the tier-0 story starts with owning the metal."""
-    try:
-        out = subprocess.check_output(
-            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
-            stderr=subprocess.DEVNULL,
-            text=True,
-            timeout=10,
-        )
-        gpus = [line.strip() for line in out.splitlines() if line.strip()]
-        return {"has_gpu": bool(gpus), "gpus": gpus}
-    except Exception:
-        return {"has_gpu": False, "gpus": []}
+    """Report local GPU presence — the tier-0 story starts with owning the metal.
+
+    Kept for the ``/ready`` shape existing callers expect; the full picture
+    (VRAM, temperature, installed models) is on ``/system`` and ``/status``.
+    """
+    profile = probe()
+    return {"has_gpu": profile.has_gpu, "gpus": [gpu.name for gpu in profile.gpus]}
 
 
 def detect_npu() -> Dict[str, Any]:
-    """Placeholder for NPU detection (Windows / DirectML / vendor APIs)."""
-    return {"has_npu": False, "details": []}
+    profile = probe()
+    return {"has_npu": profile.npu.get("detected", False), "details": profile.npu.get("details", [])}
 
 
 def extract_messages(payload: Dict[str, Any]) -> List[Message]:
@@ -146,7 +142,7 @@ def create_app(router: Optional[Router] = None):
     # resolve, and every request would fail validation with a 422.
     try:
         from fastapi import FastAPI, Request
-        from fastapi.responses import JSONResponse
+        from fastapi.responses import JSONResponse, StreamingResponse
         from starlette.concurrency import run_in_threadpool
     except ImportError as exc:  # pragma: no cover - depends on the install extra
         raise RuntimeError(
@@ -190,9 +186,46 @@ def create_app(router: Optional[Router] = None):
     async def health():
         return {"status": "ok"}
 
+    @app.post("/api/generate/stream")
+    async def generate_stream(request: Request):
+        """Server-sent events. Failover mid-stream is invisible to the reader:
+        the next provider resumes from the cut point."""
+        payload = await request.json()
+        route_request = build_request(payload)
+        stream = router.stream(route_request)
+
+        def produce():
+            try:
+                for chunk in stream:
+                    yield f"data: {json.dumps({'delta': chunk})}\n\n"
+            except NoProviderAvailable as exc:
+                yield f"data: {json.dumps(failure_payload(exc))}\n\n"
+                yield "data: [DONE]\n\n"
+                return
+            if stream.result is not None:
+                yield f"data: {json.dumps({'done': True, **result_payload(stream.result)})}\n\n"
+            yield "data: [DONE]\n\n"
+
+        async def relay():
+            # The ladder does blocking provider I/O, so it is driven on a
+            # worker thread and its chunks handed back to the event loop.
+            iterator = produce()
+            while True:
+                chunk = await run_in_threadpool(lambda: next(iterator, None))
+                if chunk is None:
+                    return
+                yield chunk
+
+        return StreamingResponse(relay(), media_type="text/event-stream")
+
+    @app.get("/system")
+    async def system():
+        """What machine this router is on, as it sees it right now."""
+        return await run_in_threadpool(lambda: probe().summary())
+
     @app.get("/status")
     async def status():
-        """Live quota forecasts and spend — the router's own vital signs."""
-        return router.status()
+        """Live quota forecasts, spend, and hardware — the router's vital signs."""
+        return await run_in_threadpool(router.status)
 
     return app

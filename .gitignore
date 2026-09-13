@@ -4,3 +4,4 @@ __pycache__/
 *.egg-info/
 router.config.json
 .env
+jackierouter-state.json

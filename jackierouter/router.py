@@ -19,13 +19,23 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, Iterator, List, Optional, Sequence, Tuple
 
 from .budget_guardian import BudgetGuardian
 from .errors import BudgetExceeded, NoProviderAvailable, ProviderError, RateLimited
 from .handoff import HandoffBriefing, apply_briefing, build_briefing
+from .persistence import StateStore
 from .quota_ledger import Forecast, QuotaLedger
-from .types import Attempt, Provider, RouteRequest, RoutingResult, Usage
+from .system_profile import SystemProbe
+from .types import (
+    Attempt,
+    Message,
+    Provider,
+    RouteRequest,
+    RoutingResult,
+    StreamEvent,
+    Usage,
+)
 
 logger = logging.getLogger("jackierouter")
 
@@ -53,6 +63,9 @@ class Router:
         risk_policy: str = MIGRATE,
         briefing_max_chars: int = 2000,
         max_attempts: int = 4,
+        system_probe: Optional[SystemProbe] = None,
+        probe_hardware: bool = True,
+        state_store: Optional[StateStore] = None,
         time_fn: Callable[[], float] = time.monotonic,
     ):
         if risk_policy not in (MIGRATE, CONSERVE):
@@ -67,7 +80,21 @@ class Router:
         self.risk_policy = risk_policy
         self.briefing_max_chars = briefing_max_chars
         self.max_attempts = max_attempts
+        # Only built when some provider actually declares hardware needs — a
+        # cloud-only ladder should not shell out to nvidia-smi — and never when
+        # the caller has switched probing off.
+        self.system_probe = system_probe
+        if self.system_probe is None and probe_hardware:
+            if any(p.requires for p in self.providers):
+                self.system_probe = SystemProbe()
         self._cooldowns: Dict[str, float] = {}
+
+        # Restore what the last process had already burned and spent, so a
+        # restart does not hand a fresh quota to a provider mid-burn.
+        self.state_store = state_store
+        if self.state_store is not None:
+            if self.state_store.load(ledger=self.ledger, budget=self.budget):
+                logger.info("restored router state from %s", self.state_store.path)
 
     # -- selection ---------------------------------------------------------
 
@@ -109,6 +136,11 @@ class Router:
                 skip(f"cooling down for {remaining:.0f}s")
                 continue
 
+            unmet = self._hardware_blocker(provider)
+            if unmet:
+                skip(unmet)
+                continue
+
             forecast = self.ledger.forecast(provider)
             if self.ledger.would_exceed(provider, needed_tokens):
                 skip(f"call does not fit remaining quota ({forecast.describe()})")
@@ -141,6 +173,17 @@ class Router:
             return candidates, skipped
         return self._order(candidates), skipped
 
+    def _hardware_blocker(self, provider: Provider) -> Optional[str]:
+        """Ask the machine itself whether this provider can run right now."""
+        if provider.requires is None or self.system_probe is None:
+            return None
+        try:
+            profile = self.system_probe.profile()
+        except Exception as exc:  # a broken probe must never block routing
+            logger.warning("system probe failed, routing without it: %s", exc)
+            return None
+        return provider.requires.unmet(profile, provider.model)
+
     def _order(self, candidates: List[Candidate]) -> List[Candidate]:
         def by_cost(candidate: Candidate):
             return (candidate.provider.tier, -candidate.forecast.fraction_remaining)
@@ -163,15 +206,43 @@ class Router:
 
     # -- dispatch ----------------------------------------------------------
 
+    def _raise_no_candidates(self, trace: List[Attempt]) -> None:
+        if trace and all(a.outcome == "skipped" and "budget cap" in a.detail for a in trace):
+            raise BudgetExceeded("every remaining provider is over budget", trace=trace)
+        raise NoProviderAvailable("no provider passed selection", trace=trace)
+
+    def _over_budget(
+        self, provider: Provider, request: RouteRequest, briefing: Optional[HandoffBriefing]
+    ) -> Optional[str]:
+        """Re-check the cap per rung: a briefing grows the prompt, and earlier
+        failures may have spent the budget since the plan was drawn."""
+        estimate = provider.estimate_cost(
+            request.prompt_tokens() + (briefing.estimated_tokens() if briefing else 0),
+            request.max_output_tokens,
+        )
+        if estimate > 0 and not self.budget.can_spend(estimate):
+            return f"budget cap reached ({self.budget.blocking_window(estimate)})"
+        return None
+
+    def _settle(
+        self,
+        provider: Provider,
+        usage: Usage,
+        briefing: Optional[HandoffBriefing],
+    ) -> float:
+        """Record a successful call against the ledger, the budget, and disk."""
+        cost = provider.estimate_cost(usage.input_tokens, usage.output_tokens)
+        self.ledger.record(provider.name, usage)
+        self.budget.record(cost)
+        self._cooldowns.pop(provider.name, None)
+        self._persist(force=cost > 0)  # money is never left unwritten
+        return cost
+
     def dispatch(self, request: RouteRequest) -> RoutingResult:
         """Run the request, failing over down the ladder until one provider answers."""
         candidates, trace = self.plan(request)
         if not candidates:
-            if trace and all(
-                a.outcome == "skipped" and "budget cap" in a.detail for a in trace
-            ):
-                raise BudgetExceeded("every remaining provider is over budget", trace=trace)
-            raise NoProviderAvailable("no provider passed selection", trace=trace)
+            self._raise_no_candidates(trace)
 
         briefing: Optional[HandoffBriefing] = None
         partial_output = ""
@@ -180,20 +251,9 @@ class Router:
             provider = candidate.provider
             messages = apply_briefing(request.messages, briefing)
 
-            # Re-check the cap here, not just at plan time: a briefing grows
-            # the prompt, and earlier failures may have spent the budget.
-            cost_estimate = provider.estimate_cost(
-                request.prompt_tokens() + (briefing.estimated_tokens() if briefing else 0),
-                request.max_output_tokens,
-            )
-            if cost_estimate > 0 and not self.budget.can_spend(cost_estimate):
-                trace.append(
-                    self._attempt(
-                        candidate,
-                        "skipped",
-                        f"budget cap reached ({self.budget.blocking_window(cost_estimate)})",
-                    )
-                )
+            blocker = self._over_budget(provider, request, briefing)
+            if blocker:
+                trace.append(self._attempt(candidate, "skipped", blocker))
                 continue
 
             try:
@@ -231,11 +291,7 @@ class Router:
                     else len(result.text) // 4
                 ),
             )
-            cost = provider.estimate_cost(usage.input_tokens, usage.output_tokens)
-
-            self.ledger.record(provider.name, usage)
-            self.budget.record(cost)
-            self._cooldowns.pop(provider.name, None)
+            cost = self._settle(provider, usage, briefing)
             trace.append(self._attempt(candidate, "ok", "", cost=cost, handoff=briefing is not None))
 
             return RoutingResult(
@@ -250,6 +306,36 @@ class Router:
             )
 
         raise NoProviderAvailable("every candidate failed", trace=trace)
+
+    def stream(self, request: RouteRequest) -> "StreamingDispatch":
+        """Stream the response, failing over mid-stream without losing the thread.
+
+        Iterate it for text deltas; read ``.result`` afterwards for the usage,
+        cost, and trace. When a provider dies partway through generating, the
+        text already emitted becomes the partial output in the briefing handed
+        to the next one, so it resumes from the cut point instead of repeating
+        what the reader has already seen.
+        """
+        return StreamingDispatch(self, request)
+
+    def _provider_stream(
+        self, provider: Provider, messages: Sequence[Message], request: RouteRequest
+    ) -> Iterator[StreamEvent]:
+        """Stream from a provider, or emulate it for an adapter that cannot."""
+        streamer = getattr(provider.adapter, "stream", None)
+        if callable(streamer):
+            yield from streamer(messages, request)
+            return
+
+        result = provider.adapter.complete(messages, request)
+        if result.text:
+            yield StreamEvent(text=result.text)
+        yield StreamEvent(
+            done=True,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+            raw=result.raw,
+        )
 
     def _attempt(
         self,
@@ -291,14 +377,27 @@ class Router:
     def _penalize(self, provider: Provider, exc: ProviderError) -> None:
         self.ledger.record_rejection(provider.name)
         self._cooldowns[provider.name] = self._time() + max(0.0, exc.retry_after)
+        self._persist()
+
+    def _persist(self, force: bool = False) -> None:
+        if self.state_store is None:
+            return
+        self.state_store.maybe_save(ledger=self.ledger, budget=self.budget, force=force)
 
     # -- introspection -----------------------------------------------------
 
     def status(self) -> Dict:
         """Everything an operator wants on a dashboard, in one call."""
         now = self._time()
+        system = None
+        if self.system_probe is not None:
+            try:
+                system = self.system_probe.profile().summary()
+            except Exception:  # pragma: no cover - defensive
+                system = None
         return {
             "horizon_seconds": self.horizon_seconds,
+            "system": system,
             "risk_policy": self.risk_policy,
             "budget": self.budget.snapshot(),
             "providers": [
@@ -315,7 +414,116 @@ class Router:
                         else round(self.ledger.forecast(p).seconds_to_exhaustion, 1)
                     ),
                     "cooldown_remaining": max(0.0, self._cooldowns.get(p.name, 0.0) - now),
+                    "hardware_blocker": self._hardware_blocker(p),
                 }
                 for p in self.providers
             ],
         }
+
+
+class StreamingDispatch:
+    """An in-progress streamed response that can change provider mid-flight.
+
+    Iterating yields text deltas. After the iteration finishes, ``result``
+    holds the same :class:`RoutingResult` a non-streamed dispatch would return
+    — including the full text, the usage, and the trace of who produced what.
+    """
+
+    def __init__(self, router: Router, request: RouteRequest):
+        self.router = router
+        self.request = request
+        self.result: Optional[RoutingResult] = None
+        self.trace: List[Attempt] = []
+
+    def __iter__(self) -> Iterator[str]:
+        router, request = self.router, self.request
+        candidates, trace = router.plan(request)
+        self.trace = trace
+        if not candidates:
+            router._raise_no_candidates(trace)
+
+        briefing: Optional[HandoffBriefing] = None
+        emitted = ""  # everything the reader has already seen, from any provider
+
+        for candidate in candidates[: router.max_attempts]:
+            provider = candidate.provider
+
+            blocker = router._over_budget(provider, request, briefing)
+            if blocker:
+                trace.append(router._attempt(candidate, "skipped", blocker))
+                continue
+
+            messages = apply_briefing(request.messages, briefing)
+            produced = ""
+            input_tokens = output_tokens = None
+            raw = None
+
+            try:
+                for event in router._provider_stream(provider, messages, request):
+                    if event.done:
+                        input_tokens = event.input_tokens
+                        output_tokens = event.output_tokens
+                        raw = event.raw
+                        break
+                    if event.text:
+                        produced += event.text
+                        emitted += event.text
+                        yield event.text
+            except (RateLimited, ProviderError) as exc:
+                reason = (
+                    f"rate limited: {exc}"
+                    if isinstance(exc, RateLimited)
+                    else f"provider error: {exc}"
+                )
+                briefing = router._handoff(request, provider, reason, emitted)
+                router._penalize(provider, exc)
+                trace.append(
+                    router._attempt(
+                        candidate,
+                        "rate_limited" if isinstance(exc, RateLimited) else "error",
+                        str(exc),
+                        handoff=True,
+                    )
+                )
+                continue
+            except Exception as exc:  # an adapter's own bug must not end the ladder
+                briefing = router._handoff(
+                    request, provider, f"adapter raised {exc!r}", emitted
+                )
+                router._penalize(provider, ProviderError(str(exc), provider=provider.name))
+                trace.append(router._attempt(candidate, "error", repr(exc), handoff=True))
+                continue
+
+            usage = Usage(
+                input_tokens=(
+                    input_tokens
+                    if input_tokens is not None
+                    else request.prompt_tokens()
+                    + (briefing.estimated_tokens() if briefing else 0)
+                ),
+                output_tokens=(
+                    output_tokens if output_tokens is not None else len(produced) // 4
+                ),
+            )
+            cost = router._settle(provider, usage, briefing)
+            trace.append(
+                router._attempt(candidate, "ok", "", cost=cost, handoff=briefing is not None)
+            )
+
+            self.result = RoutingResult(
+                text=emitted,
+                provider=provider.name,
+                model=provider.model,
+                usage=usage,
+                cost=cost,
+                trace=trace,
+                briefing=briefing.render() if briefing else None,
+                raw=raw,
+            )
+            return
+
+        raise NoProviderAvailable("every candidate failed", trace=trace)
+
+    def text(self) -> str:
+        """Consume the whole stream and return the joined text."""
+        return "".join(self)
