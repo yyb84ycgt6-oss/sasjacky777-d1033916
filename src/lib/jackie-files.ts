@@ -1,3 +1,4 @@
+import { callEdgeFunction } from "@/lib/edgeFunction";
 import { supabase } from "@/integrations/supabase/client";
 import type { Attachment } from "./jackie-attachments";
 
@@ -82,17 +83,9 @@ export async function buildFileContext(conversationId: string): Promise<string> 
 }
 
 // ── Image Generation via Edge Function ──
-const IMAGE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/jackie-image`;
 
 export async function generateImage(prompt: string): Promise<{ image: string; text: string }> {
-  const resp = await fetch(IMAGE_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-    },
-    body: JSON.stringify({ prompt }),
-  });
+  const resp = await callEdgeFunction("jackie-image", { prompt });
 
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({ error: "Image generation failed" }));

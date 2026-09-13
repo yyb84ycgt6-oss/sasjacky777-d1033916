@@ -1,3 +1,4 @@
+import { callEdgeFunction } from "@/lib/edgeFunction";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
@@ -842,21 +843,13 @@ Provide your assessment in this structure:
 
 Keep it concise but thorough. No hype, no false alarm — just truth.`;
 
-          const res = await fetch(
-            `https://rkwhhbxgjdpehfuxsult.supabase.co/functions/v1/jackie-chat`,
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
-                'apikey': import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-              },
-              body: JSON.stringify({
-                model: selectedModel,
-                messages: [{ role: 'user', content: discernmentPrompt }],
-              }),
-            }
-          );
+          // Was hardcoded to a different Supabase project entirely
+          // (rkwhhbxgjdpehfuxsult), so this could never reach this app's
+          // functions no matter what was deployed.
+          const res = await callEdgeFunction('jackie-chat', {
+            model: selectedModel,
+            messages: [{ role: 'user', content: discernmentPrompt }],
+          });
           if (!res.ok) throw new Error('Analysis failed');
           const reader = res.body?.getReader();
           if (!reader) throw new Error('No response stream');
