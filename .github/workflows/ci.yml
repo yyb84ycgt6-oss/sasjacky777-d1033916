@@ -60,12 +60,18 @@ jobs:
             exit 1
           fi
 
+      # Skipped while e2e/ has no specs. Playwright exits non-zero on an empty
+      # suite, and its webServer would build and serve the app to run nothing,
+      # so gating on the specs existing keeps the job honest and fast. It starts
+      # running by itself the moment someone adds the first spec.
       - name: E2E
-        run: npx playwright test
-        env:
-          # Chromium is not installed on the runner by default. The suite is
-          # currently empty, so this stays cheap until there are specs.
-          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "0"
+        run: |
+          if [ -z "$(find e2e -name '*.spec.ts' -print -quit)" ]; then
+            echo "No Playwright specs in e2e/ yet - skipping."
+            exit 0
+          fi
+          npx playwright install --with-deps chromium
+          npx playwright test
 
   database:
     name: Database authorization probes
