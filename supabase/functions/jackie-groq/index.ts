@@ -1,8 +1,7 @@
 // Streaming chat via Groq (free tier: 14.4k req/day, real Llama models).
 // Requires GROQ_API_KEY secret. User can add it in Cloud → Secrets.
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.58.0";
-import { verifyAccessToken } from "../_shared/authGate.ts";
+import { gate } from "../_shared/entitlement.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -27,30 +26,9 @@ const ALLOWED = new Set([
   "deepseek-r1-distill-llama-70b",
 ]);
 
-async function requireUser(req: Request): Promise<Response | null> {
-  const auth = req.headers.get("Authorization");
-  if (!auth?.startsWith("Bearer ")) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-  const sb = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_ANON_KEY")!,
-    { global: { headers: { Authorization: auth } } },
-  );
-  const { data, error } = await verifyAccessToken(sb.auth, auth.replace("Bearer ", ""));
-  if (error || !data?.claims) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-  return null;
-}
-
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
-  const un = await requireUser(req);
+  const un = await gate(req, "jackie-groq");
   if (un) return un;
 
   const key = Deno.env.get("GROQ_API_KEY");

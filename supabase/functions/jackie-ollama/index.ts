@@ -1,36 +1,34 @@
-// Bridge to a self-hosted Ollama instance (localhost via tunnel, home GPU, VPS).
-// Requires OLLAMA_BASE_URL (e.g. https://ollama.mydomain.com or a Cloudflare Tunnel URL).
-// Optional OLLAMA_API_KEY if the endpoint is protected.
+/**
+ * Bridge to a self-hosted Ollama instance (tunnel, home GPU, VPS).
+ *
+ * The base URL comes from configuration rather than the request, so there is no
+ * URL-based SSRF here. The *model* was caller-controlled, though, and that is
+ * its own problem on a private box: any signed-in user could load any model
+ * installed on it — including a private one that was never meant to be reachable
+ * from the web app — and could pick the largest one on the disk repeatedly,
+ * which on a single-GPU host is a denial of service against everyone else.
+ *
+ * Requires OLLAMA_BASE_URL. Optional OLLAMA_API_KEY if the endpoint is
+ * protected. OLLAMA_MODEL_ALLOWLIST names the models this app may run.
+ */
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.58.0";
-import { verifyAccessToken } from "../_shared/authGate.ts";
+import {
+  admit, allowlistFromEnv, corsHeaders, json, pickModel, preflight, providerFailure, tooLarge,
+} from "../_shared/entitlement.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-};
-
-async function requireUser(req: Request): Promise<Response | null> {
-  const auth = req.headers.get("Authorization");
-  if (!auth?.startsWith("Bearer ")) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-  const sb = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_ANON_KEY")!,
-    { global: { headers: { Authorization: auth } } },
-  );
-  const { data, error } = await verifyAccessToken(sb.auth, auth.replace("Bearer ", ""));
-  if (error || !data?.claims) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-  return null;
-}
+const FUNCTION_NAME = "jackie-ollama";
+const DEFAULT_MODEL = "llama3.2:3b";
+const ALLOWED_MODELS = allowlistFromEnv("OLLAMA_MODEL_ALLOWLIST", [
+  "llama3.2:3b",
+  "llama3.2:1b",
+  "llama3.1:8b",
+  "qwen2.5:7b",
+  "mistral:7b",
+  "phi3:mini",
+]);
+const MAX_MESSAGES = 64;
+const MAX_MESSAGE_CHARS = 100_000;
+const MAX_SYSTEM_CHARS = 20_000;
 
 // Ollama returns NDJSON. Rewrap into OpenAI-compatible SSE so the same client parser works.
 function ndjsonToSse(readable: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
@@ -64,24 +62,39 @@ function ndjsonToSse(readable: ReadableStream<Uint8Array>): ReadableStream<Uint8
 }
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
-  const un = await requireUser(req);
-  if (un) return un;
+  if (req.method === "OPTIONS") return preflight();
+  if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
+
+  let payload: Record<string, unknown>;
+  try {
+    payload = await req.json();
+  } catch {
+    return json({ error: "Invalid JSON body" }, 400);
+  }
+
+  const chosen = pickModel(payload.model, ALLOWED_MODELS, DEFAULT_MODEL);
+  if ("error" in chosen) return chosen.error;
+
+  const messages = payload.messages;
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return json({ error: "messages must be a non-empty array" }, 400);
+  }
+  if (messages.length > MAX_MESSAGES) return json({ error: "Too many messages" }, 400);
+  if (tooLarge(messages, MAX_MESSAGE_CHARS)) return json({ error: "Message payload too large" }, 413);
+
+  const system = typeof payload.system === "string" ? payload.system : "";
+  if (system.length > MAX_SYSTEM_CHARS) return json({ error: "System prompt too large" }, 413);
+
+  const admission = await admit(req, FUNCTION_NAME, chosen.model);
+  if (admission instanceof Response) return admission;
 
   const base = Deno.env.get("OLLAMA_BASE_URL");
   if (!base) {
-    return new Response(
-      JSON.stringify({
-        error: "OLLAMA_BASE_URL not configured. Add it in Cloud → Secrets. Expose your local Ollama via a Cloudflare Tunnel or ngrok, then paste the URL (e.g. https://ollama.mydomain.com).",
-        needs_secret: "OLLAMA_BASE_URL",
-      }),
-      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
+    console.error(`${FUNCTION_NAME}: OLLAMA_BASE_URL not configured`);
+    return json({ error: "Provider unavailable", code: "PROVIDER_UNCONFIGURED" }, 503);
   }
 
   try {
-    const { messages, model, system } = await req.json();
-    const selected = model || "llama3.2:3b";
     const optionalKey = Deno.env.get("OLLAMA_API_KEY");
     const resp = await fetch(`${base.replace(/\/$/, "")}/api/chat`, {
       method: "POST",
@@ -90,26 +103,19 @@ serve(async (req) => {
         ...(optionalKey ? { Authorization: `Bearer ${optionalKey}` } : {}),
       },
       body: JSON.stringify({
-        model: selected,
-        messages: [
-          ...(system ? [{ role: "system", content: system }] : []),
-          ...messages,
-        ],
+        model: chosen.model,
+        messages: [...(system ? [{ role: "system", content: system }] : []), ...messages],
         stream: true,
       }),
     });
-    if (!resp.ok || !resp.body) {
-      const text = await resp.text().catch(() => "");
-      return new Response(JSON.stringify({ error: `Ollama ${resp.status}: ${text || "no body"}` }), {
-        status: resp.status || 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+
+    if (!resp.ok || !resp.body) return await providerFailure(FUNCTION_NAME, resp);
+
     return new Response(ndjsonToSse(resp.body), {
       headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
     });
   } catch (e) {
-    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown" }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    console.error(`${FUNCTION_NAME}: unexpected failure`, e);
+    return json({ error: "Internal error" }, 500);
   }
 });

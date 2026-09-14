@@ -1,17 +1,28 @@
-// Streaming chat via OpenRouter (free-tier Llama + many free models).
-// Requires OPENROUTER_API_KEY. Get one at openrouter.ai/keys.
+/**
+ * Streaming chat via OpenRouter.
+ *
+ * The previous version said, in a comment, "Any model id from openrouter.ai is
+ * accepted, but we prefer known free ids" — and meant it: the free-model set
+ * was consulted only to decorate an error message, while any non-empty caller
+ * string went upstream on the project's OPENROUTER_API_KEY. OpenRouter bills
+ * per model, so that made "which of our paid models would you like us to buy
+ * for you" a parameter of the API, available to anyone who could sign up.
+ *
+ * The set is now the allowlist, and unknown models are refused before the key
+ * is touched.
+ */
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.58.0";
-import { verifyAccessToken } from "../_shared/authGate.ts";
+import {
+  admit, allowlistFromEnv, corsHeaders, json, pickModel, preflight,
+  providerFailure, tooLarge,
+} from "../_shared/entitlement.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-};
+const FUNCTION_NAME = "jackie-openrouter";
+const DEFAULT_MODEL = "meta-llama/llama-3.3-70b-instruct:free";
 
-// Any model id from openrouter.ai is accepted, but we prefer known free ids.
-const KNOWN_FREE = new Set([
+// Free tiers move. The list is overridable without a redeploy so an operator
+// can drop a model that starts charging, or add one that stops.
+const ALLOWED_MODELS = allowlistFromEnv("OPENROUTER_MODEL_ALLOWLIST", [
   "meta-llama/llama-3.3-70b-instruct:free",
   "meta-llama/llama-3.2-3b-instruct:free",
   "meta-llama/llama-3.2-1b-instruct:free",
@@ -31,56 +42,48 @@ const KNOWN_FREE = new Set([
   "microsoft/phi-3-mini-128k-instruct:free",
 ]);
 
-async function requireUser(req: Request): Promise<Response | null> {
-  const auth = req.headers.get("Authorization");
-  if (!auth?.startsWith("Bearer ")) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-  const sb = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_ANON_KEY")!,
-    { global: { headers: { Authorization: auth } } },
-  );
-  const { data, error } = await verifyAccessToken(sb.auth, auth.replace("Bearer ", ""));
-  if (error || !data?.claims) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-  return null;
-}
+const MAX_MESSAGES = 64;
+const MAX_MESSAGE_CHARS = 100_000;
+const MAX_SYSTEM_CHARS = 20_000;
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
-  const un = await requireUser(req);
-  if (un) return un;
+  if (req.method === "OPTIONS") return preflight();
+  if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
+
+  let payload: Record<string, unknown>;
+  try {
+    payload = await req.json();
+  } catch {
+    return json({ error: "Invalid JSON body" }, 400);
+  }
+
+  // Shape first, then spend. Validating before admission means a malformed
+  // request does not cost the caller a slice of their quota.
+  const chosen = pickModel(payload.model, ALLOWED_MODELS, DEFAULT_MODEL);
+  if ("error" in chosen) return chosen.error;
+
+  const messages = payload.messages;
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return json({ error: "messages must be a non-empty array" }, 400);
+  }
+  if (messages.length > MAX_MESSAGES) return json({ error: "Too many messages" }, 400);
+  if (tooLarge(messages, MAX_MESSAGE_CHARS)) {
+    return json({ error: "Message payload too large" }, 413);
+  }
+
+  const system = typeof payload.system === "string" ? payload.system : "";
+  if (system.length > MAX_SYSTEM_CHARS) return json({ error: "System prompt too large" }, 413);
+
+  const admission = await admit(req, FUNCTION_NAME, chosen.model);
+  if (admission instanceof Response) return admission;
 
   const key = Deno.env.get("OPENROUTER_API_KEY");
   if (!key) {
-    return new Response(
-      JSON.stringify({
-        error: "OPENROUTER_API_KEY not configured. Add it in Cloud → Secrets. Get a free key at openrouter.ai/keys",
-        needs_secret: "OPENROUTER_API_KEY",
-      }),
-      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
+    console.error(`${FUNCTION_NAME}: OPENROUTER_API_KEY not configured`);
+    return json({ error: "Provider unavailable", code: "PROVIDER_UNCONFIGURED" }, 503);
   }
 
   try {
-    const { messages, model, system } = await req.json();
-    const selected = (typeof model === "string" && model.length > 0)
-      ? model
-      : "meta-llama/llama-3.3-70b-instruct:free";
-    const body = {
-      model: selected,
-      messages: [
-        ...(system ? [{ role: "system", content: system }] : []),
-        ...messages,
-      ],
-      stream: true,
-    };
     const resp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -89,20 +92,20 @@ serve(async (req) => {
         "HTTP-Referer": "https://jecodedesjeux2026.lovable.app",
         "X-Title": "Jackie",
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        model: chosen.model,
+        messages: [...(system ? [{ role: "system", content: system }] : []), ...messages],
+        stream: true,
+      }),
     });
-    if (!resp.ok) {
-      const text = await resp.text();
-      return new Response(JSON.stringify({ error: `OpenRouter ${resp.status}: ${text}`, known_free: KNOWN_FREE.has(selected) }), {
-        status: resp.status, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+
+    if (!resp.ok) return await providerFailure(FUNCTION_NAME, resp);
+
     return new Response(resp.body, {
       headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
     });
   } catch (e) {
-    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown" }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    console.error(`${FUNCTION_NAME}: unexpected failure`, e);
+    return json({ error: "Internal error" }, 500);
   }
 });

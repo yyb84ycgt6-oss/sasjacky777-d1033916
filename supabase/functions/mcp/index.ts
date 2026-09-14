@@ -73,7 +73,7 @@ var list_tasks_default = defineTool({
       return { content: [{ type: "text", text: "Not authenticated" }], isError: true };
     }
     const supabase = supabaseForUser(ctx);
-    let query = supabase.from("jackie_tasks").select("id,title,description,status,priority,category,due_date,created_at").order("created_at", { ascending: false }).limit(limit ?? 25);
+    let query = supabase.from("jackie_tasks").select("id,title,description,status,priority,category,due_date,created_at").eq("user_id", ctx.getUserId()).order("created_at", { ascending: false }).limit(limit ?? 25);
     if (status) query = query.eq("status", status);
     const { data, error } = await query;
     if (error) return { content: [{ type: "text", text: error.message }], isError: true };
@@ -137,7 +137,7 @@ var update_task_status_default = defineTool3({
       return { content: [{ type: "text", text: "Not authenticated" }], isError: true };
     }
     const supabase = supabaseForUser(ctx);
-    const { data, error } = await supabase.from("jackie_tasks").update({ status }).eq("id", id).select("id,title,status,priority,updated_at");
+    const { data, error } = await supabase.from("jackie_tasks").update({ status }).eq("id", id).eq("user_id", ctx.getUserId()).select("id,title,status,priority,updated_at");
     if (error) return { content: [{ type: "text", text: error.message }], isError: true };
     if (!data?.length) {
       return { content: [{ type: "text", text: `No task found with id ${id}` }], isError: true };
@@ -167,7 +167,7 @@ var search_memory_default = defineTool4({
       return { content: [{ type: "text", text: "Not authenticated" }], isError: true };
     }
     const supabase = supabaseForUser(ctx);
-    let q = supabase.from("jackie_memory").select("id,key,value,category,confidence,updated_at").order("updated_at", { ascending: false }).limit(limit ?? 25);
+    let q = supabase.from("jackie_memory").select("id,key,value,category,confidence,updated_at").eq("user_id", ctx.getUserId()).order("updated_at", { ascending: false }).limit(limit ?? 25);
     if (category) q = q.eq("category", category);
     if (query) {
       const safe = query.replace(/[%,()]/g, " ").trim();
@@ -201,9 +201,9 @@ var remember_fact_default = defineTool5({
     }
     const supabase = supabaseForUser(ctx);
     const userId = ctx.getUserId();
-    const { data: existing, error: findError } = await supabase.from("jackie_memory").select("id").eq("key", key).limit(1);
+    const { data: existing, error: findError } = await supabase.from("jackie_memory").select("id").eq("user_id", userId).eq("key", key).limit(1);
     if (findError) return { content: [{ type: "text", text: findError.message }], isError: true };
-    const { data, error } = existing?.length ? await supabase.from("jackie_memory").update({ value, ...category ? { category } : {} }).eq("id", existing[0].id).select("id,key,value,category,updated_at") : await supabase.from("jackie_memory").insert({ user_id: userId, key, value, category: category ?? "general" }).select("id,key,value,category,updated_at");
+    const { data, error } = existing?.length ? await supabase.from("jackie_memory").update({ value, ...category ? { category } : {} }).eq("id", existing[0].id).eq("user_id", userId).select("id,key,value,category,updated_at") : await supabase.from("jackie_memory").insert({ user_id: userId, key, value, category: category ?? "general" }).select("id,key,value,category,updated_at");
     if (error) return { content: [{ type: "text", text: error.message }], isError: true };
     return {
       content: [{ type: "text", text: JSON.stringify(data?.[0] ?? null) }],
@@ -228,7 +228,7 @@ var list_conversations_default = defineTool6({
       return { content: [{ type: "text", text: "Not authenticated" }], isError: true };
     }
     const supabase = supabaseForUser(ctx);
-    const { data, error } = await supabase.from("conversations").select("id,title,model,created_at,updated_at").order("updated_at", { ascending: false }).limit(limit ?? 20);
+    const { data, error } = await supabase.from("conversations").select("id,title,model,created_at,updated_at").eq("user_id", ctx.getUserId()).order("updated_at", { ascending: false }).limit(limit ?? 20);
     if (error) return { content: [{ type: "text", text: error.message }], isError: true };
     return {
       content: [{ type: "text", text: JSON.stringify(data ?? []) }],
