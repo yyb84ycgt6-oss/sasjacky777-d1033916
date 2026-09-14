@@ -15,6 +15,7 @@
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.58.0";
 import { bearerToken, verifyAccessToken } from "./authGate.ts";
+import { chooseModel, exceedsSize, parseAllowlist } from "./modelPolicy.ts";
 
 export const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -86,25 +87,19 @@ export function pickModel(
   allowed: ReadonlySet<string>,
   fallback: string,
 ): { model: string } | { error: Response } {
-  const asked = typeof requested === "string" ? requested.trim() : "";
-  const model = asked || fallback;
-  if (!allowed.has(model)) {
-    return {
-      error: json(
-        { error: "Model not allowed", code: "MODEL_NOT_ALLOWED", allowed: [...allowed].sort() },
-        400,
-      ),
-    };
-  }
-  return { model };
+  const choice = chooseModel(requested, allowed, fallback);
+  if (choice.ok) return { model: choice.model };
+  return {
+    error: json(
+      { error: "Model not allowed", code: "MODEL_NOT_ALLOWED", allowed: choice.allowed },
+      400,
+    ),
+  };
 }
 
 /** Reads a comma-separated allowlist from the environment, with a default. */
 export function allowlistFromEnv(name: string, fallback: readonly string[]): Set<string> {
-  const raw = Deno.env.get(name);
-  if (!raw) return new Set(fallback);
-  const parsed = raw.split(",").map((m) => m.trim()).filter(Boolean);
-  return parsed.length > 0 ? new Set(parsed) : new Set(fallback);
+  return parseAllowlist(Deno.env.get(name), fallback);
 }
 
 export interface QuotaOptions {
@@ -204,11 +199,7 @@ export async function providerFailure(context: string, upstream: Response): Prom
 
 /** Caps a JSON-serialisable payload by serialised size. */
 export function tooLarge(value: unknown, maxChars: number): boolean {
-  try {
-    return JSON.stringify(value ?? "").length > maxChars;
-  } catch {
-    return true;
-  }
+  return exceedsSize(value, maxChars);
 }
 
 /**
