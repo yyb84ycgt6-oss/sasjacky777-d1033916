@@ -49,7 +49,16 @@ export default defineConfig(({ mode }) => ({
         // the PC's 21.6 MB wasm does, and precaching a quarter of a gigabyte
         // nobody reads over HTTP would be wrong even if it fit — Ollama builds
         // the model from the file once and answers from its own copy after that.
-        globIgnores: ["**/pc-os/**", "**/models/**"],
+        // The on-device inference runtime is 8.4 MB of WebAssembly. It fits
+        // under the per-file limit above, which is exactly the problem: it was
+        // therefore precached, and every visitor to every route downloaded it
+        // on first load whether or not they ever asked the device engine a
+        // question. The whole rung is built to cost nothing until it answers
+        // (`src/lib/microai/deviceEngine.ts` loads the library by dynamic
+        // import for the same reason), and a precache entry undid that
+        // silently. Runtime caching below still keeps it offline-capable, from
+        // the first time it is actually used.
+        globIgnores: ["**/pc-os/**", "**/models/**", "**/*.wasm"],
         navigateFallback: "/index.html",
         // /pc-os/index.html is a real navigation when the PC is opened in its
         // own tab. Without this it would fall back to Jackie's shell offline,
@@ -68,6 +77,19 @@ export default defineConfig(({ mode }) => ({
             options: {
               cacheName: "eye-assets",
               expiration: { maxEntries: 300, maxAgeSeconds: 60 * 60 * 24 * 30 },
+            },
+          },
+          {
+            // Kept out of the precache above, cached here the moment it is
+            // really used — so the second question on the device rung, and
+            // every question after it, works with the radio off. Its own cache
+            // name and a count of one: a stale runtime should be replaced, not
+            // accumulated alongside the new one.
+            urlPattern: ({ url, sameOrigin }) => sameOrigin && url.pathname.endsWith(".wasm"),
+            handler: "CacheFirst",
+            options: {
+              cacheName: "eye-wasm",
+              expiration: { maxEntries: 2, maxAgeSeconds: 60 * 60 * 24 * 90 },
             },
           },
         ],

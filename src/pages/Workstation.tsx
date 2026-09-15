@@ -37,7 +37,7 @@ import type { StationState } from "@/lib/constellation/types";
 import { CONTEXT_ROUTERS, routerModel } from "@/lib/microai/contextRouter";
 import {
   ContextRouterService,
-  ollamaEngine,
+  defaultEngines,
   type RoutedAnswer,
 } from "@/lib/microai/contextRouterService";
 import {
@@ -118,7 +118,7 @@ export default function Workstation() {
     }));
   }, [flow]);
   const router = useMemo(
-    () => new ContextRouterService(partitions, [ollamaEngine()]),
+    () => new ContextRouterService(partitions, defaultEngines()),
     [],
   );
 
