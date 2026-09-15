@@ -39,6 +39,7 @@ import { VoiceRecorder } from "@/components/VoiceRecorder";
 import { AttachmentDisplay } from "@/components/AttachmentDisplay";
 import { toast } from "sonner";
 import { SidebarNav } from "@/components/SidebarNav";
+import { PalettePicker } from "@/components/PalettePicker";
 
 import { getGameStateContext } from "@/lib/game-state-context";
 import { Plus, Trash2, MessageSquare, LogOut, Send, Menu, X, Sun, Moon, Volume2, VolumeX, Download, Mic, ChevronDown, Zap, DollarSign, Search, Tag, XCircle, Pin, Upload, Archive as ArchiveIcon, Square, Cpu } from "lucide-react";
@@ -209,6 +210,7 @@ const Sidebar = ({
               >
                 {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
               </button>
+              <PalettePicker />
               {isMobileOpen && (
                 <button
                   onClick={onCloseMobile}

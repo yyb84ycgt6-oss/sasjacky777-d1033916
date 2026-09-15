@@ -34,6 +34,7 @@ export const CORE_ROUTES: RouteEntry[] = [
   { path: "/hub", label: "Telegram Hub", group: "core" },
   { path: "/vault", label: "Vault", group: "core" },
   { path: "/sandbox", label: "Sandbox", group: "core" },
+  { path: "/welcome", label: "Welcome (what this is)", group: "core" },
   { path: "/auth", label: "Sign in", group: "core" },
   { path: "/index", label: "Home (alias)", group: "core", alias: true },
 
