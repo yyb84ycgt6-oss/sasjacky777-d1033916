@@ -63,3 +63,34 @@ JACKIEROUTER_CONFIG=router.config.json python router_final.py
 ```
 
 `install_jackierouter.bat` wraps that as an NSSM service on Windows.
+
+## The agent runtime
+
+`Jackie/core/engine/` is the multi-agent runtime that sits above the router:
+
+| Module | What it does |
+| --- | --- |
+| `fs/agent_registry.py` | Declarative agents — name, role, pod, backpack, default model. |
+| `fs/pod_backpack_manager.py` | Pods (execution partitions with hardware hints) and backpacks (memory partitions). |
+| `fs/jackie_orchestrator.py` | Dispatch: task → agent → router call → result, with fallback agents on error. |
+| `fs/execution_graph.py` | A DAG of tasks with dependency resolution. |
+| `fs/jackie_router_client.py` | HTTP client for the gateway at `router_final.py`. |
+| `fs/tracing.py`, `fs/state_viewer.py` | Structured tracing and an HTTP view of live state. |
+| `jackie_os.py` | The bootstrap that wires all of the above together. |
+
+The filesystem half of this package — `resolver`, `path_sanitizer`, `vault_router`,
+`tool_runner`, `manifest_locator` — was already here. The runtime half arrived
+later, on a branch that was never merged.
+
+Run it as a module from the repository root, not as a file path, because these
+are package-relative imports:
+
+```
+python -m Jackie.core.engine.quickstart
+python -m Jackie.core.engine.jackie_os --viewer
+```
+
+`fastapi`, `uvicorn` and `requests` are needed for the router client and the
+state viewer (`Jackie/core/engine/requirements.txt`). The registry, the pod
+manager, the execution graph and tracing need none of them, which is why
+`tests/test_jackie_os_runtime.py` can cover them without a network.
