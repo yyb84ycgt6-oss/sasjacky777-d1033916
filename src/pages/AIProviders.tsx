@@ -18,6 +18,7 @@ const ICONS: Record<ProviderId, typeof Zap> = {
   lovable: Star,
   groq: Zap,
   openrouter: Cpu,
+  bionic: Cpu,
   ollama: HardDrive,
   google: Sparkles,
   mistral: Cloud,

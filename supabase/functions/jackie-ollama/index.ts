@@ -1,9 +1,23 @@
-// Bridge to a self-hosted Ollama instance (localhost via tunnel, home GPU, VPS).
-// Requires OLLAMA_BASE_URL (e.g. https://ollama.mydomain.com or a Cloudflare Tunnel URL).
-// Optional OLLAMA_API_KEY if the endpoint is protected.
+/**
+ * Ollama — the chat's second local fallback.
+ *
+ * Bridge to a self-hosted Ollama instance (localhost via tunnel, home GPU,
+ * VPS). Requires OLLAMA_BASE_URL (e.g. https://ollama.mydomain.com or a
+ * Cloudflare Tunnel URL); OLLAMA_API_KEY is optional.
+ *
+ * Two things changed when the main chat started falling back here. It now
+ * takes the same request shape as `jackie-chat` — `{ messages, model, context }`
+ * — and builds Jackie's persona from the shared prompt, because a fallback
+ * that answers as a different assistant with no memory of the conversation is
+ * a worse failure than the one it was covering for. And the history is run
+ * through the same validation, so an empty turn left by an aborted send cannot
+ * wedge the conversation here either.
+ */
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.58.0";
 import { verifyAccessToken } from "../_shared/authGate.ts";
+import { clampContext, normalizeMessages } from "../_shared/chatRequest.ts";
+import { buildSystemPrompt } from "../_shared/persona.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -80,8 +94,29 @@ serve(async (req) => {
   }
 
   try {
-    const { messages, model, system } = await req.json();
-    const selected = model || "llama3.2:3b";
+    const payload = await req.json().catch(() => null);
+    if (!payload || typeof payload !== "object") {
+      return new Response(JSON.stringify({ error: "Expected a JSON body" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const { messages, model, system, context } = payload as {
+      messages?: unknown; model?: unknown; system?: unknown; context?: unknown;
+    };
+
+    const verdict = normalizeMessages(messages);
+    if (!verdict.ok) {
+      return new Response(JSON.stringify({ error: verdict.reason }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const selected = (typeof model === "string" && model.trim())
+      ? model.trim()
+      : Deno.env.get("OLLAMA_MODEL") || "llama3.2:3b";
+    const systemPrompt = (typeof system === "string" && system.trim())
+      ? system.trim()
+      : buildSystemPrompt(clampContext(context));
     const optionalKey = Deno.env.get("OLLAMA_API_KEY");
     const resp = await fetch(`${base.replace(/\/$/, "")}/api/chat`, {
       method: "POST",
@@ -92,15 +127,19 @@ serve(async (req) => {
       body: JSON.stringify({
         model: selected,
         messages: [
-          ...(system ? [{ role: "system", content: system }] : []),
-          ...messages,
+          { role: "system", content: systemPrompt },
+          ...verdict.messages,
         ],
         stream: true,
       }),
     });
     if (!resp.ok || !resp.body) {
       const text = await resp.text().catch(() => "");
-      return new Response(JSON.stringify({ error: `Ollama ${resp.status}: ${text || "no body"}` }), {
+      return new Response(JSON.stringify({
+        error: `Ollama refused the request (HTTP ${resp.status}).`,
+        detail: text.slice(0, 500) || undefined,
+        model: selected,
+      }), {
         status: resp.status || 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }

@@ -84,15 +84,31 @@ export interface StreamChatOptions {
   signal?: AbortSignal;
 }
 
-export async function streamChat({
-  messages,
-  model,
+/**
+ * Streams from any edge function that answers OpenAI-compatible SSE.
+ *
+ * `streamChat` is this with the cloud gateway's function name and body filled
+ * in. The Bionic and Ollama engines speak the same wire format, and every
+ * failure this parser learned to catch — the error hidden inside a 200, the
+ * content filter, the stream that carried nothing — is exactly as easy to hit
+ * on a local runner as on a gateway, so they read the stream through here too
+ * rather than through a second, thinner copy.
+ */
+export async function streamSse({
+  fn,
+  payload,
   onDelta,
   onDone,
   onError,
-  context,
   signal,
-}: StreamChatOptions) {
+}: {
+  fn: string;
+  payload: Record<string, unknown>;
+  onDelta: (text: string) => void;
+  onDone: () => void;
+  onError: (error: string) => void;
+  signal?: AbortSignal;
+}) {
   let settled = false;
   const finishWith = (fn: () => void) => {
     if (settled) return;
@@ -101,15 +117,7 @@ export async function streamChat({
   };
 
   try {
-    const resp = await callEdgeFunction(
-      "jackie-chat",
-      {
-        messages,
-        ...(model ? { model } : {}),
-        ...(context ? { context } : {}),
-      },
-      { signal },
-    );
+    const resp = await callEdgeFunction(fn, payload, { signal });
 
     if (!resp.ok) {
       const errorData = await resp.json().catch(() => null);
@@ -227,6 +235,30 @@ export async function streamChat({
     if (signal?.aborted || (e as Error)?.name === "AbortError") return;
     // "Failed to fetch" is what the user used to be shown here, which names
     // neither the cause nor anything they could do about it.
-    finishWith(() => onError(describeEdgeFailure(e, "jackie-chat")));
+    finishWith(() => onError(describeEdgeFailure(e, fn)));
   }
+}
+
+/** The cloud gateway, through `jackie-chat`. */
+export async function streamChat({
+  messages,
+  model,
+  onDelta,
+  onDone,
+  onError,
+  context,
+  signal,
+}: StreamChatOptions) {
+  await streamSse({
+    fn: "jackie-chat",
+    payload: {
+      messages,
+      ...(model ? { model } : {}),
+      ...(context ? { context } : {}),
+    },
+    onDelta,
+    onDone,
+    onError,
+    signal,
+  });
 }

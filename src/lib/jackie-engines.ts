@@ -1,0 +1,161 @@
+/**
+ * The engines the main chat can answer from, and the order it tries them in.
+ *
+ * The chat used to have exactly one brain: the Lovable AI gateway, behind the
+ * `jackie-chat` function. That made every outage total. If the gateway was
+ * rate-limited, out of credit, or simply unreachable, Jackie had nothing to say
+ * — even on a rig that was sitting there with its own engine running and a
+ * local model loaded.
+ *
+ * So the chat now has a chain rather than a brain:
+ *
+ *   1. **Jacky** — the owner's own Flask engine, through the `jacky-proxy`
+ *      function. Native, private, and the one that knows the rig. It answers in
+ *      one piece rather than streaming, so the router paces it out itself.
+ *   2. **Bionic** — a BionicGPT (or any OpenAI-compatible) server on the
+ *      operator's own hardware. Streams.
+ *   3. **Ollama** — the local runner, through `jackie-ollama`. Streams.
+ *   4. **Cloud** — the Lovable gateway, last. It costs money and leaves the
+ *      building, so it is the safety net, not the default.
+ *
+ * Order is priority. The router walks it from the chosen engine downward, so a
+ * failure anywhere above still ends in an answer as long as one link works.
+ *
+ * Each engine names the secret that turns it on. An engine whose secret is
+ * missing answers with `needs_secret`, which the router treats as "not
+ * configured, move on" rather than an error worth stopping for.
+ */
+
+import { CHAT_MODELS } from "../../supabase/functions/_shared/chatRequest";
+
+export type EngineId = "jacky" | "bionic" | "ollama" | "cloud";
+
+/** How the router talks to an engine. */
+export type EngineKind =
+  /** POST to `jacky-proxy` and read one whole JSON answer. */
+  | "jacky"
+  /** POST to an edge function that answers OpenAI-compatible SSE. */
+  | "sse";
+
+export interface EngineModel {
+  id: string;
+  label: string;
+  note?: string;
+}
+
+export interface EngineDef {
+  id: EngineId;
+  label: string;
+  /** One word for the badge under an answer. */
+  short: string;
+  kind: EngineKind;
+  /** Edge function this engine goes through. */
+  fn: string;
+  description: string;
+  /** Secret that has to exist for this engine to answer at all. */
+  requiresSecret?: string;
+  helpUrl?: string;
+  /** True when the engine runs on hardware the owner controls. */
+  local: boolean;
+  /**
+   * Models the picker offers. Empty means the engine decides for itself —
+   * Jacky routes to its own model and takes no model argument.
+   */
+  models: EngineModel[];
+}
+
+export const ENGINES: readonly EngineDef[] = [
+  {
+    id: "jacky",
+    label: "Jacky (native engine)",
+    short: "Jacky",
+    kind: "jacky",
+    fn: "jacky-proxy",
+    description:
+      "The rig's own Flask engine. Picks its own route and model, keeps everything on your hardware.",
+    requiresSecret: "JACKY_API_BASE",
+    local: true,
+    models: [],
+  },
+  {
+    id: "bionic",
+    label: "Bionic (OpenAI-compatible)",
+    short: "Bionic",
+    kind: "sse",
+    fn: "jackie-bionic",
+    description:
+      "BionicGPT or any OpenAI-compatible server you host. Whatever GGUF you have loaded, streamed.",
+    requiresSecret: "BIONIC_BASE_URL",
+    helpUrl: "https://bionic-gpt.com/docs/",
+    local: true,
+    models: [
+      { id: "bionic-default", label: "Server default", note: "Whatever BIONIC_MODEL names" },
+      { id: "bonsai-1.7b", label: "Bonsai 1.7B", note: "The bundled guidance model" },
+      { id: "llama3.3:70b", label: "Llama 3.3 70B" },
+      { id: "qwen2.5-coder:32b", label: "Qwen 2.5 Coder 32B", note: "Code" },
+    ],
+  },
+  {
+    id: "ollama",
+    label: "Ollama (self-hosted)",
+    short: "Ollama",
+    kind: "sse",
+    fn: "jackie-ollama",
+    description: "Your own GPU or laptop over a tunnel. Private, free, offline-capable.",
+    requiresSecret: "OLLAMA_BASE_URL",
+    helpUrl: "https://ollama.com/download",
+    local: true,
+    models: [
+      { id: "llama3.2:3b", label: "Llama 3.2 3B", note: "Laptop-friendly" },
+      { id: "llama3.3:70b", label: "Llama 3.3 70B", note: "~40GB VRAM" },
+      { id: "qwen2.5-coder:32b", label: "Qwen 2.5 Coder 32B", note: "Code" },
+      { id: "deepseek-r1:32b", label: "DeepSeek R1 32B", note: "Reasoning" },
+      { id: "llama3.2:1b", label: "Llama 3.2 1B", note: "Phone-friendly" },
+    ],
+  },
+  {
+    id: "cloud",
+    label: "Cloud gateway",
+    short: "Cloud",
+    kind: "sse",
+    fn: "jackie-chat",
+    description:
+      "The Lovable AI gateway. Leaves your hardware and costs credit, so it answers last.",
+    requiresSecret: "LOVABLE_API_KEY",
+    local: false,
+    // The same list the `jackie-chat` function accepts, so the picker cannot
+    // offer a model the server will reject.
+    models: CHAT_MODELS.map((m) => ({ id: m.id, label: m.label, note: m.description })),
+  },
+];
+
+/** Fallback order. The router starts at the chosen engine and walks down. */
+export const ENGINE_CHAIN: readonly EngineId[] = ENGINES.map((e) => e.id);
+
+/** What a fresh install talks to first. */
+export const DEFAULT_ENGINE: EngineId = "jacky";
+
+export function findEngine(id: unknown): EngineDef | undefined {
+  return ENGINES.find((e) => e.id === id);
+}
+
+export function isKnownEngine(id: unknown): id is EngineId {
+  return findEngine(id) !== undefined;
+}
+
+/**
+ * The engines to try, in order, when `preferred` is asked for.
+ *
+ * The preferred engine comes first even if it sits late in the chain; the rest
+ * follow in chain order. Choosing Ollama by hand should not mean Jacky and
+ * Bionic are gone — it means they come after.
+ */
+export function chainFrom(preferred: EngineId): EngineId[] {
+  const rest = ENGINE_CHAIN.filter((id) => id !== preferred);
+  return [preferred, ...rest];
+}
+
+/** The model an engine uses when nothing was picked. Undefined = engine decides. */
+export function defaultModelFor(id: EngineId): string | undefined {
+  return findEngine(id)?.models[0]?.id;
+}

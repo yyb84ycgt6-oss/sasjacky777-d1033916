@@ -1,19 +1,62 @@
 # The chat pipeline, and why it was silent
 
-Jackie's main chat runs through four pieces:
+Jackie's main chat runs through five pieces:
 
 ```
-src/pages/Index.tsx          the surface — history, memory, attachments, stop
-  └─ src/lib/jackie-stream.ts   reads the SSE stream, decides success or failure
-       └─ src/lib/edgeFunction.ts   builds headers the gateway will accept
-            └─ supabase/functions/jackie-chat/   auth, validation, model gateway
+src/pages/Index.tsx            the surface — history, memory, attachments, stop
+  └─ src/lib/jackie-router.ts     picks an engine, falls back when it cannot answer
+       ├─ src/lib/jackie-engines.ts   the engine registry and the chain's order
+       └─ src/lib/jackie-stream.ts    reads the SSE stream, decides success or failure
+            └─ src/lib/edgeFunction.ts   builds headers the gateway will accept
+                 └─ supabase/functions/…   auth, validation, the engine itself
 ```
 
-Two shared modules sit under `supabase/functions/_shared/` and are imported by
+Three shared modules sit under `supabase/functions/_shared/` and are imported by
 both sides, so there is no second copy to drift:
 
 - `authGate.ts` — verifies the caller's access token.
 - `chatRequest.ts` — the model list, message validation, the context budget.
+- `persona.ts` — who Jackie is. Every engine builds its system prompt from it,
+  so a fallback answers as Jackie and not as some anonymous assistant.
+
+## The engine chain
+
+The chat used to have exactly one brain, which made every outage total: if the
+cloud gateway was rate-limited, out of credit or unreachable, Jackie had nothing
+to say — on a rig that was sitting there with its own engine running and a model
+loaded. It has a chain now, and `jackie-router.ts` walks it.
+
+| # | Engine | Function | Secret | Notes |
+| --- | --- | --- | --- | --- |
+| 1 | **Jacky** | `jacky-proxy` | `JACKY_API_BASE` (+ optional `JACKY_API_TOKEN`) | The rig's own Flask engine. Picks its own route and model. Answers whole, so the router paces it onto the screen. |
+| 2 | **Bionic** | `jackie-bionic` | `BIONIC_BASE_URL` (+ optional `BIONIC_API_KEY`, `BIONIC_MODEL`) | BionicGPT, LM Studio, llama.cpp, vLLM — anything OpenAI-compatible on your hardware. Streams. |
+| 3 | **Ollama** | `jackie-ollama` | `OLLAMA_BASE_URL` (+ optional `OLLAMA_API_KEY`, `OLLAMA_MODEL`) | Your GPU or laptop over a tunnel. Streams. |
+| 4 | **Cloud** | `jackie-chat` | `LOVABLE_API_KEY` | The Lovable gateway. Leaves your hardware and costs credit, so it answers last. |
+
+Order is priority. The engine picked in the composer is tried first and the rest
+follow in table order, so choosing Ollama by hand does not mean Jacky and Bionic
+are gone — it means they come after.
+
+Two things, and only two, stop the walk:
+
+- **the user stopped the answer** — not a failure, and retrying it somewhere
+  else would be the opposite of what was asked;
+- **there is no signed-in session** — every engine refuses that identically, so
+  trying four of them is four identical errors.
+
+Everything else — a missing secret, a refused key, a rate limit, an unreachable
+host, an answer of nothing at all — moves to the next engine, because the next
+engine is a different machine with different limits.
+
+Nothing about this is silent. Each attempt is reported through `onRoute`, the
+composer says so while it happens, and the finished answer carries a badge
+naming the engine that served it and what it fell back from. An answer that
+quietly came from somewhere other than the engine named on screen is how a chat
+ends up lying about what it is.
+
+`src/test/jackie-router.test.ts` covers the walk, both stop conditions, and the
+rule that one engine's model id is never handed to the next — a Gemini id means
+nothing to Ollama, and carrying it across made every switch fail twice.
 
 ## What was broken
 
@@ -80,3 +123,10 @@ The message on screen now names the cause. The ones worth knowing:
   missing from the function's environment.
 - *"Could not reach the jackie-chat function"* — it is not deployed to this
   project, or the browser is offline.
+- *"Every engine refused (jacky → bionic → ollama → cloud)"* — the whole chain
+  is down or unconfigured. The message carries the last engine's own words; the
+  console carries one line per attempt. The quickest fix is usually one secret:
+  `JACKY_API_BASE` to reach the rig, or `LOVABLE_API_KEY` for the net.
+- *"Bionic is not connected"* / *"OLLAMA_BASE_URL not configured"* — those
+  engines are simply not set up. They are skipped, not fatal; the chat carries
+  on down the chain.
