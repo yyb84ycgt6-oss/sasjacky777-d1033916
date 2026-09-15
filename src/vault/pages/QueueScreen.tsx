@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { QueueRow } from '../components/QueueRow';
 import { EmptyState } from '../components/EmptyState';
-import { MOCK_JOBS } from '../mockData';
+import { useVault } from '../useVault';
 import type { ConversionJob } from '../types';
 
 interface QueueScreenProps {
@@ -10,20 +10,15 @@ interface QueueScreenProps {
 }
 
 export function QueueScreen({ onBack }: QueueScreenProps) {
-  const [jobs, setJobs] = useState<ConversionJob[]>(MOCK_JOBS);
+  const { jobs, cancelJob, retryJob } = useVault();
   const [filter, setFilter] = useState<'active' | 'history'>('active');
 
   const activeJobs = jobs.filter(j => !['complete', 'failed', 'cancelled'].includes(j.status));
   const historyJobs = jobs.filter(j => ['complete', 'failed', 'cancelled'].includes(j.status));
   const displayJobs = filter === 'active' ? activeJobs : historyJobs;
 
-  const handleRetry = (id: string) => {
-    setJobs(prev => prev.map(j => j.id === id ? { ...j, status: 'waiting' as const, progress: 0, errorMessage: undefined } : j));
-  };
-
-  const handleCancel = (id: string) => {
-    setJobs(prev => prev.map(j => j.id === id ? { ...j, status: 'cancelled' as const } : j));
-  };
+  const handleRetry = (id: string) => { retryJob(id); };
+  const handleCancel = (id: string) => { cancelJob(id); };
 
   return (
     <div className="space-y-4 pb-8">

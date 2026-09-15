@@ -3,7 +3,7 @@ import { Upload, Image, Mic, Video, Link, FolderOpen, Clock, ArrowRight, HardDri
 import { QuickActionCard } from '../components/QuickActionCard';
 import { MediaCard } from '../components/MediaCard';
 import { QueueRow } from '../components/QueueRow';
-import { MOCK_MEDIA_ITEMS, MOCK_JOBS } from '../mockData';
+import { useVault } from '../useVault';
 import { formatFileSize, type MediaItem } from '../types';
 
 interface DashboardProps {
@@ -11,9 +11,11 @@ interface DashboardProps {
 }
 
 export function VaultDashboard({ onNavigate }: DashboardProps) {
-  const recentItems = MOCK_MEDIA_ITEMS.slice(0, 3);
-  const activeJobs = MOCK_JOBS.filter(j => j.status !== 'complete' && j.status !== 'cancelled');
-  const totalSize = MOCK_MEDIA_ITEMS.reduce((a, i) => a + i.fileSize, 0);
+  const { media, jobs } = useVault();
+  const recentItems = media.slice(0, 3);
+  const activeJobs = jobs.filter(j => j.status !== 'complete' && j.status !== 'cancelled');
+  const totalSize = media.reduce((a, i) => a + i.fileSize, 0);
+  const doneCount = jobs.filter(j => j.status === 'complete').length;
 
   return (
     <div className="space-y-6 pb-8">
@@ -28,12 +30,12 @@ export function VaultDashboard({ onNavigate }: DashboardProps) {
       {/* Stats strip */}
       <div className="flex items-center gap-4 px-1 py-2 border-y border-border">
         <div className="text-center">
-          <p className="text-lg font-mono font-bold text-foreground">{MOCK_MEDIA_ITEMS.length}</p>
+          <p className="text-lg font-mono font-bold text-foreground">{media.length}</p>
           <p className="text-[9px] font-mono text-muted-foreground uppercase tracking-wider">Items</p>
         </div>
         <div className="w-px h-8 bg-border" />
         <div className="text-center">
-          <p className="text-lg font-mono font-bold text-foreground">{MOCK_JOBS.filter(j => j.status === 'complete').length}</p>
+          <p className="text-lg font-mono font-bold text-foreground">{doneCount}</p>
           <p className="text-[9px] font-mono text-muted-foreground uppercase tracking-wider">Jobs Done</p>
         </div>
         <div className="w-px h-8 bg-border" />
@@ -55,7 +57,7 @@ export function VaultDashboard({ onNavigate }: DashboardProps) {
           <QuickActionCard icon={Mic} label="Record Audio" description="Capture now" onClick={() => onNavigate('import')} />
           <QuickActionCard icon={Video} label="Record Video" description="Camera" onClick={() => onNavigate('import')} />
           <QuickActionCard icon={Link} label="Paste Link" description="Add reference" onClick={() => onNavigate('import')} />
-          <QuickActionCard icon={FolderOpen} label="Library" description={`${MOCK_MEDIA_ITEMS.length} items`} onClick={() => onNavigate('library')} />
+          <QuickActionCard icon={FolderOpen} label="Library" description={`${media.length} items`} onClick={() => onNavigate('library')} />
         </div>
       </div>
 
