@@ -187,3 +187,97 @@
     transform: scale(0.98);
   }
 }
+
+/* ─── Welcome page ────────────────────────────────────────────────────────
+   Ported with the landing page from lore-forge-weave. Scoped under
+   `.welcome-scope` and prefixed rather than added as global utilities: that
+   project defined `animate-fade-up`, `text-gradient` and `glow-primary` at the
+   top level, and dropping three more global names into an app this size is how
+   a class silently changes something on a page nobody was looking at.
+
+   `prefers-reduced-motion` is honoured because the hero animates on load, which
+   is exactly the case the preference exists for. */
+.welcome-scope .welcome-gradient {
+  background-image: linear-gradient(100deg, hsl(var(--primary)), hsl(var(--primary) / 0.55));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.welcome-scope .welcome-rise {
+  opacity: 0;
+  animation: welcome-rise 0.5s ease-out forwards;
+}
+
+.welcome-scope .welcome-pulse {
+  animation: welcome-pulse 2s ease-in-out infinite;
+}
+
+@keyframes welcome-rise {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes welcome-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .welcome-scope .welcome-rise,
+  .welcome-scope .welcome-pulse {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+/* ─── Aetherium palette ───────────────────────────────────────────────────
+   Ported from lore-forge-weave, whose modules were mock but whose colour work
+   was real: deep slate, teal, amber.
+
+   Selected with `data-palette` rather than by replacing the tokens, so it is a
+   choice rather than a change — the default palette writes no attribute and
+   gets the plain `:root` block above, untouched. Light and dark are a separate
+   axis, so both are defined here and neither discards the other's preference.
+
+   Only the hues move. Lightness and chroma follow whichever mode is active, or
+   a palette switch would silently undo the contrast work in the base theme. */
+:root[data-palette="aetherium"] {
+  --background: 222 25% 6%;
+  --foreground: 210 20% 90%;
+  --card: 222 20% 9%;
+  --card-foreground: 210 20% 90%;
+  --popover: 222 20% 9%;
+  --popover-foreground: 210 20% 90%;
+  --primary: 175 70% 45%;
+  --primary-foreground: 222 25% 6%;
+  --secondary: 222 15% 15%;
+  --secondary-foreground: 210 15% 75%;
+  --muted: 222 15% 12%;
+  --muted-foreground: 215 12% 55%;
+  --accent: 38 80% 55%;
+  --accent-foreground: 222 25% 6%;
+  --border: 222 15% 18%;
+  --input: 222 15% 15%;
+  --ring: 175 70% 45%;
+}
+
+:root[data-palette="aetherium"].light {
+  --background: 210 20% 98%;
+  --foreground: 222 25% 12%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 25% 12%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 25% 12%;
+  --primary: 175 65% 32%;
+  --primary-foreground: 210 20% 98%;
+  --secondary: 210 15% 92%;
+  --secondary-foreground: 222 20% 25%;
+  --muted: 210 15% 94%;
+  --muted-foreground: 215 12% 40%;
+  --accent: 38 75% 42%;
+  --accent-foreground: 210 20% 98%;
+  --border: 210 15% 85%;
+  --input: 210 15% 92%;
+  --ring: 175 65% 32%;
+}
