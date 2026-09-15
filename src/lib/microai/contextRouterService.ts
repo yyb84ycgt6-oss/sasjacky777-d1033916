@@ -20,6 +20,7 @@ import { OLLAMA_HOST, runLocalModel } from "@/lib/localAI";
 import { listModels, runLmStudio } from "@/lib/lmStudio";
 import { advancePlan, type PathPlan } from "@/lib/squad/pathPlanner";
 import { WorldObserver } from "@/lib/squad/observer";
+import { deviceEngine } from "./deviceEngine";
 import {
   routeIntent,
   routerModel,
@@ -103,6 +104,23 @@ export function lmStudioEngine(
       return { text: result.text, model: result.model };
     },
   };
+}
+
+/**
+ * The whole ladder, in the order the routers declare it.
+ *
+ * Every caller used to assemble its own list, and each assembled a different
+ * one: the Guide took LM Studio and Ollama, the Workstation took Ollama alone,
+ * the squads took Ollama alone. That is why the `device` rung being unimplemented
+ * was invisible — there was no single place where the ladder was written down,
+ * so nothing could be compared against what `contextRouter.ts` promised.
+ *
+ * Now there is. Device first, because the routers say offline-first and mean it;
+ * LM Studio before Ollama because the operator's weights already live there and
+ * pointing at them copies nothing; the network nowhere, because it never answers.
+ */
+export function defaultEngines(): InferenceEngine[] {
+  return [deviceEngine(), lmStudioEngine(), ollamaEngine()];
 }
 
 export class ContextRouterService {

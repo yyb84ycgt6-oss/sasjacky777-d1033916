@@ -91,12 +91,11 @@ tests. The engine chain is real (`docs/CHAT_PIPELINE.md`). The micro-AI context
 routers are real and run against Ollama and LM Studio. `jackierouter/` and
 `context-condenser/` are real with 152 and 42 tests.
 
-One honest gap worth naming rather than hiding: the context routers declare an
-engine ladder of `device` → `lan` → `network`, and **nothing implements the
-`device` rung**. `contextRouterService.ts` registers Ollama and LM Studio, both
-`lan`. So a router configured offline-first has no on-device engine to fall to,
-and the offline-first claim is currently carried entirely by the LAN. Closing
-that is what in-browser inference is for.
+The `device` rung — which this audit originally recorded as an honest gap,
+because the routers declared a `device` → `lan` → `network` ladder and only the
+LAN rungs existed — is now implemented by `src/lib/microai/deviceEngine.ts`:
+Bonsai 1.7B running in the tab through llama.cpp compiled to WebAssembly, off
+the GGUF the repository already ships. See `docs/ON_DEVICE.md`.
 
 ---
 
