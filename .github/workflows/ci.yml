@@ -8,7 +8,7 @@ name: CI
 
 on:
   push:
-    branches: [main, master, "SAS-JACKY"]
+    branches: ["SAS-JACKY"]
   pull_request:
   workflow_dispatch:
 
@@ -72,6 +72,46 @@ jobs:
           fi
           npx playwright install --with-deps chromium
           npx playwright test
+
+  python:
+    name: Router stack and agent runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      # 3.9 is the floor `pyproject.toml` declares, so it is the version worth
+      # testing on: the agent runtime arrived here with a `TaskNode | None`
+      # annotation that is a TypeError below 3.10, and nothing would have
+      # caught it on a newer interpreter.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+
+      - name: Install pytest
+        run: python -m pip install --quiet --upgrade pip pytest
+
+      # Reads `testpaths` from pyproject: tests/ and command_station/tools/.
+      # jackierouter has no third-party dependencies in its core, by design, so
+      # there is nothing else to install.
+      - name: Tests
+        run: python -m pytest -q
+
+  condenser:
+    name: Context condenser
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # node:test with --experimental-strip-types; package.json says >=22.6.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Tests
+        working-directory: context-condenser
+        run: npm test
 
   database:
     name: Database authorization probes

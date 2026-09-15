@@ -16,6 +16,19 @@ written — ended up invisible to the app whose whole problem it solves.
 | `command_station/` | Model-library tooling: manifests, checksums, sync batches, the integrity dashboard, the vault diff tool. | Python + batch |
 | `Jackie/` | The doctrine and the cluster/constellation modules. | Markdown + Python |
 
+## Working here with an agent
+
+[CLAUDE.md](../CLAUDE.md) is the brief: the commands, the eight rules that are
+load-bearing, and where everything lives. [AGENTS.md](../AGENTS.md) carries the
+same hard rules for tools that read that file instead.
+
+`.claude/` holds the rest of the kit: a SessionStart hook that installs
+dependencies so a fresh web session can run the suites immediately, a
+permissions allowlist so read-only commands stop prompting, and three slash
+commands — `/verify` (every check, in the order that fails fastest), `/engine`
+(add an engine to the chat's fallback chain, all five places) and `/edge`
+(scaffold an edge function with the gate wired correctly).
+
 ## Three test suites, three commands
 
 They do not overlap and none of them sees the others' files:
