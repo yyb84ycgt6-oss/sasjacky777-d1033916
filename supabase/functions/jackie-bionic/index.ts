@@ -18,60 +18,35 @@
  *   BIONIC_MODEL      optional default model name, e.g. bonsai-1.7b
  */
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.58.0";
-import { bearerToken, verifyAccessToken } from "../_shared/authGate.ts";
+import {
+  admit, allowlistFromEnv, corsHeaders, json, pickModel, preflight, tooLarge,
+} from "../_shared/entitlement.ts";
 import { clampContext, normalizeMessages } from "../_shared/chatRequest.ts";
 import { buildSystemPrompt } from "../_shared/persona.ts";
 import { bionicEndpoint } from "../_shared/bionicEndpoint.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
-
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
-}
-
-/** Same gate as `jackie-chat`: it returns a verdict and never throws. */
-async function requireUser(req: Request): Promise<Response | null> {
-  const token = bearerToken(req.headers.get("Authorization"));
-  if (!token) return json({ error: "Unauthorized", detail: "Sign in and try again." }, 401);
-
-  const url = Deno.env.get("SUPABASE_URL");
-  const anon =
-    Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY");
-  if (!url || !anon) {
-    return json(
-      {
-        error: "Server auth is not configured",
-        detail: "SUPABASE_URL and SUPABASE_ANON_KEY must be set on this function.",
-      },
-      503,
-    );
-  }
-
-  const supabase = createClient(url, anon, {
-    global: { headers: { Authorization: `Bearer ${token}` } },
-  });
-  const { data, error } = await verifyAccessToken(supabase.auth, token);
-  if (error || !data?.claims) {
-    return json({ error: "Unauthorized", detail: "Your session expired. Sign in again." }, 401);
-  }
-  return null;
-}
+const FUNCTION_NAME = "jackie-bionic";
+const DEFAULT_MODEL = "bonsai-1.7b";
+// Kept in step with what `src/lib/jackie-engines.ts` offers in the picker: a
+// picker that offers a model the allowlist refuses is a guaranteed failure the
+// user cannot diagnose. `bionic-default` means "whatever BIONIC_MODEL names",
+// which is how an operator serves a GGUF this list has never heard of.
+const ALLOWED_MODELS = allowlistFromEnv("BIONIC_MODEL_ALLOWLIST", [
+  "bonsai-1.7b",
+  "llama3.3:70b",
+  "llama3.2:3b",
+  "qwen2.5-coder:32b",
+  "deepseek-r1:32b",
+  "mistral:7b",
+]);
+const MAX_MESSAGES = 64;
+const MAX_MESSAGE_CHARS = 100_000;
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") return preflight();
+  if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
   try {
-    const unauth = await requireUser(req);
-    if (unauth) return unauth;
-
     const payload = await req.json().catch(() => null);
     if (!payload || typeof payload !== "object") {
       return json({ error: "Expected a JSON body" }, 400);
@@ -83,9 +58,30 @@ serve(async (req) => {
       system?: unknown;
     };
 
+    if (Array.isArray(messages) && messages.length > MAX_MESSAGES) {
+      return json({ error: "Too many messages" }, 400);
+    }
+    if (tooLarge(messages, MAX_MESSAGE_CHARS)) {
+      return json({ error: "Message payload too large" }, 413);
+    }
+
     const verdict = normalizeMessages(messages);
     if (!verdict.ok) return json({ error: verdict.reason }, 400);
 
+    // "Serve whatever is loaded" is a real choice an operator makes, so an
+    // absent model defers to BIONIC_MODEL rather than being refused; anything
+    // the caller names still has to be on the list.
+    const requested = typeof model === "string" && model.trim() ? model.trim() : undefined;
+    const fallbackModel = Deno.env.get("BIONIC_MODEL") || DEFAULT_MODEL;
+    const chosen = requested
+      ? pickModel(requested, ALLOWED_MODELS, fallbackModel)
+      : { model: fallbackModel };
+    if ("error" in chosen) return chosen.error;
+
+    // Checked before admission: the main chat probes this engine as one link in
+    // a chain, so an unconfigured endpoint is a normal, frequent event, and
+    // charging a unit of quota for a call that cannot happen would bill the
+    // caller for the chain's own bookkeeping.
     const baseUrl = Deno.env.get("BIONIC_BASE_URL");
     if (!baseUrl) {
       // `needs_secret` is what tells the router this engine is not configured
@@ -94,16 +90,17 @@ serve(async (req) => {
         {
           error:
             "Bionic is not connected. Set BIONIC_BASE_URL to your OpenAI-compatible endpoint (BionicGPT, LM Studio, llama.cpp, vLLM).",
+          code: "PROVIDER_UNCONFIGURED",
           needs_secret: "BIONIC_BASE_URL",
         },
         503,
       );
     }
 
-    const selected =
-      typeof model === "string" && model.trim()
-        ? model.trim()
-        : Deno.env.get("BIONIC_MODEL") || "bonsai-1.7b";
+    const admission = await admit(req, FUNCTION_NAME, chosen.model);
+    if (admission instanceof Response) return admission;
+
+    const selected = chosen.model;
 
     const systemPrompt =
       typeof system === "string" && system.trim()

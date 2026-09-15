@@ -1,6 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.58.0";
-import { bearerToken, verifyAccessToken } from "../_shared/authGate.ts";
+import { gate } from "../_shared/entitlement.ts";
 import {
   clampContext,
   normalizeMessages,
@@ -22,60 +21,29 @@ function json(body: unknown, status = 200): Response {
 }
 
 /**
- * The auth gate.
+ * The gate now answers two questions, not one.
  *
- * Two things here are load-bearing and were not before.
+ * It used to answer only "who is this", with a local `requireUser` whose
+ * history is worth keeping: it called `auth.getClaims`, which did not exist in
+ * the supabase-js version this function pinned, so every request died with a
+ * TypeError *in the gate* — ahead of the request's try/catch. The isolate
+ * answered 500 with no CORS headers, the browser was not allowed to read that,
+ * and the chat showed "Failed to fetch".
  *
- * It cannot throw. The previous gate called `auth.getClaims`, which does not
- * exist in the supabase-js version this function pinned, so every request died
- * with a TypeError *in the gate* — which sits ahead of the request's
- * try/catch. The isolate answered 500 with no CORS headers, the browser was
- * not allowed to read that, and the chat showed "Failed to fetch". A gate that
- * returns a verdict instead of throwing cannot take the function down with it,
- * and `verifyAccessToken` is built not to throw.
- *
- * And it answers with CORS headers on every path, including the failures. A
- * 401 the browser cannot read is indistinguishable from the server being down.
+ * `gate` keeps both of those properties — it returns a verdict rather than
+ * throwing, and every answer carries CORS headers, because a 401 the browser
+ * cannot read is indistinguishable from the server being down — and adds the
+ * second question: may this person spend the project's model budget right now.
+ * Authentication was never an answer to that one.
  */
-async function requireUser(req: Request): Promise<Response | null> {
-  const token = bearerToken(req.headers.get("Authorization"));
-  if (!token) return json({ error: "Unauthorized", detail: "Sign in and try again." }, 401);
-
-  const url = Deno.env.get("SUPABASE_URL");
-  // Projects created before and after the API-key change expose different
-  // names for the same public key. Reading both means the gate does not depend
-  // on which era this project was created in.
-  const anon =
-    Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY");
-  if (!url || !anon) {
-    console.error("auth gate misconfigured: SUPABASE_URL / SUPABASE_ANON_KEY missing");
-    return json(
-      {
-        error: "Server auth is not configured",
-        detail: "SUPABASE_URL and SUPABASE_ANON_KEY must be set on this function.",
-      },
-      503,
-    );
-  }
-
-  const supabase = createClient(url, anon, {
-    global: { headers: { Authorization: `Bearer ${token}` } },
-  });
-  const { data, error } = await verifyAccessToken(supabase.auth, token);
-  if (error || !data?.claims) {
-    return json({ error: "Unauthorized", detail: "Your session expired. Sign in again." }, 401);
-  }
-  return null;
-}
-
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const unauth = await requireUser(req);
-    if (unauth) return unauth;
+    const denied = await gate(req, "jackie-chat");
+    if (denied) return denied;
 
     const payload = await req.json().catch(() => null);
     if (!payload || typeof payload !== "object") {

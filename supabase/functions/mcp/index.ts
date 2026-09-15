@@ -3,10 +3,10 @@
 // supabase function: mcp
 // Bundled from src/lib/mcp/index.ts by @lovable.dev/mcp-js.
 // src/lib/mcp/index.ts
-import { auth, defineMcp } from "npm:@lovable.dev/mcp-js@0.26.2";
+import { auth, defineMcp } from "npm:@lovable.dev/mcp-js@0.26.1";
 
 // src/lib/mcp/tools/list-tasks.ts
-import { defineTool } from "npm:@lovable.dev/mcp-js@0.26.2";
+import { defineTool } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z } from "npm:zod@^3.25.76";
 
 // src/lib/mcp/supabase.ts
@@ -73,7 +73,7 @@ var list_tasks_default = defineTool({
       return { content: [{ type: "text", text: "Not authenticated" }], isError: true };
     }
     const supabase = supabaseForUser(ctx);
-    let query = supabase.from("jackie_tasks").select("id,title,description,status,priority,category,due_date,created_at").order("created_at", { ascending: false }).limit(limit ?? 25);
+    let query = supabase.from("jackie_tasks").select("id,title,description,status,priority,category,due_date,created_at").eq("user_id", ctx.getUserId()).order("created_at", { ascending: false }).limit(limit ?? 25);
     if (status) query = query.eq("status", status);
     const { data, error } = await query;
     if (error) return { content: [{ type: "text", text: error.message }], isError: true };
@@ -85,7 +85,7 @@ var list_tasks_default = defineTool({
 });
 
 // src/lib/mcp/tools/create-task.ts
-import { defineTool as defineTool2 } from "npm:@lovable.dev/mcp-js@0.26.2";
+import { defineTool as defineTool2 } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z as z2 } from "npm:zod@^3.25.76";
 var create_task_default = defineTool2({
   name: "create_task",
@@ -121,7 +121,7 @@ var create_task_default = defineTool2({
 });
 
 // src/lib/mcp/tools/update-task-status.ts
-import { defineTool as defineTool3 } from "npm:@lovable.dev/mcp-js@0.26.2";
+import { defineTool as defineTool3 } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z as z3 } from "npm:zod@^3.25.76";
 var update_task_status_default = defineTool3({
   name: "update_task_status",
@@ -137,7 +137,7 @@ var update_task_status_default = defineTool3({
       return { content: [{ type: "text", text: "Not authenticated" }], isError: true };
     }
     const supabase = supabaseForUser(ctx);
-    const { data, error } = await supabase.from("jackie_tasks").update({ status }).eq("id", id).select("id,title,status,priority,updated_at");
+    const { data, error } = await supabase.from("jackie_tasks").update({ status }).eq("id", id).eq("user_id", ctx.getUserId()).select("id,title,status,priority,updated_at");
     if (error) return { content: [{ type: "text", text: error.message }], isError: true };
     if (!data?.length) {
       return { content: [{ type: "text", text: `No task found with id ${id}` }], isError: true };
@@ -150,7 +150,7 @@ var update_task_status_default = defineTool3({
 });
 
 // src/lib/mcp/tools/search-memory.ts
-import { defineTool as defineTool4 } from "npm:@lovable.dev/mcp-js@0.26.2";
+import { defineTool as defineTool4 } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z as z4 } from "npm:zod@^3.25.76";
 var search_memory_default = defineTool4({
   name: "search_memory",
@@ -167,7 +167,7 @@ var search_memory_default = defineTool4({
       return { content: [{ type: "text", text: "Not authenticated" }], isError: true };
     }
     const supabase = supabaseForUser(ctx);
-    let q = supabase.from("jackie_memory").select("id,key,value,category,confidence,updated_at").order("updated_at", { ascending: false }).limit(limit ?? 25);
+    let q = supabase.from("jackie_memory").select("id,key,value,category,confidence,updated_at").eq("user_id", ctx.getUserId()).order("updated_at", { ascending: false }).limit(limit ?? 25);
     if (category) q = q.eq("category", category);
     if (query) {
       const safe = query.replace(/[%,()]/g, " ").trim();
@@ -183,7 +183,7 @@ var search_memory_default = defineTool4({
 });
 
 // src/lib/mcp/tools/remember-fact.ts
-import { defineTool as defineTool5 } from "npm:@lovable.dev/mcp-js@0.26.2";
+import { defineTool as defineTool5 } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z as z5 } from "npm:zod@^3.25.76";
 var remember_fact_default = defineTool5({
   name: "remember_fact",
@@ -201,9 +201,9 @@ var remember_fact_default = defineTool5({
     }
     const supabase = supabaseForUser(ctx);
     const userId = ctx.getUserId();
-    const { data: existing, error: findError } = await supabase.from("jackie_memory").select("id").eq("key", key).limit(1);
+    const { data: existing, error: findError } = await supabase.from("jackie_memory").select("id").eq("user_id", userId).eq("key", key).limit(1);
     if (findError) return { content: [{ type: "text", text: findError.message }], isError: true };
-    const { data, error } = existing?.length ? await supabase.from("jackie_memory").update({ value, ...category ? { category } : {} }).eq("id", existing[0].id).select("id,key,value,category,updated_at") : await supabase.from("jackie_memory").insert({ user_id: userId, key, value, category: category ?? "general" }).select("id,key,value,category,updated_at");
+    const { data, error } = existing?.length ? await supabase.from("jackie_memory").update({ value, ...category ? { category } : {} }).eq("id", existing[0].id).eq("user_id", userId).select("id,key,value,category,updated_at") : await supabase.from("jackie_memory").insert({ user_id: userId, key, value, category: category ?? "general" }).select("id,key,value,category,updated_at");
     if (error) return { content: [{ type: "text", text: error.message }], isError: true };
     return {
       content: [{ type: "text", text: JSON.stringify(data?.[0] ?? null) }],
@@ -213,7 +213,7 @@ var remember_fact_default = defineTool5({
 });
 
 // src/lib/mcp/tools/list-conversations.ts
-import { defineTool as defineTool6 } from "npm:@lovable.dev/mcp-js@0.26.2";
+import { defineTool as defineTool6 } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z as z6 } from "npm:zod@^3.25.76";
 var list_conversations_default = defineTool6({
   name: "list_conversations",
@@ -228,7 +228,7 @@ var list_conversations_default = defineTool6({
       return { content: [{ type: "text", text: "Not authenticated" }], isError: true };
     }
     const supabase = supabaseForUser(ctx);
-    const { data, error } = await supabase.from("conversations").select("id,title,model,created_at,updated_at").order("updated_at", { ascending: false }).limit(limit ?? 20);
+    const { data, error } = await supabase.from("conversations").select("id,title,model,created_at,updated_at").eq("user_id", ctx.getUserId()).order("updated_at", { ascending: false }).limit(limit ?? 20);
     if (error) return { content: [{ type: "text", text: error.message }], isError: true };
     return {
       content: [{ type: "text", text: JSON.stringify(data ?? []) }],
@@ -252,5 +252,5 @@ var mcp_default = defineMcp({
 });
 
 // lovable-mcp-supabase-entry.ts
-import { createSupabaseHandler } from "npm:@lovable.dev/mcp-js@0.26.2/stacks/supabase";
+import { createSupabaseHandler } from "npm:@lovable.dev/mcp-js@0.26.1/stacks/supabase";
 Deno.serve(createSupabaseHandler(mcp_default, { functionName: "mcp" }));
