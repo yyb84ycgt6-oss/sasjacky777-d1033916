@@ -7,7 +7,7 @@ This is the source of truth for your sovereign multi-agent system.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 
 @dataclass
@@ -96,7 +96,7 @@ class AgentRegistry:
         """Register a new agent."""
         self.agents[config.name] = config
 
-    def get(self, name: str) -> AgentConfig | None:
+    def get(self, name: str) -> Optional[AgentConfig]:
         """Retrieve an agent by name."""
         return self.agents.get(name)
 

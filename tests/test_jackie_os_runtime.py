@@ -154,3 +154,37 @@ def test_the_result_type_the_graph_returns_is_the_orchestrator_s_own():
     graph = ExecutionGraph(FakeOrchestrator())
     graph.add_task(TaskNode(id="x", agent="Code", content="c"))
     assert isinstance(graph.run()["x"], FSTaskResult)
+
+
+def test_no_module_uses_syntax_newer_than_the_declared_python_floor():
+    """
+    `pyproject.toml` declares `requires-python = ">=3.9"`, and CI runs the suite
+    on 3.9 precisely because this class of mistake is invisible on a newer
+    interpreter: `X | None` in an annotation is evaluated at class- or
+    function-definition time, so it is a TypeError on import, not a warning.
+
+    Two of them shipped in the recovered runtime — `AgentRegistry.get` and
+    `JackieOS.graph` — and both were found by reading rather than by running,
+    which is exactly the reviewing this test replaces.
+    """
+    import ast
+
+    root = Path(__file__).resolve().parents[1]
+    offenders = []
+    for path in root.rglob("*.py"):
+        if "node_modules" in path.parts or "__pycache__" in path.parts:
+            continue
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                annotation = node.returns
+            elif isinstance(node, (ast.AnnAssign, ast.arg)):
+                annotation = node.annotation
+            else:
+                continue
+            if isinstance(annotation, ast.BinOp) and isinstance(annotation.op, ast.BitOr):
+                offenders.append(f"{path.relative_to(root)}:{node.lineno}")
+
+    assert offenders == [], (
+        "PEP 604 unions (`X | None`) are a TypeError on Python 3.9, which this "
+        "project supports. Use Optional[X]:\n  " + "\n  ".join(offenders)
+    )

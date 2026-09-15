@@ -29,6 +29,8 @@ Usage:
     snapshot = os.snapshot()
 """
 
+from typing import Optional
+
 from .fs.agent_registry import AgentRegistry
 from .fs.pod_backpack_manager import PodBackpackManager
 from .fs.jackie_router_client import JackieRouterClient
@@ -53,7 +55,7 @@ class JackieOS:
         self.orchestrator = JackieOrchestrator(router_url=router_url)
 
         # Execution graph (optional, per-run)
-        self.graph: ExecutionGraph | None = None
+        self.graph: Optional[ExecutionGraph] = None
 
         # Setup tracing
         setup_logging()
