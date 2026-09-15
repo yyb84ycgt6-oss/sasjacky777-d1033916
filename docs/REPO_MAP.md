@@ -36,6 +36,10 @@ through — the same shape as the four `contextRouter.ts` ships hard-coded, but
 authored at runtime, testable on their own engine ladder, exportable as files
 and synced between your devices. See [INDEX_FORGE.md](INDEX_FORGE.md).
 
+The pill — mounted on every screen — is where they get used: commands resolve
+against the route manifest with no model involved, questions route to whichever
+index is expert in them. See [INDEX_PILL.md](INDEX_PILL.md).
+
 ## Three test suites, three commands
 
 They do not overlap and none of them sees the others' files:
