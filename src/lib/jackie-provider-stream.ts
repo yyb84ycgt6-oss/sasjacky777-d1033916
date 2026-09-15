@@ -3,7 +3,7 @@
 // Auto-fallback: on 429/402/5xx or missing-secret errors, cascades down
 // the FALLBACK_ORDER (Lovable → free → freemium → paid).
 //
-// Local runners (Ollama) always fail over, even with `fallback` off: a local
+// Local runners (Bionic, Ollama) always fail over, even with `fallback` off: a local
 // rate limit / overload / refused connection is never a reason for the main
 // assistant to stop. Context is auto-captured before every switch.
 import type { ProviderId } from "./jackie-providers";
@@ -14,7 +14,7 @@ import { captureContext } from "./repair/contextGuard";
 export type ChatMessage = { role: "user" | "assistant" | "system"; content: string };
 
 /** Providers that run on the operator's own machine — always worth failing over. */
-const LOCAL_PROVIDERS: ProviderId[] = ["ollama"];
+const LOCAL_PROVIDERS: ProviderId[] = ["bionic", "ollama"];
 
 const RATE_LIMIT_PATTERNS =
   /(429|rate ?limit|too many requests|overload|busy|model is loading|queue|timeout|timed out|connection refused|econnrefused|fetch failed|unavailable)/i;
