@@ -29,6 +29,13 @@ commands — `/verify` (every check, in the order that fails fastest), `/engine`
 (add an engine to the chat's fallback chain, all five places) and `/edge`
 (scaffold an edge function with the gate wired correctly).
 
+## The Index Forge
+
+`/forge` crafts the specialised micro-AI indexes the chat and the guide route
+through — the same shape as the four `contextRouter.ts` ships hard-coded, but
+authored at runtime, testable on their own engine ladder, exportable as files
+and synced between your devices. See [INDEX_FORGE.md](INDEX_FORGE.md).
+
 ## Three test suites, three commands
 
 They do not overlap and none of them sees the others' files:

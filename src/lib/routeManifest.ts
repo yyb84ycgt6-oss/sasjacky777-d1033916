@@ -42,6 +42,7 @@ export const CORE_ROUTES: RouteEntry[] = [
   { path: "/control", label: "Jackie Control", group: "ai" },
   { path: "/providers", label: "AI Providers", group: "ai" },
   { path: "/grok", label: "Grok Studio", group: "ai" },
+  { path: "/forge", label: "Index Forge (craft your own micro-AI indexes)", group: "ai" },
   { path: "/agent-lab", label: "Agent Lab", group: "ai" },
   { path: "/agent-compare", label: "Agent Compare", group: "ai" },
   { path: "/local-ai", label: "Local AI Test (Ollama on this machine)", group: "ai" },

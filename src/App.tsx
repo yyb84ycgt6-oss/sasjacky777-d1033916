@@ -55,6 +55,7 @@ import JackieCore from "./pages/JackieCore";
 import GithubSync from "./pages/GithubSync";
 import LocalAITest from "./pages/LocalAITest";
 import MicroAI from "./pages/MicroAI";
+import IndexForge from "./pages/IndexForge";
 import MicroBoard from "./pages/MicroBoard";
 import NervousSystem from "./pages/NervousSystem";
 import { ERU_ALIASES } from "./lib/routeManifest";
@@ -278,6 +279,7 @@ const App = () => (
                 <Route path="/nervous" element={<ProtectedRoute><NervousSystem /></ProtectedRoute>} />
                 <Route path="/github" element={<ProtectedRoute><GithubSync /></ProtectedRoute>} />
                 <Route path="/local-ai" element={<ProtectedRoute><LocalAITest /></ProtectedRoute>} />
+                <Route path="/forge" element={<ProtectedRoute><IndexForge /></ProtectedRoute>} />
                 <Route path="/micro" element={<ProtectedRoute><MicroAI /></ProtectedRoute>} />
                 <Route path="/micro/board" element={<ProtectedRoute><MicroBoard /></ProtectedRoute>} />
                 <Route
