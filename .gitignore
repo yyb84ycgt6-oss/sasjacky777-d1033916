@@ -34,3 +34,10 @@ dist-ssr
 # Playwright
 test-results/
 playwright-report/
+
+# Python — the router stack and command_station tooling run here too.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+.venv/
