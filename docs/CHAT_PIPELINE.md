@@ -37,6 +37,13 @@ Order is priority. The engine picked in the composer is tried first and the rest
 follow in table order, so choosing Ollama by hand does not mean Jacky and Bionic
 are gone — it means they come after.
 
+Every link is gated by `_shared/entitlement.ts`: who is this, may they run this
+model, and have they got quota left. The model allowlists live next to each
+function and are kept in step with `jackie-engines.ts`, because a picker that
+offers a model the allowlist refuses is a failure that looks exactly like the
+engine being down. An unconfigured engine is detected before admission, so
+probing a chain link that is not set up costs the caller nothing.
+
 Two things, and only two, stop the walk:
 
 - **the user stopped the answer** — not a failure, and retrying it somewhere
