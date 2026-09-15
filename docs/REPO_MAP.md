@@ -1,0 +1,65 @@
+# What is in this repository, and which suite covers it
+
+SAS-JACKY is not one program. It is the web app, the rig-side engine that app
+talks to, and the tooling that keeps the model library on disk honest. Work that
+belongs to each of those lived on separate branches for a while, which is how
+`jackierouter` — the most developed piece of routing logic anyone here has
+written — ended up invisible to the app whose whole problem it solves.
+
+## The three trees
+
+| Path | What it is | Language |
+| --- | --- | --- |
+| `src/`, `supabase/` | The web app and its edge functions. Jackie's chat, memory, vault, pods, the lot. | TypeScript |
+| `jackierouter/`, `router_final.py`, `tools/` | The rig-side router: predictive failover, the cost ladder, hardware gating, context-preserving handoff. Runs on the machine with the GPU. | Python |
+| `context-condenser/` | Anchored dehydration and real rehydration — a condensate never exists without a reference to the lossless bytes it came from. | TypeScript (node:test) |
+| `command_station/` | Model-library tooling: manifests, checksums, sync batches, the integrity dashboard, the vault diff tool. | Python + batch |
+| `Jackie/` | The doctrine and the cluster/constellation modules. | Markdown + Python |
+
+## Three test suites, three commands
+
+They do not overlap and none of them sees the others' files:
+
+```
+npx vitest run          # src/**  — 506 tests
+python3 -m pytest       # tests/ + command_station/tools/ — 164 tests
+cd context-condenser && npm test   # 42 tests
+npx playwright test     # e2e/ — browser, needs a built app
+```
+
+`vitest.config.ts` includes only `src/**`, and `playwright.config.ts` points at
+`e2e/`, so the Python tree at the root is invisible to both. `pyproject.toml`
+names `tests` and `command_station/tools` as its test paths, which is why the
+Python project sits at the root rather than nested — `command_station` has to be
+its sibling.
+
+## Why the router exists on both sides
+
+The app has its own engine chain (`src/lib/jackie-router.ts`, see
+[CHAT_PIPELINE.md](CHAT_PIPELINE.md)): Jacky → Bionic → Ollama → cloud, walked
+in the browser, with the chain's first link being the rig.
+
+`jackierouter/` is what runs *behind* that first link, and it is the more
+developed of the two. The browser chain reacts — an engine refuses, try the next
+one. The Python router forecasts: a sliding-window ledger measures burn rate per
+provider and predicts seconds-to-exhaustion, so it migrates while headroom
+remains rather than failing the request that hits the wall. It gates providers on
+hardware the box actually has — free VRAM, GPU temperature below the throttle
+point, the model genuinely pulled — *before* the call rather than after the
+error. And it carries a briefing across every failover, built from the
+interrupted turn, so the next model continues mid-thought instead of starting
+over. That works mid-stream, so a reader sees one continuous answer even when
+the provider changed halfway through a sentence.
+
+Both layers are worth having. The browser cannot see the rig's VRAM, and the rig
+cannot fall back to the cloud gateway on the user's behalf.
+
+Point it at a config and run it:
+
+```
+python -m jackierouter detect                       # what machine is this
+python -m jackierouter suggest -o router.config.json
+JACKIEROUTER_CONFIG=router.config.json python router_final.py
+```
+
+`install_jackierouter.bat` wraps that as an NSSM service on Windows.

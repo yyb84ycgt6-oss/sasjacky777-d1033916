@@ -1,0 +1,256 @@
+{
+  "manifest_version": "2.0.0",
+  "generated_at": "2025-03-14T14:30:00Z",
+  "workstation_config": {
+    "gpu_vram_gb": 24,
+    "cpu_cores": 16,
+    "dram_gb": 128,
+    "storage_drives": {
+      "primary": "C:",
+      "permanent_storage": "E:",
+      "lm_studio_models": "C:\\Users\\Eru\\AI_ Workspace\\models\\LM_Studio\\Models"
+    },
+    "backup_policy": {
+      "type": "indefinite_retention",
+      "daily_sync": true,
+      "weekly_verification": true,
+      "integrity_checks": "sha256",
+      "logging_enabled": true
+    }
+  },
+  "model_families": [
+    {
+      "model_family": "QWYTHOS-9B",
+      "version": "1.0.0",
+      "formats": ["F16", "Q4_K_M"],
+      "hardware_requirements": {
+        "gpu_vram_min_gb": 24,
+        "cpu_cores_min": 8,
+        "dram_gb_min": 64,
+        "preferred_quantization": "Q4_K_M"
+      },
+      "operational_guidelines": {
+        "inference_mode": "hybrid",
+        "context_window_max_tokens": 262144,
+        "kv_cache_location": "dram",
+        "recommendation": "Main brain - inference only",
+        "use_cases": ["long_context_reasoning", "multi_agent_orchestration", "context_stitching"],
+        "fallback_for": []
+      },
+      "integration_points": {
+        "router": "hybrid_router.py:QWYTHOS_CONFIG",
+        "vault": "E:\\AI_Permanent\\Models\\qwythos-9b-claude-mythos-5-1m\\",
+        "backup_policy": "daily",
+        "memory_vault_pods": ["context_chunks_QWYTHOS-9B_F16", "context_chunks_QWYTHOS-9B_Q4_K_M"]
+      },
+      "files": {
+        "lm_studio_path": "C:\\Users\\Eru\\AI_ Workspace\\models\\LM_Studio\\Models\\qwythos-9b-claude-mythos-5",
+        "permanent_path": "E:\\AI_Permanent\\Models\\qwythos-9b-claude-mythos-5-1m\\",
+        "gguf_files": [
+          "mmproj-Qwythos-9B-Claude-Mythos-5-1M-F16.gguf",
+          "Qwythos-9B-Claude-Mythos-5-1M-Q4_K_M.gguf"
+        ]
+      }
+    },
+    {
+      "model_family": "Muse-Glimmer-30B",
+      "version": "1.0.0",
+      "formats": ["Q4_K_M", "INT4"],
+      "hardware_requirements": {
+        "gpu_vram_min_gb": 24,
+        "cpu_cores_min": 8,
+        "dram_gb_min": 64,
+        "preferred_quantization": "Q4_K_M"
+      },
+      "operational_guidelines": {
+        "inference_mode": "hybrid",
+        "context_window_max_tokens": 131072,
+        "kv_cache_location": "dram",
+        "recommendation": "Image/audio brain - hybrid mode",
+        "use_cases": ["vision_processing", "audio_processing", "multimodal_reasoning"],
+        "fallback_for": []
+      },
+      "integration_points": {
+        "router": "hybrid_router.py:MUSE_Glimmer_CONFIG",
+        "vault": "E:\\AI_Permanent\\Models\\muse-glimmer-30b\\",
+        "backup_policy": "daily",
+        "memory_vault_pods": ["context_chunks_Muse-Glimmer-30B", "embedding_pods_Muse-Glimmer-30B"]
+      },
+      "files": {
+        "lm_studio_path": "C:\\Users\\Eru\\AI_ Workspace\\models\\LM_Studio\\Models\\muse-glimmer-30b",
+        "permanent_path": "E:\\AI_Permanent\\Models\\muse-glimmer-30b\\",
+        "gguf_files": []
+      }
+    },
+    {
+      "model_family": "GPT-OSS",
+      "version": "1.0.0",
+      "formats": ["Q4_K_M"],
+      "hardware_requirements": {
+        "gpu_vram_min_gb": 8,
+        "cpu_cores_min": 4,
+        "dram_gb_min": 32,
+        "preferred_quantization": "Q4_K_M"
+      },
+      "operational_guidelines": {
+        "inference_mode": "cpu_only",
+        "context_window_max_tokens": 65536,
+        "kv_cache_location": "dram",
+        "recommendation": "Embedding/vector search - CPU only",
+        "use_cases": ["embedding_generation", "vector_search", "memory_indexing"],
+        "fallback_for": []
+      },
+      "integration_points": {
+        "router": "hybrid_router.py:GPT_OSS_CONFIG",
+        "vault": "E:\\AI_Permanent\\Models\\GPT-OSS\\",
+        "backup_policy": "daily",
+        "memory_vault_pods": ["context_chunks_GPT-OSS", "embedding_pods_GPT-OSS"]
+      },
+      "files": {
+        "lm_studio_path": "C:\\Users\\Eru\\AI_ Workspace\\LMServer2012-08-30\\Models\\GPT-OSS",
+        "permanent_path": "E:\\AI_Permanent\\Models\\GPT-OSS\\",
+        "gguf_files": []
+      }
+    },
+    {
+      "model_family": "Qwen2-7B",
+      "version": "0.1.0",
+      "formats": ["Q4_K_M", "INT8"],
+      "hardware_requirements": {
+        "gpu_vram_min_gb": 16,
+        "cpu_cores_min": 4,
+        "dram_gb_min": 32,
+        "preferred_quantization": "Q4_K_M"
+      },
+      "operational_guidelines": {
+        "inference_mode": "hybrid",
+        "context_window_max_tokens": 131072,
+        "kv_cache_location": "dram",
+        "recommendation": "Secondary brain - fallback for QWYTHOS",
+        "use_cases": ["general_reasoning", "fallback_inference", "rapid_response"],
+        "fallback_for": ["QWYTHOS-9B"]
+      },
+      "integration_points": {
+        "router": "hybrid_router.py:Qwen2_7B_CONFIG",
+        "vault": "E:\\AI_Permanent\\Models\\Qwen2-7B\\",
+        "backup_policy": "daily",
+        "memory_vault_pods": ["context_chunks_Qwen2-7B", "embedding_pods_Qwen2-7B"]
+      },
+      "files": {
+        "lm_studio_path": "C:\\Users\\Eru\\AI_ Workspace\\LMServer2012-08-30\\Models\\Qwen2-7B",
+        "permanent_path": "E:\\AI_Permanent\\Models\\Qwen2-7B\\",
+        "gguf_files": []
+      }
+    },
+    {
+      "model_family": "Llama3-8B",
+      "version": "0.1.0",
+      "formats": ["Q4_K_M"],
+      "hardware_requirements": {
+        "gpu_vram_min_gb": 16,
+        "cpu_cores_min": 4,
+        "dram_gb_min": 32,
+        "preferred_quantization": "Q4_K_M"
+      },
+      "operational_guidelines": {
+        "inference_mode": "hybrid",
+        "context_window_max_tokens": 8192,
+        "kv_cache_location": "dram",
+        "recommendation": "General-purpose reasoning",
+        "use_cases": ["general_inference", "code_generation", "text_completion"],
+        "fallback_for": []
+      },
+      "integration_points": {
+        "router": "hybrid_router.py:Llama3_8B_CONFIG",
+        "vault": "E:\\AI_Permanent\\Models\\Llama3-8B\\",
+        "backup_policy": "daily",
+        "memory_vault_pods": ["context_chunks_Llama3-8B", "embedding_pods_Llama3-8B"]
+      },
+      "files": {
+        "lm_studio_path": "C:\\Users\\Eru\\AI_ Workspace\\LMServer2012-08-30\\Models\\Llama3-8B",
+        "permanent_path": "E:\\AI_Permanent\\Models\\Llama3-8B\\",
+        "gguf_files": []
+      }
+    },
+    {
+      "model_family": "Mistral-7B",
+      "version": "0.1.0",
+      "formats": ["Q4_K_M", "INT8"],
+      "hardware_requirements": {
+        "gpu_vram_min_gb": 16,
+        "cpu_cores_min": 4,
+        "dram_gb_min": 32,
+        "preferred_quantization": "Q4_K_M"
+      },
+      "operational_guidelines": {
+        "inference_mode": "hybrid",
+        "context_window_max_tokens": 32768,
+        "kv_cache_location": "dram",
+        "recommendation": "Fine-tuned for code/math",
+        "use_cases": ["code_analysis", "mathematical_reasoning", "structured_output"],
+        "fallback_for": []
+      },
+      "integration_points": {
+        "router": "hybrid_router.py:Mistral_7B_CONFIG",
+        "vault": "E:\\AI_Permanent\\Models\\Mistral-7B\\",
+        "backup_policy": "daily",
+        "memory_vault_pods": ["context_chunks_Mistral-7B", "embedding_pods_Mistral-7B"]
+      },
+      "files": {
+        "lm_studio_path": "C:\\Users\\Eru\\AI_ Workspace\\LMServer2012-08-30\\Models\\Mistral-7B",
+        "permanent_path": "E:\\AI_Permanent\\Models\\Mistral-7B\\",
+        "gguf_files": []
+      }
+    },
+    {
+      "model_family": "Phi-3-mini",
+      "version": "0.1.0",
+      "formats": ["Q4_K_M"],
+      "hardware_requirements": {
+        "gpu_vram_min_gb": 4,
+        "cpu_cores_min": 2,
+        "dram_gb_min": 16,
+        "preferred_quantization": "Q4_K_M"
+      },
+      "operational_guidelines": {
+        "inference_mode": "cpu_only",
+        "context_window_max_tokens": 4096,
+        "kv_cache_location": "dram",
+        "recommendation": "Lightweight text processing",
+        "use_cases": ["lightweight_inference", "preprocessing", "quick_classification"],
+        "fallback_for": []
+      },
+      "integration_points": {
+        "router": "hybrid_router.py:Phi3_mini_CONFIG",
+        "vault": "E:\\AI_Permanent\\Models\\Phi-3-mini\\",
+        "backup_policy": "daily",
+        "memory_vault_pods": ["context_chunks_Phi-3-mini", "embedding_pods_Phi-3-mini"]
+      },
+      "files": {
+        "lm_studio_path": "C:\\Users\\Eru\\AI_ Workspace\\LMServer2012-08-30\\Models\\Phi-3-mini",
+        "permanent_path": "E:\\AI_Permanent\\Models\\Phi-3-mini\\",
+        "gguf_files": []
+      }
+    }
+  ],
+  "memory_vault_config": {
+    "storage_drive": "E:",
+    "base_path": "E:\\AI_Permanent\\Models\\",
+    "pod_partition_size": 100,
+    "retention_policy": "indefinite",
+    "deduplication_enabled": true,
+    "integrity_check_method": "sha256",
+    "logging_enabled": true,
+    "chunk_formats": ["jsonl", "bin"],
+    "embedding_formats": ["jsonl", "bin"]
+  },
+  "hybrid_routing_config": {
+    "cpu_threads": 32,
+    "gpu_memory_utilization": 0.92,
+    "kv_cache_cpu_offload": true,
+    "max_context_length": 2000000,
+    "agent_pool_size": 10,
+    "memory_vault_active": true,
+    "context_stitching_enabled": true
+  }
+}
