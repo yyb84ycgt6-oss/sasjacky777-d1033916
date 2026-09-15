@@ -4,6 +4,7 @@ import { ConversionPresetCard } from '../components/ConversionPresetCard';
 import { TelegramAvatarPreview } from '../components/TelegramAvatarPreview';
 import { getPresetForMedia, formatFileSize, formatDuration, type MediaItem, type ConversionPreset } from '../types';
 import { conversionService } from '../services';
+import { useVault } from '../useVault';
 import { toast } from 'sonner';
 
 interface JobBuilderProps {
@@ -13,6 +14,7 @@ interface JobBuilderProps {
 }
 
 export function JobBuilder({ item, onBack, onJobCreated }: JobBuilderProps) {
+  const { queueJob } = useVault();
   const allPresets = getPresetForMedia(item);
   const generalPresets = allPresets.filter(p => p.category !== 'telegram');
   const telegramPresets = allPresets.filter(p => p.category === 'telegram');
@@ -36,15 +38,19 @@ export function JobBuilder({ item, onBack, onJobCreated }: JobBuilderProps) {
     if (preset.telegramMeta?.cropShape) setAvatarShape(preset.telegramMeta.cropShape);
   };
 
-  const handleQueue = () => {
+  // `conversionService.createJob` built a job object that was then discarded,
+  // under a toast promising "Processing will begin shortly". Nothing processed
+  // anything. The job is now written to the Vault, where the queue runner in
+  // `useVault` picks it up and runs it through ffmpeg.
+  const handleQueue = async () => {
     if (!selected) return;
-    conversionService.createJob(item, selected.actionType, selected.key, selected.outputFormat, {
+    await queueJob(item, selected.actionType, selected.key, selected.outputFormat, {
       targetBitrate: bitrate,
       trimStart: selected.actionType === 'trim_clip' ? trimStart : undefined,
       trimEnd: selected.actionType === 'trim_clip' ? trimEnd : undefined,
       normalizationEnabled: normalize,
     });
-    toast.success('Job queued. Processing will begin shortly.');
+    toast.success('Queued. Converting on this device.');
     onJobCreated();
   };
 

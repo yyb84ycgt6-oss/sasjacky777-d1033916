@@ -3,14 +3,28 @@ import { ArrowLeft, Mic, Video, Camera } from 'lucide-react';
 import { UploadDropzone } from '../components/UploadDropzone';
 import { PasteLinkField } from '../components/PasteLinkField';
 import { toast } from 'sonner';
+import { useVault } from '../useVault';
 
 interface ImportScreenProps {
   onBack: () => void;
 }
 
 export function ImportScreen({ onBack }: ImportScreenProps) {
-  const handleFilesSelected = (files: File[]) => {
-    toast.success(`${files.length} file${files.length > 1 ? 's' : ''} received. Ready to convert.`);
+  const { importFile } = useVault();
+
+  // This used to toast "received. Ready to convert." and do nothing at all —
+  // no store, no bytes, nothing. The file is now validated, its duration and
+  // resolution read, and both the metadata and the bytes written to the Vault.
+  const handleFilesSelected = async (files: File[]) => {
+    let imported = 0;
+    for (const file of files) {
+      const item = await importFile(file);
+      if (item) imported += 1;
+      else toast.error(`${file.name} was refused.`);
+    }
+    if (imported > 0) {
+      toast.success(`${imported} file${imported > 1 ? 's' : ''} in your Vault.`);
+    }
   };
 
   const handleLinkSubmit = (url: string, sourceType: string, explanation: string) => {

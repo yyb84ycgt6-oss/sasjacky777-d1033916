@@ -67,10 +67,11 @@ What is missing is both ends: nothing stores a media item, and
 There is no ffmpeg, no edge function, no queue. A job is created with
 `status: 'waiting'` and waits forever.
 
-**To make it real:** a `media_items` / `conversion_jobs` pair of tables with RLS
-(the pattern is already set by the authz migration), Supabase Storage for the
-files, and an edge function that actually converts. The UI and the logic below
-it can stay exactly as they are — this is a backend, not a rewrite.
+**Built.** See `docs/VAULT.md`. It went local rather than server-side: blobs and
+metadata in IndexedDB, conversion through ffmpeg compiled to WebAssembly, on the
+machine that already holds the file. `mockData.ts` is deleted, and `services.ts`
+— which was always sound and simply never called by anything that stored a
+result — is unchanged.
 
 ### Sentinel — `/sentinel`, `/sentinel/board`
 

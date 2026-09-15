@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ArrowLeft, Search, Grid3X3, List, Heart } from 'lucide-react';
 import { MediaCard } from '../components/MediaCard';
 import { EmptyState } from '../components/EmptyState';
-import { MOCK_MEDIA_ITEMS } from '../mockData';
+import { useVault } from '../useVault';
 import { libraryService } from '../services';
 import type { MediaItem, LibraryTab } from '../types';
 
@@ -23,13 +23,9 @@ export function LibraryScreen({ onBack, onSelectItem }: LibraryScreenProps) {
   const [tab, setTab] = useState<LibraryTab>('all');
   const [search, setSearch] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [items, setItems] = useState(MOCK_MEDIA_ITEMS);
+  const { media: items, toggleFavorite } = useVault();
 
   const filtered = libraryService.filterItems(items, tab, search, []);
-
-  const toggleFavorite = (id: string) => {
-    setItems(prev => prev.map(i => i.id === id ? { ...i, isFavorite: !i.isFavorite } : i));
-  };
 
   return (
     <div className="space-y-4 pb-8">
