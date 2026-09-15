@@ -63,6 +63,7 @@ import RouteDebugOverlay from "./components/RouteDebugOverlay";
 import { UniversalFloatingNavBar } from "./components/UniversalFloatingNavBar";
 import { GlobalStickyNotes } from "./components/GlobalStickyNotes";
 import { GuideDock } from "./components/GuideDock";
+import { IndexPill } from "./components/IndexPill";
 
 const EruRouter = lazy(() => import("./eru/EruRouter"));
 
@@ -319,6 +320,7 @@ const App = () => (
               <UniversalFloatingNavBar />
               <GlobalStickyNotes />
               <GuideDock />
+              <IndexPill />
             </BrowserRouter>
             </TooltipProvider>
           </I18nProvider>
