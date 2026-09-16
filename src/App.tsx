@@ -55,6 +55,8 @@ import JackieCore from "./pages/JackieCore";
 import GithubSync from "./pages/GithubSync";
 import LocalAITest from "./pages/LocalAITest";
 import MicroAI from "./pages/MicroAI";
+import IndexForge from "./pages/IndexForge";
+import Welcome from "./pages/Welcome";
 import MicroBoard from "./pages/MicroBoard";
 import NervousSystem from "./pages/NervousSystem";
 import { ERU_ALIASES } from "./lib/routeManifest";
@@ -62,6 +64,7 @@ import RouteDebugOverlay from "./components/RouteDebugOverlay";
 import { UniversalFloatingNavBar } from "./components/UniversalFloatingNavBar";
 import { GlobalStickyNotes } from "./components/GlobalStickyNotes";
 import { GuideDock } from "./components/GuideDock";
+import { IndexPill } from "./components/IndexPill";
 
 const EruRouter = lazy(() => import("./eru/EruRouter"));
 
@@ -82,7 +85,24 @@ const SandboxCatcher = ({ children }: { children: React.ReactNode }) => {
   return <>{children}</>;
 };
 
-const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
+/**
+ * Guards a route, and decides what a signed-out visitor sees instead.
+ *
+ * `fallback` exists because "/" is not like the others. Every protected route
+ * showed `<Auth />` directly, so the first thing this app ever said to someone
+ * who had not seen it before was "password" — no name, no explanation, no way
+ * to find out what they would be signing in to. The root now falls back to the
+ * landing page, which has a sign-in button on it. Everywhere else still goes
+ * straight to the form, because someone deep-linked to /vault knows what this
+ * is and wants to get in, not to read about it.
+ */
+const ProtectedRoute = ({
+  children,
+  fallback,
+}: {
+  children: React.ReactNode;
+  fallback?: React.ReactNode;
+}) => {
   const { user, loading } = useAuth();
 
   if (loading) {
@@ -93,7 +113,7 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
     );
   }
 
-  if (!user) return <Auth />;
+  if (!user) return <>{fallback ?? <Auth />}</>;
   return <>{children}</>;
 };
 
@@ -117,12 +137,13 @@ const App = () => (
                 <Routes>
                   <Route path="/auth" element={<Auth />} />
                   <Route path="/.lovable/oauth/consent" element={<OAuthConsent />} />
+                  <Route path="/welcome" element={<Welcome />} />
                   <Route path="/sandbox" element={<Sandbox />} />
                   <Route path="/index" element={<Navigate to="/" replace />} />
                 <Route
                   path="/"
                   element={
-                    <ProtectedRoute>
+                    <ProtectedRoute fallback={<Welcome />}>
                       <Index />
                     </ProtectedRoute>
                   }
@@ -278,6 +299,7 @@ const App = () => (
                 <Route path="/nervous" element={<ProtectedRoute><NervousSystem /></ProtectedRoute>} />
                 <Route path="/github" element={<ProtectedRoute><GithubSync /></ProtectedRoute>} />
                 <Route path="/local-ai" element={<ProtectedRoute><LocalAITest /></ProtectedRoute>} />
+                <Route path="/forge" element={<ProtectedRoute><IndexForge /></ProtectedRoute>} />
                 <Route path="/micro" element={<ProtectedRoute><MicroAI /></ProtectedRoute>} />
                 <Route path="/micro/board" element={<ProtectedRoute><MicroBoard /></ProtectedRoute>} />
                 <Route
@@ -317,6 +339,7 @@ const App = () => (
               <UniversalFloatingNavBar />
               <GlobalStickyNotes />
               <GuideDock />
+              <IndexPill />
             </BrowserRouter>
             </TooltipProvider>
           </I18nProvider>

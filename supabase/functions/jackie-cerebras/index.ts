@@ -1,6 +1,6 @@
 // Streaming chat via Cerebras (free tier, ~2000 tok/s Llama).
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.58.0";
+import { gate } from "../_shared/entitlement.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -17,36 +17,9 @@ const DEFAULT_MODEL = "llama-3.3-70b";
 const SECRET = "CEREBRAS_API_KEY";
 const BASE = "https://api.cerebras.ai/v1/chat/completions";
 
-async function requireUser(req: Request): Promise<Response | null> {
-  const auth = req.headers.get("Authorization");
-  if (!auth?.startsWith("Bearer ")) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-  const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {
-    global: { headers: { Authorization: auth } },
-  });
-  // getClaims exists only in supabase-js >= 2.58 (auth-js >= 2.70). On 2.49.1 it threw here,
-  // outside the handler's try/catch: a CORS-less 500 that browsers report as "Failed to fetch".
-  let data: { claims?: unknown } | null = null;
-  let error: unknown = null;
-  try {
-    ({ data, error } = await sb.auth.getClaims(auth.replace("Bearer ", "")));
-  } catch (e) {
-    error = e;
-  }
-  if (error || !data?.claims) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-  return null;
-}
-
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
-  const un = await requireUser(req);
+  const un = await gate(req, "jackie-cerebras");
   if (un) return un;
 
   const key = Deno.env.get(SECRET);

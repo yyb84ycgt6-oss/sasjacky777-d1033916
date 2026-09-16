@@ -1,5 +1,5 @@
 import { ArrowLeft, Download, Share, Copy, RotateCcw, Play, HardDrive, Clock } from 'lucide-react';
-import { MOCK_OUTPUTS, MOCK_JOBS } from '../mockData';
+import { useVault } from '../useVault';
 import { formatFileSize, formatDuration } from '../types';
 import { toast } from 'sonner';
 
@@ -9,8 +9,9 @@ interface OutputReviewProps {
 }
 
 export function OutputReview({ jobId, onBack }: OutputReviewProps) {
-  const output = MOCK_OUTPUTS.find(o => o.conversionJobId === jobId);
-  const job = MOCK_JOBS.find(j => j.id === jobId);
+  const { outputs, jobs, download } = useVault();
+  const output = outputs.find(o => o.conversionJobId === jobId);
+  const job = jobs.find(j => j.id === jobId);
 
   if (!output || !job) {
     return (

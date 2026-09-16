@@ -1,7 +1,16 @@
+import { callEdgeFunction } from "@/lib/edgeFunction";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
-import { streamChat, JACKIE_MODELS, type ChatMessage, type JackieModelId } from "@/lib/jackie-stream";
+import { DEFAULT_CHAT_MODEL, type ChatMessage } from "@/lib/jackie-stream";
+import { routeChat } from "@/lib/jackie-router";
+import {
+  ENGINES,
+  DEFAULT_ENGINE,
+  findEngine,
+  isKnownEngine,
+  type EngineId,
+} from "@/lib/jackie-engines";
 import {
   listConversations,
   createConversation,
@@ -30,9 +39,10 @@ import { VoiceRecorder } from "@/components/VoiceRecorder";
 import { AttachmentDisplay } from "@/components/AttachmentDisplay";
 import { toast } from "sonner";
 import { SidebarNav } from "@/components/SidebarNav";
+import { PalettePicker } from "@/components/PalettePicker";
 
 import { getGameStateContext } from "@/lib/game-state-context";
-import { Plus, Trash2, MessageSquare, LogOut, Send, Menu, X, Sun, Moon, Volume2, VolumeX, Download, Mic, ChevronDown, Zap, DollarSign, Search, Tag, XCircle, Pin, Upload, Archive as ArchiveIcon } from "lucide-react";
+import { Plus, Trash2, MessageSquare, LogOut, Send, Menu, X, Sun, Moon, Volume2, VolumeX, Download, Mic, ChevronDown, Zap, DollarSign, Search, Tag, XCircle, Pin, Upload, Archive as ArchiveIcon, Square, Cpu } from "lucide-react";
 import {
   listTags,
   createTag,
@@ -81,6 +91,10 @@ interface DisplayMessage {
   memoryTier?: 1 | 2 | 3;
   securityFlag?: string | null;
   attachments?: Attachment[];
+  /** Which engine actually answered, and what it fell back from. */
+  servedBy?: EngineId;
+  servedModel?: string;
+  fellBackFrom?: EngineId[];
 }
 
 // ─── Sidebar ───────────────────────────────────────────────
@@ -196,6 +210,7 @@ const Sidebar = ({
               >
                 {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
               </button>
+              <PalettePicker />
               {isMobileOpen && (
                 <button
                   onClick={onCloseMobile}
@@ -446,6 +461,20 @@ const MemoryDots = ({ tier }: { tier: 1 | 2 | 3 }) => (
 
 // ─── Messages ──────────────────────────────────────────────
 
+/**
+ * The model an engine should open on.
+ *
+ * `saved` is honoured only when it belongs to that engine — a model id left
+ * behind by a previous engine is worse than no preference at all, because the
+ * picker shows it and the engine rejects it.
+ */
+function modelFor(engine: EngineId, saved?: string): string {
+  const def = findEngine(engine);
+  if (!def) return DEFAULT_CHAT_MODEL;
+  if (saved && def.models.some((m) => m.id === saved)) return saved;
+  return def.models[0]?.id ?? "";
+}
+
 const JackieMessage = ({ message }: { message: DisplayMessage }) => {
   const [speaking, setSpeaking] = useState(false);
 
@@ -496,8 +525,24 @@ const JackieMessage = ({ message }: { message: DisplayMessage }) => {
         <AttachmentDisplay attachments={message.attachments} />
       )}
 
-      <div className="font-mono text-[10px] text-muted-foreground">
-        {message.timestamp.toLocaleTimeString("en-US", { hour12: false })}
+      <div className="flex flex-wrap items-center gap-2 font-mono text-[10px] text-muted-foreground">
+        <span>{message.timestamp.toLocaleTimeString("en-US", { hour12: false })}</span>
+        {message.servedBy && (
+          <span
+            className={message.fellBackFrom?.length ? "text-yellow-500" : ""}
+            title={
+              message.fellBackFrom?.length
+                ? `Fell back from ${message.fellBackFrom
+                    .map((id) => findEngine(id)?.short ?? id)
+                    .join(" → ")}`
+                : "Engine that answered"
+            }
+          >
+            · {findEngine(message.servedBy)?.short ?? message.servedBy}
+            {message.servedModel ? ` · ${message.servedModel}` : ""}
+            {message.fellBackFrom?.length ? " · fallback" : ""}
+          </span>
+        )}
       </div>
     </div>
   );
@@ -540,29 +585,76 @@ const Index = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [bgSettings, setBgSettings] = useState<NSSettings>(() => loadNeutronSettings());
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
-  const [selectedModel, setSelectedModel] = useState<JackieModelId>(
-    () => (getChatPreset().model as JackieModelId) || "google/gemini-2.5-pro"
-  );
+  // A model id persisted by an older build can outlive the list that contains
+  // it. Handing an unknown id to the function meant a silent fall back to
+  // whatever its own default was, so the label said one thing and the answer
+  // came from another. Unknown ids resolve to the shared default instead.
+  // Which engine answers first. The rest of the chain still covers for it, so
+  // this is a preference rather than a restriction — picking Ollama does not
+  // mean the chat dies when the box is asleep.
+  const [selectedEngine, setSelectedEngine] = useState<EngineId>(() => {
+    const saved = getChatPreset().engine;
+    return isKnownEngine(saved) ? saved : DEFAULT_ENGINE;
+  });
+  // A model id persisted by an older build can outlive the list that contains
+  // it. Handing an unknown id to the function meant a silent fall back to
+  // whatever its own default was, so the label said one thing and the answer
+  // came from another. Unknown ids resolve to the engine's own default instead.
+  const [selectedModel, setSelectedModel] = useState<string>(() => {
+    const preset = getChatPreset();
+    const engine = isKnownEngine(preset.engine) ? preset.engine : DEFAULT_ENGINE;
+    return modelFor(engine, preset.model);
+  });
   const [presetModel, setPresetModel] = useState<string>(() => getChatPreset().model);
+  const [presetEngine, setPresetEngine] = useState<string>(() => getChatPreset().engine);
+  /** Set while an answer is being served by something other than the choice. */
+  const [routeNote, setRouteNote] = useState<string | null>(null);
+
+  const engineDef = findEngine(selectedEngine);
+  const engineModels = engineDef?.models ?? [];
+  const isPinnedDefault = presetEngine === selectedEngine && presetModel === selectedModel;
 
   const saveCurrentAsPreset = useCallback(() => {
-    setChatPreset({ provider: "lovable", model: selectedModel });
+    setChatPreset({ engine: selectedEngine, provider: "lovable", model: selectedModel });
     setPresetModel(selectedModel);
-    toast.success("Default model saved for new chats.");
-  }, [selectedModel]);
+    setPresetEngine(selectedEngine);
+    toast.success("Default engine and model saved for new chats.");
+  }, [selectedEngine, selectedModel]);
   const [tags, setTags] = useState<TagType[]>([]);
   const [tagMap, setTagMap] = useState<Record<string, string[]>>({});
   const [activeTagFilter, setActiveTagFilter] = useState<string | null>(null);
   const [rateLimitCooldown, setRateLimitCooldown] = useState(0);
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Holds the answer in flight so it can be stopped. Without this the composer
+  // stayed locked until the model finished or the tab was reloaded.
+  const abortRef = useRef<AbortController | null>(null);
 
-  const changeModel = useCallback(async (model: JackieModelId) => {
+  const changeModel = useCallback(async (model: string) => {
     setSelectedModel(model);
     if (activeConvId) {
       try { await updateConversationModel(activeConvId, model); } catch { /* best effort */ }
     }
   }, [activeConvId]);
+
+  /**
+   * Switching engine switches model with it.
+   *
+   * Ollama cannot serve `google/gemini-2.5-flash` and the cloud gateway cannot
+   * serve `llama3.2:3b`. Carrying the old id across meant the first send after
+   * every switch failed on a model the new engine had never heard of.
+   */
+  const changeEngine = useCallback(async (id: EngineId) => {
+    setSelectedEngine(id);
+    setRouteNote(null);
+    const model = modelFor(id);
+    setSelectedModel(model);
+    if (activeConvId && model) {
+      try { await updateConversationModel(activeConvId, model); } catch { /* best effort */ }
+    }
+  }, [activeConvId]);
+
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [engineMenuOpen, setEngineMenuOpen] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const dragCounter = useRef(0);
   const feedRef = useRef<HTMLDivElement>(null);
@@ -662,10 +754,14 @@ const Index = () => {
       loadMessages(id);
       try {
         const model = await getConversationModel(id);
-        if (model) setSelectedModel(model as JackieModelId);
+        // Only adopt a stored model the current engine can actually serve.
+        if (typeof model === "string" && model) {
+          const resolved = modelFor(selectedEngine, model);
+          if (resolved === model) setSelectedModel(model);
+        }
       } catch { /* use current */ }
     },
-    [loadMessages]
+    [loadMessages, selectedEngine]
   );
 
   const startNewConversation = () => {
@@ -673,9 +769,12 @@ const Index = () => {
     setMessages([]);
     setChatHistory([]);
     setInput("");
-    // Apply saved preset model for every new chat.
+    setRouteNote(null);
+    // Apply the saved engine + model preset for every new chat.
     const preset = getChatPreset();
-    setSelectedModel(preset.model as JackieModelId);
+    const engine = isKnownEngine(preset.engine) ? preset.engine : DEFAULT_ENGINE;
+    setSelectedEngine(engine);
+    setSelectedModel(modelFor(engine, preset.model));
   };
 
   const handleExportArchive = async () => {
@@ -842,21 +941,13 @@ Provide your assessment in this structure:
 
 Keep it concise but thorough. No hype, no false alarm — just truth.`;
 
-          const res = await fetch(
-            `https://rkwhhbxgjdpehfuxsult.supabase.co/functions/v1/jackie-chat`,
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
-                'apikey': import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-              },
-              body: JSON.stringify({
-                model: selectedModel,
-                messages: [{ role: 'user', content: discernmentPrompt }],
-              }),
-            }
-          );
+          // Was hardcoded to a different Supabase project entirely
+          // (rkwhhbxgjdpehfuxsult), so this could never reach this app's
+          // functions no matter what was deployed.
+          const res = await callEdgeFunction('jackie-chat', {
+            model: selectedModel,
+            messages: [{ role: 'user', content: discernmentPrompt }],
+          });
           if (!res.ok) throw new Error('Analysis failed');
           const reader = res.body?.getReader();
           if (!reader) throw new Error('No response stream');
@@ -997,10 +1088,32 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
       jackieContext = [gameContext, memCtx, taskCtx, fileCtx].filter(Boolean).join("\n");
     } catch { /* graceful degradation */ }
 
-    await streamChat({
+    const controller = new AbortController();
+    abortRef.current = controller;
+    // `streamChat` calls exactly one of onDone/onError, or neither when the
+    // user stopped it. This records which happened, so the stopped-answer
+    // handling below cannot also fire if a stop lands in the same tick as a
+    // completion and save the answer twice.
+    let settled = false;
+
+    setRouteNote(null);
+
+    await routeChat({
       messages: newHistory,
+      engine: selectedEngine,
       model: selectedModel,
       context: jackieContext,
+      signal: controller.signal,
+      // Reported, never swallowed. An answer that quietly came from a different
+      // engine than the one named on screen is how a chat ends up lying about
+      // what it is.
+      onRoute: ({ engine, from, reason }) => {
+        if (!from) return;
+        const to = findEngine(engine)?.short ?? engine;
+        const failed = findEngine(from)?.short ?? from;
+        setRouteNote(`${failed} could not answer — trying ${to}.`);
+        console.warn(`[jackie] ${failed} → ${to}: ${reason}`);
+      },
       onDelta: (chunk) => {
         assistantContent += chunk;
         setMessages((prev) =>
@@ -1008,15 +1121,27 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
         );
         scrollToBottom();
       },
-      onDone: async () => {
+      onDone: async ({ engine, model, fellBackFrom }) => {
+        settled = true;
+        abortRef.current = null;
         const securityFlag = detectSecurityFlag(assistantContent);
         const memoryTier = detectMemoryTier(assistantContent, userText);
 
         setMessages((prev) =>
           prev.map((m) =>
-            m.id === assistantTempId ? { ...m, securityFlag, memoryTier } : m
+            m.id === assistantTempId
+              ? { ...m, securityFlag, memoryTier, servedBy: engine, servedModel: model, fellBackFrom }
+              : m
           )
         );
+
+        if (fellBackFrom.length) {
+          const served = findEngine(engine)?.short ?? engine;
+          const failed = fellBackFrom.map((id) => findEngine(id)?.short ?? id).join(", ");
+          setRouteNote(`Answered by ${served} after ${failed} could not.`);
+        } else {
+          setRouteNote(null);
+        }
 
         setChatHistory((prev) => [...prev, { role: "assistant", content: assistantContent }]);
 
@@ -1048,6 +1173,8 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
         setIsProcessing(false);
       },
       onError: (err) => {
+        settled = true;
+        abortRef.current = null;
         if (err.includes("Rate limit") || err.includes("rate limit")) {
           const seconds = 30;
           setRateLimitCooldown(seconds);
@@ -1066,9 +1193,37 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
           toast.error(err);
         }
         setMessages((prev) => prev.filter((m) => m.id !== assistantTempId));
+        setRouteNote(null);
         setIsProcessing(false);
       },
     });
+
+    // Stopping is neither success nor failure, so `streamChat` calls neither
+    // callback. What already streamed is still worth keeping — throwing away a
+    // half-written answer the moment someone stops it is the wrong instinct.
+    if (controller.signal.aborted && !settled) {
+      abortRef.current = null;
+      if (assistantContent.trim()) {
+        setChatHistory((prev) => [...prev, { role: "assistant", content: assistantContent }]);
+        try {
+          await saveMessage({
+            conversation_id: convId!,
+            role: "assistant",
+            content: assistantContent,
+            memory_tier: 1,
+          });
+        } catch { /* the message is on screen either way */ }
+      } else {
+        setMessages((prev) => prev.filter((m) => m.id !== assistantTempId));
+      }
+      setIsProcessing(false);
+    }
+  };
+
+  /** Stops the answer in flight, keeping whatever has already arrived. */
+  const handleStop = () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1277,35 +1432,85 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
         {/* Command input */}
         <div className="border-t border-border p-4 flex-shrink-0">
           <div className="max-w-[768px]">
+            {routeNote && (
+              <div className="mb-2 font-mono text-[10px] text-yellow-500" role="status">
+                ⇄ {routeNote}
+              </div>
+            )}
             <div className="mb-2 flex min-h-9 items-center gap-1 border-b border-border pb-2">
               <button
                 onClick={saveCurrentAsPreset}
                 className={`p-2 rounded-sm transition-colors ${
-                  presetModel === selectedModel ? "text-primary" : "text-muted-foreground hover:text-primary"
+                  isPinnedDefault ? "text-primary" : "text-muted-foreground hover:text-primary"
                 }`}
-                title={presetModel === selectedModel ? "Default model for new chats" : "Pin as default"}
-                aria-label={presetModel === selectedModel ? "Default model for new chats" : "Pin model as default"}
+                title={isPinnedDefault ? "Default engine + model for new chats" : "Pin as default"}
+                aria-label={isPinnedDefault ? "Default engine and model for new chats" : "Pin engine and model as default"}
               >
-                <Pin size={14} className={presetModel === selectedModel ? "fill-primary" : ""} />
+                <Pin size={14} className={isPinnedDefault ? "fill-primary" : ""} />
               </button>
+
+              {/* Engine picker — which brain answers first. */}
               <div className="relative">
                 <button
-                  onClick={() => setModelMenuOpen((prev) => !prev)}
+                  onClick={() => setEngineMenuOpen((prev) => !prev)}
                   className="flex h-9 items-center gap-1 rounded-sm px-2 font-mono text-xs text-foreground hover:bg-secondary transition-colors"
-                  aria-label="Choose AI model"
-                  aria-expanded={modelMenuOpen}
+                  aria-label="Choose engine"
+                  aria-expanded={engineMenuOpen}
                 >
-                  {JACKIE_MODELS.find((m) => m.id === selectedModel)?.label ?? "Model"}
+                  <Cpu size={12} className={engineDef?.local ? "text-primary" : "text-muted-foreground"} />
+                  {engineDef?.short ?? "Engine"}
                   <ChevronDown size={12} />
                 </button>
-                {modelMenuOpen && (
+                {engineMenuOpen && (
                   <>
-                    <div className="fixed inset-0 z-40" onClick={() => setModelMenuOpen(false)} />
-                    <div className="absolute bottom-full left-0 mb-2 z-50 bg-popover border border-border rounded-md shadow-lg py-1 min-w-[260px] max-w-[calc(100vw-2rem)]">
-                      {JACKIE_MODELS.map((m) => {
-                        const costLabel = ["$", "$$", "$$$"][m.cost - 1];
-                        const speedDots = Array.from({ length: 3 }, (_, i) => i < m.speed);
-                        return (
+                    <div className="fixed inset-0 z-40" onClick={() => setEngineMenuOpen(false)} />
+                    <div className="absolute bottom-full left-0 mb-2 z-50 bg-popover border border-border rounded-md shadow-lg py-1 min-w-[300px] max-w-[calc(100vw-2rem)]">
+                      {ENGINES.map((e, i) => (
+                        <button
+                          key={e.id}
+                          onClick={() => { changeEngine(e.id); setEngineMenuOpen(false); }}
+                          className={`w-full text-left px-3 py-2 font-mono text-xs hover:bg-secondary transition-colors flex items-start gap-3 ${
+                            selectedEngine === e.id ? "text-primary bg-secondary/50" : "text-popover-foreground"
+                          }`}
+                        >
+                          <span className="mt-[2px] text-[10px] text-muted-foreground w-3 flex-shrink-0">{i + 1}</span>
+                          <span className="flex-1 min-w-0">
+                            <span className="flex items-center gap-2">
+                              <span className="font-semibold">{e.label}</span>
+                              {selectedEngine === e.id && <span className="text-[9px] text-primary">●</span>}
+                            </span>
+                            <span className="block text-[10px] text-muted-foreground">{e.description}</span>
+                            <span className="block text-[10px] text-muted-foreground/70">
+                              {e.local ? "on your hardware" : "leaves your hardware"}
+                              {e.requiresSecret ? ` · needs ${e.requiresSecret}` : ""}
+                            </span>
+                          </span>
+                        </button>
+                      ))}
+                      <div className="px-3 py-2 border-t border-border font-mono text-[10px] text-muted-foreground">
+                        Order is the fallback chain. If your pick cannot answer, the next one does.
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+              {/* Model picker. Jacky routes to its own model, so it has none. */}
+              {engineModels.length > 0 ? (
+                <div className="relative">
+                  <button
+                    onClick={() => setModelMenuOpen((prev) => !prev)}
+                    className="flex h-9 items-center gap-1 rounded-sm px-2 font-mono text-xs text-foreground hover:bg-secondary transition-colors"
+                    aria-label="Choose AI model"
+                    aria-expanded={modelMenuOpen}
+                  >
+                    {engineModels.find((m) => m.id === selectedModel)?.label ?? "Model"}
+                    <ChevronDown size={12} />
+                  </button>
+                  {modelMenuOpen && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setModelMenuOpen(false)} />
+                      <div className="absolute bottom-full left-0 mb-2 z-50 bg-popover border border-border rounded-md shadow-lg py-1 min-w-[260px] max-w-[calc(100vw-2rem)]">
+                        {engineModels.map((m) => (
                           <button
                             key={m.id}
                             onClick={() => { changeModel(m.id); setModelMenuOpen(false); }}
@@ -1318,31 +1523,25 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
                                 <span className="font-semibold">{m.label}</span>
                                 {selectedModel === m.id && <span className="text-[9px] text-primary">●</span>}
                               </div>
-                              <span className="text-[10px] text-muted-foreground">{m.description}</span>
-                            </div>
-                            <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
-                              <span className={`text-[10px] font-semibold ${m.cost === 1 ? "text-green-500" : m.cost === 2 ? "text-yellow-500" : "text-orange-500"}`}>
-                                {costLabel}
-                              </span>
-                              <div className="flex gap-0.5" title={`Speed: ${m.speed}/3`}>
-                                {speedDots.map((active, i) => (
-                                  <Zap key={i} size={8} className={active ? "text-primary fill-primary" : "text-muted-foreground/30"} />
-                                ))}
-                              </div>
+                              {m.note && <span className="text-[10px] text-muted-foreground">{m.note}</span>}
                             </div>
                           </button>
-                        );
-                      })}
-                      <a
-                        href="/providers"
-                        className="block px-3 py-2 border-t border-border font-mono text-[10px] text-muted-foreground hover:text-primary hover:bg-secondary transition-colors"
-                      >
-                        → More providers (Groq, OpenRouter, Ollama…)
-                      </a>
-                    </div>
-                  </>
-                )}
-              </div>
+                        ))}
+                        <a
+                          href="/providers"
+                          className="block px-3 py-2 border-t border-border font-mono text-[10px] text-muted-foreground hover:text-primary hover:bg-secondary transition-colors"
+                        >
+                          → More providers (Groq, OpenRouter, Mistral…)
+                        </a>
+                      </div>
+                    </>
+                  )}
+                </div>
+              ) : (
+                <span className="h-9 flex items-center px-2 font-mono text-xs text-muted-foreground" title="Jacky picks its own route and model">
+                  auto model
+                </span>
+              )}
               {messages.length > 0 && (
                 <button
                   onClick={exportChat}
@@ -1390,10 +1589,19 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
                   <Zap size={14} />
                   {rateLimitCooldown}s
                 </div>
+              ) : isProcessing ? (
+                <button
+                  onClick={handleStop}
+                  className="p-3 rounded-sm bg-destructive/20 border border-destructive/40 text-destructive hover:bg-destructive/30 transition-colors btn-mechanical flex-shrink-0"
+                  title="Stop generating"
+                  aria-label="Stop generating"
+                >
+                  <Square size={16} />
+                </button>
               ) : (
                 <button
                   onClick={handleSubmit}
-                  disabled={isProcessing || (!input.trim() && pendingFiles.length === 0)}
+                  disabled={!input.trim() && pendingFiles.length === 0}
                   className="p-3 rounded-sm bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-30 transition-opacity btn-mechanical flex-shrink-0"
                   title="Send (Enter)"
                 >

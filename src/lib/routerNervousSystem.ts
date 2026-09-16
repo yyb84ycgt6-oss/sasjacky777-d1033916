@@ -92,8 +92,39 @@ class RouterNervousSystem {
 
 export const routerNS = new RouterNervousSystem();
 
-const FILING_PREFIX = 'jackie.filing.';
-const ARCHIVE_PREFIX = 'jackie.filing.archived.';
+/**
+ * The filing cabinet is per-account, per-browser.
+ *
+ * These records live in localStorage, which is scoped to the origin and not to
+ * the person. With one fixed prefix, everything filed by whoever signed in
+ * first stayed readable by whoever signed in next on the same machine — a
+ * shared laptop, a demo device, a library. Notes were the visible case; pods,
+ * agents and tasks all went to the same place.
+ *
+ * The scope segment sits inside the prefix so `list()`, `archive()` and
+ * `restore()` inherit it without changing: switching accounts changes which
+ * keys those functions can even see. `anon` covers the signed-out case rather
+ * than a bare prefix, so signed-out scribbles can never be mistaken for a
+ * user's own records.
+ *
+ * Note the ordering relationship the enumeration in list() depends on: the
+ * archive prefix must remain an extension of the live one.
+ */
+const FILING_ROOT = 'jackie.filing.';
+let filingScope = 'anon';
+
+/** Called by the auth provider whenever the signed-in user changes. */
+export function setFilingScope(userId: string | null | undefined): void {
+  // A dot would be read as a separator by the key parser below.
+  filingScope = userId ? String(userId).replace(/\./g, '_') : 'anon';
+}
+
+export function currentFilingScope(): string {
+  return filingScope;
+}
+
+const filingPrefix = () => `${FILING_ROOT}${filingScope}.`;
+const archivePrefix = () => `${FILING_ROOT}${filingScope}.archived.`;
 
 export interface FiledRecord {
   key: string;
@@ -108,16 +139,29 @@ export interface FiledRecord {
  * Filing System Bridge – every note/pod/agent is a file
  */
 export const FilingSystem = {
-  write: (entityType: 'note' | 'pod' | 'agent' | 'task', id: string, data: any) => {
-    routerNS.emit('filing:write', { entityType, id, data, ts: Date.now() });
+  /**
+   * Files a record, and says whether it managed to.
+   *
+   * This announced `filing:write` before it wrote and swallowed whatever the
+   * write threw — the same shape as the archive bug below, where the event was
+   * the only thing that ever happened. A full quota is the ordinary case here,
+   * because the cabinet only ever grows, and every listener went on believing
+   * a record existed that nothing would ever read back. The event now follows
+   * the write rather than predicting it.
+   */
+  write: (entityType: 'note' | 'pod' | 'agent' | 'task', id: string, data: any): boolean => {
     try {
-      const key = `${FILING_PREFIX}${entityType}.${id}`;
+      const key = `${filingPrefix()}${entityType}.${id}`;
       localStorage.setItem(key, JSON.stringify(data));
-    } catch {}
+    } catch {
+      return false;
+    }
+    routerNS.emit('filing:write', { entityType, id, data, ts: Date.now() });
+    return true;
   },
   read: (entityType: string, id: string) => {
     try {
-      const raw = localStorage.getItem(`${FILING_PREFIX}${entityType}.${id}`);
+      const raw = localStorage.getItem(`${filingPrefix()}${entityType}.${id}`);
       return raw ? JSON.parse(raw) : null;
     } catch { return null; }
   },
@@ -137,10 +181,10 @@ export const FilingSystem = {
         // Order matters: the archive prefix extends the live one, so a key has
         // to be tested for archived first or every archived record reads as
         // live, filed under an entity type of "archived".
-        const archived = key.startsWith(ARCHIVE_PREFIX);
-        const live = !archived && key.startsWith(FILING_PREFIX);
+        const archived = key.startsWith(archivePrefix());
+        const live = !archived && key.startsWith(filingPrefix());
         if (!live && !archived) continue;
-        const [entityType, ...rest] = key.slice((archived ? ARCHIVE_PREFIX : FILING_PREFIX).length).split('.');
+        const [entityType, ...rest] = key.slice((archived ? archivePrefix() : filingPrefix()).length).split('.');
         const raw = localStorage.getItem(key) ?? '';
         let data: unknown = null;
         try { data = JSON.parse(raw); } catch { data = raw; }
@@ -157,10 +201,10 @@ export const FilingSystem = {
   archive: (entityType: string, id: string) => {
     routerNS.emit('filing:archive', { entityType, id });
     try {
-      const key = `${FILING_PREFIX}${entityType}.${id}`;
+      const key = `${filingPrefix()}${entityType}.${id}`;
       const raw = localStorage.getItem(key);
       if (raw === null) return false;
-      localStorage.setItem(`${ARCHIVE_PREFIX}${entityType}.${id}`, raw);
+      localStorage.setItem(`${archivePrefix()}${entityType}.${id}`, raw);
       localStorage.removeItem(key);
       return true;
     } catch { return false; }
@@ -168,10 +212,10 @@ export const FilingSystem = {
   /** Puts an archived record back in the live drawer. */
   restore: (entityType: string, id: string) => {
     try {
-      const key = `${ARCHIVE_PREFIX}${entityType}.${id}`;
+      const key = `${archivePrefix()}${entityType}.${id}`;
       const raw = localStorage.getItem(key);
       if (raw === null) return false;
-      localStorage.setItem(`${FILING_PREFIX}${entityType}.${id}`, raw);
+      localStorage.setItem(`${filingPrefix()}${entityType}.${id}`, raw);
       localStorage.removeItem(key);
       routerNS.emit('filing:write', { entityType, id, restored: true, ts: Date.now() });
       return true;

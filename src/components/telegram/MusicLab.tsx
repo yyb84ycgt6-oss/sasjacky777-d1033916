@@ -1,3 +1,4 @@
+import { callEdgeFunction } from '@/lib/edgeFunction';
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { haptic } from '@/lib/telegram';
@@ -112,17 +113,7 @@ export default function MusicLab({ onBack }: MusicLabProps) {
     setTracks(prev => [newTrack, ...prev]);
 
     try {
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/music-generate`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-          },
-          body: JSON.stringify({ prompt, duration: 30 }),
-        }
-      );
+      const response = await callEdgeFunction('music-generate', { prompt, duration: 30 });
 
       if (!response.ok) {
         throw new Error(`Generation failed: ${response.status}`);

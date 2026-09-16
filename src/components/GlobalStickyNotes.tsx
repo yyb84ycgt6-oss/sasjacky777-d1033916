@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState, useRef, useMemo } from "react";
+import { useAuth } from "@/hooks/useAuth";
 import { DraggableToolbar } from "./DraggableToolbar";
 import { Plus, Pin, X, StickyNote, Link as LinkIcon, Palette, Edit2, Volume2, VolumeX } from "lucide-react";
 import { routerNS, FilingSystem } from "@/lib/routerNervousSystem";
 import { voiceManager } from "@/lib/voice-manager";
+import { toast } from "sonner";
 
 const getContrastText = (bg: string): string => {
   const r = parseInt(bg.substr(1,2),16);
@@ -24,12 +26,37 @@ type Note = {
   agent?: string;
 };
 
-const STORAGE_KEY = "jackie.notes.v1";
+/**
+ * Notes are per-account, not per-browser.
+ *
+ * This panel is mounted globally — outside every ProtectedRoute, so it renders
+ * on /auth too — and it stored everything under one fixed localStorage key.
+ * localStorage is scoped to the origin, not to the person, so on a shared
+ * machine user A could sign out, user B could sign in, and A's notes were
+ * still sitting there: readable, editable, and indistinguishable from B's own.
+ *
+ * Two things fix that, and both are needed. The key carries the user id, so
+ * two accounts cannot address the same records. And the panel renders nothing
+ * at all when nobody is signed in, so the signed-out surface has no notes to
+ * show and no way to write into an account's namespace.
+ *
+ * These records stay local to the browser. If notes should follow a person
+ * between devices they need a table with RLS, which is a larger change than
+ * closing the leak.
+ */
+const notesKeyFor = (userId: string) => `jackie.notes.v1:${userId}`;
 const VOICE_KEY = "jackie.notes.voice.v1";
 const COLORS = ["#FFF8C6", "#CDE7FF", "#FFD6E7", "#D6FFEA", "#FFE3C6"];
 
 export function GlobalStickyNotes() {
+  const { user } = useAuth();
+  const storageKey = user ? notesKeyFor(user.id) : null;
   const [notes, setNotes] = useState<Note[]>([]);
+  // Which namespace the notes in state were loaded from. The save effect
+  // refuses to run until this matches, so the moment after an account switch —
+  // when state still holds the previous user's notes but the key has already
+  // changed — cannot write one account's notes into another's namespace.
+  const loadedFor = useRef<string | null>(null);
   const [open, setOpen] = useState(true);
   const [dragId, setDragId] = useState<string | null>(null);
   const offset = useRef({ x: 0, y: 0 });
@@ -38,6 +65,8 @@ export function GlobalStickyNotes() {
   // is opt-in, remembered, and hidden entirely where the browser has no voice.
   const [speaks, setSpeaks] = useState(false);
   const voiceSupported = useRef(voiceManager.isSupported());
+  /** Keeps the unsaved warning to one per spell of failing storage. */
+  const warnedUnsaved = useRef(false);
 
   useEffect(() => {
     try { setSpeaks(localStorage.getItem(VOICE_KEY) === "on"); } catch { /* storage off */ }
@@ -62,18 +91,41 @@ export function GlobalStickyNotes() {
   }, []);
 
   useEffect(() => {
+    if (!storageKey) {
+      loadedFor.current = null;
+      setNotes([]);
+      return;
+    }
+    let loaded: Note[] = [];
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) setNotes(JSON.parse(raw));
-    } catch {}
-  }, []);
+      const raw = localStorage.getItem(storageKey);
+      if (raw) loaded = JSON.parse(raw);
+    } catch { /* storage off or unreadable */ }
+    loadedFor.current = storageKey;
+    setNotes(loaded);
+  }, [storageKey]);
 
   useEffect(() => {
+    if (!storageKey || loadedFor.current !== storageKey) return;
+    // Notes that cannot be saved still sit on the screen looking saved, and the
+    // only time the person finds out is the reload that loses them. A full
+    // quota is the ordinary cause and it is something they can act on, so it
+    // gets said — once, because this effect runs on every keystroke.
+    let persisted = true;
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(notes));
-      notes.forEach(n => FilingSystem.write('note', n.id, n));
-    } catch {}
-  }, [notes]);
+      localStorage.setItem(storageKey, JSON.stringify(notes));
+    } catch {
+      persisted = false;
+    }
+    if (persisted) persisted = notes.every(n => FilingSystem.write('note', n.id, n));
+
+    if (!persisted && !warnedUnsaved.current) {
+      warnedUnsaved.current = true;
+      toast.error("Notes are not being saved — this browser's storage is full or blocked. Copy anything you need before reloading.");
+    } else if (persisted) {
+      warnedUnsaved.current = false;
+    }
+  }, [notes, storageKey]);
 
   const addNote = () => {
     const id = Math.random().toString(36).slice(2);
@@ -154,6 +206,15 @@ export function GlobalStickyNotes() {
   }, [dragId]);
 
   const pinnedCount = useMemo(() => notes.filter((n) => n.pinned).length, [notes]);
+
+  // Nothing to show, and nothing that could write, when nobody is signed in.
+  // This is mounted outside every ProtectedRoute — including on /auth — so the
+  // check has to live here rather than in the routing.
+  //
+  // It sits after the hooks above, not before them: an early return placed
+  // higher would change how many hooks run between renders, which React
+  // forbids.
+  if (!storageKey) return null;
 
   return (
     <>

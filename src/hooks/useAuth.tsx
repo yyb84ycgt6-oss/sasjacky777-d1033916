@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { setFilingScope } from "@/lib/routerNervousSystem";
 import type { User, Session } from "@supabase/supabase-js";
 
 interface AuthContextType {
@@ -26,6 +27,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (_event, session) => {
+        // Before the state update, so nothing that re-renders off `user` can
+        // read or write the previous account's browser-local records.
+        setFilingScope(session?.user?.id ?? null);
         setSession(session);
         setUser(session?.user ?? null);
         setLoading(false);
@@ -33,6 +37,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     );
 
     supabase.auth.getSession().then(({ data: { session } }) => {
+      setFilingScope(session?.user?.id ?? null);
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);

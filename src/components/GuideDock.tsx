@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { DraggableToolbar } from "./DraggableToolbar";
 import { Compass, CornerDownLeft, Loader2, X } from "lucide-react";
 import { askGuide, type GuideAnswer } from "@/lib/guide/guideService";
-import { lmStudioEngine, ollamaEngine } from "@/lib/microai/contextRouterService";
+import { defaultEngines } from "@/lib/microai/contextRouterService";
 import { checkGuideWeights, GUIDE_INSTALL_COMMAND, GUIDE_WEIGHTS_MB } from "@/lib/guide/weights";
 
 /**
@@ -25,7 +25,7 @@ export function GuideDock() {
   // LM Studio first: the operator's weights already live in the hub, so
   // guidance points at them rather than asking for a second copy. Ollama is the
   // fallback for a machine that runs one and not the other.
-  const enginesRef = useRef([lmStudioEngine(), ollamaEngine()]);
+  const enginesRef = useRef(defaultEngines());
 
   // One probe per open, not per keystroke: the answer is the same until someone
   // installs the model, and the panel should not poll a host that is not there.

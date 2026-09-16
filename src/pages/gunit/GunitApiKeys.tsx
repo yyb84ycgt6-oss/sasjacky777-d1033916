@@ -13,6 +13,38 @@ interface ApiKey {
   created_at: string;
 }
 
+/**
+ * Key minting happens in the `api-keys` edge function, not here.
+ *
+ * This panel used to generate the key in the browser, hash it, and insert the
+ * row over PostgREST. RLS pinned user_id, so nobody could forge a key for
+ * someone else — but the client chose `rate_limit`, and a rate limit the
+ * caller picks is not a rate limit. It could also set `expires_at` and
+ * `superseded_by`, the two columns rotation depends on. 20260914120000 revokes
+ * those write grants, so creation and revocation go through the server like
+ * they do in ApiKeyManager.
+ */
+const EDGE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/api-keys`;
+
+async function apiCall(action: string, method: string, body?: Record<string, unknown>) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error("Not authenticated");
+
+  const resp = await fetch(`${EDGE_URL}/${action}`, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${session.access_token}`,
+      apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data.error || "Request failed");
+  return data;
+}
+
 export default function GunitApiKeys() {
   const { user } = useAuth();
   const [keys, setKeys] = useState<ApiKey[]>([]);
@@ -36,43 +68,29 @@ export default function GunitApiKeys() {
   const generateKey = async () => {
     if (!newKeyName.trim() || !user) return;
 
-    // Generate key client-side, hash it, store hash
-    const rawBytes = new Uint8Array(32);
-    crypto.getRandomValues(rawBytes);
-    const hex = Array.from(rawBytes).map((b) => b.toString(16).padStart(2, "0")).join("");
-    const rawKey = `gunit_${hex}`;
-    const prefix = rawKey.slice(0, 12);
-
-    // Hash
-    const encoder = new TextEncoder();
-    const hashBuffer = await crypto.subtle.digest("SHA-256", encoder.encode(rawKey));
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    const keyHash = hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
-
-    const { error } = await supabase.from("api_keys").insert({
-      user_id: user.id,
-      name: newKeyName.trim(),
-      key_hash: keyHash,
-      prefix,
-      scopes: ["bot:create", "bot:run"],
-    });
-
-    if (error) {
-      toast.error("Failed to create key");
-      return;
+    try {
+      const data = await apiCall("create", "POST", {
+        name: newKeyName.trim(),
+        scopes: ["bot:create", "bot:run"],
+      });
+      setNewRawKey(data.raw_key);
+      setNewKeyName("");
+      setShowKey(true);
+      fetchKeys();
+      toast.success("API key generated. Copy it now — it won't be shown again.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to create key");
     }
-
-    setNewRawKey(rawKey);
-    setNewKeyName("");
-    setShowKey(true);
-    fetchKeys();
-    toast.success("API key generated. Copy it now — it won't be shown again.");
   };
 
   const revokeKey = async (id: string) => {
-    await supabase.from("api_keys").update({ is_active: false }).eq("id", id);
-    toast.success("Key revoked");
-    fetchKeys();
+    try {
+      await apiCall("revoke", "POST", { key_id: id });
+      toast.success("Key revoked");
+      fetchKeys();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to revoke key");
+    }
   };
 
   const copyKey = () => {

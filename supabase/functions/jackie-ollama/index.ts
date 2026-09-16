@@ -1,43 +1,51 @@
-// Bridge to a self-hosted Ollama instance (localhost via tunnel, home GPU, VPS).
-// Requires OLLAMA_BASE_URL (e.g. https://ollama.mydomain.com or a Cloudflare Tunnel URL).
-// Optional OLLAMA_API_KEY if the endpoint is protected.
+/**
+ * Ollama — the chat's second local fallback.
+ *
+ * Bridge to a self-hosted Ollama instance (tunnel, home GPU, VPS).
+ *
+ * The base URL comes from configuration rather than the request, so there is no
+ * URL-based SSRF here. The *model* was caller-controlled, though, and that is
+ * its own problem on a private box: any signed-in user could load any model
+ * installed on it — including a private one that was never meant to be reachable
+ * from the web app — and could pick the largest one on the disk repeatedly,
+ * which on a single-GPU host is a denial of service against everyone else.
+ *
+ * It also takes the same request shape as `jackie-chat` — `{ messages, model,
+ * context }` — and builds Jackie's persona from the shared prompt, because the
+ * main chat falls back here, and a fallback that answers as a different
+ * assistant with no memory of the conversation is a worse failure than the one
+ * it was covering for.
+ *
+ * Requires OLLAMA_BASE_URL. Optional OLLAMA_API_KEY if the endpoint is
+ * protected. OLLAMA_MODEL_ALLOWLIST names the models this app may run.
+ */
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.58.0";
+import {
+  admit, allowlistFromEnv, corsHeaders, json, pickModel, preflight, providerFailure, tooLarge,
+} from "../_shared/entitlement.ts";
+import { clampContext, normalizeMessages } from "../_shared/chatRequest.ts";
+import { buildSystemPrompt } from "../_shared/persona.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-};
-
-async function requireUser(req: Request): Promise<Response | null> {
-  const auth = req.headers.get("Authorization");
-  if (!auth?.startsWith("Bearer ")) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-  const sb = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_ANON_KEY")!,
-    { global: { headers: { Authorization: auth } } },
-  );
-  // getClaims exists only in supabase-js >= 2.58 (auth-js >= 2.70). On 2.49.1 it threw here,
-  // outside the handler's try/catch: a CORS-less 500 that browsers report as "Failed to fetch".
-  let data: { claims?: unknown } | null = null;
-  let error: unknown = null;
-  try {
-    ({ data, error } = await sb.auth.getClaims(auth.replace("Bearer ", "")));
-  } catch (e) {
-    error = e;
-  }
-  if (error || !data?.claims) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-  return null;
-}
+const FUNCTION_NAME = "jackie-ollama";
+const DEFAULT_MODEL = "llama3.2:3b";
+// The default set covers the small models that are safe to load anywhere plus
+// the ones the chat's own engine picker offers. A picker that offers a model
+// the allowlist refuses is a guaranteed failure the user cannot diagnose, so
+// the two lists are kept in step; `src/lib/jackie-engines.ts` is the other end.
+const ALLOWED_MODELS = allowlistFromEnv("OLLAMA_MODEL_ALLOWLIST", [
+  "llama3.2:3b",
+  "llama3.2:1b",
+  "llama3.1:8b",
+  "llama3.3:70b",
+  "qwen2.5:7b",
+  "qwen2.5-coder:32b",
+  "deepseek-r1:32b",
+  "mistral:7b",
+  "phi3:mini",
+]);
+const MAX_MESSAGES = 64;
+const MAX_MESSAGE_CHARS = 100_000;
+const MAX_SYSTEM_CHARS = 20_000;
 
 // Ollama returns NDJSON. Rewrap into OpenAI-compatible SSE so the same client parser works.
 function ndjsonToSse(readable: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
@@ -71,24 +79,55 @@ function ndjsonToSse(readable: ReadableStream<Uint8Array>): ReadableStream<Uint8
 }
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
-  const un = await requireUser(req);
-  if (un) return un;
+  if (req.method === "OPTIONS") return preflight();
+  if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
+  let payload: Record<string, unknown>;
+  try {
+    payload = await req.json();
+  } catch {
+    return json({ error: "Invalid JSON body" }, 400);
+  }
+
+  const chosen = pickModel(payload.model, ALLOWED_MODELS, DEFAULT_MODEL);
+  if ("error" in chosen) return chosen.error;
+
+  if (Array.isArray(payload.messages) && payload.messages.length > MAX_MESSAGES) {
+    return json({ error: "Too many messages" }, 400);
+  }
+  if (tooLarge(payload.messages, MAX_MESSAGE_CHARS)) {
+    return json({ error: "Message payload too large" }, 413);
+  }
+
+  // The same validation `jackie-chat` runs, so an empty turn left by an aborted
+  // send cannot wedge a conversation here either — most runners reject a
+  // message with no content, and the bad turn stays in the history forever.
+  const verdict = normalizeMessages(payload.messages);
+  if (!verdict.ok) return json({ error: verdict.reason }, 400);
+
+  const explicitSystem = typeof payload.system === "string" ? payload.system.trim() : "";
+  if (explicitSystem.length > MAX_SYSTEM_CHARS) {
+    return json({ error: "System prompt too large" }, 413);
+  }
+  const systemPrompt = explicitSystem || buildSystemPrompt(clampContext(payload.context));
+
+  // Checked before admission on purpose. The main chat probes this engine as
+  // one link in a chain, so an unconfigured runner is a normal, frequent event
+  // — and charging a unit of the caller's quota for a call that cannot happen
+  // would bill them for the chain's own bookkeeping.
   const base = Deno.env.get("OLLAMA_BASE_URL");
   if (!base) {
-    return new Response(
-      JSON.stringify({
-        error: "OLLAMA_BASE_URL not configured. Add it in Cloud → Secrets. Expose your local Ollama via a Cloudflare Tunnel or ngrok, then paste the URL (e.g. https://ollama.mydomain.com).",
-        needs_secret: "OLLAMA_BASE_URL",
-      }),
-      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    console.error(`${FUNCTION_NAME}: OLLAMA_BASE_URL not configured`);
+    return json(
+      { error: "Provider unavailable", code: "PROVIDER_UNCONFIGURED", needs_secret: "OLLAMA_BASE_URL" },
+      503,
     );
   }
 
+  const admission = await admit(req, FUNCTION_NAME, chosen.model);
+  if (admission instanceof Response) return admission;
+
   try {
-    const { messages, model, system } = await req.json();
-    const selected = model || "llama3.2:3b";
     const optionalKey = Deno.env.get("OLLAMA_API_KEY");
     const resp = await fetch(`${base.replace(/\/$/, "")}/api/chat`, {
       method: "POST",
@@ -97,26 +136,19 @@ serve(async (req) => {
         ...(optionalKey ? { Authorization: `Bearer ${optionalKey}` } : {}),
       },
       body: JSON.stringify({
-        model: selected,
-        messages: [
-          ...(system ? [{ role: "system", content: system }] : []),
-          ...messages,
-        ],
+        model: chosen.model,
+        messages: [{ role: "system", content: systemPrompt }, ...verdict.messages],
         stream: true,
       }),
     });
-    if (!resp.ok || !resp.body) {
-      const text = await resp.text().catch(() => "");
-      return new Response(JSON.stringify({ error: `Ollama ${resp.status}: ${text || "no body"}` }), {
-        status: resp.status || 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+
+    if (!resp.ok || !resp.body) return await providerFailure(FUNCTION_NAME, resp);
+
     return new Response(ndjsonToSse(resp.body), {
       headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
     });
   } catch (e) {
-    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown" }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    console.error(`${FUNCTION_NAME}: unexpected failure`, e);
+    return json({ error: "Internal error" }, 500);
   }
 });

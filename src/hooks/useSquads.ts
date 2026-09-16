@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
-import { ollamaEngine } from "@/lib/microai/contextRouterService";
+import { defaultEngines } from "@/lib/microai/contextRouterService";
 import { SquadCommander } from "@/lib/squad/commander";
 
 /**
@@ -7,7 +7,7 @@ import { SquadCommander } from "@/lib/squad/commander";
  * same plans. A per-component instance would give each panel its own idea of
  * which engine is answering.
  */
-const commander = new SquadCommander([ollamaEngine()]);
+const commander = new SquadCommander(defaultEngines());
 
 export function useSquads(online: boolean) {
   const survey = useSyncExternalStore(

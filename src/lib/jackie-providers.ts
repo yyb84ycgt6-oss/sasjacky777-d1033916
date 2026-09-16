@@ -7,6 +7,7 @@ export type ProviderId =
   | "lovable"
   | "groq"
   | "openrouter"
+  | "bionic"
   | "ollama"
   | "google"
   | "mistral"
@@ -164,6 +165,23 @@ export const PROVIDERS: ProviderDef[] = [
       { id: "llama3.1-8b", label: "Llama 3.1 8B", free: true, note: "~2500 tok/s" },
       { id: "llama-4-scout-17b-16e-instruct", label: "Llama 4 Scout 17B", free: true },
       { id: "qwen-3-32b", label: "Qwen 3 32B", free: true },
+    ],
+  },
+  {
+    id: "bionic",
+    label: "Bionic (self-hosted, OpenAI-compatible)",
+    fn: "jackie-bionic",
+    tier: "free",
+    free: true,
+    requiresSecret: "BIONIC_BASE_URL",
+    helpUrl: "https://bionic-gpt.com/docs/",
+    description:
+      "BionicGPT, LM Studio, llama.cpp or vLLM on your own hardware. Serves whatever GGUF you have loaded. $0.",
+    models: [
+      { id: "bonsai-1.7b", label: "Bonsai 1.7B", free: true, note: "The bundled guidance model" },
+      { id: "llama3.3:70b", label: "Llama 3.3 70B", free: true },
+      { id: "qwen2.5-coder:32b", label: "Qwen 2.5 Coder 32B", free: true, note: "Code" },
+      { id: "deepseek-r1:32b", label: "DeepSeek R1 32B", free: true, reasoning: true },
     ],
   },
   {

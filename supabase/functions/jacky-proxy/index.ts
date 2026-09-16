@@ -13,7 +13,7 @@
 //   { "path": "ask", "method": "POST", "body": { "prompt": "…", "task_type": "general" } }
 // Returns: { ok, status, data } — data is the upstream JSON.
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.58.0";
+import { gate } from "../_shared/entitlement.ts";
 import { checkJackyPath } from "../_shared/jackyPath.ts";
 
 const corsHeaders = {
@@ -29,33 +29,12 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-async function requireUser(req: Request): Promise<Response | null> {
-  const auth = req.headers.get("Authorization");
-  if (!auth?.startsWith("Bearer ")) return json({ error: "Unauthorized" }, 401);
-  const sb = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_ANON_KEY")!,
-    { global: { headers: { Authorization: auth } } },
-  );
-  // getClaims exists only in supabase-js >= 2.58 (auth-js >= 2.70). On 2.49.1 it threw here,
-  // outside the handler's try/catch: a CORS-less 500 that browsers report as "Failed to fetch".
-  let data: { claims?: unknown } | null = null;
-  let error: unknown = null;
-  try {
-    ({ data, error } = await sb.auth.getClaims(auth.replace("Bearer ", "")));
-  } catch (e) {
-    error = e;
-  }
-  if (error || !data?.claims) return json({ error: "Unauthorized" }, 401);
-  return null;
-}
-
 const ALLOWED = new Set(["GET", "POST"]);
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
-  const un = await requireUser(req);
+  const un = await gate(req, "jacky-proxy");
   if (un) return un;
 
   const base = (Deno.env.get("JACKY_API_BASE") || "").replace(/\/+$/, "");
