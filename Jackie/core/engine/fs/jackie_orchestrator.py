@@ -16,6 +16,33 @@ from .pod_backpack_manager import PodBackpackManager
 from .jackie_router_client import JackieRouterClient
 
 
+def _failure_in(result: Dict) -> Optional[str]:
+    """
+    Reads a task result for the failure the graph used to ignore.
+
+    `run()` hardcoded `success=True` with a note that real code would check
+    `router_result["error"]`. Nothing ever did, so a task whose agent did not
+    exist, or whose router call failed, was recorded as completed — and every
+    task depending on it then ran against a result that was never produced.
+    A dependency graph that cannot fail is not a dependency graph.
+
+    It lives here rather than in `execution_graph`, which is where it was
+    written, because the recovery path below has to ask the same question and
+    `execution_graph` already imports from this module — two copies of "did
+    this task fail" is exactly the kind of pair that drifts until one of them
+    starts calling a failure a success.
+    """
+    if not isinstance(result, dict):
+        return None
+    error = result.get("error")
+    if error:
+        return str(error)
+    router = result.get("router_result")
+    if isinstance(router, dict) and router.get("error"):
+        return str(router["error"])
+    return None
+
+
 @dataclass
 class FSTask:
     """A single task that needs to be executed."""
@@ -99,26 +126,24 @@ class JackieOrchestrator:
         }
 
         result = self.run_task(agent_name, content)
+        failure = _failure_in(result)
+        if not failure:
+            return result
 
-        if result["router_result"].get("error"):
-            fb_name = fallback_map.get(agent_name)
-            if not fb_name:
-                return result
+        fb_name = fallback_map.get(agent_name)
+        if not fb_name or not self.registry.get(fb_name):
+            return result
 
-            # Retry with fallback agent
-            fb_agent = self.registry.get(fb_name)
-            if not fb_agent:
-                return result
-
-            result[agent_name] = {
-                "status": "fallback",
-                "from": agent_name,
-                "to": fb_name,
-                "error": result["router_result"]["error"],
-                "result": self.run_task(fb_name, content),
-            }
-
-        return result
+        # The recovered run is the result. This used to hang the fallback off
+        # `result[agent_name]` and hand back the primary's failed
+        # `router_result` untouched, so a recovery that worked perfectly still
+        # read as a failure to `_failure_in` — and the answer the fallback
+        # actually produced sat nested two levels down where nothing looked for
+        # it. A recovery nobody can observe is not a recovery.
+        recovered = self.run_task(fb_name, content)
+        if isinstance(recovered, dict):
+            recovered["recovered_from"] = {"agent": agent_name, "error": failure}
+        return recovered
 
     # ────────────────────────────────────────
     # Batch task execution

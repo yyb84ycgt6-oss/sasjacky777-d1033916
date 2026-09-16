@@ -19,7 +19,9 @@ Not one program. Four trees that ship together:
 | `context-condenser/` | Anchored dehydration and real rehydration. Its own package. | TypeScript (node:test) |
 
 `docs/REPO_MAP.md` is the longer version. `docs/CHAT_PIPELINE.md` explains the
-chat, which is the part most work touches.
+chat, which is the part most work touches. `docs/ENVIRONMENT.md` lists every
+environment variable and which of the two stores it belongs in — read it before
+adding a key, because anything that lands in `.env` ships in the bundle.
 
 ---
 

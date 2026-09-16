@@ -14,28 +14,7 @@ Usage:
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-from .jackie_orchestrator import FSTaskResult
-
-
-def _failure_in(result: Dict) -> Optional[str]:
-    """
-    Reads a task result for the failure the graph used to ignore.
-
-    `run()` hardcoded `success=True` with a note that real code would check
-    `router_result["error"]`. Nothing ever did, so a task whose agent did not
-    exist, or whose router call failed, was recorded as completed — and every
-    task depending on it then ran against a result that was never produced.
-    A dependency graph that cannot fail is not a dependency graph.
-    """
-    if not isinstance(result, dict):
-        return None
-    error = result.get("error")
-    if error:
-        return str(error)
-    router = result.get("router_result")
-    if isinstance(router, dict) and router.get("error"):
-        return str(router["error"])
-    return None
+from .jackie_orchestrator import FSTaskResult, _failure_in
 
 
 @dataclass

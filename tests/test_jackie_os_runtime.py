@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from Jackie.core.engine.fs.agent_registry import AgentConfig, AgentRegistry
 from Jackie.core.engine.fs.execution_graph import ExecutionGraph, TaskNode, _failure_in
-from Jackie.core.engine.fs.jackie_orchestrator import FSTaskResult
+from Jackie.core.engine.fs.jackie_orchestrator import FSTaskResult, JackieOrchestrator
 from Jackie.core.engine.fs.pod_backpack_manager import PodBackpackManager
 from Jackie.core.engine.fs.tracing import TaskTrace
 
@@ -130,6 +130,85 @@ class TestTheExecutionGraph:
         graph.add_task(TaskNode(id="x", agent="Code", content="c"))
         assert graph.get_task("x").agent == "Code"
         assert graph.get_task("absent") is None
+
+
+class FakeRouter:
+    """Stands in for JackieRouterClient. Fails whichever agents it is told to."""
+
+    def __init__(self, failing=()):
+        self.failing = set(failing)
+        self.asked = []
+
+    def send(self, **kwargs):
+        agent = kwargs.get("agent")
+        self.asked.append(agent)
+        if agent in self.failing:
+            return {"error": f"{agent} is down"}
+        return {"ok": True, "content": f"{agent} handled it"}
+
+
+def _orchestrator(failing=()):
+    orch = JackieOrchestrator()
+    orch.router = FakeRouter(failing)
+    return orch
+
+
+class TestRecovery:
+    """
+    `run_task_with_recovery` ran a fallback and then hid the result of it.
+
+    It handed back the primary's failed `router_result` untouched and hung the
+    fallback off `result[agent_name]`, two levels down. So every consumer —
+    `_failure_in` included — saw a task that had failed, while the answer the
+    fallback had actually produced sat somewhere nothing reads. A recovery
+    nobody can observe is not a recovery, it is a wasted second call.
+    """
+
+    def test_a_recovered_task_reads_as_a_success(self):
+        orch = _orchestrator(failing={"Analysis"})
+        result = orch.run_task_with_recovery("Analysis", "do the thing")
+
+        assert _failure_in(result) is None
+        assert result["agent"] == "Memory"
+        assert result["router_result"]["ok"] is True
+
+    def test_it_says_what_it_recovered_from(self):
+        # The failure is not swallowed just because the fallback worked: the
+        # primary being down is the thing worth knowing.
+        orch = _orchestrator(failing={"Analysis"})
+        result = orch.run_task_with_recovery("Analysis", "do the thing")
+
+        assert result["recovered_from"] == {"agent": "Analysis", "error": "Analysis is down"}
+        assert orch.router.asked == ["Analysis", "Memory"]
+
+    def test_a_fallback_that_also_fails_is_still_a_failure(self):
+        orch = _orchestrator(failing={"Analysis", "Memory"})
+        result = orch.run_task_with_recovery("Analysis", "do the thing")
+
+        assert _failure_in(result) == "Memory is down"
+        assert result["recovered_from"]["agent"] == "Analysis"
+
+    def test_an_agent_with_no_fallback_returns_its_own_failure(self):
+        orch = _orchestrator(failing={"Jackie"})
+        result = orch.run_task_with_recovery("Jackie", "do the thing")
+
+        assert _failure_in(result) == "Jackie is down"
+        assert orch.router.asked == ["Jackie"]
+
+    def test_a_task_that_worked_is_left_alone(self):
+        orch = _orchestrator()
+        result = orch.run_task_with_recovery("Analysis", "do the thing")
+
+        assert _failure_in(result) is None
+        assert "recovered_from" not in result
+        assert orch.router.asked == ["Analysis"]
+
+    def test_an_unknown_agent_is_refused_before_anything_runs(self):
+        orch = _orchestrator()
+        result = orch.run_task_with_recovery("Nobody", "do the thing")
+
+        assert _failure_in(result) == "Unknown agent: Nobody"
+        assert orch.router.asked == []
 
 
 class TestTracing:
