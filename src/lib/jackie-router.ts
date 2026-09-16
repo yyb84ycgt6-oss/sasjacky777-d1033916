@@ -241,6 +241,7 @@ export async function routeChat(args: RouteChatOptions): Promise<void> {
   const chain = args.fallback === false ? [preferred] : chainFrom(preferred);
 
   const fellBackFrom: EngineId[] = [];
+  const reasons: string[] = [];
   let lastReason = "";
 
   for (const id of chain) {
@@ -267,12 +268,28 @@ export async function routeChat(args: RouteChatOptions): Promise<void> {
     }
 
     fellBackFrom.push(id);
+    reasons.push(result.reason);
     lastReason = result.reason;
   }
 
+  // When every rung refused for the *same* reason, the engines are not the
+  // problem — the thing they share is. Listing them sends someone to check
+  // four engines and a network when the answer is one gate, one secret or one
+  // un-pushed migration, and the chain's own length is what disguises it: four
+  // identical refusals look like four faults.
+  //
+  // The comparison drops a leading engine label because `askJacky` writes
+  // "Jacky: …" while the streamed rungs return the server's words unprefixed.
+  // Comparing raw strings would therefore never match on the one chain that
+  // matters — the full one, starting at Jacky.
+  const core = (r: string) => r.replace(/^[A-Za-z][\w-]*:\s*/, "").trim();
+  const shared = reasons.length > 1 && reasons.every((r) => core(r) === core(reasons[0]));
+
   args.onError(
-    fellBackFrom.length > 1
-      ? `Every engine refused (${fellBackFrom.join(" → ")}). Last: ${lastReason}`
-      : lastReason || "Jackie could not reach any engine.",
+    shared
+      ? `Every engine refused for the same reason, so this is not the engines: ${core(reasons[0])}`
+      : fellBackFrom.length > 1
+        ? `Every engine refused (${fellBackFrom.join(" → ")}). Last: ${lastReason}`
+        : lastReason || "Jackie could not reach any engine.",
   );
 }
