@@ -8,7 +8,7 @@
 // assistant to stop. Context is auto-captured before every switch.
 import type { ProviderId } from "./jackie-providers";
 import { findProvider, FALLBACK_ORDER } from "./jackie-providers";
-import { supabase } from "@/integrations/supabase/client";
+import { callEdgeFunction, NotSignedInError } from "./edgeFunction";
 import { captureContext } from "./repair/contextGuard";
 
 export type ChatMessage = { role: "user" | "assistant" | "system"; content: string };
@@ -60,6 +60,21 @@ type SingleResult =
   | { kind: "retryable"; reason: string }
   | { kind: "fatal"; reason: string };
 
+/**
+ * How a stream that closed cleanly is scored.
+ *
+ * Reaching `[DONE]`, or the end of the body, having carried no content is a
+ * failure however tidy the close was — reporting it as success is what put
+ * empty assistant bubbles on the screen. It is retryable rather than fatal
+ * because an empty answer is exactly the kind of thing the next provider in
+ * the chain tends to get right.
+ */
+function settle(gotAnyDelta: boolean): SingleResult {
+  return gotAnyDelta
+    ? { kind: "ok" }
+    : { kind: "retryable", reason: "The model returned an empty answer." };
+}
+
 async function tryOne(
   args: StreamArgs,
   provider: ProviderId,
@@ -69,21 +84,21 @@ async function tryOne(
   const def = findProvider(provider);
   if (!def) return { kind: "fatal", reason: `Unknown provider: ${provider}` };
 
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) return { kind: "fatal", reason: "Not signed in." };
-
-  const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/${def.fn}`;
+  // Through `callEdgeFunction`, never a hand-rolled fetch. This one used to
+  // build its own request with the access token in Authorization and no
+  // `apikey` at all, which the gateway rejects before the function runs — the
+  // browser calls that `TypeError: Failed to fetch`, so every provider looked
+  // dead for a reason nothing on screen could name.
   let resp: Response;
   try {
-    resp = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${session.access_token}`,
-      },
-      body: JSON.stringify({ messages: args.messages, model, system: args.system }),
-    });
+    resp = await callEdgeFunction(
+      def.fn,
+      { messages: args.messages, model, system: args.system },
+    );
   } catch (e) {
+    // Signed out is not something the next provider can fix, so it must not
+    // cascade down the whole chain collecting the same refusal.
+    if (e instanceof NotSignedInError) return { kind: "fatal", reason: e.message };
     return { kind: "retryable", reason: e instanceof Error ? e.message : "Network error" };
   }
 
@@ -121,7 +136,7 @@ async function tryOne(
         if (line.endsWith("\r")) line = line.slice(0, -1);
         if (!line.startsWith("data: ")) continue;
         const payload = line.slice(6).trim();
-        if (payload === "[DONE]") return { kind: "ok" };
+        if (payload === "[DONE]") return settle(gotAnyDelta);
         try {
           const j = JSON.parse(payload);
           const c = j.choices?.[0]?.delta?.content;
@@ -136,7 +151,7 @@ async function tryOne(
     }
     return { kind: "fatal", reason: e instanceof Error ? e.message : "Stream broken" };
   }
-  return { kind: "ok" };
+  return settle(gotAnyDelta);
 }
 
 export async function streamProviderChat(args: StreamArgs) {

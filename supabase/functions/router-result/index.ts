@@ -25,16 +25,32 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: 'invalid credentials' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    const { error: updErr } = await admin.from('mesh_jobs').update({
+    // Liveness is about the router, not about this job: it answered, its
+    // credentials are good, it is alive. Refreshing here rather than on the
+    // way out means a router posting a stale job_id no longer ages out of the
+    // mesh for it — the same order router-poll uses.
+    await admin.from('mesh_routers').update({ last_seen_at: new Date().toISOString() }).eq('id', router.id);
+
+    // `.select()` is what makes this honest. The filter is job id AND the
+    // router that claimed it, so a stale, finished or someone else's job_id
+    // matches no rows — and an update matching nothing is not an error, it is
+    // a 204 with `error: null`. Without asking which rows came back this
+    // answered `ok: true`, the rig dropped a result it had already spent the
+    // compute on, and the job sat 'claimed' until it aged out.
+    const { data: updated, error: updErr } = await admin.from('mesh_jobs').update({
       status: error ? 'failed' : 'done',
       result,
       error,
       finished_at: new Date().toISOString(),
-    }).eq('id', job_id).eq('router_id', router.id);
+    }).eq('id', job_id).eq('router_id', router.id).select('id');
 
     if (updErr) return new Response(JSON.stringify({ error: updErr.message }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-    await admin.from('mesh_routers').update({ last_seen_at: new Date().toISOString() }).eq('id', router.id);
-
+    if (!updated || updated.length === 0) {
+      return new Response(
+        JSON.stringify({ error: 'no claimed job with that id belongs to this router', job_id }),
+        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      );
+    }
     return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (e) {
     return new Response(JSON.stringify({ error: String(e) }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });

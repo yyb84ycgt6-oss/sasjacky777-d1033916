@@ -139,12 +139,25 @@ export interface FiledRecord {
  * Filing System Bridge – every note/pod/agent is a file
  */
 export const FilingSystem = {
-  write: (entityType: 'note' | 'pod' | 'agent' | 'task', id: string, data: any) => {
-    routerNS.emit('filing:write', { entityType, id, data, ts: Date.now() });
+  /**
+   * Files a record, and says whether it managed to.
+   *
+   * This announced `filing:write` before it wrote and swallowed whatever the
+   * write threw — the same shape as the archive bug below, where the event was
+   * the only thing that ever happened. A full quota is the ordinary case here,
+   * because the cabinet only ever grows, and every listener went on believing
+   * a record existed that nothing would ever read back. The event now follows
+   * the write rather than predicting it.
+   */
+  write: (entityType: 'note' | 'pod' | 'agent' | 'task', id: string, data: any): boolean => {
     try {
       const key = `${filingPrefix()}${entityType}.${id}`;
       localStorage.setItem(key, JSON.stringify(data));
-    } catch {}
+    } catch {
+      return false;
+    }
+    routerNS.emit('filing:write', { entityType, id, data, ts: Date.now() });
+    return true;
   },
   read: (entityType: string, id: string) => {
     try {

@@ -4,6 +4,7 @@ import { DraggableToolbar } from "./DraggableToolbar";
 import { Plus, Pin, X, StickyNote, Link as LinkIcon, Palette, Edit2, Volume2, VolumeX } from "lucide-react";
 import { routerNS, FilingSystem } from "@/lib/routerNervousSystem";
 import { voiceManager } from "@/lib/voice-manager";
+import { toast } from "sonner";
 
 const getContrastText = (bg: string): string => {
   const r = parseInt(bg.substr(1,2),16);
@@ -64,6 +65,8 @@ export function GlobalStickyNotes() {
   // is opt-in, remembered, and hidden entirely where the browser has no voice.
   const [speaks, setSpeaks] = useState(false);
   const voiceSupported = useRef(voiceManager.isSupported());
+  /** Keeps the unsaved warning to one per spell of failing storage. */
+  const warnedUnsaved = useRef(false);
 
   useEffect(() => {
     try { setSpeaks(localStorage.getItem(VOICE_KEY) === "on"); } catch { /* storage off */ }
@@ -104,10 +107,24 @@ export function GlobalStickyNotes() {
 
   useEffect(() => {
     if (!storageKey || loadedFor.current !== storageKey) return;
+    // Notes that cannot be saved still sit on the screen looking saved, and the
+    // only time the person finds out is the reload that loses them. A full
+    // quota is the ordinary cause and it is something they can act on, so it
+    // gets said — once, because this effect runs on every keystroke.
+    let persisted = true;
     try {
       localStorage.setItem(storageKey, JSON.stringify(notes));
-      notes.forEach(n => FilingSystem.write('note', n.id, n));
-    } catch { /* storage off or full */ }
+    } catch {
+      persisted = false;
+    }
+    if (persisted) persisted = notes.every(n => FilingSystem.write('note', n.id, n));
+
+    if (!persisted && !warnedUnsaved.current) {
+      warnedUnsaved.current = true;
+      toast.error("Notes are not being saved — this browser's storage is full or blocked. Copy anything you need before reloading.");
+    } else if (persisted) {
+      warnedUnsaved.current = false;
+    }
   }, [notes, storageKey]);
 
   const addNote = () => {

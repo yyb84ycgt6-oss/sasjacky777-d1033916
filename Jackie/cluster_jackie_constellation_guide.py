@@ -1,5 +1,17 @@
 """JackieConstellationGuide — sovereign guide persona++++++."""
 
+# The six singletons below are built at the bottom of this module, and until
+# now none of them were imported: the module referenced them as bare globals
+# and so raised NameError the moment anything imported it. They are pulled from
+# the `cluster_*` siblings that define them, package-relative, because that is
+# how the rest of this package addresses itself.
+from .cluster_constellation_identity import identity
+from .cluster_constellation_temporal import temporal_fabric
+from .cluster_constellation_topology import topology
+from .cluster_global_coherence import coherence_pp
+from .cluster_meta_governance import meta_governance
+from .cluster_sovereign_safety import safety_envelope
+
 
 class JackieConstellationGuide:
     """Jackie's constellation-level guide; communicates at altitude."""

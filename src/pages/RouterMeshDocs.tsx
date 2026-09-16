@@ -23,13 +23,17 @@ while True:
         if job:
             try:
                 result = handle(job)
-                requests.post(f"{BASE}/router-result",
+                ack = requests.post(f"{BASE}/router-result",
                     json={"router_id": ROUTER_ID, "secret": SECRET,
                           "job_id": job["id"], "result": result})
             except Exception as e:
-                requests.post(f"{BASE}/router-result",
+                ack = requests.post(f"{BASE}/router-result",
                     json={"router_id": ROUTER_ID, "secret": SECRET,
                           "job_id": job["id"], "error": str(e)})
+            # 404 means the job is no longer this router's to finish. Say so:
+            # dropping it quietly loses the answer you just spent the GPU on.
+            if ack.status_code != 200:
+                print("result rejected:", ack.status_code, ack.text)
         else:
             time.sleep(2)
     except Exception as e:
@@ -52,18 +56,22 @@ while (true) {
       body: JSON.stringify({ router_id: ROUTER_ID, secret: ROUTER_SECRET })
     }).then(r => r.json());
     if (r.job) {
+      let ack;
       try {
         const result = await handle(r.job);
-        await fetch(BASE + "/router-result", {
+        ack = await fetch(BASE + "/router-result", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ router_id: ROUTER_ID, secret: ROUTER_SECRET, job_id: r.job.id, result })
         });
       } catch (e) {
-        await fetch(BASE + "/router-result", {
+        ack = await fetch(BASE + "/router-result", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ router_id: ROUTER_ID, secret: ROUTER_SECRET, job_id: r.job.id, error: String(e) })
         });
       }
+      // 404 means the job is no longer this router's to finish. Say so:
+      // dropping it quietly loses the answer you just spent the GPU on.
+      if (!ack.ok) console.error("result rejected:", ack.status, await ack.text());
     } else await new Promise(r => setTimeout(r, 2000));
   } catch (e) { console.error(e); await new Promise(r => setTimeout(r, 5000)); }
 }

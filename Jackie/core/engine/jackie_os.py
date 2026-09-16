@@ -29,7 +29,7 @@ Usage:
     snapshot = os.snapshot()
 """
 
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from .fs.agent_registry import AgentRegistry
 from .fs.pod_backpack_manager import PodBackpackManager
