@@ -4,10 +4,38 @@ Jackie OS — Router Client
 
 Deterministic, pod-aware, backpack-aware client for talking to the router.
 This is the canonical client Jackie will use to send requests.
+
+Deliberately stdlib-only. `requests` was the single third-party import in the
+whole Python tree and was never declared in pyproject, so CI — which installs
+pytest and nothing else — could not even collect
+`tests/test_jackie_os_runtime.py`. The suite written to prove this runtime
+works had therefore never run in the one place that would have caught it,
+which is the exact failure that runtime was recovered from.
 """
 
-import requests
+import json
+import urllib.error
+import urllib.request
 from typing import Dict, Any, Optional
+
+
+def _post_json(url: str, payload: Dict[str, Any], timeout: int) -> Dict[str, Any]:
+    """POST JSON, read JSON back. Raises; callers turn that into an error dict."""
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _get_json(url: str, timeout: int) -> Dict[str, Any]:
+    """GET JSON. Raises; callers turn that into an error dict."""
+    request = urllib.request.Request(url, method="GET")
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8"))
 
 
 class JackieRouterClient:
@@ -83,13 +111,7 @@ class JackieRouterClient:
         )
 
         try:
-            resp = requests.post(
-                f"{self.router_url}/chat/completions",
-                json=payload,
-                timeout=120,
-            )
-            resp.raise_for_status()
-            return resp.json()
+            return _post_json(f"{self.router_url}/chat/completions", payload, 120)
 
         except Exception as e:
             return {
@@ -105,13 +127,11 @@ class JackieRouterClient:
     def auto(self, prompt: str, model: str = "auto") -> Dict[str, Any]:
         """Send a lightweight auto-complete request."""
         try:
-            resp = requests.post(
+            return _post_json(
                 f"{self.router_url}/complete/auto",
-                json={"prompt": prompt, "model": model},
-                timeout=120,
+                {"prompt": prompt, "model": model},
+                120,
             )
-            resp.raise_for_status()
-            return resp.json()
 
         except Exception as e:
             return {"error": str(e), "prompt": prompt}
@@ -123,13 +143,13 @@ class JackieRouterClient:
     def ready(self) -> Dict[str, Any]:
         """Check if the router is running."""
         try:
-            return requests.get(f"{self.router_url}/ready", timeout=5).json()
+            return _get_json(f"{self.router_url}/ready", 5)
         except Exception as e:
             return {"ready": False, "error": str(e)}
 
     def health(self) -> Dict[str, Any]:
         """Get detailed router health info."""
         try:
-            return requests.get(f"{self.router_url}/health", timeout=5).json()
+            return _get_json(f"{self.router_url}/health", 5)
         except Exception as e:
             return {"status": "offline", "error": str(e)}

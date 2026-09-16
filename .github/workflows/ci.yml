@@ -138,4 +138,13 @@ jobs:
           PGHOST: /var/run/postgresql
           PGPORT: "5433"
           PGUSER: postgres
-        run: sudo -u postgres -E ./scripts/db-authz-test.sh
+        run: |
+          # The probes run as the postgres OS user, which has no route into the
+          # runner's home directory: psql could not open a single .sql file, so
+          # this job failed on "Permission denied" at the first one and has
+          # never actually checked a policy. Open the traverse bit on each
+          # ancestor and read on the tree, rather than moving the checkout.
+          dir="$GITHUB_WORKSPACE"
+          while [ "$dir" != "/" ]; do sudo chmod a+x "$dir"; dir="$(dirname "$dir")"; done
+          sudo chmod -R a+rX "$GITHUB_WORKSPACE/scripts" "$GITHUB_WORKSPACE/supabase"
+          sudo -u postgres -E ./scripts/db-authz-test.sh
