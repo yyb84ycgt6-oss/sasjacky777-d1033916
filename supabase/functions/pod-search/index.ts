@@ -1,5 +1,17 @@
-import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors';
-import { createClient } from 'npm:@supabase/supabase-js@2';
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.58.0";
+
+// These headers are defined here rather than imported from
+// `@supabase/supabase-js/cors`, the way the other thirty-odd functions define
+// them. That subpath only exists from 2.95.0 while this project pins 2.58.0,
+// so the import resolved only because the specifier floated on `@2` — a
+// floating dependency in front of the gate of a deployed function, which is
+// how this project lost the chat the first time. The values are the ones that
+// module exports.
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+};
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
