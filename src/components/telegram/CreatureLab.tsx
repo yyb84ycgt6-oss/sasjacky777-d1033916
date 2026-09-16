@@ -78,9 +78,15 @@ export default function CreatureLab({ onBack }: CreatureLabProps) {
       : '!';
     toast.success(`${result.child.name} has been bred${mutMsg} Rarity: ${RARITY_CONFIG[result.child.rarity].label}`);
 
-    // Auto-generate matching card in Card Arena collection
+    // Auto-generate matching card in Card Arena collection.
+    //
+    // This whole block used to end in `catch {}`, so a breed that could not be
+    // filed told the player nothing: the creature existed, the card did not,
+    // and the collection they went looking in was simply missing it. The two
+    // writes are also one change — a definition with no ownership row is an
+    // orphan — so the second failing puts the first one back.
+    const cardDef = creatureToCard(result.child);
     try {
-      const cardDef = creatureToCard(result.child);
       const CARD_STORAGE = 'card_arena_state';
       const raw = localStorage.getItem(CARD_STORAGE);
       const cardState = raw ? JSON.parse(raw) : { ownedCards: [], dust: 200, gems: 50, eventTokens: 0, pityCounter: 0, seasonTier: 0, seasonXp: 0 };
@@ -91,13 +97,22 @@ export default function CreatureLab({ onBack }: CreatureLabProps) {
           cardId: cardDef.id, copies: 1, foil: false, animated: false,
           firstObtained: Date.now(), source: 'battle',
         });
-        const bredCards = JSON.parse(localStorage.getItem('bred_card_defs') || '[]');
+        const previousDefs = localStorage.getItem('bred_card_defs');
+        const bredCards = JSON.parse(previousDefs || '[]');
         bredCards.push(cardDef);
         localStorage.setItem('bred_card_defs', JSON.stringify(bredCards));
-        localStorage.setItem(CARD_STORAGE, JSON.stringify(cardState));
+        try {
+          localStorage.setItem(CARD_STORAGE, JSON.stringify(cardState));
+        } catch (e) {
+          if (previousDefs === null) localStorage.removeItem('bred_card_defs');
+          else localStorage.setItem('bred_card_defs', previousDefs);
+          throw e;
+        }
         toast.success(`🃏 Card "${cardDef.name}" added to your Card Arena collection!`);
       }
-    } catch {}
+    } catch {
+      toast.error(`"${cardDef.name}" was bred, but its card could not be saved — this browser's storage is full or blocked.`);
+    }
   };
 
   const handleRetire = async (creature: Creature) => {

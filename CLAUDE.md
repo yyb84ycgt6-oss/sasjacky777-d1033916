@@ -72,7 +72,12 @@ fetch`, naming neither the cause nor a fix.
   `_shared/entitlement.ts` — authentication, model allowlist, and quota.
 - Everything else: `verifyAccessToken` from `_shared/authGate.ts`, which falls
   back to `getUser` when `getClaims` is missing.
-- Pin `@supabase/supabase-js@2.58.0`.
+- Pin `@supabase/supabase-js@2.58.0`. Pin it — never `@2`, which resolves to
+  whatever the latest 2.x is on the day the function deploys. Seven functions
+  floated, and took `corsHeaders` from that package's `/cors` subpath, which
+  does not exist below 2.95.0: following the pin above would have broken every
+  one of them at import, which is a 500 with no CORS headers. They define their
+  own `corsHeaders` now, like the other thirty-odd do.
 
 `src/test/chat-request.test.ts` walks every function and fails the build if this
 slips. A gate must **return a verdict, never throw**.

@@ -92,7 +92,12 @@ export default function FoldSurface() {
       if (h?.id) map[h.id] = typeof h.similarity === "number" ? h.similarity : 1;
     }
     setHits(map);
-    if ((data as any)?.note) toast.message((data as any).note);
+    // Ranked-by-similarity and fell-back-to-recent look identical on the
+    // surface, so the distinction has to be said out loud rather than shown as
+    // a neutral note next to a success count the results do not support.
+    const note = (data as any)?.note;
+    if ((data as any)?.ranked === false) toast.warning(note ?? "Showing recent folds, not ranked matches.");
+    else if (note) toast.message(note);
     else toast.success(`${Object.keys(map).length} similar folds`);
   }
 

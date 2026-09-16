@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, beforeEach, vi } from "vitest";
 import { routerNS, FilingSystem, EVENT_NAMES } from "@/lib/routerNervousSystem";
 
 /**
@@ -9,6 +9,30 @@ import { routerNS, FilingSystem, EVENT_NAMES } from "@/lib/routerNervousSystem";
  */
 describe("the filing cabinet", () => {
   beforeEach(() => localStorage.clear());
+
+  it("says so when the cabinet refuses the write, instead of announcing it anyway", () => {
+    // A full quota is the ordinary way this fails, and it used to emit
+    // filing:write first and swallow the throw — so every listener believed in
+    // a record that nothing would ever read back.
+    const heard: unknown[] = [];
+    const off = routerNS.on("filing:write", (p) => heard.push(p));
+    const full = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("QuotaExceededError");
+    });
+
+    try {
+      expect(FilingSystem.write("note", "n1", { title: "first" })).toBe(false);
+      expect(heard).toEqual([]);
+    } finally {
+      full.mockRestore();
+      off?.();
+    }
+  });
+
+  it("confirms the write that did land", () => {
+    expect(FilingSystem.write("note", "n2", { title: "kept" })).toBe(true);
+    expect(FilingSystem.read("note", "n2")).toEqual({ title: "kept" });
+  });
 
   it("lists back what was filed", () => {
     FilingSystem.write("note", "n1", { title: "first" });
