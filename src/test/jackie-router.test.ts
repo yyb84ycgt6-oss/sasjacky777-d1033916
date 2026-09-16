@@ -237,6 +237,30 @@ describe("when the whole chain refuses for one reason", () => {
     expect(c.errors[0]).not.toMatch(/jacky → bionic/);
   });
 
+  /**
+   * The failure the operator actually saw, for months.
+   *
+   * Four rungs call four different functions. When none of them can be reached
+   * at all — a fetch that rejects, which is what a 500 with no CORS headers
+   * looks like from a browser — the engines are not individually broken. No
+   * edge function on the project answered, and the fix is a deploy. The old
+   * message, "Every engine refused (jacky → bionic → ollama → cloud)", sent
+   * someone to check four engines, three secrets and their wifi instead.
+   */
+  it("says nothing was reached when every function fails at the transport layer", async () => {
+    vi.spyOn(edge, "callEdgeFunction").mockImplementation(() =>
+      Promise.reject(new TypeError("Failed to fetch")),
+    );
+    const c = collect();
+    await routeChat({ messages: ask, engine: "jacky", ...c.handlers });
+
+    expect(c.errors).toHaveLength(1);
+    expect(c.errors[0]).toMatch(/not one of 4 edge functions answered/i);
+    expect(c.errors[0]).toMatch(/not deployed|without CORS/i);
+    // The engine list is the misleading part, so it is not what leads.
+    expect(c.errors[0]).not.toMatch(/^Every engine refused \(/);
+  });
+
   it("still lists the engines when they failed for different reasons", async () => {
     vi.spyOn(edge, "callEdgeFunction")
       .mockResolvedValueOnce(refusal(502, { error: "jacky upstream unreachable" }))

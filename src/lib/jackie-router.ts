@@ -27,7 +27,7 @@
  * text intact.
  */
 import { streamSse, type ChatMessage } from "@/lib/jackie-stream";
-import { callEdgeFunction, describeEdgeFailure, NotSignedInError } from "@/lib/edgeFunction";
+import { callEdgeFunction, describeEdgeFailure, describesUnreachable, NotSignedInError } from "@/lib/edgeFunction";
 import {
   chainFrom,
   findEngine,
@@ -285,11 +285,24 @@ export async function routeChat(args: RouteChatOptions): Promise<void> {
   const core = (r: string) => r.replace(/^[A-Za-z][\w-]*:\s*/, "").trim();
   const shared = reasons.length > 1 && reasons.every((r) => core(r) === core(reasons[0]));
 
+  // Refused and unreachable are different diagnoses with opposite fixes. Each
+  // rung calls a *different* function, so if none of them could even be
+  // reached, the engines are not individually broken — no edge function on this
+  // project answered at all, which means they are not deployed (or are
+  // answering without CORS headers, which a browser reports the same way).
+  // Listing four engine names for that sends someone to check four engines,
+  // three secrets and their wifi, and the answer is one deploy.
+  const allUnreachable = reasons.length > 1 && reasons.every((r) => describesUnreachable(core(r)));
+
   args.onError(
-    shared
-      ? `Every engine refused for the same reason, so this is not the engines: ${core(reasons[0])}`
-      : fellBackFrom.length > 1
-        ? `Every engine refused (${fellBackFrom.join(" → ")}). Last: ${lastReason}`
-        : lastReason || "Jackie could not reach any engine.",
+    allUnreachable
+      ? `No engine could be reached — not one of ${fellBackFrom.length} edge functions answered. ` +
+        `They are most likely not deployed to this project, or are answering without CORS headers. ` +
+        `Deploy the functions, then try again. (Last: ${core(lastReason)})`
+      : shared
+        ? `Every engine refused for the same reason, so this is not the engines: ${core(reasons[0])}`
+        : fellBackFrom.length > 1
+          ? `Every engine refused (${fellBackFrom.join(" → ")}). Last: ${lastReason}`
+          : lastReason || "Jackie could not reach any engine.",
   );
 }
