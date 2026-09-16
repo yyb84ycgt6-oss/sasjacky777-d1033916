@@ -42,6 +42,14 @@ import {
   loadDraft, saveDraft, clearDraft, registerContextSource, guardSwitch,
 } from "@/lib/repair/contextGuard";
 import { orchestrate } from "@/lib/jackie-orchestrator";
+import {
+  askGemini, GeminiNotConnectedError, GeminiSkippedError,
+  type GeminiCitation,
+} from "@/lib/geminiEngine";
+import {
+  CONSULT_ENGINES, findConsultEngine, readConsultEngine, writeConsultEngine,
+  type ConsultEngineId,
+} from "@/lib/repair/consultEngine";
 import { readSettings as readMicroSettings } from "@/lib/microai/settings";
 import { findModel as findMicroModel } from "@/lib/microai/models";
 
@@ -197,6 +205,13 @@ export default function RepairBay() {
   const [answer, setAnswer] = useState("");
   const [busy, setBusy] = useState(false);
   const [modelUsed, setModelUsed] = useState<string | null>(null);
+  // Which engine answers. Persisted, because a person who has connected their
+  // own engine did not do that in order to be put back on the gateway by a
+  // page reload.
+  const [engineId, setEngineId] = useState<ConsultEngineId>(() => readConsultEngine());
+  const [citations, setCitations] = useState<GeminiCitation[]>([]);
+  const [geminiSession, setGeminiSession] = useState<string | null>(null);
+  const [engineNote, setEngineNote] = useState<string | null>(null);
 
   useEffect(() => {
     setFirmware(loadFirmware());
@@ -337,11 +352,10 @@ export default function RepairBay() {
     setTab("consult");
     setAsk(`Firmware review: ${comp.name}`);
     setAnswer("");
+    setCitations([]);
+    setEngineNote(null);
     try {
-      const r = await orchestrate({
-        system: consultSystem(evidence),
-        kind: "reasoning",
-        prompt: `Firmware/driver review request.
+      const r = await askEngine(`Firmware/driver review request.
 
 Component: ${comp.name} (${comp.category})
 Installed version I observed: ${row?.currentVersion || "(not logged)"}
@@ -349,15 +363,76 @@ Latest version I observed on the vendor page: ${row?.latestSeen || "(not logged)
 My note: ${row?.note || "(none)"}
 Official source for this part: ${comp.firmwareSource?.url ?? "unknown"}
 
-Tell me: (1) is this update worth taking for MY use case, or is it risk with no reward; (2) what specifically to read in the changelog before deciding; (3) the safe flashing procedure for this exact part on this exact board; (4) what breaks or resets afterwards and what I should record first. Do not state version numbers I did not give you as fact.`,
-      });
-      setAnswer(r.output);
-      setModelUsed(r.modelUsed);
+Tell me: (1) is this update worth taking for MY use case, or is it risk with no reward; (2) what specifically to read in the changelog before deciding; (3) the safe flashing procedure for this exact part on this exact board; (4) what breaks or resets afterwards and what I should record first. Do not state version numbers I did not give you as fact.`, "");
+      setAnswer(r.text);
+      setModelUsed(r.answeredBy);
+      setCitations(r.citations);
+      if (r.session) setGeminiSession(r.session);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Review failed");
+      // A firmware answer is one someone acts on with a screwdriver, so the
+      // reason it did not arrive has to be as specific here as anywhere.
+      const message = explainEngineFailure(e);
+      setEngineNote(message);
+      toast.error(message);
     } finally {
       setBusy(false);
     }
+  };
+
+  /**
+   * One ask, routed to whichever engine the operator picked.
+   *
+   * The gateway gets the rig brief in its system prompt because it has no
+   * other way to know any of it. The operator's engine gets the same brief
+   * folded into the question instead: `gemini-engine` takes a query rather
+   * than a system prompt, and dropping the grounding entirely would make the
+   * cited answer worse than the uncited one it replaced.
+   */
+  const askEngine = async (q: string, context: string): Promise<{
+    text: string;
+    answeredBy: string;
+    citations: GeminiCitation[];
+    session: string | null;
+  }> => {
+    if (engineId === "gemini") {
+      const brief = consultSystem(evidence);
+      const answer = await askGemini(
+        `${brief}\n\n---\n${q}${context ? `\n\n---\nRecent session context I saved:\n${context}` : ""}`,
+        { session: geminiSession },
+      );
+      return {
+        text: answer.text,
+        answeredBy: "my Gemini Enterprise engine",
+        citations: answer.citations,
+        session: answer.session,
+      };
+    }
+
+    const r = await orchestrate({
+      system: consultSystem(evidence),
+      kind: "reasoning",
+      prompt: context ? `${q}\n\n---\nRecent session context I saved:\n${context}` : q,
+    });
+    return { text: r.output, answeredBy: `${r.modelUsed} (Lovable gateway)`, citations: [], session: null };
+  };
+
+  /**
+   * Turns a refusal into something the person can act on.
+   *
+   * "Not connected" is a setup step, not an outage, and the two send someone
+   * looking in completely different places. A declined query is the engine
+   * saying something about the question rather than failing to answer it.
+   */
+  const explainEngineFailure = (e: unknown): string => {
+    if (e instanceof GeminiNotConnectedError) {
+      return e.missing.length
+        ? `Your engine is not connected yet — still needs ${e.missing.join(", ")}. Set those in Cloud → Secrets, or switch to the gateway.`
+        : "Your engine is not connected yet. Link it in Cloud → Secrets, or switch to the gateway.";
+    }
+    if (e instanceof GeminiSkippedError) {
+      return `Your engine declined to ground that one (${e.reasons.join(", ")}). Try asking it about something it indexes, or switch to the gateway.`;
+    }
+    return e instanceof Error ? e.message : "Consultant unavailable";
   };
 
   const runConsult = async (prompt?: string) => {
@@ -365,18 +440,25 @@ Tell me: (1) is this update worth taking for MY use case, or is it risk with no 
     if (!q) return;
     setBusy(true);
     setAnswer("");
+    setCitations([]);
+    setEngineNote(null);
     setAsk(q);
     try {
       const recent = captures.slice(0, 2).map((c) => `### ${c.title}\n${c.body.slice(0, 2000)}`).join("\n\n");
-      const r = await orchestrate({
-        system: consultSystem(evidence),
-        kind: "reasoning",
-        prompt: recent ? `${q}\n\n---\nRecent session context I saved:\n${recent}` : q,
-      });
-      setAnswer(r.output);
-      setModelUsed(r.modelUsed);
+      const r = await askEngine(q, recent);
+      setAnswer(r.text);
+      setModelUsed(r.answeredBy);
+      setCitations(r.citations);
+      if (r.session) setGeminiSession(r.session);
+      // An engine that can cite and did not is worth saying out loud: the
+      // answer is ungrounded even though the cited path was the one chosen.
+      if (engineId === "gemini" && r.citations.length === 0) {
+        setEngineNote("Your engine answered without citing anything it indexes — treat this as ungrounded.");
+      }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Consultant unavailable");
+      const message = explainEngineFailure(e);
+      setEngineNote(message);
+      toast.error(message);
     } finally {
       setBusy(false);
     }
@@ -1509,14 +1591,72 @@ Tell me: (1) is this update worth taking for MY use case, or is it risk with no 
                   Terminal not responding
                 </Button>
               </div>
+              <div className="space-y-2 border-t border-border/50 pt-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Answered by</span>
+                  {CONSULT_ENGINES.map((e) => (
+                    <Button
+                      key={e.id}
+                      size="sm"
+                      variant={engineId === e.id ? "default" : "outline"}
+                      className="min-h-9"
+                      onClick={() => {
+                        setEngineId(e.id);
+                        writeConsultEngine(e.id);
+                        setEngineNote(null);
+                        // A new engine has not answered this question yet, and
+                        // leaving the last one's citations under it would
+                        // attribute sources to an engine that never cited them.
+                        setCitations([]);
+                      }}
+                      aria-pressed={engineId === e.id}
+                    >
+                      {e.short}
+                    </Button>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground">{findConsultEngine(engineId).description}</p>
+              </div>
+
               {modelUsed && (
                 <p className="text-xs text-muted-foreground">Answered by {modelUsed}</p>
+              )}
+              {engineNote && (
+                <p className="text-xs text-amber-600 dark:text-amber-500">{engineNote}</p>
               )}
             </Card>
 
             {answer && (
               <Card className="p-4">
                 <pre className="whitespace-pre-wrap text-sm leading-relaxed">{answer}</pre>
+
+                {citations.length > 0 && (
+                  <div className="mt-4 border-t border-border/50 pt-3">
+                    <h4 className="text-xs font-medium text-muted-foreground">
+                      Cited from your engine ({citations.length})
+                    </h4>
+                    <ul className="mt-2 space-y-1.5">
+                      {citations.map((c, i) => (
+                        <li key={`${c.uri ?? c.title}-${i}`} className="text-xs">
+                          {c.uri ? (
+                            <a
+                              href={c.uri}
+                              target="_blank"
+                              rel="noreferrer noopener"
+                              className="text-primary underline underline-offset-2 break-all"
+                            >
+                              {c.title || c.uri}
+                            </a>
+                          ) : (
+                            <span>{c.title}</span>
+                          )}
+                          {c.domain && <span className="ml-1.5 text-muted-foreground">· {c.domain}</span>}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
                 <Button
                   size="sm"
                   variant="outline"
