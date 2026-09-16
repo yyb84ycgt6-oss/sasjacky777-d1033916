@@ -7,6 +7,11 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { ModelSelector } from "@/components/microai/ModelSelector";
+import { BackendPicker } from "@/components/microai/BackendPicker";
+import { ModelChatPanel } from "@/components/microai/ModelChatPanel";
+import { ChatHistoryPanel } from "@/components/microai/ChatHistoryPanel";
+import { CHAT_BACKENDS, findBackend, defaultModelOf } from "@/lib/microai/chatBackends";
+import { listThreads, threadKey, type ChatThread } from "@/lib/microai/chatHistory";
 import { PerfMonitor } from "@/components/microai/PerfMonitor";
 import { routeMicroPrompt, readMicroLog, clearMicroLog, type MicroRunMetrics, type MicroLogEntry } from "@/lib/microai/router";
 import { readSettings, writeSettings } from "@/lib/microai/settings";
@@ -34,6 +39,40 @@ export default function MicroAI() {
   const [metrics, setMetrics] = useState<MicroRunMetrics | null>(null);
   const [log, setLog] = useState<MicroLogEntry[]>(() => readMicroLog());
   const termRef = useRef<HTMLDivElement>(null);
+
+  // The chat picker is its own selection: the device model above drives the
+  // terminal and assistant, while this drives the chat panel, and collapsing
+  // them would make choosing Groq silently change what the terminal runs.
+  const [chatBackendId, setChatBackendId] = useState<string>(() => {
+    try {
+      return localStorage.getItem("jacky.microai.chatBackend") ?? CHAT_BACKENDS[0].id;
+    } catch {
+      return CHAT_BACKENDS[0].id;
+    }
+  });
+  const [chatModelId, setChatModelId] = useState<string>(() => {
+    try {
+      return localStorage.getItem("jacky.microai.chatModel") ?? defaultModelOf(CHAT_BACKENDS[0]);
+    } catch {
+      return defaultModelOf(CHAT_BACKENDS[0]);
+    }
+  });
+  const [threads, setThreads] = useState<ChatThread[]>(() => listThreads());
+
+  const refreshThreads = () => setThreads(listThreads());
+
+  const pickChat = (backendId: string, modelId: string) => {
+    const backend = findBackend(backendId);
+    const model = modelId || defaultModelOf(backend);
+    setChatBackendId(backend.id);
+    setChatModelId(model);
+    try {
+      localStorage.setItem("jacky.microai.chatBackend", backend.id);
+      localStorage.setItem("jacky.microai.chatModel", model);
+    } catch {
+      /* the choice holds for this session even if it cannot be remembered */
+    }
+  };
 
   useEffect(() => {
     termRef.current?.scrollTo({ top: termRef.current.scrollHeight });
@@ -150,6 +189,40 @@ export default function MicroAI() {
             <Link to="/micro/board" className="text-[11px]">Compare models</Link>
           </Button>
         </div>
+      </div>
+
+      {/* The full picker. Every engine this app can reach, in one place, so
+          choosing between the device, the operator's own grounded engine and
+          the cloud no longer means changing screens. */}
+      <Card className="bg-card/80 border-border/40">
+        <CardHeader className="p-3 pb-2">
+          <CardTitle className="text-xs font-mono uppercase tracking-wider">Chat with any engine</CardTitle>
+        </CardHeader>
+        <CardContent className="p-3 pt-0">
+          <BackendPicker
+            backendId={chatBackendId}
+            modelId={chatModelId}
+            onChange={pickChat}
+            disabled={locked}
+          />
+        </CardContent>
+      </Card>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="lg:col-span-2">
+          <ModelChatPanel
+            key={threadKey(chatBackendId, chatModelId)}
+            backendId={chatBackendId}
+            modelId={chatModelId}
+            onActivity={refreshThreads}
+          />
+        </div>
+        <ChatHistoryPanel
+          threads={threads}
+          activeKey={threadKey(chatBackendId, chatModelId)}
+          onOpen={pickChat}
+          onCleared={refreshThreads}
+        />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
