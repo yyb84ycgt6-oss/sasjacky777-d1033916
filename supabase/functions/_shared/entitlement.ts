@@ -121,7 +121,16 @@ export async function consumeQuota(opts: QuotaOptions): Promise<Response | null>
     admin = adminClient();
   } catch (e) {
     console.error("entitlement: cannot build admin client", e);
-    return json({ error: "Service unavailable", code: "MISCONFIGURED" }, 503);
+    return json(
+      {
+        error: "Jackie's server is missing its database credentials",
+        detail:
+          "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are injected by the platform; if they are absent " +
+          "the function was not deployed through Supabase. Redeploy the edge functions.",
+        code: "MISCONFIGURED",
+      },
+      503,
+    );
   }
 
   const { data, error } = await admin.rpc("consume_provider_quota", {
@@ -132,7 +141,32 @@ export async function consumeQuota(opts: QuotaOptions): Promise<Response | null>
 
   if (error) {
     console.error(`entitlement: consume_provider_quota failed for ${opts.functionName}`, error);
-    return json({ error: "Quota service unavailable", code: "QUOTA_UNAVAILABLE" }, 503);
+
+    // A missing function is not an outage, and the difference decides what the
+    // person does next. `consume_provider_quota` ships in
+    // 20260914120000_authz_hardening.sql, and migrations in this project do not
+    // run themselves — so on a database that never had `supabase db push` run
+    // against it, this RPC is absent and EVERY gated function fails here. The
+    // chat then walks its whole engine chain and each rung refuses for the same
+    // reason, which reads as "the engines are down" when the truth is one
+    // un-pushed migration. Reported as a transient outage, that is a thing you
+    // wait out forever.
+    const code = String((error as { code?: unknown }).code ?? "");
+    const missing = code === "PGRST202" || code === "42883";
+
+    return json(
+      missing
+        ? {
+            error: "Jackie's quota function is missing from the database",
+            detail:
+              "consume_provider_quota does not exist on this project. Run `supabase db push` to apply " +
+              "supabase/migrations/20260914120000_authz_hardening.sql, then try again. Until then every " +
+              "engine will refuse for this same reason.",
+            code: "QUOTA_FUNCTION_MISSING",
+          }
+        : { error: "Quota service unavailable", code: "QUOTA_UNAVAILABLE", detail: error.message },
+      503,
+    );
   }
 
   const verdict = (data ?? {}) as Record<string, unknown>;

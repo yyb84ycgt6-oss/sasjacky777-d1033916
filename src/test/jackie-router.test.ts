@@ -201,6 +201,91 @@ describe("falling back", () => {
   });
 });
 
+describe("when the whole chain refuses for one reason", () => {
+  beforeEach(() => vi.restoreAllMocks());
+  afterEach(() => vi.restoreAllMocks());
+
+  /**
+   * The chain's length is what disguises a shared cause.
+   *
+   * Every gated function calls `consume_provider_quota`, which ships in a
+   * migration, and migrations in this project do not run themselves. On a
+   * database that never had `supabase db push` run against it the RPC is
+   * absent, so all four rungs refuse identically — and "Every engine refused
+   * (jacky → bionic → ollama)" sends someone to check four engines and a
+   * network when the answer is one un-pushed migration. Four identical
+   * refusals are one fault wearing four coats.
+   */
+  it("says the engines are not the problem when they all refuse alike", async () => {
+    const missing = {
+      error: "Jackie's quota function is missing from the database",
+      code: "QUOTA_FUNCTION_MISSING",
+    };
+    // A fresh Response per call: a body can only be read once, so reusing one
+    // object would leave rungs two to four parsing a consumed stream and
+    // reporting a bare HTTP status instead of the server's words.
+    vi.spyOn(edge, "callEdgeFunction").mockImplementation(() =>
+      Promise.resolve(refusal(503, missing)),
+    );
+    const c = collect();
+    await routeChat({ messages: ask, engine: "jacky", ...c.handlers });
+
+    expect(c.errors).toHaveLength(1);
+    expect(c.errors[0]).toMatch(/not the engines/i);
+    expect(c.errors[0]).toContain("quota function is missing");
+    // The engine list is exactly what misleads here, so it is not the headline.
+    expect(c.errors[0]).not.toMatch(/jacky → bionic/);
+  });
+
+  /**
+   * The failure the operator actually saw, for months.
+   *
+   * Four rungs call four different functions. When none of them can be reached
+   * at all — a fetch that rejects, which is what a 500 with no CORS headers
+   * looks like from a browser — the engines are not individually broken. No
+   * edge function on the project answered, and the fix is a deploy. The old
+   * message, "Every engine refused (jacky → bionic → ollama → cloud)", sent
+   * someone to check four engines, three secrets and their wifi instead.
+   */
+  it("says nothing was reached when every function fails at the transport layer", async () => {
+    vi.spyOn(edge, "callEdgeFunction").mockImplementation(() =>
+      Promise.reject(new TypeError("Failed to fetch")),
+    );
+    const c = collect();
+    await routeChat({ messages: ask, engine: "jacky", ...c.handlers });
+
+    expect(c.errors).toHaveLength(1);
+    expect(c.errors[0]).toMatch(/not one of 4 edge functions answered/i);
+    expect(c.errors[0]).toMatch(/not deployed|without CORS/i);
+    // The engine list is the misleading part, so it is not what leads.
+    expect(c.errors[0]).not.toMatch(/^Every engine refused \(/);
+  });
+
+  it("still lists the engines when they failed for different reasons", async () => {
+    vi.spyOn(edge, "callEdgeFunction")
+      .mockResolvedValueOnce(refusal(502, { error: "jacky upstream unreachable" }))
+      .mockResolvedValueOnce(refusal(503, { error: "Bionic is not connected" }))
+      .mockResolvedValueOnce(refusal(400, { error: "OLLAMA_BASE_URL not configured" }))
+      .mockResolvedValueOnce(refusal(503, { error: "Jackie has no model key" }));
+    const c = collect();
+    await routeChat({ messages: ask, engine: "jacky", ...c.handlers });
+
+    expect(c.errors[0]).toMatch(/Every engine refused \(/);
+    expect(c.errors[0]).not.toMatch(/not the engines/i);
+  });
+
+  it("does not call a single refusal a shared cause", async () => {
+    vi.spyOn(edge, "callEdgeFunction").mockImplementation(() =>
+      Promise.resolve(refusal(503, { error: "only one tried" })),
+    );
+    const c = collect();
+    await routeChat({ messages: ask, engine: "cloud", fallback: false, ...c.handlers });
+
+    expect(c.errors[0]).not.toMatch(/not the engines/i);
+    expect(c.errors[0]).toContain("only one tried");
+  });
+});
+
 describe("the two things that stop the walk", () => {
   beforeEach(() => vi.restoreAllMocks());
   afterEach(() => vi.restoreAllMocks());

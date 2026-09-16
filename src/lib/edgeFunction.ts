@@ -96,8 +96,26 @@ export function describeEdgeFailure(error: unknown, name: string): string {
 
   if (/failed to fetch|networkerror|load failed/i.test(message)) {
     return typeof navigator !== "undefined" && navigator.onLine === false
-      ? "You are offline, so Jackie cannot reach the server. This part needs a connection."
-      : `Could not reach the ${name} function. Check that it is deployed to this project and that you are online.`;
+      ? OFFLINE_MESSAGE
+      : `${UNREACHABLE_PREFIX} ${name} function. Check that it is deployed to this project and that you are online.`;
   }
   return message;
+}
+
+/**
+ * The two sentences above, named so callers can recognise their own output.
+ *
+ * A function that *refused* answered: it ran, decided, and said why. A function
+ * that could not be *reached* never ran at all, and the two need opposite
+ * responses — fix the refusal, versus deploy the thing. The router has to tell
+ * them apart to say anything useful when a whole chain fails, and matching on a
+ * sentence written somewhere else is how those two drift apart.
+ */
+export const UNREACHABLE_PREFIX = "Could not reach the";
+export const OFFLINE_MESSAGE =
+  "You are offline, so Jackie cannot reach the server. This part needs a connection.";
+
+/** Whether a failure message describes a call that never got a response at all. */
+export function describesUnreachable(message: string): boolean {
+  return message.startsWith(UNREACHABLE_PREFIX) || message === OFFLINE_MESSAGE;
 }
