@@ -637,7 +637,7 @@ Deliverables:
   },
 ];
 
-Deno.serve(async (req) => {
+async function handle(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") return new Response(null, { headers: cors });
 
   const authHeader = req.headers.get("Authorization") ?? "";
@@ -693,4 +693,19 @@ Deno.serve(async (req) => {
   return new Response(JSON.stringify({ synced: rows.length }), {
     headers: { ...cors, "Content-Type": "application/json" },
   });
+}
+
+// Anything unexpected still answers with CORS headers (rule 3). A throw that
+// escapes the handler becomes a 500 the browser is not allowed to read, which it
+// reports as "Failed to fetch" — naming neither this function nor the cause.
+Deno.serve(async (req) => {
+  try {
+    return await handle(req);
+  } catch (e) {
+    console.error("core-sync: unexpected failure", e);
+    return new Response(JSON.stringify({ error: "Internal error" }), {
+      status: 500,
+      headers: { ...cors, "Content-Type": "application/json" },
+    });
+  }
 });

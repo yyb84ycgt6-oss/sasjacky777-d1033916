@@ -23,15 +23,17 @@ export interface AgentBlueprint {
 }
 
 /**
- * Free-tier friendly Lovable models. `gemini-3.1-flash-lite` and the Flash
- * family are the cheapest high-volume options available without any key; the
- * Pro/GPT tiers cost more per call, so they're reserved for reasoning agents.
+ * Free-tier friendly Lovable models, all from the list `jackie-chat` accepts
+ * (`CHAT_MODELS`). Flash Lite and the Flash family are the cheapest high-volume
+ * options; Pro costs more per call, so it is reserved for reasoning agents.
+ * These once named models the function did not know, and every agent was
+ * silently answered by its default instead.
  */
 export const LOVABLE_AGENTS: AgentBlueprint[] = [
   {
     name: "Scout",
     role: "Fast triage & routing",
-    model: "google/gemini-3.1-flash-lite",
+    model: "google/gemini-2.5-flash-lite",
     contextBudget: 8_000,
     tags: ["lovable", "fast", "triage"],
     why: "Cheapest high-volume model — built for classification and routing.",
@@ -51,7 +53,7 @@ Be terse. Never invent detail that is not in the request.`,
   {
     name: "Architect",
     role: "System design & trade-offs",
-    model: "google/gemini-3.1-pro-preview",
+    model: "google/gemini-2.5-pro",
     contextBudget: 128_000,
     tags: ["lovable", "reasoning", "architecture"],
     why: "Strong reasoning + large context for whole-system design.",
@@ -71,7 +73,7 @@ premature complexity, and fragile abstractions. Never fake certainty — mark as
   {
     name: "Forge",
     role: "Code generation & refactors",
-    model: "google/gemini-3.6-flash",
+    model: "google/gemini-3-flash-preview",
     contextBudget: 128_000,
     tags: ["lovable", "code"],
     why: "Fast coding model with a large window — good speed/quality balance.",
@@ -95,7 +97,7 @@ Prefer clarity over cleverness. No dead abstractions. No silent error swallowing
   {
     name: "Auditor",
     role: "Security & risk review",
-    model: "google/gemini-3.1-pro-preview",
+    model: "google/gemini-2.5-pro",
     contextBudget: 128_000,
     tags: ["lovable", "security", "reasoning"],
     why: "Reasoning model — security review is where mistakes are expensive.",
@@ -116,7 +118,7 @@ Never invent a vulnerability to look thorough, and never describe a hypothetical
   {
     name: "Analyst",
     role: "Research & source discernment",
-    model: "google/gemini-3.5-flash",
+    model: "google/gemini-2.5-flash",
     contextBudget: 128_000,
     tags: ["lovable", "research"],
     why: "Efficient long-context model for reading and summarising volume.",
@@ -137,7 +139,7 @@ Never fabricate citations, numbers, dates, or quotes.`,
   {
     name: "Scribe",
     role: "Docs, specs & summaries",
-    model: "google/gemini-3.1-flash-lite",
+    model: "google/gemini-2.5-flash-lite",
     contextBudget: 32_000,
     tags: ["lovable", "fast", "writing"],
     why: "High-volume summarisation and extraction at the lowest cost.",

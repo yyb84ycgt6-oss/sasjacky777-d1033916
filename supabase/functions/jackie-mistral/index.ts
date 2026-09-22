@@ -1,62 +1,23 @@
 // Streaming chat via Mistral La Plateforme (free experimental tier).
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { gate } from "../_shared/entitlement.ts";
+import { openAiCompatHandler } from "../_shared/openaiCompat.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
-
-const ALLOWED = new Set([
-  "mistral-large-latest",
-  "mistral-small-latest",
-  "open-mistral-nemo",
-  "codestral-latest",
-  "pixtral-large-latest",
-]);
-const DEFAULT_MODEL = "mistral-small-latest";
+// The models this function will send upstream, and the secret it reads.
+// Everything else — config check before quota, message validation, the
+// persona, error handling — is shared, in _shared/openaiCompat.ts.
 const SECRET = "MISTRAL_API_KEY";
-const BASE = "https://api.mistral.ai/v1/chat/completions";
 
-serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
-  const un = await gate(req, "jackie-mistral");
-  if (un) return un;
-
-  const key = Deno.env.get(SECRET);
-  if (!key) {
-    return new Response(JSON.stringify({
-      error: `${SECRET} not configured. Get a free key at https://console.mistral.ai/api-keys/`,
-      needs_secret: SECRET,
-    }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-  }
-
-  try {
-    const { messages, model, system } = await req.json();
-    const selected = ALLOWED.has(model) ? model : DEFAULT_MODEL;
-    const body = {
-      model: selected,
-      messages: [
-        ...(system ? [{ role: "system", content: system }] : []),
-        ...messages,
-      ],
-      stream: true,
-    };
-    const resp = await fetch(BASE, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!resp.ok) {
-      const text = await resp.text();
-      return new Response(JSON.stringify({ error: `Mistral ${resp.status}: ${text}` }), {
-        status: resp.status, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    return new Response(resp.body, { headers: { ...corsHeaders, "Content-Type": "text/event-stream" } });
-  } catch (e) {
-    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown" }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-});
+serve(openAiCompatHandler({
+  fn: "jackie-mistral",
+  secret: SECRET,
+  url: "https://api.mistral.ai/v1/chat/completions",
+  defaultModel: "mistral-small-latest",
+  models: [
+    "mistral-large-latest",
+    "mistral-small-latest",
+    "open-mistral-nemo",
+    "codestral-latest",
+    "pixtral-large-latest",
+  ],
+  keyHelp: "Get a free key at https://console.mistral.ai/api-keys/",
+}));

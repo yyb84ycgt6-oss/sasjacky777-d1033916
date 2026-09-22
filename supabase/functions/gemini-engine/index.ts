@@ -51,9 +51,6 @@ function mergeText(acc: string, next: string): string {
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
-  const un = await gate(req, "gemini-engine");
-  if (un) return un;
-
   const lovableKey = Deno.env.get("LOVABLE_API_KEY");
   const connKey = Deno.env.get("GEMINI_ENTERPRISE_API_KEY");
   const projectId = Deno.env.get("GEMINI_ENTERPRISE_PROJECT_ID");
@@ -70,8 +67,12 @@ serve(async (req) => {
         !engineId && "GEMINI_ENTERPRISE_ENGINE_ID",
         !lovableKey && "LOVABLE_API_KEY",
       ].filter(Boolean),
-    }, 400);
+    }, 503);
   }
+
+  // Charged only once the engine is known to be linked (rule 5).
+  const un = await gate(req, "gemini-engine");
+  if (un) return un;
 
   try {
     const { query, mode, session } = await req.json();

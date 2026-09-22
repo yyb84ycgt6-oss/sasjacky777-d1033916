@@ -3,6 +3,8 @@
 // Each entry defines the edge function endpoint + supported models.
 // Add a key in Cloud → Secrets to activate providers that require one.
 
+import { CHAT_MODELS } from "../../supabase/functions/_shared/chatRequest";
+
 export type ProviderId =
   | "lovable"
   | "groq"
@@ -54,22 +56,10 @@ export const PROVIDERS: ProviderDef[] = [
     free: true,
     isDefault: true,
     description: "Default brain. Zero-config gateway to Gemini + GPT via Lovable. Always tried first.",
-    models: [
-      { id: "google/gemini-3.6-flash", label: "Gemini 3.6 Flash", free: true, vision: true, note: "Default" },
-      { id: "google/gemini-3.5-flash", label: "Gemini 3.5 Flash", free: true, vision: true },
-      { id: "google/gemini-3.1-flash-lite", label: "Gemini 3.1 Flash Lite", free: true, vision: true, note: "Cheapest / highest volume" },
-      { id: "google/gemini-3.1-pro-preview", label: "Gemini 3.1 Pro", vision: true, reasoning: true, note: "Strongest reasoning" },
-      { id: "google/gemini-3-flash-preview", label: "Gemini 3 Flash Preview", free: true, vision: true },
-      { id: "google/gemini-2.5-pro", label: "Gemini 2.5 Pro", vision: true, reasoning: true },
-      { id: "google/gemini-2.5-flash", label: "Gemini 2.5 Flash", vision: true },
-      { id: "google/gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite", free: true, vision: true },
-      { id: "openai/gpt-5.6-terra", label: "GPT-5.6 Terra", reasoning: true },
-      { id: "openai/gpt-5.6-luna", label: "GPT-5.6 Luna", note: "Fast, low cost" },
-      { id: "openai/gpt-5.4-mini", label: "GPT-5.4 Mini" },
-      { id: "openai/gpt-5", label: "GPT-5" },
-      { id: "openai/gpt-5-mini", label: "GPT-5 Mini" },
-      { id: "openai/gpt-5-nano", label: "GPT-5 Nano" },
-    ],
+    // The exact list `jackie-chat` accepts. This used to be its own list of
+    // eight models the function had never heard of, each silently answered by
+    // the function's default under the chosen model's name (rule 5).
+    models: CHAT_MODELS.map((m) => ({ id: m.id, label: m.label, note: m.description })),
   },
 
   // ── FREE TIER ──────────────────────────────────────────────────────
@@ -302,9 +292,9 @@ export const PROVIDERS: ProviderDef[] = [
     helpUrl: "https://console.anthropic.com/settings/keys",
     description: "Direct Claude. Only used if you paste your own key.",
     models: [
-      { id: "claude-3-5-sonnet-latest", label: "Claude 3.5 Sonnet", vision: true },
-      { id: "claude-3-5-haiku-latest", label: "Claude 3.5 Haiku" },
-      { id: "claude-3-opus-latest", label: "Claude 3 Opus", vision: true },
+      { id: "claude-opus-5", label: "Claude Opus 5", vision: true, reasoning: true, note: "Default" },
+      { id: "claude-sonnet-5", label: "Claude Sonnet 5", vision: true, reasoning: true },
+      { id: "claude-haiku-4-5", label: "Claude Haiku 4.5", vision: true, note: "Fastest, lowest cost" },
     ],
   },
   {

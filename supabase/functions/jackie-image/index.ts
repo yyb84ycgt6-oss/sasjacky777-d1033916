@@ -12,6 +12,18 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Key before quota (rule 5): a call that cannot happen must not be billed.
+  if (!Deno.env.get("LOVABLE_API_KEY")) {
+    return new Response(
+      JSON.stringify({
+        error: "LOVABLE_API_KEY not configured",
+        code: "PROVIDER_UNCONFIGURED",
+        needs_secret: "LOVABLE_API_KEY",
+      }),
+      { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
+  }
+
   const unauth = await gate(req, "jackie-image");
   if (unauth) return unauth;
 

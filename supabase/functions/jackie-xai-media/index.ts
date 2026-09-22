@@ -92,15 +92,15 @@ serve(async (req) => {
     model = picked.model;
   }
 
+  // Key before quota (rule 5).
+  const key = Deno.env.get(SECRET);
+  if (!key) {
+    return json({ error: "Provider unavailable", code: "PROVIDER_UNCONFIGURED", needs_secret: SECRET }, 503);
+  }
+
   const admission = await admit(req, FUNCTION_NAME, model);
   if (admission instanceof Response) return admission;
   const { userId } = admission;
-
-  const key = Deno.env.get(SECRET);
-  if (!key) {
-    console.error(`${FUNCTION_NAME}: ${SECRET} not configured`);
-    return json({ error: "Provider unavailable", code: "PROVIDER_UNCONFIGURED" }, 503);
-  }
 
   try {
     // ---- Image generation -------------------------------------------------

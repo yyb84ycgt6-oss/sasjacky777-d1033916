@@ -34,7 +34,7 @@ const json = (body: unknown, status = 200) =>
     headers: { ...cors, "Content-Type": "application/json" },
   });
 
-Deno.serve(async (req) => {
+async function handle(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") return new Response(null, { headers: cors });
 
   // A privilege grant is a state change. Restricting the method does not
@@ -97,4 +97,19 @@ Deno.serve(async (req) => {
   }
 
   return json({ granted: true });
+}
+
+// Anything unexpected still answers with CORS headers (rule 3). A throw that
+// escapes the handler becomes a 500 the browser is not allowed to read, which it
+// reports as "Failed to fetch" — naming neither this function nor the cause.
+Deno.serve(async (req) => {
+  try {
+    return await handle(req);
+  } catch (e) {
+    console.error("core-claim: unexpected failure", e);
+    return new Response(JSON.stringify({ error: "Internal error" }), {
+      status: 500,
+      headers: { ...cors, "Content-Type": "application/json" },
+    });
+  }
 });

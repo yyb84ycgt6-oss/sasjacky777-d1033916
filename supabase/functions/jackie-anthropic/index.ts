@@ -1,27 +1,38 @@
 // Streaming chat via Anthropic Claude direct (paid).
-// Translates OpenAI-shape request into Anthropic Messages API + SSE.
+// Translates an OpenAI-shape request into the Messages API and its SSE back into
+// OpenAI-shape SSE, so the same client parser reads every provider.
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { gate } from "../_shared/entitlement.ts";
+import {
+  admit, corsHeaders, json, preflight, providerFailure, tooLarge,
+} from "../_shared/entitlement.ts";
+import { clampContext, normalizeMessages } from "../_shared/chatRequest.ts";
+import { buildSystemPrompt } from "../_shared/persona.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
-
-const ALLOWED = new Set([
-  "claude-3-5-sonnet-latest",
-  "claude-3-5-haiku-latest",
-  "claude-3-opus-latest",
-]);
-const DEFAULT_MODEL = "claude-3-5-haiku-latest";
+// The Claude 3.x ids this listed have been retired; every request to them
+// failed upstream and the /micro cascade walked past Anthropic entirely.
+const ALLOWED = new Set(["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"]);
+const DEFAULT_MODEL = "claude-opus-5";
 const SECRET = "ANTHROPIC_API_KEY";
 const BASE = "https://api.anthropic.com/v1/messages";
+const MAX_MESSAGES = 64;
+const MAX_MESSAGE_CHARS = 200_000;
+const MAX_SYSTEM_CHARS = 20_000;
+/** Streaming, so a generous ceiling costs nothing unless it is used; a low one truncates. */
+const MAX_TOKENS = 64_000;
 
-// Adapt Anthropic SSE ("content_block_delta") to OpenAI SSE deltas so the
-// unified client parser works unchanged.
+const enc = new TextEncoder();
+const frame = (obj: unknown) => enc.encode(`data: ${JSON.stringify(obj)}\n\n`);
+
+/**
+ * Anthropic SSE → OpenAI SSE.
+ *
+ * Only text deltas become content. Two things used to be dropped on the floor
+ * and are now surfaced as an in-stream error frame, which the client parser
+ * reports instead of saving a blank or half answer as if it were whole: an
+ * `error` event mid-stream, and a `refusal` stop reason.
+ */
 function anthropicToOpenAIStream(upstream: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
   const dec = new TextDecoder();
-  const enc = new TextEncoder();
   let buf = "";
   return new ReadableStream({
     async start(controller) {
@@ -38,17 +49,27 @@ function anthropicToOpenAIStream(upstream: ReadableStream<Uint8Array>): Readable
             if (!line.startsWith("data:")) continue;
             const payload = line.slice(5).trim();
             if (!payload) continue;
+            let j: Record<string, any>;
             try {
-              const j = JSON.parse(payload);
-              if (j.type === "content_block_delta" && j.delta?.type === "text_delta") {
-                const oai = { choices: [{ delta: { content: j.delta.text } }] };
-                controller.enqueue(enc.encode(`data: ${JSON.stringify(oai)}\n\n`));
-              } else if (j.type === "message_stop") {
-                controller.enqueue(enc.encode("data: [DONE]\n\n"));
-              }
-            } catch { /* partial */ }
+              j = JSON.parse(payload);
+            } catch {
+              continue;
+            }
+            if (j.type === "content_block_delta" && j.delta?.type === "text_delta") {
+              controller.enqueue(frame({ choices: [{ delta: { content: j.delta.text } }] }));
+            } else if (j.type === "message_delta" && j.delta?.stop_reason === "refusal") {
+              controller.enqueue(frame({ error: { message: "Claude declined this request." } }));
+            } else if (j.type === "message_delta" && j.delta?.stop_reason) {
+              controller.enqueue(frame({ choices: [{ delta: {}, finish_reason: j.delta.stop_reason }] }));
+            } else if (j.type === "error") {
+              controller.enqueue(frame({ error: { message: j.error?.message ?? "Anthropic stream error" } }));
+            } else if (j.type === "message_stop") {
+              controller.enqueue(enc.encode("data: [DONE]\n\n"));
+            }
           }
         }
+      } catch (e) {
+        controller.enqueue(frame({ error: { message: `Anthropic stream broke: ${(e as Error)?.message ?? e}` } }));
       } finally {
         controller.close();
       }
@@ -57,51 +78,63 @@ function anthropicToOpenAIStream(upstream: ReadableStream<Uint8Array>): Readable
 }
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
-  const un = await gate(req, "jackie-anthropic");
-  if (un) return un;
-
-  const key = Deno.env.get(SECRET);
-  if (!key) {
-    return new Response(JSON.stringify({
-      error: `${SECRET} not configured. Paste your Anthropic key at https://console.anthropic.com/settings/keys`,
-      needs_secret: SECRET,
-    }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-  }
+  if (req.method === "OPTIONS") return preflight();
+  if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
   try {
-    const { messages, model, system } = await req.json();
-    const selected = ALLOWED.has(model) ? model : DEFAULT_MODEL;
-    const body = {
-      model: selected,
-      max_tokens: 4096,
-      system: system || undefined,
-      messages: (messages as Array<{ role: string; content: string }>)
-        .filter((m) => m.role !== "system")
-        .map((m) => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content })),
-      stream: true,
-    };
+    // Configuration before quota (rule 5): most deployments have no key here.
+    const key = Deno.env.get(SECRET);
+    if (!key) {
+      return json({
+        error: `${SECRET} not configured. Paste your Anthropic key at https://console.anthropic.com/settings/keys`,
+        code: "PROVIDER_UNCONFIGURED",
+        needs_secret: SECRET,
+      }, 503);
+    }
+
+    const payload = await req.json().catch(() => null);
+    if (!payload || typeof payload !== "object") return json({ error: "Expected a JSON body" }, 400);
+    const { messages, model, system, context } = payload as Record<string, unknown>;
+
+    if (Array.isArray(messages) && messages.length > MAX_MESSAGES) return json({ error: "Too many messages" }, 400);
+    if (tooLarge(messages, MAX_MESSAGE_CHARS)) return json({ error: "Message payload too large" }, 413);
+    const verdict = normalizeMessages(messages);
+    if (!verdict.ok) return json({ error: verdict.reason }, 400);
+
+    const explicitSystem = typeof system === "string" ? system.trim() : "";
+    if (explicitSystem.length > MAX_SYSTEM_CHARS) return json({ error: "System prompt too large" }, 413);
+
+    const selected = typeof model === "string" && ALLOWED.has(model) ? model : DEFAULT_MODEL;
+    const admission = await admit(req, "jackie-anthropic", selected);
+    if (admission instanceof Response) return admission;
+
     const resp = await fetch(BASE, {
       method: "POST",
       headers: {
         "x-api-key": key,
         "anthropic-version": "2023-06-01",
+        // Server-side refusal fallbacks: when a safety classifier declines, the
+        // API retries on a model chosen by refusal category instead of failing.
+        "anthropic-beta": "server-side-fallback-2026-07-01",
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        model: selected,
+        max_tokens: MAX_TOKENS,
+        system: explicitSystem || buildSystemPrompt(clampContext(context)),
+        messages: verdict.messages,
+        fallbacks: "default",
+        stream: true,
+      }),
     });
-    if (!resp.ok || !resp.body) {
-      const text = await resp.text();
-      return new Response(JSON.stringify({ error: `Anthropic ${resp.status}: ${text}` }), {
-        status: resp.status, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    if (!resp.ok) return await providerFailure("jackie-anthropic", resp);
+    if (!resp.body) return json({ error: "Anthropic returned an empty response." }, 502);
+
     return new Response(anthropicToOpenAIStream(resp.body), {
-      headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
+      headers: { ...corsHeaders, "Content-Type": "text/event-stream", "Cache-Control": "no-cache, no-transform" },
     });
   } catch (e) {
-    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown" }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    console.error("jackie-anthropic: unexpected failure", e);
+    return json({ error: e instanceof Error ? e.message : "Unknown error" }, 500);
   }
 });

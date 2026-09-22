@@ -16,6 +16,8 @@ import {
   admit, allowlistFromEnv, corsHeaders, json, pickModel, preflight,
   providerFailure, tooLarge,
 } from "../_shared/entitlement.ts";
+import { clampContext, normalizeMessages } from "../_shared/chatRequest.ts";
+import { buildSystemPrompt } from "../_shared/persona.ts";
 
 const FUNCTION_NAME = "jackie-openrouter";
 const DEFAULT_MODEL = "meta-llama/llama-3.3-70b-instruct:free";
@@ -70,18 +72,26 @@ serve(async (req) => {
   if (tooLarge(messages, MAX_MESSAGE_CHARS)) {
     return json({ error: "Message payload too large" }, 413);
   }
+  // Roles and content checked, not forwarded as sent: a caller's own `system`
+  // turns and malformed entries stop here.
+  const verdict = normalizeMessages(messages);
+  if (!verdict.ok) return json({ error: verdict.reason }, 400);
 
   const system = typeof payload.system === "string" ? payload.system : "";
   if (system.length > MAX_SYSTEM_CHARS) return json({ error: "System prompt too large" }, 413);
 
-  const admission = await admit(req, FUNCTION_NAME, chosen.model);
-  if (admission instanceof Response) return admission;
-
+  // Key before quota (rule 5): an unconfigured provider is not a call, and the
+  // /micro cascade probes this one on every failure upstream of it.
   const key = Deno.env.get("OPENROUTER_API_KEY");
   if (!key) {
-    console.error(`${FUNCTION_NAME}: OPENROUTER_API_KEY not configured`);
-    return json({ error: "Provider unavailable", code: "PROVIDER_UNCONFIGURED" }, 503);
+    return json(
+      { error: "Provider unavailable", code: "PROVIDER_UNCONFIGURED", needs_secret: "OPENROUTER_API_KEY" },
+      503,
+    );
   }
+
+  const admission = await admit(req, FUNCTION_NAME, chosen.model);
+  if (admission instanceof Response) return admission;
 
   try {
     const resp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -94,7 +104,11 @@ serve(async (req) => {
       },
       body: JSON.stringify({
         model: chosen.model,
-        messages: [...(system ? [{ role: "system", content: system }] : []), ...messages],
+        // Jackie's persona when the caller brings no system prompt of its own (rule 6).
+        messages: [
+          { role: "system", content: system.trim() || buildSystemPrompt(clampContext(payload.context)) },
+          ...verdict.messages,
+        ],
         stream: true,
       }),
     });

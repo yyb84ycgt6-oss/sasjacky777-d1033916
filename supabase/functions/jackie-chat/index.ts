@@ -13,6 +13,8 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+const MAX_SYSTEM_CHARS = 20_000;
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -42,17 +44,15 @@ serve(async (req) => {
   }
 
   try {
-    const denied = await gate(req, "jackie-chat");
-    if (denied) return denied;
-
     const payload = await req.json().catch(() => null);
     if (!payload || typeof payload !== "object") {
       return json({ error: "Expected a JSON body" }, 400);
     }
-    const { messages, model, context } = payload as {
+    const { messages, model, context, system } = payload as {
       messages?: unknown;
       model?: unknown;
       context?: unknown;
+      system?: unknown;
     };
 
     const verdict = normalizeMessages(messages);
@@ -66,19 +66,35 @@ serve(async (req) => {
         {
           error: "Jackie has no model key",
           detail: "Set the LOVABLE_API_KEY secret on this project, then try again.",
+          code: "PROVIDER_UNCONFIGURED",
+          needs_secret: "LOVABLE_API_KEY",
         },
         503,
       );
     }
 
     const { model: selectedModel } = resolveModel(model);
+
+    // Charged last, after everything that could refuse for free: a malformed
+    // body or a missing key is not a call, and billing it would spend the
+    // caller's allowance on the chain's own bookkeeping (rule 5).
+    const denied = await gate(req, "jackie-chat", selectedModel);
+    if (denied) return denied;
     // GPT-5.6 on chat completions runs with reasoning on by default and rejects
     // tool-bearing requests unless effort is explicitly disabled.
     const extraFields = selectedModel.startsWith("openai/gpt-5.6")
       ? { reasoning_effort: "none" }
       : {};
 
-    const systemPrompt = buildSystemPrompt(clampContext(context));
+    // An explicit system prompt is an Agent Lab agent's whole identity. This
+    // function used to drop it and answer every agent as Jackie, so "Scout"
+    // and "Auditor" were the same assistant under different names. Without
+    // one, Jackie's persona is built exactly as before.
+    const explicitSystem = typeof system === "string" ? system.trim() : "";
+    if (explicitSystem.length > MAX_SYSTEM_CHARS) {
+      return json({ error: "System prompt too large" }, 413);
+    }
+    const systemPrompt = explicitSystem || buildSystemPrompt(clampContext(context));
 
     // A gateway that accepts the connection and then never answers leaves the
     // browser holding an open stream with no content, which reads as "Jackie is
