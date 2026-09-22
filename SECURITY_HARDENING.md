@@ -117,6 +117,40 @@ migration SQL says otherwise.
   predicates added here are defence in depth, and worth having on an endpoint an
   agent will drive with every id it has seen — but this was not a `🔴`.
 
+## Second pass (September 22)
+
+A review of `SAS-JACKY` at `323e71f` found that authentication was still being
+treated as authorization in the places where it mattered most, because anyone
+can get a session on this app.
+
+- **The demo was one shared account** whose password was in the public bundle.
+  Every demo visitor read every other's chats, memory and vault; anyone could
+  change the password; `jackie.dev` is not our domain. It is now
+  `signInAnonymously()` — one private user per visitor. **To do by hand:**
+  enable anonymous sign-ins (Cloud → Users → Auth settings), then delete the
+  old `demo@jackie.dev` user, whose password is still in git history.
+- **Owner-only engines.** `jacky-proxy`, `jackie-bionic`, `jackie-ollama` and
+  `github-sync` reach the owner's rig, GPU and GitHub credential. They now
+  require the `owner` role (`requireOwnerUser` / `admitOwner`), checked before
+  quota. `github-sync` also reads only repositories in `GITHUB_SYNC_REPOS`,
+  instead of any `owner`/`repo` the caller named.
+- **Five functions spent AI credit unmetered**: `gunit-chat`,
+  `gunit-agent-cycle` (four calls per cycle, now four units), `gunit-bot-gen`,
+  `pod-fold`, `pod-search`. All go through `consumeQuota` now.
+- **Quota charged before configuration** in 20 functions (rule 5). Every one
+  now checks its own key first; `jacky-proxy` charges only for `ask` paths, so
+  JackyLive's telemetry polling no longer spends the per-minute allowance that
+  the chat needs. The claim above that `jackie-chat` checked first is now true.
+- **The quota counter raced.** Without an override row, `consume_provider_quota`
+  took no lock; 40 concurrent calls against a limit of 20 admitted 24 on a real
+  Postgres. `20260922120000_provider_quota_lock.sql` adds a per-user advisory
+  lock; the same test admits exactly 20.
+- **Ten providers shared one set of bugs**, now one shared handler
+  (`_shared/openaiCompat.ts`): messages validated (no caller `system` turns),
+  Jackie's persona when no system prompt is given, upstream bodies kept in the
+  logs, and a revoked provider key reported as `502 PROVIDER_KEY_REFUSED`
+  rather than a `401` that reads as "signed out".
+
 ## Still open
 
 - **Generated Supabase types are behind the schema.** `user_roles` and
@@ -131,9 +165,17 @@ migration SQL says otherwise.
   `20260807073000`. `scripts/db-authz-test.sh` tolerates both by name. A fresh
   environment cannot be provisioned from `supabase/migrations/` until they are
   reconciled — worth fixing before anyone needs a preview database.
-- **Untouched, from the review:** route-level lazy loading, the ~250 MB of model
+- **Rig endpoints behind the platform JWT check.** `router-poll` and
+  `router-result` authenticate a rig by `router_id` + `secret` in the body, and
+  `mcp` verifies its own OAuth tokens — but only `api-key-auth` has
+  `verify_jwt = false` in `supabase/config.toml`, so the platform likely refuses
+  a rig's poll (and the MCP discovery document) before the function runs.
+  Deliberately left for the owner to decide, since it turns a platform check off.
+- **Untouched, from the review:** the ~250 MB of model
   assets, incremental TypeScript strictness, rejecting `sb_secret_` keys in
   browser builds, `/hub` being explicitly rather than accidentally public, and
   the TonConnect wallet TODO. All real; none of them are authorization.
+- **Two dependency advisories need major upgrades**: vite (dev server only,
+  5 → 8) and react-router-dom (open-redirect advisories, 6 → 7).
 - **CORS is still `*`.** Ranked low deliberately: every endpoint requires a
   bearer token, and another origin does not obtain one by being allowed to ask.

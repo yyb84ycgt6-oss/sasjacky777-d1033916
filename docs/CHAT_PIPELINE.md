@@ -44,6 +44,17 @@ offers a model the allowlist refuses is a failure that looks exactly like the
 engine being down. An unconfigured engine is detected before admission, so
 probing a chain link that is not set up costs the caller nothing.
 
+The first three links belong to the owner — their rig, their GPU — so they
+answer only an account holding the `owner` role. For anyone else they refuse
+with `OWNER_ONLY` before quota is spent, and the walk moves on to the cloud.
+
+A link that breaks *after* streaming some of an answer is handled apart from
+one that never started. The next engine begins a fresh answer, so the router
+calls `onReset` first and the composer clears the half answer — otherwise the
+two were saved as one reply ("The capital of France is Paris is the capital of
+France."). A stream that stops with neither `[DONE]` nor a finish reason is
+reported as cut off rather than saved as complete.
+
 Two things, and only two, stop the walk:
 
 - **the user stopped the answer** — not a failure, and retrying it somewhere

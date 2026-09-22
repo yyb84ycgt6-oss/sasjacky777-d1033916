@@ -14,7 +14,7 @@ Not one program. Four trees that ship together:
 | Path | What it is | Language |
 | --- | --- | --- |
 | `src/` | The web app — Jackie's chat, memory, vault, pods, game, Eru. 1,000+ files. | TypeScript + React + Tailwind + shadcn/ui |
-| `supabase/functions/` | 40 edge functions and their shared modules. | TypeScript (Deno) |
+| `supabase/functions/` | 39 edge functions and their shared modules. | TypeScript (Deno) |
 | `jackierouter/`, `Jackie/`, `command_station/` | The rig-side engine: predictive routing, the agent runtime, model-library tooling. | Python |
 | `context-condenser/` | Anchored dehydration and real rehydration. Its own package. | TypeScript (node:test) |
 
@@ -30,14 +30,14 @@ adding a key, because anything that lands in `.env` ships in the bundle.
 ```bash
 npm install                  # also installs the git hooks (prepare script)
 
-npx vitest run               # app tests — 506, the ones you will run most
+npx vitest run               # app tests — 650+, the ones you will run most
 npx vitest run src/test/X    # one file
 npm run lint                 # eslint — warnings are fine, errors are not
 npx tsc --noEmit -p tsconfig.app.json    # typecheck
 npm run build                # vite build, ~60s
 
-python3 -m pytest            # Python — 181, reads pyproject testpaths
-cd context-condenser && npm test         # 42, node:test
+python3 -m pytest            # Python — 330+, reads pyproject testpaths
+cd context-condenser && npm test         # 44, node:test
 
 npm run dev                  # vite on :8080
 npm run smoke                # route smoke check
@@ -83,6 +83,12 @@ fetch`, naming neither the cause nor a fix.
 
 `src/test/chat-request.test.ts` walks every function and fails the build if this
 slips. A gate must **return a verdict, never throw**.
+
+Signed in is not the same as *owner*: anyone can sign in to this app (email,
+Google, the anonymous demo). Functions that reach the owner's own hardware or
+credentials — `jacky-proxy`, `jackie-bionic`, `jackie-ollama`, `github-sync` —
+go through `requireOwnerUser` / `admitOwner`, which check the `owner` role
+before any quota is spent. A new function like them does the same.
 
 ### 3. Every response carries CORS headers. Including the failures.
 
@@ -173,9 +179,10 @@ src/lib/jackie-*.ts           memory, tasks, tags, files, attachments, archive
 src/components/ui/            shadcn primitives
 src/test/                     vitest
 
-supabase/functions/_shared/   authGate, entitlement, chatRequest, persona, modelPolicy
+supabase/functions/_shared/   authGate, entitlement, chatRequest, persona, modelPolicy,
+                              openaiCompat (the one handler behind ten providers)
 supabase/functions/jackie-*   the providers and engines
-supabase/migrations/          33 migrations; RLS lives here, not in function code
+supabase/migrations/          35 migrations; RLS lives here, not in function code
 
 jackierouter/                 predictive, hardware-aware routing (152 tests)
 Jackie/core/engine/           the agent runtime — registry, pods, orchestrator, graph

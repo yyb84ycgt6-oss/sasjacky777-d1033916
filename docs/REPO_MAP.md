@@ -45,9 +45,9 @@ index is expert in them. See [INDEX_PILL.md](INDEX_PILL.md).
 They do not overlap and none of them sees the others' files:
 
 ```
-npx vitest run          # src/**  — 506 tests
-python3 -m pytest       # tests/ + command_station/tools/ — 164 tests
-cd context-condenser && npm test   # 42 tests
+npx vitest run          # src/**  — 650+ tests
+python3 -m pytest       # tests/ + command_station/tools/ — 330+ tests
+cd context-condenser && npm test   # 44 tests
 npx playwright test     # e2e/ — browser, needs a built app
 ```
 
