@@ -19,7 +19,7 @@
  */
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import {
-  admit, allowlistFromEnv, corsHeaders, json, pickModel, preflight, tooLarge,
+  admitOwner, allowlistFromEnv, corsHeaders, json, pickModel, preflight, tooLarge,
 } from "../_shared/entitlement.ts";
 import { clampContext, normalizeMessages } from "../_shared/chatRequest.ts";
 import { buildSystemPrompt } from "../_shared/persona.ts";
@@ -97,7 +97,9 @@ serve(async (req) => {
       );
     }
 
-    const admission = await admit(req, FUNCTION_NAME, chosen.model);
+    // Bionic serves from the operator's own hardware, so it answers the owner only.
+    // Any account can sign in to this app; that must not make it anyone's GPU.
+    const admission = await admitOwner(req, FUNCTION_NAME, chosen.model);
     if (admission instanceof Response) return admission;
 
     const selected = chosen.model;

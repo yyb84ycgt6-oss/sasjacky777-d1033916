@@ -108,8 +108,11 @@ async function tryOne(
       ? `Missing ${err.needs_secret}`
       : err?.error || `HTTP ${resp.status}`;
     // Retry on missing secret, rate limit, credit, or transient upstream
+    // OWNER_ONLY: the owner's own engines (Bionic, Ollama) refuse everyone
+    // else. That is this account's normal state, not a fault — move on.
     const retryable =
       !!err?.needs_secret ||
+      err?.code === "OWNER_ONLY" ||
       resp.status === 429 ||
       resp.status === 402 ||
       resp.status >= 500 ||

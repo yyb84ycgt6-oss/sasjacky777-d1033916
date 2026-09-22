@@ -13,7 +13,7 @@
 //   { "path": "ask", "method": "POST", "body": { "prompt": "…", "task_type": "general" } }
 // Returns: { ok, status, data } — data is the upstream JSON.
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { gate } from "../_shared/entitlement.ts";
+import { consumeQuota, requireOwnerUser } from "../_shared/entitlement.ts";
 import { checkJackyPath } from "../_shared/jackyPath.ts";
 
 const corsHeaders = {
@@ -30,21 +30,32 @@ function json(body: unknown, status = 200): Response {
 }
 
 const ALLOWED = new Set(["GET", "POST"]);
+const INFERENCE_PATH = /^(ask|squads\/[^/]+\/ask)$/;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
-  const un = await gate(req, "jacky-proxy");
-  if (un) return un;
-
+  // Configuration before anything else. Jacky is the first link of the chat's
+  // default chain, so an unset JACKY_API_BASE is the common case, and it must
+  // cost the caller nothing — `needs_secret` tells the router to move on.
   const base = (Deno.env.get("JACKY_API_BASE") || "").replace(/\/+$/, "");
   const token = Deno.env.get("JACKY_API_TOKEN") || "";
   if (!base) {
     return json(
-      { error: "jacky link not configured", detail: "Set the JACKY_API_BASE secret to your jacky host root." },
+      {
+        error: "jacky link not configured",
+        detail: "Set the JACKY_API_BASE secret to your jacky host root.",
+        code: "PROVIDER_UNCONFIGURED",
+        needs_secret: "JACKY_API_BASE",
+      },
       503,
     );
   }
+
+  // The rig, its GPU controls and the server's token belong to one person.
+  // Signed in is not enough: this app lets anyone sign in.
+  const auth = await requireOwnerUser(req);
+  if (auth instanceof Response) return auth;
 
   const payload = await req.json().catch(() => ({} as Record<string, unknown>));
 
@@ -57,6 +68,15 @@ serve(async (req) => {
   const rawPath = verdict.path!;
   const method = String((payload as any).method || "GET").toUpperCase();
   if (!ALLOWED.has(method)) return json({ error: `method ${method} not allowed` }, 405);
+
+  // Only the calls that make the rig think spend quota. `status` and
+  // `assessment` are telemetry that JackyLive polls every few seconds; charging
+  // for them used the whole per-minute allowance on polling alone and left the
+  // chat rate-limited for as long as that page was open.
+  if (INFERENCE_PATH.test(rawPath)) {
+    const denied = await consumeQuota({ userId: auth.userId, functionName: "jacky-proxy" });
+    if (denied) return denied;
+  }
 
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers["Authorization"] = `Bearer ${token}`;

@@ -106,11 +106,18 @@ frequent event rather than an error.
 | `JACKY_API_BASE` | `jacky-proxy` | Root of the rig's Flask engine. |
 | `JACKY_API_TOKEN` | optional | Bearer token attached to proxied calls. |
 
+All three engines — and `github-sync` — answer **only an account holding the
+`owner` role** (granted by `core-claim` to an allowlisted, verified address).
+Anyone can sign in to this app; signing in does not make the rig, the GPU or the
+GitHub credential theirs. A non-owner gets `403 OWNER_ONLY`, checked before
+quota, so the chat router moves past these engines at no cost.
+
 ### Everything else
 
 | Secret | Used by | Notes |
 | --- | --- | --- |
 | `GITHUB_API_KEY` | `github-sync` | Read-only repo access through the connector gateway. |
+| `GITHUB_SYNC_REPOS` | optional | Comma-separated `owner/repo` list `github-sync` may read. Defaults to `93jessycollin93-del/sas-jacky`; any other repository is refused, however the request names it. |
 | `TELEGRAM_API_KEY` | `telegram-validate` | The bot token. Validates `initData` HMAC signatures — the token *is* the signing key, so a leak forges logins. |
 | `GEMINI_ENTERPRISE_API_KEY` | `gemini-engine` | With `_PROJECT_ID`, `_LOCATION` and `_ENGINE_ID` below. |
 | `GEMINI_ENTERPRISE_PROJECT_ID` | `gemini-engine` | |

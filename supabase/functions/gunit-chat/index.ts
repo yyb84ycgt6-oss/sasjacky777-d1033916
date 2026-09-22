@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.58.0";
+import { consumeQuota } from "../_shared/entitlement.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -37,6 +38,15 @@ serve(async (req) => {
       });
     }
 
+    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
+
+    // Metered like every other function that spends the project's AI credit.
+    // This one was missed when the rest were gated, so any account could loop on
+    // it without limit — and an empty balance takes the main chat down with it.
+    const denied = await consumeQuota({ userId: user.id, functionName: "gunit-chat" });
+    if (denied) return denied;
+
     // Save user message
     await supabase.from("gunit_memory").insert({
       user_id: user.id, role: "user", content: message.trim(),
@@ -53,9 +63,6 @@ serve(async (req) => {
     const contextMessages = (history || []).reverse().map((m: any) => ({
       role: m.role, content: m.content,
     }));
-
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -130,6 +137,11 @@ serve(async (req) => {
               const content = parsed.choices?.[0]?.delta?.content;
               if (content) {
                 fullResponse += content;
+                controller.enqueue(encoder.encode(`data: ${json}\n\n`));
+              } else if (parsed.error || parsed.choices?.[0]?.finish_reason) {
+                // Relayed, not dropped: an error inside a 200 stream is the
+                // only way the browser learns the answer failed, and a finish
+                // reason is how it knows a short answer was really complete.
                 controller.enqueue(encoder.encode(`data: ${json}\n\n`));
               }
             } catch { /* partial */ }

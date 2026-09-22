@@ -21,7 +21,7 @@
  */
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import {
-  admit, allowlistFromEnv, corsHeaders, json, pickModel, preflight, providerFailure, tooLarge,
+  admitOwner, allowlistFromEnv, corsHeaders, json, pickModel, preflight, providerFailure, tooLarge,
 } from "../_shared/entitlement.ts";
 import { clampContext, normalizeMessages } from "../_shared/chatRequest.ts";
 import { buildSystemPrompt } from "../_shared/persona.ts";
@@ -31,7 +31,8 @@ const DEFAULT_MODEL = "llama3.2:3b";
 // The default set covers the small models that are safe to load anywhere plus
 // the ones the chat's own engine picker offers. A picker that offers a model
 // the allowlist refuses is a guaranteed failure the user cannot diagnose, so
-// the two lists are kept in step; `src/lib/jackie-engines.ts` is the other end.
+// the lists are kept in step; `src/lib/jackie-engines.ts` and
+// `src/lib/jackie-providers.ts` are the other ends.
 const ALLOWED_MODELS = allowlistFromEnv("OLLAMA_MODEL_ALLOWLIST", [
   "llama3.2:3b",
   "llama3.2:1b",
@@ -42,6 +43,11 @@ const ALLOWED_MODELS = allowlistFromEnv("OLLAMA_MODEL_ALLOWLIST", [
   "deepseek-r1:32b",
   "mistral:7b",
   "phi3:mini",
+  // Offered by the /micro picker (`src/lib/jackie-providers.ts`);
+  // `src/test/provider-allowlists.test.ts` holds the two lists together.
+  "llama3.2-vision:11b",
+  "codellama:34b",
+  "gemma2:9b",
 ]);
 const MAX_MESSAGES = 64;
 const MAX_MESSAGE_CHARS = 100_000;
@@ -124,7 +130,9 @@ serve(async (req) => {
     );
   }
 
-  const admission = await admit(req, FUNCTION_NAME, chosen.model);
+  // Ollama runs on the operator's own GPU, so it answers the owner only.
+  // Any account can sign in to this app; that must not make it anyone's GPU.
+  const admission = await admitOwner(req, FUNCTION_NAME, chosen.model);
   if (admission instanceof Response) return admission;
 
   try {

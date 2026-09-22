@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.58.0";
+import { consumeQuota } from "../_shared/entitlement.ts";
 
 // These headers are defined here rather than imported from
 // `@supabase/supabase-js/cors`, the way the other thirty-odd functions define
@@ -22,7 +23,7 @@ Deno.serve(async (req) => {
     const url = Deno.env.get('SUPABASE_URL')!;
     const anon = Deno.env.get('SUPABASE_ANON_KEY')!;
     const service = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const lovableKey = Deno.env.get('LOVABLE_API_KEY')!;
+    const lovableKey = Deno.env.get('LOVABLE_API_KEY');
 
     const userClient = createClient(url, anon, { global: { headers: { Authorization: auth } } });
     const { data: userData } = await userClient.auth.getUser();
@@ -32,6 +33,15 @@ Deno.serve(async (req) => {
     const query = String(body?.query ?? '').slice(0, 5000);
     const limit = Math.min(50, Math.max(1, Number(body?.limit ?? 10)));
     if (!query) return new Response(JSON.stringify({ error: 'query required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+
+    if (!lovableKey) {
+      return new Response(JSON.stringify({ error: 'LOVABLE_API_KEY not configured', needs_secret: 'LOVABLE_API_KEY' }), { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+    // Metered like every other function that spends the project's AI credit.
+    // This one was missed when the rest were gated, so any account could loop on
+    // it without limit — and an empty balance takes the main chat down with it.
+    const denied = await consumeQuota({ userId: userData.user.id, functionName: 'pod-search' });
+    if (denied) return denied;
 
     const embRes = await fetch('https://ai.gateway.lovable.dev/v1/embeddings', {
       method: 'POST',

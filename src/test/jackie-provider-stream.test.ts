@@ -111,3 +111,29 @@ describe("talking to a provider function", () => {
     expect(c.errors[0]).toMatch(/signed out/i);
   });
 });
+
+describe("the owner's own engines", () => {
+  beforeEach(() => vi.restoreAllMocks());
+  afterEach(() => vi.restoreAllMocks());
+
+  it("moves past an engine that answers only its owner, instead of stopping there", async () => {
+    vi.spyOn(edge, "callEdgeFunction")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: "This engine belongs to the project owner.", code: "OWNER_ONLY" }), {
+          status: 403,
+        }),
+      )
+      .mockResolvedValue(sse(token("from the next one"), "data: [DONE]\n\n"));
+    const c = collect();
+    await streamProviderChat({
+      provider: "bionic",
+      model: "bonsai-1.7b",
+      messages: [{ role: "user", content: "hi" }],
+      fallback: true,
+      ...c.handlers,
+    });
+
+    expect(c.errors).toEqual([]);
+    expect(c.deltas.join("")).toBe("from the next one");
+  });
+});

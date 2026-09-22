@@ -19,7 +19,11 @@ import { chooseModel, exceedsSize, parseAllowlist } from "./modelPolicy.ts";
 
 export const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  // The x-supabase-client-* headers are sent by newer supabase-js builds on
+  // `functions.invoke`. A preflight that does not allow one fails the whole
+  // call as "Failed to fetch", so they are listed rather than discovered.
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -177,7 +181,12 @@ export async function consumeQuota(opts: QuotaOptions): Promise<Response | null>
 
   if (reason === "rate_limited") {
     return json(
-      { error: "Too many requests", code: "RATE_LIMITED", retry_after: retryAfter },
+      {
+        error: "Too many requests",
+        detail: `Your per-minute AI allowance is used up. Try again in ${retryAfter} seconds.`,
+        code: "RATE_LIMITED",
+        retry_after: retryAfter,
+      },
       429,
       { "Retry-After": String(retryAfter) },
     );
@@ -186,7 +195,14 @@ export async function consumeQuota(opts: QuotaOptions): Promise<Response | null>
     return json({ error: "Provider access is disabled for this account", code: "QUOTA_DISABLED" }, 403);
   }
   return json(
-    { error: "Quota exceeded", code: "QUOTA_EXCEEDED", retry_after: retryAfter },
+    {
+      // Named apart from the per-minute limit: "wait a moment" is the wrong
+      // advice for a daily allowance that frees up over hours.
+      error: "Daily AI quota used up",
+      detail: "Your daily AI allowance is used up. It frees up gradually over the next 24 hours.",
+      code: "QUOTA_EXCEEDED",
+      retry_after: retryAfter,
+    },
     429,
     { "Retry-After": String(retryAfter) },
   );
@@ -217,23 +233,105 @@ export async function providerFailure(context: string, upstream: Response): Prom
   const detail = await upstream.text().catch(() => "<unreadable>");
   console.error(`${context}: upstream ${upstream.status}`, detail.slice(0, 1000));
 
-  const code = upstream.status === 429
+  // The provider refusing *our* key is a server-side configuration fault. Passed
+  // through as 401 it reads as "you are signed out" — the one diagnosis that is
+  // certainly wrong — so it becomes a 502 that names the key.
+  const keyRefused = upstream.status === 401 || upstream.status === 403;
+
+  const code = keyRefused
+    ? "PROVIDER_KEY_REFUSED"
+    : upstream.status === 429
     ? "PROVIDER_RATE_LIMITED"
+    : upstream.status === 402
+    ? "PROVIDER_OUT_OF_CREDIT"
     : upstream.status === 404
     ? "MODEL_UNAVAILABLE"
     : upstream.status >= 500
     ? "PROVIDER_ERROR"
     : "INVALID_REQUEST";
 
+  const error = keyRefused
+    ? "The provider refused this project's API key. Check the secret in Cloud → Secrets."
+    : upstream.status === 402
+    ? "The provider account is out of credit."
+    : upstream.status === 429
+    ? "The provider is rate-limiting this project. Try again shortly, or pick another engine."
+    : "Provider request failed";
+
   // 4xx from the provider is usually our request; surface it as 502 only when
   // the provider itself broke, so callers can tell "retry" from "fix this".
-  const status = upstream.status >= 500 ? 502 : upstream.status;
-  return json({ error: "Provider request failed", code, provider_status: upstream.status }, status);
+  const status = keyRefused || upstream.status >= 500 ? 502 : upstream.status;
+  return json({ error, code, provider_status: upstream.status }, status);
 }
 
 /** Caps a JSON-serialisable payload by serialised size. */
 export function tooLarge(value: unknown, maxChars: number): boolean {
   return exceedsSize(value, maxChars);
+}
+
+/**
+ * Refuses anyone who does not hold the 'owner' role.
+ *
+ * Signing in proves who someone is, and this app lets anyone sign in: email
+ * sign-up, Google, and a demo button. Some functions reach things that belong
+ * to one person — the rig behind `jacky-proxy`, the GPU behind Bionic and
+ * Ollama, the GitHub credential behind `github-sync` — and treating "signed
+ * in" as "is the owner" handed all of them to every account. The role is the
+ * one `core-claim` grants to allowlisted, verified addresses, read here with
+ * the service role so no policy on `user_roles` can widen it.
+ *
+ * Checked before quota, so a refusal costs the caller nothing — the chat router
+ * probes these engines on every message and a non-owner is a normal case.
+ */
+export async function requireOwner(userId: string): Promise<Response | null> {
+  let admin;
+  try {
+    admin = adminClient();
+  } catch (e) {
+    console.error("entitlement: cannot build admin client for owner check", e);
+    return json({ error: "Service unavailable", code: "MISCONFIGURED" }, 503);
+  }
+  const { data, error } = await admin
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", userId)
+    .eq("role", "owner")
+    .maybeSingle();
+  if (error) {
+    console.error("entitlement: owner lookup failed", error);
+    return json({ error: "Authorization service unavailable", code: "OWNER_CHECK_FAILED" }, 503);
+  }
+  if (!data) {
+    return json(
+      {
+        error: "This engine belongs to the project owner.",
+        detail: "Only an account holding the owner role can use it. The owner claims it once through core-claim.",
+        code: "OWNER_ONLY",
+      },
+      403,
+    );
+  }
+  return null;
+}
+
+/** requireUser + requireOwner, without spending quota. */
+export async function requireOwnerUser(req: Request): Promise<{ userId: string } | Response> {
+  const auth = await requireUser(req);
+  if (auth instanceof Response) return auth;
+  const denied = await requireOwner(auth.userId);
+  return denied ?? auth;
+}
+
+/** requireOwnerUser + consumeQuota: an owner-only call that spends a unit. */
+export async function admitOwner(
+  req: Request,
+  functionName: string,
+  model?: string | null,
+): Promise<{ userId: string } | Response> {
+  const auth = await requireOwnerUser(req);
+  if (auth instanceof Response) return auth;
+  const denied = await consumeQuota({ userId: auth.userId, functionName, model });
+  return denied ?? auth;
 }
 
 /**

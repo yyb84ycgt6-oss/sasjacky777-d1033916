@@ -1,4 +1,4 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.58.0";
+import { requireOwnerUser } from "../_shared/entitlement.ts";
 
 // These headers are defined here rather than imported from
 // `@supabase/supabase-js/cors`, the way the other thirty-odd functions define
@@ -16,6 +16,17 @@ const corsHeaders = {
 const GATEWAY_URL = 'https://connector-gateway.lovable.dev/github';
 
 type Action = 'overview' | 'file' | 'tree';
+
+const DEFAULT_REPO = '93jessycollin93-del/sas-jacky';
+
+/** Repositories this function may read, from GITHUB_SYNC_REPOS (comma-separated owner/repo). */
+function allowedRepos(): string[] {
+  const listed = (Deno.env.get('GITHUB_SYNC_REPOS') ?? '')
+    .split(',')
+    .map((r) => r.trim().toLowerCase())
+    .filter((r) => /^[\w.-]+\/[\w.-]+$/.test(r));
+  return listed.length > 0 ? listed : [DEFAULT_REPO];
+}
 
 async function gh(path: string) {
   const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
@@ -41,28 +52,22 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   try {
-    // Require an authenticated app user — this proxies workspace GitHub credentials.
-    const authHeader = req.headers.get('Authorization') ?? '';
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_ANON_KEY')!,
-      { global: { headers: { Authorization: authHeader } } },
-    );
-    const { data: userData } = await supabase.auth.getUser();
-    if (!userData?.user) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
+    // This proxies the workspace's GitHub credential, which can read private
+    // repositories. Being signed in is not enough — anyone can sign in to this
+    // app — so it answers the owner only, and only about repositories the
+    // server has been told to expose. A caller-chosen owner/repo turned the
+    // credential into a reader for anything it could see.
+    const auth = await requireOwnerUser(req);
+    if (auth instanceof Response) return auth;
 
     const body = await req.json().catch(() => ({}));
     const action: Action = body.action ?? 'overview';
-    const owner = String(body.owner ?? '93jessycollin93-del');
-    const repo = String(body.repo ?? 'sas-jacky');
-    if (!/^[\w.-]+$/.test(owner) || !/^[\w.-]+$/.test(repo)) {
-      return new Response(JSON.stringify({ error: 'Invalid owner/repo' }), {
-        status: 400,
+    const allowed = allowedRepos();
+    const owner = String(body.owner ?? allowed[0].split('/')[0]);
+    const repo = String(body.repo ?? allowed[0].split('/')[1]);
+    if (!allowed.includes(`${owner}/${repo}`.toLowerCase())) {
+      return new Response(JSON.stringify({ error: 'Repository not allowed', allowed }), {
+        status: 403,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }

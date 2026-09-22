@@ -7,8 +7,27 @@ import { toast } from "sonner";
 
 type AuthView = "login" | "signup" | "forgot" | "reset";
 
-const DEMO_EMAIL = "demo@jackie.dev";
-const DEMO_PASSWORD = "J4ck!3_D3m0#2026xQ";
+/**
+ * The demo is a private anonymous session, one per visitor.
+ *
+ * It used to be one shared account whose password sat in this file, and so in
+ * the public bundle. Every demo visitor was the same user and could read every
+ * other visitor's chats, memory and vault; anyone could change the password
+ * and break the demo for everyone; and `jackie.dev` is not a domain this
+ * project controls, so its owner received the account's reset emails.
+ * Anonymous sign-in gives each visitor their own user id, so row-level security
+ * separates them exactly as it separates real accounts.
+ */
+async function startDemoSession(): Promise<void> {
+  const { error } = await supabase.auth.signInAnonymously();
+  if (!error) return;
+  // Named, because this one is a project setting the owner can switch on in a
+  // minute, and a bare "failed" sends them looking everywhere else.
+  if (/anonymous sign-ins are disabled/i.test(error.message)) {
+    throw new Error("The demo needs anonymous sign-ins enabled (Cloud → Users → Auth settings).");
+  }
+  throw error;
+}
 
 const Auth = () => {
   const navigate = useNavigate();
@@ -236,28 +255,8 @@ const Auth = () => {
               <button
                 onClick={async () => {
                   setLoading(true);
-                  setEmail(DEMO_EMAIL);
-                  setPassword(DEMO_PASSWORD);
                   try {
-                    // Try sign in first, if fails create the demo account then sign in
-                    const { error } = await supabase.auth.signInWithPassword({
-                      email: DEMO_EMAIL,
-                      password: DEMO_PASSWORD,
-                    });
-                    if (error) {
-                      // Create demo account
-                      const { error: signUpErr } = await supabase.auth.signUp({
-                        email: DEMO_EMAIL,
-                        password: DEMO_PASSWORD,
-                      });
-                      if (signUpErr) throw signUpErr;
-                      // Try login again
-                      const { error: retryErr } = await supabase.auth.signInWithPassword({
-                        email: DEMO_EMAIL,
-                        password: DEMO_PASSWORD,
-                      });
-                      if (retryErr) throw retryErr;
-                    }
+                    await startDemoSession();
                     toast.success("Welcome, demo user!");
                   } catch (err: any) {
                     toast.error(err.message || "Demo login failed.");
