@@ -331,3 +331,48 @@ describe("saying where the answer came from", () => {
     expect(c.routes).toEqual(["jacky", "bionic"]);
   });
 });
+
+describe("an engine that breaks partway through an answer", () => {
+  beforeEach(() => vi.restoreAllMocks());
+  afterEach(() => vi.restoreAllMocks());
+
+  const halfThenError = () =>
+    sse(token("The capital of France is "), `data: ${JSON.stringify({ error: { message: "model went away" } })}\n\n`);
+
+  it("clears the half answer before the next engine starts over", async () => {
+    vi.spyOn(edge, "callEdgeFunction")
+      .mockResolvedValueOnce(refusal(503, { error: "jacky link not configured" }))
+      .mockResolvedValueOnce(halfThenError())
+      .mockResolvedValueOnce(sse(token("Paris is the capital of France."), "data: [DONE]\n\n"));
+    const c = collect();
+    let shown = "";
+    await routeChat({
+      messages: ask,
+      engine: "jacky",
+      ...c.handlers,
+      onDelta: (t) => {
+        shown += t;
+      },
+      onReset: () => {
+        shown = "";
+      },
+    });
+
+    expect(shown).toBe("Paris is the capital of France.");
+    expect(c.result).toMatchObject({ engine: "ollama", fellBackFrom: ["jacky", "bionic"] });
+  });
+
+  it("stops rather than splicing when the caller cannot clear the screen", async () => {
+    const call = vi
+      .spyOn(edge, "callEdgeFunction")
+      .mockResolvedValueOnce(halfThenError())
+      .mockResolvedValueOnce(sse(token("a whole other answer"), "data: [DONE]\n\n"));
+    const c = collect();
+    await routeChat({ messages: ask, engine: "bionic", ...c.handlers });
+
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(c.text).toBe("The capital of France is ");
+    expect(c.result).toBeNull();
+    expect(c.errors[0]).toMatch(/broke off partway/);
+  });
+});

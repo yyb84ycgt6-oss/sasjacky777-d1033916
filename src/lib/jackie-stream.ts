@@ -49,7 +49,7 @@ export function isKnownModel(id: unknown): id is JackieModelId {
  * `finish_reason` like `content_filter` on the choice and no content at all.
  * All three used to be silently discarded.
  */
-function readFrame(parsed: unknown): { content?: string; error?: string } {
+function readFrame(parsed: unknown): { content?: string; error?: string; finished?: boolean } {
   if (!parsed || typeof parsed !== "object") return {};
   const frame = parsed as {
     error?: unknown;
@@ -70,7 +70,11 @@ function readFrame(parsed: unknown): { content?: string; error?: string } {
     return { error: "The model stopped: that request tripped its content filter." };
   }
 
-  return typeof content === "string" && content.length > 0 ? { content } : {};
+  // Any other finish reason ("stop", "length", "end_turn", …) means the model
+  // closed the answer itself, which is what separates a finished stream from
+  // one that was cut off underneath it.
+  const finished = typeof finish === "string" && finish.length > 0;
+  return typeof content === "string" && content.length > 0 ? { content, finished } : { finished };
 }
 
 export interface StreamChatOptions {
@@ -125,15 +129,20 @@ export async function streamSse({
       // person can act on — a missing key, a refused key, the gateway's own
       // words. Showing only `error` threw that away.
       const detail = typeof errorData?.detail === "string" ? errorData.detail : "";
+      // A used-up daily allowance and a per-minute burst are both 429s, and
+      // "wait a moment" is right for only one of them.
       const base =
-        resp.status === 429
+        errorData?.code === "QUOTA_EXCEEDED"
+          ? "Daily AI quota used up. It frees up gradually over the next 24 hours."
+          : resp.status === 429
           ? "Rate limit hit. Wait a moment and try again."
           : resp.status === 402
           ? "Usage limit reached. Add credits to continue."
           : typeof errorData?.error === "string"
           ? errorData.error
           : `Jackie's server answered HTTP ${resp.status}.`;
-      finishWith(() => onError(detail && detail !== base ? `${base} ${detail}` : base));
+      const redundant = !detail || detail === base || errorData?.code === "QUOTA_EXCEEDED";
+      finishWith(() => onError(redundant ? base : `${base} ${detail}`));
       return;
     }
 
@@ -148,20 +157,25 @@ export async function streamSse({
     let done = false;
     let received = 0;
     let streamError: string | null = null;
+    let finished = false;
 
     const abort = () => reader.cancel().catch(() => {});
     signal?.addEventListener("abort", abort, { once: true });
 
     const takeFrame = (line: string): "stop" | "continue" => {
       const jsonStr = line.slice(6).trim();
-      if (jsonStr === "[DONE]") return "stop";
+      if (jsonStr === "[DONE]") {
+        finished = true;
+        return "stop";
+      }
       let parsed: unknown;
       try {
         parsed = JSON.parse(jsonStr);
       } catch {
         return "continue";
       }
-      const { content, error } = readFrame(parsed);
+      const { content, error, finished: closed } = readFrame(parsed);
+      if (closed) finished = true;
       if (error) {
         streamError = error;
         return "stop";
@@ -226,6 +240,17 @@ export async function streamSse({
     if (received === 0) {
       finishWith(() =>
         onError("Jackie's model returned an empty answer. Try again, or switch model."),
+      );
+      return;
+    }
+
+    // Text with neither `[DONE]` nor a finish reason is an answer the stream
+    // stopped carrying — an edge function hitting its wall-clock limit, a proxy
+    // dropping the socket. Saving it as complete is how a reply ends mid-word
+    // with nothing to say it did.
+    if (!finished) {
+      finishWith(() =>
+        onError("The answer was cut off before it finished. Try again, or pick a faster model."),
       );
       return;
     }

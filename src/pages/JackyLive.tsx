@@ -43,20 +43,22 @@ export default function JackyLive() {
 
   useEffect(() => {
     let alive = true;
-    async function poll() {
+    async function poll(): Promise<boolean> {
       try {
         const [s, a] = await Promise.all([
           jacky.getStatus(),
           jacky.getAssessment().catch(() => null as JackyAssessment | null),
         ]);
-        if (!alive) return;
+        if (!alive) return true;
         applyStatus(s);
         setLive(true);
         if (a?.badge) setVerdict(String(a.badge));
+        return true;
       } catch {
-        if (!alive) return;
+        if (!alive) return false;
         setLive(false);
         drift();
+        return false;
       }
     }
     function applyStatus(s: JackyStatus) {
@@ -78,11 +80,18 @@ export default function JackyLive() {
         return { gpu: d(p.gpu, 42, 78, 3.2), cpu: d(p.cpu, 12, 96, 9), ram: d(p.ram, 30, 90, 5), vram: d(p.vram, 40, 94, 4) };
       });
     }
-    poll();
-    const id = setInterval(poll, 4000);
+    // Every 4 s while the rig answers; every 30 s while it does not. An
+    // unconfigured or sleeping rig used to be asked twice every four seconds
+    // for as long as this page stayed open, to learn the same thing each time.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const loop = async () => {
+      const ok = await poll();
+      if (alive) timer = setTimeout(loop, ok ? 4000 : 30000);
+    };
+    void loop();
     return () => {
       alive = false;
-      clearInterval(id);
+      if (timer) clearTimeout(timer);
     };
   }, []);
 

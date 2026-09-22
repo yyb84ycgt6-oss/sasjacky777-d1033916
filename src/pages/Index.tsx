@@ -1114,6 +1114,14 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
         setRouteNote(`${failed} could not answer — trying ${to}.`);
         console.warn(`[jackie] ${failed} → ${to}: ${reason}`);
       },
+      // A failover after partial output starts the answer over; the half from
+      // the engine that broke must not be kept in front of it.
+      onReset: () => {
+        assistantContent = "";
+        setMessages((prev) =>
+          prev.map((m) => (m.id === assistantTempId ? { ...m, content: "" } : m))
+        );
+      },
       onDelta: (chunk) => {
         assistantContent += chunk;
         setMessages((prev) =>

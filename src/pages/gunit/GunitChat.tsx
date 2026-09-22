@@ -4,6 +4,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { MessageSquare, Send, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import ReactMarkdown from "react-markdown";
+import { streamSse } from "@/lib/jackie-stream";
 
 interface Message {
   id?: string;
@@ -48,60 +49,26 @@ export default function GunitChat() {
     let assistantContent = "";
     setMessages((prev) => [...prev, { role: "assistant", content: "", created_at: new Date().toISOString() }]);
 
-    try {
-      const resp = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/gunit-chat`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
-            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-          },
-          body: JSON.stringify({ message: text }),
-        }
-      );
-
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({ error: "Request failed" }));
-        throw new Error(err.error || `Error ${resp.status}`);
-      }
-
-      const reader = resp.body!.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        let nl: number;
-        while ((nl = buffer.indexOf("\n")) !== -1) {
-          const line = buffer.slice(0, nl).trim();
-          buffer = buffer.slice(nl + 1);
-          if (!line.startsWith("data: ")) continue;
-          const json = line.slice(6);
-          if (json === "[DONE]") break;
-          try {
-            const parsed = JSON.parse(json);
-            const content = parsed.choices?.[0]?.delta?.content;
-            if (content) {
-              assistantContent += content;
-              setMessages((prev) => {
-                const copy = [...prev];
-                copy[copy.length - 1] = { ...copy[copy.length - 1], content: assistantContent };
-                return copy;
-              });
-            }
-          } catch {}
-        }
-      }
-    } catch (e: any) {
+    const showInLastBubble = (content: string) =>
       setMessages((prev) => {
         const copy = [...prev];
-        copy[copy.length - 1] = { ...copy[copy.length - 1], content: `⚠ ${e.message}` };
+        copy[copy.length - 1] = { ...copy[copy.length - 1], content };
         return copy;
+      });
+
+    // Through the shared parser rather than a copy of it. This page had its
+    // own, which dropped error frames and left an empty bubble when a stream
+    // carried nothing — the two bugs `streamSse` exists to catch.
+    try {
+      await streamSse({
+        fn: "gunit-chat",
+        payload: { message: text },
+        onDelta: (chunk) => {
+          assistantContent += chunk;
+          showInLastBubble(assistantContent);
+        },
+        onDone: () => {},
+        onError: (reason) => showInLastBubble(`⚠ ${reason}`),
       });
     } finally {
       setLoading(false);

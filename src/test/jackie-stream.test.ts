@@ -215,3 +215,45 @@ describe("stopping an answer", () => {
     expect(spy.mock.calls[0][2]).toMatchObject({ signal: controller.signal });
   });
 });
+
+describe("telling a finished answer from a cut-off one", () => {
+  beforeEach(() => vi.restoreAllMocks());
+  afterEach(() => vi.restoreAllMocks());
+
+  it("treats text that stops without [DONE] or a finish reason as cut off", async () => {
+    vi.spyOn(edge, "callEdgeFunction").mockResolvedValue(sse(token("Step 1: open the case. Step 2: rem")));
+    const c = collect();
+    await streamChat({ messages: ask, ...c.handlers });
+
+    expect(c.done).toBe(0);
+    expect(c.errors[0]).toMatch(/cut off/);
+  });
+
+  it("accepts a finish reason in place of [DONE]", async () => {
+    const closing = `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\n`;
+    vi.spyOn(edge, "callEdgeFunction").mockResolvedValue(sse(token("all of it"), closing));
+    const c = collect();
+    await streamChat({ messages: ask, ...c.handlers });
+
+    expect(c.done).toBe(1);
+    expect(c.errors).toEqual([]);
+  });
+});
+
+describe("naming which limit was hit", () => {
+  beforeEach(() => vi.restoreAllMocks());
+  afterEach(() => vi.restoreAllMocks());
+
+  it("does not tell someone out of daily quota to wait a moment", async () => {
+    vi.spyOn(edge, "callEdgeFunction").mockResolvedValue(
+      new Response(JSON.stringify({ error: "Daily AI quota used up", code: "QUOTA_EXCEEDED", retry_after: 3600 }), {
+        status: 429,
+      }),
+    );
+    const c = collect();
+    await streamChat({ messages: ask, ...c.handlers });
+
+    expect(c.errors[0]).toMatch(/Daily AI quota/);
+    expect(c.errors[0]).not.toMatch(/wait a moment/i);
+  });
+});

@@ -20,11 +20,14 @@
  * that quietly came from somewhere other than the engine named on screen is
  * how a chat ends up lying about what it is.
  *
- * Partial output is not thrown away either: if an engine streamed some tokens
- * and then broke, that text is already on screen, so the router hands the next
- * engine the same history and keeps going rather than restarting the answer on
- * top of what is already there — it reports the break instead, once, with the
- * text intact.
+ * Partial output is the one case that needs care. If an engine streamed some
+ * tokens and then broke, the next engine starts a *fresh* answer — it never
+ * saw the half one — so appending its text to what is on screen produced
+ * "The capital of France is Paris is the capital of France." and saved that,
+ * as one reply, to the database, the history and the memory extractor. So
+ * before a failover that follows output, the router calls `onReset` and the
+ * caller clears the half answer. A caller that cannot reset gets the break
+ * reported as an error instead, with nothing spliced.
  */
 import { streamSse, type ChatMessage } from "@/lib/jackie-stream";
 import { callEdgeFunction, describeEdgeFailure, describesUnreachable, NotSignedInError } from "@/lib/edgeFunction";
@@ -63,6 +66,12 @@ export interface RouteChatOptions {
   /** Model for that engine. Ignored by engines that pick their own. */
   model?: string;
   onDelta: (text: string) => void;
+  /**
+   * The engine that was answering broke after some output and the next engine
+   * is about to start over. Discard what `onDelta` delivered so far. Without
+   * this, a break after output ends the walk instead of being spliced.
+   */
+  onReset?: () => void;
   onDone: (result: RouteResult) => void;
   onError: (error: string) => void;
   /** Fired before each attempt, including the first. */
@@ -192,6 +201,7 @@ async function streamEngine(
   model: string | undefined,
 ): Promise<Attempt> {
   let outcome: Attempt = { kind: "failed", reason: "no answer" };
+  let emitted = false;
   await streamSse({
     fn: def.fn,
     payload: {
@@ -199,7 +209,10 @@ async function streamEngine(
       ...(model ? { model } : {}),
       ...(args.context ? { context: args.context } : {}),
     },
-    onDelta: args.onDelta,
+    onDelta: (text) => {
+      emitted = true;
+      args.onDelta(text);
+    },
     onDone: () => {
       outcome = { kind: "ok" };
     },
@@ -212,6 +225,12 @@ async function streamEngine(
   });
   // `streamSse` calls neither callback when the user stopped it.
   if (args.signal?.aborted) return { kind: "stop" };
+  if (outcome.kind === "failed" && emitted) {
+    if (!args.onReset) {
+      return { kind: "stop", reason: `${outcome.reason} (the answer broke off partway through)` };
+    }
+    args.onReset();
+  }
   return outcome;
 }
 
