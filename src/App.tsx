@@ -14,51 +14,8 @@ import Sandbox from "./pages/Sandbox";
 import OAuthConsent from "./pages/OAuthConsent";
 import { SandboxBanner } from "./components/SandboxBanner";
 
-import Play from "./pages/Play";
-import TelegramShell from "./pages/TelegramShell";
 import NotFound from "./pages/NotFound";
-import Vault from "./pages/Vault";
-import BotFoundry from "./pages/BotFoundry";
-import BotSwarm from "./pages/BotSwarm";
-import ApiKeyManager from "./pages/ApiKeyManager";
-import GunitLayout from "./pages/gunit/GunitLayout";
-import GunitDashboard from "./pages/gunit/GunitDashboard";
-import GunitBotFactory from "./pages/gunit/GunitBotFactory";
-import GunitChat from "./pages/gunit/GunitChat";
-import GunitAgents from "./pages/gunit/GunitAgents";
-import GunitUsers from "./pages/gunit/GunitUsers";
-import GunitApiKeys from "./pages/gunit/GunitApiKeys";
-import SphereCommand from "./pages/SphereCommand";
-import JackieControl from "./pages/JackieControl";
-import VeilOps from "./pages/VeilOps";
-import MarvelsRace from "./pages/MarvelsRace";
-import SentinelDashboard from "./pages/SentinelDashboard";
-import SentinelBoard from "./pages/SentinelBoard";
-import ApexHub from "./pages/ApexHub";
-import AIProviders from "./pages/AIProviders";
-import GrokStudio from "./pages/GrokStudio";
-import RepairBay from "./pages/RepairBay";
-import LocalBridge from "./pages/LocalBridge";
-import PodStation from "./pages/PodStation";
-import FoldSurface from "./pages/FoldSurface";
-import JackyLive from "./pages/JackyLive";
-import AgentLab from "./pages/AgentLab";
-import AgentCompare from "./pages/AgentCompare";
-import RouterMesh from "./pages/RouterMesh";
-import RouterMeshDocs from "./pages/RouterMeshDocs";
-import PCDesktop from "./pages/PCDesktop";
-import PcApps from "./pages/PcApps";
-import PathRouter from "./pages/PathRouter";
-import Workstation from "./pages/Workstation";
-import Guide from "./pages/Guide";
-import JackieCore from "./pages/JackieCore";
-import GithubSync from "./pages/GithubSync";
-import LocalAITest from "./pages/LocalAITest";
-import MicroAI from "./pages/MicroAI";
-import IndexForge from "./pages/IndexForge";
 import Welcome from "./pages/Welcome";
-import MicroBoard from "./pages/MicroBoard";
-import NervousSystem from "./pages/NervousSystem";
 import { ERU_ALIASES } from "./lib/routeManifest";
 import RouteDebugOverlay from "./components/RouteDebugOverlay";
 import { UniversalFloatingNavBar } from "./components/UniversalFloatingNavBar";
@@ -66,11 +23,68 @@ import { GlobalStickyNotes } from "./components/GlobalStickyNotes";
 import { GuideDock } from "./components/GuideDock";
 import { IndexPill } from "./components/IndexPill";
 
+// Every page below is its own chunk, loaded when its route is first visited.
+// They were all imported eagerly, which put ~50 pages — 3D scenes, editors,
+// games, dashboards — into one 4.8 MB entry chunk that every visitor
+// downloaded before the first screen could render. The pages kept eager are
+// the ones a first visit actually lands on: the chat, sign-in, the landing
+// page and the 404.
+const Play = lazy(() => import("./pages/Play"));
+const TelegramShell = lazy(() => import("./pages/TelegramShell"));
+const Vault = lazy(() => import("./pages/Vault"));
+const BotFoundry = lazy(() => import("./pages/BotFoundry"));
+const BotSwarm = lazy(() => import("./pages/BotSwarm"));
+const ApiKeyManager = lazy(() => import("./pages/ApiKeyManager"));
+const GunitLayout = lazy(() => import("./pages/gunit/GunitLayout"));
+const GunitDashboard = lazy(() => import("./pages/gunit/GunitDashboard"));
+const GunitBotFactory = lazy(() => import("./pages/gunit/GunitBotFactory"));
+const GunitChat = lazy(() => import("./pages/gunit/GunitChat"));
+const GunitAgents = lazy(() => import("./pages/gunit/GunitAgents"));
+const GunitUsers = lazy(() => import("./pages/gunit/GunitUsers"));
+const GunitApiKeys = lazy(() => import("./pages/gunit/GunitApiKeys"));
+const SphereCommand = lazy(() => import("./pages/SphereCommand"));
+const JackieControl = lazy(() => import("./pages/JackieControl"));
+const VeilOps = lazy(() => import("./pages/VeilOps"));
+const MarvelsRace = lazy(() => import("./pages/MarvelsRace"));
+const SentinelDashboard = lazy(() => import("./pages/SentinelDashboard"));
+const SentinelBoard = lazy(() => import("./pages/SentinelBoard"));
+const ApexHub = lazy(() => import("./pages/ApexHub"));
+const AIProviders = lazy(() => import("./pages/AIProviders"));
+const GrokStudio = lazy(() => import("./pages/GrokStudio"));
+const RepairBay = lazy(() => import("./pages/RepairBay"));
+const LocalBridge = lazy(() => import("./pages/LocalBridge"));
+const PodStation = lazy(() => import("./pages/PodStation"));
+const FoldSurface = lazy(() => import("./pages/FoldSurface"));
+const JackyLive = lazy(() => import("./pages/JackyLive"));
+const AgentLab = lazy(() => import("./pages/AgentLab"));
+const AgentCompare = lazy(() => import("./pages/AgentCompare"));
+const RouterMesh = lazy(() => import("./pages/RouterMesh"));
+const RouterMeshDocs = lazy(() => import("./pages/RouterMeshDocs"));
+const PCDesktop = lazy(() => import("./pages/PCDesktop"));
+const PcApps = lazy(() => import("./pages/PcApps"));
+const PathRouter = lazy(() => import("./pages/PathRouter"));
+const Workstation = lazy(() => import("./pages/Workstation"));
+const Guide = lazy(() => import("./pages/Guide"));
+const JackieCore = lazy(() => import("./pages/JackieCore"));
+const GithubSync = lazy(() => import("./pages/GithubSync"));
+const LocalAITest = lazy(() => import("./pages/LocalAITest"));
+const MicroAI = lazy(() => import("./pages/MicroAI"));
+const IndexForge = lazy(() => import("./pages/IndexForge"));
+const MicroBoard = lazy(() => import("./pages/MicroBoard"));
+const NervousSystem = lazy(() => import("./pages/NervousSystem"));
+
 const EruRouter = lazy(() => import("./eru/EruRouter"));
 
 const VisualizerLab = lazy(() => import("./eru/VisualizerLab"));
 
 const queryClient = new QueryClient();
+
+/** Shown for the moment a route's chunk is loading — the same mark as the auth check. */
+const RouteFallback = () => (
+  <div className="min-h-screen bg-background flex items-center justify-center">
+    <span className="font-mono text-4xl font-bold text-primary animate-pulse">J</span>
+  </div>
+);
 
 const SandboxCatcher = ({ children }: { children: React.ReactNode }) => {
   const [params] = useSearchParams();
@@ -134,205 +148,207 @@ const App = () => (
             <BrowserRouter>
               <SandboxBanner />
               <SandboxCatcher>
-                <Routes>
-                  <Route path="/auth" element={<Auth />} />
-                  <Route path="/.lovable/oauth/consent" element={<OAuthConsent />} />
-                  <Route path="/welcome" element={<Welcome />} />
-                  <Route path="/sandbox" element={<Sandbox />} />
-                  <Route path="/index" element={<Navigate to="/" replace />} />
-                <Route
-                  path="/"
-                  element={
-                    <ProtectedRoute fallback={<Welcome />}>
-                      <Index />
-                    </ProtectedRoute>
-                  }
-                />
-
-
-                <Route
-                  path="/play"
-                  element={
-                    <ProtectedRoute>
-                      <Play />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/core"
-                  element={
-                    <ProtectedRoute>
-                      <JackieCore />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/path"
-                  element={
-                    <ProtectedRoute>
-                      <PathRouter />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/workstation"
-                  element={
-                    <ProtectedRoute>
-                      <Workstation />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route path="/work" element={<Navigate to="/workstation" replace />} />
-                <Route
-                  path="/guide"
-                  element={
-                    <ProtectedRoute>
-                      <Guide />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/pc"
-                  element={
-                    <ProtectedRoute>
-                      <PCDesktop />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/pc-apps"
-                  element={
-                    <ProtectedRoute>
-                      <PcApps />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route path="/hub" element={<TelegramShell />} />
-                <Route
-                  path="/vault"
-                  element={
-                    <ProtectedRoute>
-                      <Vault />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/bots"
-                  element={
-                    <ProtectedRoute>
-                      <BotFoundry />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/swarm"
-                  element={
-                    <ProtectedRoute>
-                      <BotSwarm />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/keys"
-                  element={
-                    <ProtectedRoute>
-                      <ApiKeyManager />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/gunit"
-                  element={
-                    <ProtectedRoute>
-                      <GunitLayout />
-                    </ProtectedRoute>
-                  }
-                >
-                  <Route index element={<GunitDashboard />} />
-                  <Route path="bots" element={<GunitBotFactory />} />
-                  <Route path="chat" element={<GunitChat />} />
-                  <Route path="agents" element={<GunitAgents />} />
-                  <Route path="users" element={<GunitUsers />} />
-                  <Route path="keys" element={<GunitApiKeys />} />
-                </Route>
-                <Route
-                  path="/sphere"
-                  element={
-                    <ProtectedRoute>
-                      <SphereCommand />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/control"
-                  element={
-                    <ProtectedRoute>
-                      <JackieControl />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/veilops"
-                  element={
-                    <ProtectedRoute>
-                      <VeilOps />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route path="/marvels" element={<ProtectedRoute><MarvelsRace /></ProtectedRoute>} />
-                <Route path="/sentinel" element={<ProtectedRoute><SentinelDashboard /></ProtectedRoute>} />
-                <Route path="/sentinel/board" element={<ProtectedRoute><SentinelBoard /></ProtectedRoute>} />
-                <Route path="/apex" element={<ProtectedRoute><ApexHub /></ProtectedRoute>} />
-                <Route path="/providers" element={<ProtectedRoute><AIProviders /></ProtectedRoute>} />
-                <Route path="/grok" element={<ProtectedRoute><GrokStudio /></ProtectedRoute>} />
-                <Route path="/repair" element={<ProtectedRoute><RepairBay /></ProtectedRoute>} />
-                <Route path="/bridge" element={<ProtectedRoute><LocalBridge /></ProtectedRoute>} />
-                <Route path="/pods" element={<ProtectedRoute><PodStation /></ProtectedRoute>} />
-                <Route path="/eyepod" element={<ProtectedRoute><PodStation /></ProtectedRoute>} />
-                <Route path="/pods/surface" element={<ProtectedRoute><FoldSurface /></ProtectedRoute>} />
-                <Route path="/eyepod/surface" element={<ProtectedRoute><FoldSurface /></ProtectedRoute>} />
-                <Route path="/jacky-live" element={<ProtectedRoute><JackyLive /></ProtectedRoute>} />
-                <Route path="/agent-lab" element={<ProtectedRoute><AgentLab /></ProtectedRoute>} />
-                <Route path="/agent-compare" element={<ProtectedRoute><AgentCompare /></ProtectedRoute>} />
-                <Route path="/mesh" element={<ProtectedRoute><RouterMesh /></ProtectedRoute>} />
-                <Route path="/mesh/docs" element={<ProtectedRoute><RouterMeshDocs /></ProtectedRoute>} />
-                <Route path="/nervous" element={<ProtectedRoute><NervousSystem /></ProtectedRoute>} />
-                <Route path="/github" element={<ProtectedRoute><GithubSync /></ProtectedRoute>} />
-                <Route path="/local-ai" element={<ProtectedRoute><LocalAITest /></ProtectedRoute>} />
-                <Route path="/forge" element={<ProtectedRoute><IndexForge /></ProtectedRoute>} />
-                <Route path="/micro" element={<ProtectedRoute><MicroAI /></ProtectedRoute>} />
-                <Route path="/micro/board" element={<ProtectedRoute><MicroBoard /></ProtectedRoute>} />
-                <Route
-
-                  path="/eru/visualizers"
-                  element={
-                    <ProtectedRoute>
-                      <Suspense fallback={null}><VisualizerLab /></Suspense>
-                    </ProtectedRoute>
-                  }
-                />
-                {ERU_ALIASES.map(({ path }) => (
+                <Suspense fallback={<RouteFallback />}>
+                  <Routes>
+                    <Route path="/auth" element={<Auth />} />
+                    <Route path="/.lovable/oauth/consent" element={<OAuthConsent />} />
+                    <Route path="/welcome" element={<Welcome />} />
+                    <Route path="/sandbox" element={<Sandbox />} />
+                    <Route path="/index" element={<Navigate to="/" replace />} />
                   <Route
-                    key={`eru-alias-${path}`}
-                    path={path}
+                    path="/"
                     element={
-                      <ProtectedRoute>
-                        <EruAliasRedirect />
+                      <ProtectedRoute fallback={<Welcome />}>
+                        <Index />
                       </ProtectedRoute>
                     }
                   />
-                ))}
 
-                <Route
-                  path="/eru/*"
-                  element={
-                    <ProtectedRoute>
-                      <Suspense fallback={null}><EruRouter /></Suspense>
-                    </ProtectedRoute>
-                  }
-                />
-                <Route path="*" element={<NotFound />} />
-              </Routes>
+
+                  <Route
+                    path="/play"
+                    element={
+                      <ProtectedRoute>
+                        <Play />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/core"
+                    element={
+                      <ProtectedRoute>
+                        <JackieCore />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/path"
+                    element={
+                      <ProtectedRoute>
+                        <PathRouter />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/workstation"
+                    element={
+                      <ProtectedRoute>
+                        <Workstation />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route path="/work" element={<Navigate to="/workstation" replace />} />
+                  <Route
+                    path="/guide"
+                    element={
+                      <ProtectedRoute>
+                        <Guide />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/pc"
+                    element={
+                      <ProtectedRoute>
+                        <PCDesktop />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/pc-apps"
+                    element={
+                      <ProtectedRoute>
+                        <PcApps />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route path="/hub" element={<TelegramShell />} />
+                  <Route
+                    path="/vault"
+                    element={
+                      <ProtectedRoute>
+                        <Vault />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/bots"
+                    element={
+                      <ProtectedRoute>
+                        <BotFoundry />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/swarm"
+                    element={
+                      <ProtectedRoute>
+                        <BotSwarm />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/keys"
+                    element={
+                      <ProtectedRoute>
+                        <ApiKeyManager />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/gunit"
+                    element={
+                      <ProtectedRoute>
+                        <GunitLayout />
+                      </ProtectedRoute>
+                    }
+                  >
+                    <Route index element={<GunitDashboard />} />
+                    <Route path="bots" element={<GunitBotFactory />} />
+                    <Route path="chat" element={<GunitChat />} />
+                    <Route path="agents" element={<GunitAgents />} />
+                    <Route path="users" element={<GunitUsers />} />
+                    <Route path="keys" element={<GunitApiKeys />} />
+                  </Route>
+                  <Route
+                    path="/sphere"
+                    element={
+                      <ProtectedRoute>
+                        <SphereCommand />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/control"
+                    element={
+                      <ProtectedRoute>
+                        <JackieControl />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/veilops"
+                    element={
+                      <ProtectedRoute>
+                        <VeilOps />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route path="/marvels" element={<ProtectedRoute><MarvelsRace /></ProtectedRoute>} />
+                  <Route path="/sentinel" element={<ProtectedRoute><SentinelDashboard /></ProtectedRoute>} />
+                  <Route path="/sentinel/board" element={<ProtectedRoute><SentinelBoard /></ProtectedRoute>} />
+                  <Route path="/apex" element={<ProtectedRoute><ApexHub /></ProtectedRoute>} />
+                  <Route path="/providers" element={<ProtectedRoute><AIProviders /></ProtectedRoute>} />
+                  <Route path="/grok" element={<ProtectedRoute><GrokStudio /></ProtectedRoute>} />
+                  <Route path="/repair" element={<ProtectedRoute><RepairBay /></ProtectedRoute>} />
+                  <Route path="/bridge" element={<ProtectedRoute><LocalBridge /></ProtectedRoute>} />
+                  <Route path="/pods" element={<ProtectedRoute><PodStation /></ProtectedRoute>} />
+                  <Route path="/eyepod" element={<ProtectedRoute><PodStation /></ProtectedRoute>} />
+                  <Route path="/pods/surface" element={<ProtectedRoute><FoldSurface /></ProtectedRoute>} />
+                  <Route path="/eyepod/surface" element={<ProtectedRoute><FoldSurface /></ProtectedRoute>} />
+                  <Route path="/jacky-live" element={<ProtectedRoute><JackyLive /></ProtectedRoute>} />
+                  <Route path="/agent-lab" element={<ProtectedRoute><AgentLab /></ProtectedRoute>} />
+                  <Route path="/agent-compare" element={<ProtectedRoute><AgentCompare /></ProtectedRoute>} />
+                  <Route path="/mesh" element={<ProtectedRoute><RouterMesh /></ProtectedRoute>} />
+                  <Route path="/mesh/docs" element={<ProtectedRoute><RouterMeshDocs /></ProtectedRoute>} />
+                  <Route path="/nervous" element={<ProtectedRoute><NervousSystem /></ProtectedRoute>} />
+                  <Route path="/github" element={<ProtectedRoute><GithubSync /></ProtectedRoute>} />
+                  <Route path="/local-ai" element={<ProtectedRoute><LocalAITest /></ProtectedRoute>} />
+                  <Route path="/forge" element={<ProtectedRoute><IndexForge /></ProtectedRoute>} />
+                  <Route path="/micro" element={<ProtectedRoute><MicroAI /></ProtectedRoute>} />
+                  <Route path="/micro/board" element={<ProtectedRoute><MicroBoard /></ProtectedRoute>} />
+                  <Route
+
+                    path="/eru/visualizers"
+                    element={
+                      <ProtectedRoute>
+                        <Suspense fallback={null}><VisualizerLab /></Suspense>
+                      </ProtectedRoute>
+                    }
+                  />
+                  {ERU_ALIASES.map(({ path }) => (
+                    <Route
+                      key={`eru-alias-${path}`}
+                      path={path}
+                      element={
+                        <ProtectedRoute>
+                          <EruAliasRedirect />
+                        </ProtectedRoute>
+                      }
+                    />
+                  ))}
+
+                  <Route
+                    path="/eru/*"
+                    element={
+                      <ProtectedRoute>
+                        <Suspense fallback={null}><EruRouter /></Suspense>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route path="*" element={<NotFound />} />
+                </Routes>
+                </Suspense>
               <RouteDebugOverlay />
 
               </SandboxCatcher>

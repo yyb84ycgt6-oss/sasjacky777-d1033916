@@ -23,10 +23,16 @@ type Overview = {
 
 type RemoteFile = { path: string; size?: number; sha: string };
 
-const LOCAL_SOURCES = import.meta.glob("/src/**/*.{ts,tsx,js,jsx,css,md}", {
-  query: "?raw",
-  import: "default",
-}) as Record<string, () => Promise<string>>;
+// Each match becomes its own lazily loaded chunk, fetched only when a file is
+// opened for comparison. Tests are left out: they are not what anyone syncs,
+// and they were fifty of the chunks every build shipped. `vite.config.ts` puts
+// these chunks under assets/src/ and keeps them out of the service worker's
+// precache, which had been downloading all ~1,300 of them (about 20 MB) on
+// every visitor's first load.
+const LOCAL_SOURCES = import.meta.glob(
+  ["/src/**/*.{ts,tsx,js,jsx,css,md}", "!/src/test/**", "!/src/**/*.test.{ts,tsx}"],
+  { query: "?raw", import: "default" },
+) as Record<string, () => Promise<string>>;
 
 const invokeSync = async <T,>(body: Record<string, unknown>): Promise<T> => {
   const { data, error } = await supabase.functions.invoke("github-sync", { body });

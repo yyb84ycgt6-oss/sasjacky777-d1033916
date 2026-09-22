@@ -3,14 +3,14 @@
 // supabase function: mcp
 // Bundled from src/lib/mcp/index.ts by @lovable.dev/mcp-js.
 // src/lib/mcp/index.ts
-import { auth, defineMcp } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { auth, defineMcp } from "npm:@lovable.dev/mcp-js@0.26.2";
 
 // src/lib/mcp/tools/list-tasks.ts
-import { defineTool } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z } from "npm:zod@^3.25.76";
+import { defineTool } from "npm:@lovable.dev/mcp-js@0.26.2";
+import { z } from "npm:zod@3.25.76";
 
 // src/lib/mcp/supabase.ts
-import { createClient } from "npm:@supabase/supabase-js@^2.99.1";
+import { createClient } from "npm:@supabase/supabase-js@2.100.1";
 function runtimeEnv(name) {
   const runtime = globalThis;
   return runtime.Deno?.env?.get?.(name) ?? runtime.process?.env?.[name];
@@ -85,8 +85,8 @@ var list_tasks_default = defineTool({
 });
 
 // src/lib/mcp/tools/create-task.ts
-import { defineTool as defineTool2 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z2 } from "npm:zod@^3.25.76";
+import { defineTool as defineTool2 } from "npm:@lovable.dev/mcp-js@0.26.2";
+import { z as z2 } from "npm:zod@3.25.76";
 var create_task_default = defineTool2({
   name: "create_task",
   title: "Create task",
@@ -121,8 +121,8 @@ var create_task_default = defineTool2({
 });
 
 // src/lib/mcp/tools/update-task-status.ts
-import { defineTool as defineTool3 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z3 } from "npm:zod@^3.25.76";
+import { defineTool as defineTool3 } from "npm:@lovable.dev/mcp-js@0.26.2";
+import { z as z3 } from "npm:zod@3.25.76";
 var update_task_status_default = defineTool3({
   name: "update_task_status",
   title: "Update task status",
@@ -150,8 +150,8 @@ var update_task_status_default = defineTool3({
 });
 
 // src/lib/mcp/tools/search-memory.ts
-import { defineTool as defineTool4 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z4 } from "npm:zod@^3.25.76";
+import { defineTool as defineTool4 } from "npm:@lovable.dev/mcp-js@0.26.2";
+import { z as z4 } from "npm:zod@3.25.76";
 var search_memory_default = defineTool4({
   name: "search_memory",
   title: "Search Jackie memory",
@@ -183,8 +183,8 @@ var search_memory_default = defineTool4({
 });
 
 // src/lib/mcp/tools/remember-fact.ts
-import { defineTool as defineTool5 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z5 } from "npm:zod@^3.25.76";
+import { defineTool as defineTool5 } from "npm:@lovable.dev/mcp-js@0.26.2";
+import { z as z5 } from "npm:zod@3.25.76";
 var remember_fact_default = defineTool5({
   name: "remember_fact",
   title: "Remember a fact",
@@ -213,8 +213,8 @@ var remember_fact_default = defineTool5({
 });
 
 // src/lib/mcp/tools/list-conversations.ts
-import { defineTool as defineTool6 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z6 } from "npm:zod@^3.25.76";
+import { defineTool as defineTool6 } from "npm:@lovable.dev/mcp-js@0.26.2";
+import { z as z6 } from "npm:zod@3.25.76";
 var list_conversations_default = defineTool6({
   name: "list_conversations",
   title: "List conversations",
@@ -252,5 +252,5 @@ var mcp_default = defineMcp({
 });
 
 // lovable-mcp-supabase-entry.ts
-import { createSupabaseHandler } from "npm:@lovable.dev/mcp-js@0.26.1/stacks/supabase";
+import { createSupabaseHandler } from "npm:@lovable.dev/mcp-js@0.26.2/stacks/supabase";
 Deno.serve(createSupabaseHandler(mcp_default, { functionName: "mcp" }));

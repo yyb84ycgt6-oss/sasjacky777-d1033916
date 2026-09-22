@@ -58,7 +58,10 @@ export default defineConfig(({ mode }) => ({
         // import for the same reason), and a precache entry undid that
         // silently. Runtime caching below still keeps it offline-capable, from
         // the first time it is actually used.
-        globIgnores: ["**/pc-os/**", "**/models/**", "**/*.wasm"],
+        // assets/src/** holds the raw source text GitHub Sync compares
+        // against, one chunk per file. It is read on demand by one page;
+        // precaching it cost every visitor ~20 MB on first load.
+        globIgnores: ["**/pc-os/**", "**/models/**", "**/*.wasm", "**/assets/src/**"],
         navigateFallback: "/index.html",
         // /pc-os/index.html is a real navigation when the PC is opened in its
         // own tab. Without this it would fall back to Jackie's shell offline,
@@ -96,6 +99,16 @@ export default defineConfig(({ mode }) => ({
       },
     }),
   ].filter(Boolean),
+  build: {
+    rollupOptions: {
+      output: {
+        // Raw source imports (`?raw`, only GitHub Sync uses them) get their own
+        // directory so the service worker can leave them out by path.
+        chunkFileNames: (chunk) =>
+          chunk.facadeModuleId?.endsWith("?raw") ? "assets/src/[name]-[hash].js" : "assets/[name]-[hash].js",
+      },
+    },
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
