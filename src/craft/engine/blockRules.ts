@@ -53,6 +53,9 @@ export function supported(world: World, x: number, y: number, z: number, id: num
     }
     case B.STONE_PLATE: case B.OAK_PLATE:
       return belowDef.opaque || below === B.OAK_FENCE || below === B.HOPPER || (isSlab(below) && world.getMeta(x, y - 1, z) !== 0);
+    case B.RAIL: case B.POWERED_RAIL: case B.DETECTOR_RAIL: case B.ACTIVATOR_RAIL:
+      // Track needs a full block under it (a top slab or a hopper will do, as in the original).
+      return belowDef.opaque || below === B.HOPPER || (isSlab(below) && world.getMeta(x, y - 1, z) !== 0);
     case B.REDSTONE_TORCH: case B.REDSTONE_TORCH_OFF:
     case B.TORCH: {
       if (meta === 0) return belowDef.solid && (belowDef.opaque || below === B.OAK_FENCE || below === B.GLASS);
@@ -179,8 +182,8 @@ export class BlockRules {
     if (id === 0) return true;
     if (isFluid(id)) return false;
     const def = block(id);
-    // Water washes away dust, torches, levers, buttons and diodes, as it does plants.
-    if (def.shape === "wire" || isRedstoneTorch(id) || id === B.LEVER || isButton(id) || id === B.REPEATER || id === B.COMPARATOR) return true;
+    // Water washes away dust, rails, torches, levers, buttons and diodes, as it does plants.
+    if (def.shape === "wire" || def.shape === "rail" || isRedstoneTorch(id) || id === B.LEVER || isButton(id) || id === B.REPEATER || id === B.COMPARATOR) return true;
     return !def.solid && id !== B.LADDER && !isDoor(id) && (def.replaceable || def.shape === "cross" || def.shape === "crop" || id === B.TORCH || id === B.SNOW)
       && !(fluid === B.WATER && id === B.LILY_PAD);
   }

@@ -35,6 +35,7 @@ import { WORLD_HEIGHT } from "./constants";
 import { maxStack, resolveDrops, type ItemStack } from "./items";
 import { mergeInto, range, sameItem, type Slot } from "./inventory";
 import { isBottle, isBrewingFuel, isBrewingIngredient } from "./brewing";
+import { railChainPowered } from "./rails";
 import { smeltResult, fuelTicks } from "./crafting";
 import { posKey, unpackPos, type BlockChange, type World } from "./world";
 
@@ -47,7 +48,7 @@ export function dustConnectsTo(id: number, meta: number, toward: number): boolea
   switch (id) {
     case B.REDSTONE_WIRE: case B.REDSTONE_TORCH: case B.REDSTONE_TORCH_OFF: case B.LEVER:
     case B.STONE_BUTTON: case B.OAK_BUTTON: case B.STONE_PLATE: case B.OAK_PLATE: case B.REDSTONE_BLOCK:
-    case B.DAYLIGHT_DETECTOR: case B.COMPARATOR:
+    case B.DAYLIGHT_DETECTOR: case B.COMPARATOR: case B.DETECTOR_RAIL:
       return true;
     case B.REPEATER: {
       // Only along its line: in at the back, out at the front.
@@ -111,7 +112,12 @@ export function dustColor(level: number): [number, number, number] {
 
 // ---- the simulation ------------------------------------------------------------------------------------
 
-export interface Body { x: number; y: number; z: number; width: number; height: number; mob: boolean; move(dx: number, dy: number, dz: number): void }
+export interface Body {
+  x: number; y: number; z: number; width: number; height: number; mob: boolean;
+  /** A minecart: detector rails feel these and nothing else. */
+  cart?: boolean;
+  move(dx: number, dy: number, dz: number): void;
+}
 
 export interface RedstoneContext {
   sound(name: string, x: number, y: number, z: number, volume?: number, pitch?: number): void;
@@ -188,7 +194,8 @@ export class Redstone {
 
   private isComponent(id: number): boolean {
     return id === B.REDSTONE_WIRE || isRedstoneTorch(id) || id === B.LEVER || isButton(id) || isPlate(id) ||
-      id === B.REDSTONE_BLOCK || id === B.REPEATER || id === B.COMPARATOR || id === B.OBSERVER || id === B.DAYLIGHT_DETECTOR;
+      id === B.REDSTONE_BLOCK || id === B.REPEATER || id === B.COMPARATOR || id === B.OBSERVER || id === B.DAYLIGHT_DETECTOR ||
+      id === B.DETECTOR_RAIL;
   }
 
   /** The Face from a torch to the block holding it. */
@@ -217,6 +224,7 @@ export class Redstone {
       case B.COMPARATOR: return f === FACE_OF_FACING[m & 3] ? (m >> 3) & 15 : 0;
       case B.OBSERVER: return (m & 8) !== 0 && f === OPPOSITE_FACE[m & 7] ? 15 : 0;
       case B.DAYLIGHT_DETECTOR: return m & 15;
+      case B.DETECTOR_RAIL: return (m & 8) !== 0 ? 15 : 0;
       default: return 0;
     }
   }
@@ -232,6 +240,8 @@ export class Redstone {
       case B.REPEATER: return (m & 16) !== 0 && f === FACE_OF_FACING[m & 3] ? 15 : 0;
       case B.COMPARATOR: return f === FACE_OF_FACING[m & 3] ? (m >> 3) & 15 : 0;
       case B.OBSERVER: return (m & 8) !== 0 && f === OPPOSITE_FACE[m & 7] ? 15 : 0;
+      // A detector rail drives the block it sits on, like a pressure plate.
+      case B.DETECTOR_RAIL: return (m & 8) !== 0 && f === Face.Down ? 15 : 0;
       default: return 0;
     }
   }
@@ -337,7 +347,8 @@ export class Redstone {
       const m = c.meta[i];
       if (id === B.HOPPER || id === B.DAYLIGHT_DETECTOR) this.tracked.set(posKey(x, y, z), id);
       // Timers are not saved: a button pressed at save time must still pop back out.
-      if ((isButton(id) && (m & 8) !== 0) || (isPlate(id) && (m & 1) !== 0) || (id === B.OBSERVER && (m & 8) !== 0)) this.setTimer(x, y, z, 10);
+      if ((isButton(id) && (m & 8) !== 0) || (isPlate(id) && (m & 1) !== 0) || (id === B.OBSERVER && (m & 8) !== 0)
+        || (id === B.DETECTOR_RAIL && (m & 8) !== 0)) this.setTimer(x, y, z, 10);
       if (id === B.REPEATER || id === B.COMPARATOR || isRedstoneTorch(id) || id === B.REDSTONE_LAMP_ON) this.mark(x, y, z);
     }
   }
@@ -477,6 +488,12 @@ export class Redstone {
         if (disabled !== ((m & 8) !== 0)) this.world.setMeta(x, y, z, disabled ? m | 8 : m & ~8, "world");
         return;
       }
+      case B.POWERED_RAIL: case B.ACTIVATOR_RAIL: {
+        // Powered straight from redstone, or along a line of the same rail up to eight long.
+        const powered = railChainPowered(this.id, this.meta, (rx, ry, rz) => this.inputPower(rx, ry, rz) > 0, x, y, z);
+        if (powered !== ((m & 8) !== 0)) this.world.setMeta(x, y, z, powered ? m | 8 : m & ~8, "world");
+        return;
+      }
     }
   }
 
@@ -540,6 +557,10 @@ export class Redstone {
           this.world.setMeta(x, y, z, m & ~8, "world");
           this.ctx.sound("click", x + 0.5, y + 0.5, z + 0.5, 0.3, 0.5);
         }
+        return;
+      case B.DETECTOR_RAIL:
+        if ((m & 8) !== 0 && !this.cartOn(x, y, z)) this.world.setMeta(x, y, z, m & ~8, "world");
+        else if ((m & 8) !== 0) this.setTimer(x, y, z, 20);
         return;
       case B.STONE_PLATE: case B.OAK_PLATE:
         if ((m & 1) !== 0 && !this.plateOccupied(x, y, z, id)) {
@@ -714,9 +735,25 @@ export class Redstone {
     return false;
   }
 
+  private cartOn(x: number, y: number, z: number): boolean {
+    for (const b of this.ctx.bodies()) {
+      if (b.cart && Math.floor(b.x) === x && Math.floor(b.z) === z && Math.floor(b.y + 0.3) === y) return true;
+    }
+    return false;
+  }
+
   private pressurePlates(): void {
     for (const b of this.ctx.bodies()) {
       const x = Math.floor(b.x), y = Math.floor(b.y + 0.01), z = Math.floor(b.z);
+      // A minecart on a detector rail switches it on for as long as it stays.
+      if (b.cart) {
+        const ry = Math.floor(b.y + 0.3);
+        if (this.id(x, ry, z) === B.DETECTOR_RAIL && (this.meta(x, ry, z) & 8) === 0) {
+          this.world.setMeta(x, ry, z, this.meta(x, ry, z) | 8, "world");
+          this.setTimer(x, ry, z, 20);
+        }
+        continue;
+      }
       const id = this.id(x, y, z);
       if (!isPlate(id)) continue;
       if (id === B.STONE_PLATE && !b.mob) continue;

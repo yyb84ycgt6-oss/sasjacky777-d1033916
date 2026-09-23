@@ -64,6 +64,23 @@ const legs4 = (size: [number, number, number], uv: [number, number], x: number, 
 ];
 
 const MODELS: Record<string, PartSpec[]> = {
+  // Vehicles are modelled at half size and drawn at `size: 2`, so their skins fit the 64×64 sheet.
+  boat: [
+    { name: "bottom", size: [10, 1, 14], uv: [0, 0], pivot: [0, 0.5, 0] },
+    { name: "left", size: [1, 3, 14], uv: [0, 16], pivot: [-5.5, 2, 0] },
+    { name: "right", size: [1, 3, 14], uv: [0, 16], pivot: [5.5, 2, 0] },
+    { name: "front", size: [9, 3, 1], uv: [32, 16], pivot: [0, 2, -7.5] },
+    { name: "back", size: [9, 3, 1], uv: [32, 16], pivot: [0, 2, 7.5] },
+    { name: "paddleL", size: [1, 1, 7], uv: [0, 36], pivot: [-6, 3.5, -1], offset: [0, 0, 2.5] },
+    { name: "paddleR", size: [1, 1, 7], uv: [0, 36], pivot: [6, 3.5, -1], offset: [0, 0, 2.5] },
+  ],
+  minecart: [
+    { name: "bottom", size: [8, 1, 10], uv: [0, 0], pivot: [0, 1.5, 0] },
+    { name: "left", size: [1, 4, 10], uv: [0, 12], pivot: [-4.5, 3, 0] },
+    { name: "right", size: [1, 4, 10], uv: [0, 12], pivot: [4.5, 3, 0] },
+    { name: "front", size: [6, 4, 1], uv: [24, 12], pivot: [0, 3, -4.5] },
+    { name: "back", size: [6, 4, 1], uv: [24, 12], pivot: [0, 3, 4.5] },
+  ],
   // A cube of jelly with a darker core; scaled by the slime's size in pose().
   slime: [
     { name: "core", size: [6, 6, 6], uv: [0, 16], pivot: [0, 4, 0] },
@@ -204,6 +221,10 @@ export interface PoseInput {
   /** A slime's size (1, 2 or 4) and its stretch or squash. */
   size?: number;
   squish?: number;
+  /** Sideways tilt: a vehicle's shake when struck. */
+  rock?: number;
+  /** A rider: legs forward, as seated in a boat or a cart. */
+  sitting?: boolean;
 }
 
 const WOOL_TINTS = WOOL_COLORS.map((c) => ({
@@ -221,7 +242,7 @@ export function pose(m: ModelInstance, kind: string, p: PoseInput): void {
   const stretch = 1 + (p.squish ?? 0) * 0.5;
   scale.scale.set(s * (1 + (p.swell ?? 0) * 0.1) / stretch, s * stretch, s * (1 + (p.swell ?? 0) * 0.1) / stretch);
   if (p.death > 0) r.rotation.z = Math.min(1, p.death / 20) * (Math.PI / 2);
-  else r.rotation.z = 0;
+  else r.rotation.z = p.rock ?? 0;
 
   const l = Math.max(0.12, p.light);
   const hurtTint = p.hurt || p.death > 0;
@@ -257,8 +278,16 @@ export function pose(m: ModelInstance, kind: string, p: PoseInput): void {
         set("rightArm", -swing + attack - sneak * 0.4, 0, 0.05);
         set("leftArm", swing - sneak * 0.4, 0, -0.05);
       }
-      set("rightLeg", swing);
-      set("leftLeg", -swing);
+      if (p.sitting) { set("rightLeg", -1.4, 0.1); set("leftLeg", -1.4, -0.1); }
+      else { set("rightLeg", swing); set("leftLeg", -swing); }
+      break;
+    }
+    case "boat": {
+      // The paddles dip in turn while the boat is driven.
+      // Angled out over the sides, blades dipping behind as they pull.
+      const stroke = p.walk;
+      set("paddleL", 0.4 + Math.sin(stroke) * 0.4, -0.7 + Math.cos(stroke) * 0.25, 0);
+      set("paddleR", 0.4 + Math.sin(stroke) * 0.4, 0.7 - Math.cos(stroke) * 0.25, 0);
       break;
     }
     case "pig": case "cow": case "sheep": case "creeper":

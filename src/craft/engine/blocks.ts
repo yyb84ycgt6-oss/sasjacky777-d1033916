@@ -37,7 +37,7 @@ export const OPPOSITE_FACING = [1, 0, 3, 2] as const;
 /** Clockwise rotation of a facing seen from above: north → east → south → west. */
 export const CLOCKWISE_FACING = [3, 2, 0, 1] as const;
 
-export type Shape = "none" | "cube" | "cross" | "crop" | "boxes" | "fluid" | "wire";
+export type Shape = "none" | "cube" | "cross" | "crop" | "boxes" | "fluid" | "wire" | "rail";
 export type RenderLayer = "none" | "opaque" | "cutout" | "translucent";
 export type ToolType = "pickaxe" | "axe" | "shovel" | "hoe" | "sword" | "shears";
 export type Material =
@@ -838,6 +838,23 @@ add(183, "brewing_stand", "Brewing Stand", {
   textures: tex("brewing_stand_base"), hardness: 0.5, tool: P, harvestTier: 0, material: "metal", emission: 1, interact: "brewing",
   boxTexture: (_m, box) => (box <= 2 ? "brewing_stand_base" : box === 3 ? "brewing_stand_rod" : "brewing_bottle"),
 });
+// ---- rails (185+) --------------------------------------------------------------------------
+
+/** A rail's thin collision and selection box; a slope is a half-height wedge approximated as a slab. */
+const railBoxes = (meta: number, curves: boolean): Box[] => {
+  const shape = curves ? meta & 15 : meta & 7;
+  return shape >= 2 && shape <= 5 ? [[0, 0, 0, 16, 8, 16]] : [[0, 0, 0, 16, 2, 16]];
+};
+const rail = (id: number, name: string, displayName: string, tex: (m: number) => string, curves: boolean) => add(id, name, displayName, {
+  shape: "rail", layer: "cutout", opaque: false, solid: false, textures: { top: tex(0), side: tex(0), bottom: tex(0) },
+  boxes: (m) => railBoxes(m, curves), collision: () => [], hardness: 0.7, tool: P, material: "metal", needsSupport: true,
+  boxTexture: (m) => tex(m),
+});
+rail(185, "rail", "Rail", (m) => ((m & 15) >= 6 ? "rail_corner" : "rail"), true);
+rail(186, "powered_rail", "Powered Rail", (m) => ((m & 8) !== 0 ? "powered_rail_on" : "powered_rail"), false);
+rail(187, "detector_rail", "Detector Rail", (m) => ((m & 8) !== 0 ? "detector_rail_on" : "detector_rail"), false);
+rail(188, "activator_rail", "Activator Rail", (m) => ((m & 8) !== 0 ? "activator_rail_on" : "activator_rail"), false);
+
 add(184, "cauldron", "Cauldron", {
   shape: "boxes", layer: "cutout", opaque: false, boxes: cauldronBoxes, collision: () => cauldronBoxes(0),
   textures: tex("cauldron_top", "cauldron_side", "cauldron_bottom"), hardness: 2, tool: P, harvestTier: 0, material: "metal",
@@ -892,6 +909,7 @@ export const B = {
   DAYLIGHT_DETECTOR: 171, HOPPER: 172, DISPENSER: 173, DROPPER: 174, IRON_DOOR: 175, OAK_TRAPDOOR: 176,
   IRON_TRAPDOOR: 177, SLIME_BLOCK: 178,
   ENCHANTING_TABLE: 179, ANVIL: 180, CHIPPED_ANVIL: 181, DAMAGED_ANVIL: 182, BREWING_STAND: 183, CAULDRON: 184,
+  RAIL: 185, POWERED_RAIL: 186, DETECTOR_RAIL: 187, ACTIVATOR_RAIL: 188,
 } as const;
 
 export const isFluid = (id: number): boolean => id === B.WATER || id === B.LAVA;

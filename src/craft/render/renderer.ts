@@ -8,12 +8,13 @@
  * guest's copy that only ever receives snapshots.
  */
 import * as THREE from "three";
-import { block, modelBoxes } from "../engine/blocks";
+import { B, block, modelBoxes } from "../engine/blocks";
 import { layerOf } from "../engine/atlas";
 import type { ChunkMesh } from "../engine/mesher";
 import type { Entity } from "../engine/entities";
 import { ItemEntity, PrimedTnt, FallingBlock, Projectile, XpOrb } from "../engine/entities";
 import { Mob } from "../engine/mobs";
+import { Boat, Vehicle } from "../engine/vehicles";
 import type { World } from "../engine/world";
 import { itemId } from "../engine/items";
 import { ChunkMeshes } from "./chunkMeshes";
@@ -39,6 +40,7 @@ export interface RemotePlayerView {
   dead: boolean;
   /** Under invisibility: only the held item shows, as in the original. */
   invisible?: boolean;
+  sitting?: boolean;
 }
 
 export interface FrameState {
@@ -218,6 +220,17 @@ export class WorldRenderer {
     if (e instanceof Mob) {
       v.model = buildModel(e.kind);
       object.add(v.model.root);
+    } else if (e instanceof Vehicle) {
+      v.model = buildModel(e instanceof Boat ? "boat" : "minecart", e instanceof Boat ? e.wood : 0);
+      if (e.kind === "tnt_minecart") {
+        // The TNT sits in the cart, drawn as the block itself.
+        v.lit = createLitBlockMaterial(this.shared);
+        const tnt = new THREE.Mesh(blockGeometry(B.TNT, 0), v.lit);
+        tnt.scale.setScalar(0.62);
+        tnt.position.set(-0.31, 0.12, -0.31);
+        v.model.parts.get("__scale")!.add(tnt);
+      }
+      object.add(v.model.root);
     } else if (e instanceof ItemEntity) {
       v.item = new ItemView(this.shared, e.stack.id, e.stack.count);
       object.add(v.item.root);
@@ -294,6 +307,20 @@ export class WorldRenderer {
           size: e.size, squish: e.squish,
         });
         v.model.root.visible = !e.hasEffect("invisibility");
+        v.object.position.set(0, 0, 0);
+        continue;
+      }
+      if (v.model && e instanceof Vehicle) {
+        const yaw = e.prevYaw + angleDelta(e.prevYaw, e.yaw) * a;
+        const rock = e.hurtTime > 0 ? Math.sin((e.hurtTime - a) * 1.2) * e.hurtTime * 0.012 : 0;
+        pose(v.model, e.kind, {
+          x, y, z, yaw, pitch: 0, walk: e instanceof Boat ? e.paddle : 0, speed: 0, light: bright, hurt: false, death: 0,
+          swing: 0, time: this.time, size: 2, rock,
+        });
+        if (v.lit) {
+          const [s, b] = this.lightAt(x, y + 0.5, z);
+          v.lit.uniforms.uSky.value = s; v.lit.uniforms.uBlock.value = b;
+        }
         v.object.position.set(0, 0, 0);
         continue;
       }
@@ -374,6 +401,7 @@ export class WorldRenderer {
       pose(v.model!, "player", {
         x: p.x, y: p.y, z: p.z, yaw: p.yaw, pitch: p.pitch, walk: p.walk, speed: p.speed,
         light: this.brightness(p.x, p.y + 1.6, p.z), hurt: p.hurt, death: 0, swing: p.swing, time: this.time, sneaking: p.sneaking,
+        sitting: p.sitting,
       });
       const [s, b] = this.lightAt(p.x, p.y + 1, p.z);
       this.attachHeld(p.id, v.model!, p.heldItem, s, b);
@@ -398,6 +426,7 @@ export class WorldRenderer {
       pose(this.localModel, "player", {
         x: lp.x, y: lp.y, z: lp.z, yaw: lp.yaw, pitch: lp.pitch, walk: lp.walk, speed: lp.speed,
         light: this.brightness(lp.x, lp.y + 1.6, lp.z), hurt: lp.hurt, death: 0, swing: lp.swing, time: this.time, sneaking: lp.sneaking,
+        sitting: lp.sitting,
       });
       const [s, b] = this.lightAt(lp.x, lp.y + 1, lp.z);
       this.attachHeld("__local", this.localModel, lp.heldItem, s, b);

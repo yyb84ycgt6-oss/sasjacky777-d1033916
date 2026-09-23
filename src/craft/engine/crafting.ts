@@ -182,6 +182,17 @@ shapeless("fermented_spider_eye", ["spider_eye", "brown_mushroom", "sugar"], "fe
 shaped("glistering_melon_slice", ["NNN", "NMN", "NNN"], { N: "gold_nugget", M: "melon_slice" }, "glistering_melon_slice");
 shaped("golden_carrot", ["NNN", "NCN", "NNN"], { N: "gold_nugget", C: "carrot" }, "golden_carrot");
 
+// Rails and vehicles
+shaped("rail", ["I I", "ISI", "I I"], { I: "iron_ingot", S: "stick" }, "rail", 16);
+shaped("powered_rail", ["G G", "GSG", "GRG"], { G: "gold_ingot", S: "stick", R: "redstone" }, "powered_rail", 6);
+shaped("detector_rail", ["I I", "IPI", "IRI"], { I: "iron_ingot", P: "stone_pressure_plate", R: "redstone" }, "detector_rail", 6);
+shaped("activator_rail", ["ISI", "ITI", "ISI"], { I: "iron_ingot", S: "stick", T: "redstone_torch" }, "activator_rail", 6);
+shaped("minecart", ["I I", "III"], { I: "iron_ingot" }, "minecart");
+shapeless("tnt_minecart", ["tnt", "minecart"], "tnt_minecart");
+for (const wood of ["oak", "spruce", "birch", "jungle", "acacia"]) {
+  shaped(`${wood}_boat`, ["P P", "PPP"], { P: `${wood}_planks` }, `${wood}_boat`);
+}
+
 // Dyes and colour
 shapeless("yellow_dye", ["dandelion"], "yellow_dye");
 shapeless("red_dye", ["poppy"], "red_dye");

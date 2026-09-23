@@ -200,6 +200,26 @@ export function skin(kind: string, variant = 0): HTMLCanvasElement {
       p.px(core.front.x + 3, core.front.y + 4, dark, 0);
       break;
     }
+    case "boat": {
+      // Drawn at half size (the model doubles it): planks with dark seams, per wood.
+      const woods = ["#9c7a45", "#6b5030", "#c8b77a", "#a0724a", "#b0603a"];
+      const plank = hex(woods[variant % woods.length]);
+      const seam = [plank[0] * 0.7, plank[1] * 0.7, plank[2] * 0.7] as RGB;
+      const wood = (_f: Face, _x: number, y: number): RGB => (y % 3 === 2 ? seam : plank);
+      p.box(0, 0, 10, 1, 14, wood);
+      p.box(0, 16, 1, 3, 14, wood);
+      p.box(32, 16, 9, 3, 1, wood);
+      p.box(0, 36, 1, 1, 7, hex("#6b4a26"));
+      break;
+    }
+    case "minecart": {
+      const iron = hex("#8a8a8e"), dark = hex("#4a4a4e");
+      const rim = (_f: Face, x: number, y: number): RGB => (y === 0 || x === 0 ? dark : iron);
+      p.box(0, 0, 8, 1, 10, (_f, x, y) => ((x + y) % 4 === 0 ? dark : iron));
+      p.box(0, 12, 1, 4, 10, rim);
+      p.box(24, 12, 6, 4, 1, rim);
+      break;
+    }
     case "player": {
       const hues = [
         ["#3aa8a8", "#2e3a8c"], ["#a83a3a", "#3a3a3a"], ["#3a8a3a", "#5a4a2a"], ["#8a3aa8", "#2a2a5a"],

@@ -21,6 +21,8 @@ import { PrimedTnt, Projectile, type ProjectileKind } from "../engine/entities";
 import { itemDef, itemId, resolveDrops, type ItemDef, type ItemStack } from "../engine/items";
 import { isArthropod, isUndead, Mob } from "../engine/mobs";
 import { potionOfItem } from "../engine/potions";
+import { isRail, neighboursToReshape, placedShape, railShape, RAIL_EXITS } from "../engine/rails";
+import { Vehicle } from "../engine/vehicles";
 import type { ThrowExtra } from "../net/session";
 import { aabbIntersects, bodyBox } from "../engine/physics";
 import { raycastBlocks, rayBox, type BlockHit } from "../engine/raycast";
@@ -197,7 +199,9 @@ export class Actions {
     const hit = p.gameMode === "spectator" ? null : raycastBlocks(g.world, ox, oy, oz, d.x, d.y, d.z, reach);
     let best: Entity | null = null, bestT = Math.min(entityReach, hit ? hit.distance : Infinity);
     for (const e of g.entities.values()) {
-      if (!(e instanceof Mob) || e.dying) continue;
+      if (!(e instanceof Mob || e instanceof Vehicle) || (e instanceof Mob && e.dying)) continue;
+      // The vehicle you sit in is not in your way.
+      if (e instanceof Vehicle && e.id === p.riding) continue;
       if (Math.abs(e.x - ox) > 6 || Math.abs(e.z - oz) > 6) continue;
       const box = e.box();
       const r = rayBox(ox, oy, oz, d.x, d.y, d.z, { ...box, minX: box.minX - 0.1, maxX: box.maxX + 0.1, minZ: box.minZ - 0.1, maxZ: box.maxZ + 0.1 }, bestT);
@@ -460,6 +464,7 @@ export class Actions {
       const e = t.entity;
       if (crit) g.particles("crit", e.x, e.y + e.body.height * 0.7, e.z, 10);
       if (g.role === "guest") g.net?.attack(e.id, damage, b.x, b.z, knockback, fire, looting);
+      else if (e instanceof Vehicle) e.hurt(g.ctx, damage, "player", b.x, b.z, p.id);
       else if (e instanceof Mob) {
         e.looting = looting;
         if (e.hurt(g.ctx, damage, "player", b.x, b.z, p.id, knockback)) {
@@ -487,6 +492,12 @@ export class Actions {
     const held = inv.held;
     const def = held ? itemDef(held.id) : undefined;
     const t = this.target;
+
+    if (t?.entity instanceof Vehicle && fresh && !p.sneaking) {
+      g.mount(t.entity);
+      this.swing();
+      return;
+    }
 
     if (t?.entity instanceof Mob && fresh) {
       const name = def?.name ?? null;
@@ -539,6 +550,10 @@ export class Actions {
     }
     if (def.use === "bottle") {
       this.fillBottle();
+      return;
+    }
+    if (def.use === "boat") {
+      this.putVehicle(def, null);
       return;
     }
     if (def.use === "bow") {
@@ -787,8 +802,42 @@ export class Actions {
       if (def.use === "water_bucket" || def.use === "lava_bucket") return this.emptyBucket(hit, def);
     }
 
+    if (fresh && (def.use === "boat" || def.use === "minecart")) return this.putVehicle(def, hit);
     if (def.places !== undefined) return this.place(hit, def);
     return false;
+  }
+
+  /**
+   * Puts a boat on water (or on the ground), or a minecart on a rail. The host
+   * creates it; a guest asks the host to.
+   */
+  private putVehicle(def: ItemDef, hit: BlockHit | null): boolean {
+    const g = this.game;
+    const p = g.player;
+    let x: number, y: number, z: number, yaw = p.yaw;
+    let kind = def.name;
+    let wood = 0;
+    if (def.use === "boat") {
+      const water = this.fluidHit();
+      if (water && g.world.blockAt(water.x, water.y, water.z) === B.WATER && (!hit || water.distance <= hit.distance)) {
+        x = water.x + 0.5; y = water.y + 0.75; z = water.z + 0.5;
+      } else if (hit && hit.face === Face.Up) {
+        x = hit.px; y = hit.y + 1; z = hit.pz;
+      } else return false;
+      kind = "boat";
+      wood = Math.max(0, ["oak", "spruce", "birch", "jungle", "acacia"].indexOf(def.name.replace(/_boat$/, "")));
+    } else {
+      if (!hit || !isRail(g.world.blockAt(hit.x, hit.y, hit.z))) return false;
+      const id = g.world.blockAt(hit.x, hit.y, hit.z);
+      const [e1, e2] = RAIL_EXITS[railShape(id, g.world.getMeta(hit.x, hit.y, hit.z))] ?? RAIL_EXITS[0];
+      x = hit.x + 0.5; y = hit.y + 0.0625; z = hit.z + 0.5;
+      yaw = Math.atan2(-(e2[0] - e1[0]), -(e2[2] - e1[2]));
+    }
+    if (g.role === "guest") g.net?.placeVehicle?.(kind, x, y, z, yaw, wood);
+    else g.placeVehicle(kind, x, y, z, yaw, wood);
+    this.consumeHeld();
+    this.swing();
+    return true;
   }
 
   private interactBlock(x: number, y: number, z: number, id: number, meta: number, held: ItemDef | undefined): boolean {
@@ -1059,6 +1108,15 @@ export class Actions {
       w.setBlock(x, y, z, B.RED_BED, facing, "player");
       w.setBlock(hx, y, hz, B.RED_BED, facing | 4, "player");
       return this.afterPlace(x, y, z, def, item);
+    }
+    if (isRail(id)) {
+      // Track joins the track around it, and the ends it meets swing round to it.
+      const get = (a: number, b: number, c: number) => w.blockAt(a, b, c);
+      const gm = (a: number, b: number, c: number) => w.getMeta(a, b, c);
+      meta = placedShape(get, gm, id, x, y, z, look >= 2);
+      if (!this.commit(x, y, z, id, meta, item)) return false;
+      for (const [nx, ny, nz, nm] of neighboursToReshape(get, gm, x, y, z)) w.setBlock(nx, ny, nz, w.blockAt(nx, ny, nz), nm, "player");
+      return true;
     }
     if (this.collidesWithEntity(x, y, z, id, meta)) return false;
     return this.commit(x, y, z, id, meta, item);

@@ -17,6 +17,7 @@ import {
   block, faceTexture, isDoor, isLeaves, isRedstoneTorch, modelBoxes, B, Face, FACING_DIRS, type BlockDef, type Box,
 } from "./blocks";
 import { dustColor, dustConnection } from "./redstone";
+import { railShape, isSlope } from "./rails";
 import { WORLD_HEIGHT } from "./constants";
 
 export const PAD = 18;
@@ -249,6 +250,8 @@ export class Mesher {
             this.fluid(target, input, x, y, z, def, m, tr, tg, tb);
           } else if (def.shape === "wire") {
             this.wire(target, input, x, y, z, m);
+          } else if (def.shape === "rail") {
+            this.rail(target, input, x, y, z, def, m);
           }
         }
       }
@@ -471,6 +474,36 @@ export class Mesher {
       }
       b.quad(sx, sy, sz, su, sv, line, sSky, sBlk, sShade, 0, r, g, bl, TINT_FULL);
     }
+  }
+
+  /**
+   * A rail: one quad a pixel above the floor, turned to its shape, or tilted
+   * up a slope from the low edge to the next block's floor. The textures are
+   * painted with the track running along v; curves join the south and east edges.
+   */
+  private rail(b: Builder, input: MeshInput, x: number, y: number, z: number, def: BlockDef, m: number): void {
+    const shape = railShape(def.id, m);
+    const layer = this.layer(def, m, Face.Up);
+    // Slopes catch the light of the block above them, as they lie half inside it.
+    this.flatLight(input, x, isSlope(shape) ? y + 1 : y, z, 1);
+    const bx = x * 16, bz = z * 16, fy = y * 16 + 1;
+    const xs = [0, 16, 16, 0], zs = [16, 16, 0, 0];
+    for (let i = 0; i < 4; i++) {
+      const lx = xs[i], lz = zs[i];
+      let u = lx, v = lz, h = 0;
+      switch (shape) {
+        case 1: u = lz; v = lx; break;
+        case 2: u = lz; v = 16 - lx; h = lx; break;
+        case 3: u = lz; v = lx; h = 16 - lx; break;
+        case 4: h = 16 - lz; break;
+        case 5: h = lz; v = 16 - lz; break;
+        case 7: u = 16 - lx; break;
+        case 8: u = 16 - lx; v = 16 - lz; break;
+        case 9: v = 16 - lz; break;
+      }
+      sx[i] = bx + lx; sy[i] = fy + h; sz[i] = bz + lz; su[i] = u; sv[i] = v;
+    }
+    b.quad(sx, sy, sz, su, sv, layer, sSky, sBlk, sShade, 0, 255, 255, 255, TINT_NONE);
   }
 
   private fluidHeight(input: MeshInput, id: number, x: number, y: number, z: number): number {

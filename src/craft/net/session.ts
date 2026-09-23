@@ -25,6 +25,7 @@ import {
 import { itemDef, type ItemStack, type StatusEffect } from "../engine/items";
 import { sanitizeStack } from "../engine/inventory";
 import { Mob, isMobKind } from "../engine/mobs";
+import { isVehicleKind, Vehicle, vehicleFromSnapshot } from "../engine/vehicles";
 import { block } from "../engine/blocks";
 import type { PlayerSave } from "../engine/player";
 import type { AdvancementEvent } from "../engine/advancements";
@@ -226,7 +227,7 @@ export class NetSession implements NetLink {
     const b = p.body;
     this.stateOp = ["st", r2(b.x), r2(b.y), r2(b.z), r2(p.yaw), r2(p.pitch), r2(p.walkDist), r2(Math.hypot(b.x - p.prevX, b.z - p.prevZ)),
       r2(g.actions.swingProgress(1)), p.sneaking ? 1 : 0, p.inventory.held?.id ?? -1, g.settings.skin, p.name, p.hurtTime > 0 ? 1 : 0,
-      p.dead ? 1 : 0, p.gameMode, p.sleeping ? 1 : 0, p.hasEffect("invisibility") ? 1 : 0];
+      p.dead ? 1 : 0, p.gameMode, p.sleeping ? 1 : 0, p.hasEffect("invisibility") ? 1 : 0, p.riding !== null ? 1 : 0];
     if (this.role === "host") {
       if (this.ticks % ENTITY_TICKS === 0 && g.remote.size) this.push(["en", this.entitySnapshots()]);
       if (this.ticks % ENV_TICKS === 0) this.push(["env", g.time, r2(g.rain), r2(g.thunder), g.meta.difficulty]);
@@ -299,6 +300,14 @@ export class NetSession implements NetLink {
   giveRemote(id: string, stack: ItemStack): void { this.push(["gv", id, stack]); }
   advanceRemote(id: string, event: AdvancementEvent): void { this.push(["av", id, event]); }
   pushRemote(id: string, dx: number, dy: number, dz: number): void { this.push(["pu", id, dx, dy, dz]); }
+  mount(entityId: number, on: boolean): void { if (this.role === "guest") this.push(["mo", entityId, on ? 1 : 0]); }
+  vehiclePose(v: Vehicle): void {
+    const b = v.body;
+    this.push(["vp", v.id, r3(b.x), r3(b.y), r3(b.z), r3(v.yaw), r3(b.vx), r3(b.vy), r3(b.vz)]);
+  }
+  placeVehicle(kind: string, x: number, y: number, z: number, yaw: number, wood: number): void {
+    this.push(["pv", kind, r3(x), r3(y), r3(z), r3(yaw), wood]);
+  }
   xpRemote(id: string, amount: number): void { this.push(["xp", id, amount]); }
   effect(kind: "sound" | "particles" | "explosion", data: unknown[]): void {
     if (this.role === "host") this.push(["fx", kind, ...data]);
@@ -452,7 +461,7 @@ export class NetSession implements NetLink {
       r = {
         id, name: this.names.get(id) ?? "Player", x: 0, y: 0, z: 0, yaw: 0, pitch: 0, px: 0, py: 0, pz: 0, pyaw: 0, walk: 0, speed: 0,
         swing: 0, sneaking: false, held: null, variant: 0, hurt: false, dead: false, gameMode: "survival", sleeping: false,
-        invisible: false, lastSeen: now, receivedAt: 0, ...init,
+        invisible: false, riding: false, lastSeen: now, receivedAt: 0, ...init,
       };
       r.px = r.x; r.py = r.y; r.pz = r.z;
       g.remote.set(id, r);
@@ -537,6 +546,9 @@ export class NetSession implements NetLink {
         case "in": if (this.role === "host") this.onInteract(from, op); break;
         case "dr": if (this.role === "host") this.onDrops(op); break;
         case "th": if (this.role === "host") this.onThrow(from, op); break;
+        case "mo": if (this.role === "host") this.onMount(from, op); break;
+        case "vp": if (this.role === "host") this.onVehiclePose(from, op); break;
+        case "pv": if (this.role === "host") this.onPlaceVehicle(from, op); break;
         case "tn": if (this.role === "host" && finite(op[1], op[2], op[3])) g.spawn(new PrimedTnt((op[1] as number) + 0.5, op[2] as number, (op[3] as number) + 0.5, 80)); break;
         case "sl": if (this.role === "host") { const r = g.remote.get(from); if (r) r.sleeping = op[1] === 1; } break;
         case "ps":
@@ -574,6 +586,7 @@ export class NetSession implements NetLink {
     r.gameMode = String(op[15] ?? "survival");
     r.sleeping = op[16] === 1;
     r.invisible = op[17] === 1;
+    r.riding = op[18] === 1;
     r.receivedAt = now;
   }
 
@@ -653,6 +666,10 @@ export class NetSession implements NetLink {
         if (!created) continue;
         e = created;
         g.entities.set(e.id, e);
+      } else if (e instanceof Vehicle && g.player.riding === e.id) {
+        // This guest drives it: keep its own motion, and only hear who the host says is riding.
+        const rider = s.data?.r;
+        if (typeof rider === "string" && rider !== g.player.id) g.dismount();
       } else {
         e.beginTick();
         e.applySnapshot(s);
@@ -687,6 +704,7 @@ export class NetSession implements NetLink {
     const [, id, dmg, fx, fz, kb, fire, looting] = op;
     if (!finite(id, dmg, fx, fz)) return;
     const e = g.entities.get(id as number);
+    if (e instanceof Vehicle) { e.hurt(g.ctx, Math.min(40, dmg as number), "player", fx as number, fz as number, from); return; }
     if (e instanceof Mob) {
       e.looting = int(looting) ? Math.max(0, Math.min(3, looting as number)) : 0;
       const took = e.hurt(g.ctx, Math.min(40, dmg as number), "player", fx as number, fz as number, from, Math.min(2, Math.max(0, Number(kb) || 0)));
@@ -713,6 +731,36 @@ export class NetSession implements NetLink {
       }
     }
     if (finite(xp) && (xp as number) > 0) g.spawnXp(x as number, y as number, z as number, Math.min(1000, xp as number));
+  }
+
+  private onMount(from: string, op: Op): void {
+    const [, id, on] = op;
+    const v = this.game!.entities.get(id as number);
+    if (!(v instanceof Vehicle)) return;
+    // First come, first seated; a guest can only climb out of their own seat.
+    if (on === 1 && (v.rider === null || v.rider === from)) v.rider = from;
+    else if (on === 0 && v.rider === from) v.rider = null;
+  }
+
+  private onVehiclePose(from: string, op: Op): void {
+    const [, id, x, y, z, yaw, vx, vy, vz] = op;
+    const v = this.game!.entities.get(id as number);
+    if (!(v instanceof Vehicle) || v.rider !== from || !finite(x, y, z, yaw, vx, vy, vz)) return;
+    const b = v.body;
+    // A rider reports where their vehicle went; a jump further than a fast cart could go is not believed.
+    if (Math.hypot((x as number) - b.x, (z as number) - b.z) > 4) return;
+    b.x = x as number; b.y = y as number; b.z = z as number;
+    b.vx = vx as number; b.vy = vy as number; b.vz = vz as number;
+    v.yaw = yaw as number;
+  }
+
+  private onPlaceVehicle(from: string, op: Op): void {
+    const g = this.game!;
+    const [, kind, x, y, z, yaw, wood] = op;
+    if (!isVehicleKind(kind) || !finite(x, y, z, yaw)) return;
+    const r = g.remote.get(from);
+    if (r && Math.hypot(r.x - (x as number), r.y - (y as number), r.z - (z as number)) > 8) return;
+    g.placeVehicle(kind, x as number, y as number, z as number, yaw as number, int(wood) ? (wood as number) : 0);
   }
 
   private onThrow(from: string, op: Op): void {
@@ -744,6 +792,7 @@ export function entityFromSnapshot(s: EntitySnapshot): Entity | null {
     if (st) e = new ItemEntity(s.x, s.y, s.z, st, 0, s.id);
   } else if (s.kind === "xp") e = new XpOrb(s.x, s.y, s.z, Number(s.data?.value ?? 1), s.id);
   else if (isProjectileKind(s.kind)) e = new Projectile(s.kind, s.x, s.y, s.z, s.vx ?? 0, s.vy ?? 0, s.vz ?? 0, null, s.id);
+  else if (isVehicleKind(s.kind)) e = vehicleFromSnapshot(s);
   else if (s.kind === "falling_block") e = new FallingBlock(s.x, s.y, s.z, Number(s.data?.b ?? 12), Number(s.data?.m ?? 0), s.id);
   else if (s.kind === "tnt") e = new PrimedTnt(s.x, s.y, s.z, Number(s.data?.fuse ?? 80), s.id);
   if (e) {

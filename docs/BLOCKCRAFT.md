@@ -90,6 +90,22 @@ everything within four blocks. Healing hurts the undead and harming heals them.
 Cauldrons hold three bottles of water, and hoppers feed brewing stands.
 Blaze powder and nether wart come from the Nether.
 
+## Rails, minecarts and boats
+
+`engine/rails.ts` gives rails their ten shapes: two straights, four slopes and
+four curves. A rail placed by a player joins the track around it, and the ends
+it meets swing round to it. Powered rails boost a moving cart, kick a stopped one
+away from a wall, and brake it when unpowered. Power runs along a line of them
+for eight rails. Detector rails give a signal while a cart is on them, and
+activator rails light TNT carts and throw riders out.
+
+`engine/vehicles.ts` has the minecart, the TNT minecart and boats in five
+woods. Carts run along the line between a rail's ends, a curve included, and top
+out at eight blocks a second. Boats float, turn with A and D, and glide on ice.
+Right-click to get in; sneak to get out. Online, whoever rides a vehicle drives
+it on their own screen and reports where it went, so a guest's boat answers the
+keys at once instead of a round trip later.
+
 ## Commands
 
 With cheats on (a world option) or in creative: `/time`, `/gamemode`, `/give`,

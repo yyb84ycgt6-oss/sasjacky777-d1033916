@@ -50,7 +50,9 @@ export type ItemUse =
   | "bucket" | "water_bucket" | "lava_bucket" | "milk_bucket" | "bow" | "flint_and_steel"
   | "bone_meal" | "throw" | "shears" | "hoe" | "plant"
   /** Drunk like milk (potions); thrown to burst (splash potions, bottles o' enchanting); filled at water (glass bottles). */
-  | "drink" | "splash" | "xp_bottle" | "bottle";
+  | "drink" | "splash" | "xp_bottle" | "bottle"
+  /** Put down on water or rails to ride. */
+  | "boat" | "minecart";
 
 export type Category = "building" | "colored" | "natural" | "functional" | "redstone" | "tools" | "combat" | "food" | "ingredients";
 
@@ -105,11 +107,13 @@ const FLAT_BLOCK_ICONS: Record<string, string> = {
   oak_button: "button_item_oak", stone_pressure_plate: "plate_item_stone", oak_pressure_plate: "plate_item_oak",
   repeater: "repeater", comparator: "comparator", hopper: "hopper_item", daylight_detector: "daylight_detector_item",
   brewing_stand: "brewing_stand_item", cauldron: "cauldron_item",
+  rail: "rail", powered_rail: "powered_rail", detector_rail: "detector_rail", activator_rail: "activator_rail",
 };
 const REDSTONE = new Set([
   "redstone_torch", "lever", "stone_button", "oak_button", "stone_pressure_plate", "oak_pressure_plate", "redstone_lamp",
   "repeater", "comparator", "piston", "sticky_piston", "observer", "daylight_detector", "hopper", "dispenser", "dropper",
   "oak_trapdoor", "iron_trapdoor", "slime_block", "redstone_block", "tnt", "note_block",
+  "rail", "powered_rail", "detector_rail", "activator_rail",
 ]);
 
 const COLORED = /_wool$|terracotta$/;
@@ -329,6 +333,13 @@ food("pufferfish", "Pufferfish", 1, 0.2, { effect: ["poison", 60, 1] });
 // Plain enchanted books are listed per enchantment in the creative menu instead (Screens.tsx).
 item("enchanted_book", "Enchanted Book", { maxStack: 1, category: "ingredients", hidden: true });
 item("experience_bottle", "Bottle o' Enchanting", { use: "xp_bottle", category: "ingredients" });
+
+// Vehicles.
+for (const wood of ["oak", "spruce", "birch", "jungle", "acacia"]) {
+  item(`${wood}_boat`, `${wood[0].toUpperCase()}${wood.slice(1)} Boat`, { maxStack: 1, use: "boat", category: "tools", fuel: 1200 });
+}
+item("minecart", "Minecart", { maxStack: 1, use: "minecart", category: "tools" });
+item("tnt_minecart", "Minecart with TNT", { maxStack: 1, use: "minecart", category: "tools" });
 
 // ---- lookups -----------------------------------------------------------------------
 

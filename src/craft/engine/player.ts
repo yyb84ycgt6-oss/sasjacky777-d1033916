@@ -11,7 +11,7 @@ import { B, block } from "./blocks";
 import { levelOf, protectionFactor, wears } from "./enchanting";
 import { Inventory } from "./inventory";
 import { itemDef, type FoodInfo, type ItemStack, type StatusEffect } from "./items";
-import { newBody, travel, type Body, type BlockReader } from "./physics";
+import { newBody, senseEnvironment, travel, type Body, type BlockReader } from "./physics";
 import type { DamageSource } from "./entities";
 
 export type GameMode = "survival" | "creative" | "adventure" | "spectator";
@@ -98,6 +98,8 @@ export class Player {
    * enchants, so closing and reopening the table cannot re-roll a bad offer.
    */
   enchantSeed = Math.floor(Math.random() * 0x7fffffff);
+  /** The vehicle being ridden (entity id), or null. */
+  riding: number | null = null;
   sneaking = false;
   sprinting = false;
   /** Ticks since the last swing; the attack meter charges back up over 1 / attackSpeed seconds. */
@@ -303,6 +305,29 @@ export class Player {
   beginTick(): void {
     this.prevX = this.body.x; this.prevY = this.body.y; this.prevZ = this.body.z;
     this.prevWalkDist = this.walkDist;
+  }
+
+  /**
+   * A tick spent riding: the vehicle does the moving (the game seats the
+   * player on it), but breath, fire, hunger and effects run as usual.
+   */
+  tickRiding(world: BlockReader, rules: SurvivalRules): void {
+    if (this.dead) { this.deathTime++; return; }
+    if (this.hurtTime > 0) this.hurtTime--;
+    if (this.invulnerable > 0) this.invulnerable--;
+    this.attackTicks++;
+    this.sneaking = false;
+    this.sprinting = false;
+    const b = this.body;
+    b.height = PLAYER_HEIGHT;
+    b.eyeHeight = EYE_HEIGHT;
+    b.vx = b.vy = b.vz = 0;
+    b.fallDistance = 0;
+    // Nothing moved the body this tick, so sense the water and lava around the seat directly.
+    senseEnvironment(world, b);
+    this.environment(world, rules);
+    this.metabolism(rules);
+    this.tickEffects();
   }
 
   tick(world: BlockReader, input: PlayerInput, rules: SurvivalRules): void {

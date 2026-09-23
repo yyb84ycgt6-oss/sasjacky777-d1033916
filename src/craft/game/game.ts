@@ -39,6 +39,7 @@ import { WorldRenderer, type RemotePlayerView } from "../render/renderer";
 import { bottleBits, tickBrewing } from "../engine/brewing";
 import { levelOf } from "../engine/enchanting";
 import { potionOfItem, splashSeconds } from "../engine/potions";
+import { Boat, Minecart, Vehicle, vehicleFromSnapshot } from "../engine/vehicles";
 import { Actions } from "./actions";
 import type { ThrowExtra } from "../net/session";
 import { runCommand } from "./commands";
@@ -47,7 +48,7 @@ import { effectiveControls, saveSettings, type Settings } from "./settings";
 import { Store } from "./store";
 import { Streamer } from "./streamer";
 import { emptyControls, type ChatLine, type Controls, type Hud, type Screen } from "./types";
-import type { Slot } from "../engine/inventory";
+import { sanitizeStack, type Slot } from "../engine/inventory";
 
 export type Role = "local" | "host" | "guest";
 
@@ -80,6 +81,10 @@ export interface NetLink {
   advanceRemote?(id: string, event: AdvancementEvent): void;
   /** A piston shoved a guest: move them on their own screen, which owns their position. */
   pushRemote?(id: string, dx: number, dy: number, dz: number): void;
+  /** Guest → host: climb into, or out of, a vehicle; where the vehicle a guest drives went; put one down. */
+  mount?(entityId: number, on: boolean): void;
+  vehiclePose?(v: Vehicle): void;
+  placeVehicle?(kind: string, x: number, y: number, z: number, yaw: number, wood: number): void;
   close(): void;
 }
 
@@ -100,6 +105,8 @@ export interface RemotePlayer {
   sleeping: boolean;
   /** Drank invisibility: drawn as nothing. */
   invisible: boolean;
+  /** Seated in a boat or a cart. */
+  riding: boolean;
   lastSeen: number;
   receivedAt: number;
 }
@@ -385,10 +392,14 @@ export class Game {
       m.applySnapshot(s);
       e = m;
     } else if (s.kind === "item") {
-      const st = s.data?.stack as ItemStack | undefined;
-      if (st && itemDef(st.id)) e = new ItemEntity(s.x, s.y, s.z, st, 0, s.id);
+      const st = sanitizeStack(s.data?.stack);
+      if (st) e = new ItemEntity(s.x, s.y, s.z, st, 0, s.id);
     } else if (s.kind === "xp") {
       e = new XpOrb(s.x, s.y, s.z, Number(s.data?.value ?? 1), s.id);
+    } else {
+      e = vehicleFromSnapshot(s);
+      // Nobody is riding anything when a world opens.
+      if (e instanceof Vehicle) e.rider = null;
     }
     if (e) {
       bumpEntityIds(e.id);
@@ -442,7 +453,7 @@ export class Game {
     for (const e of this.entities.values()) {
       if (e.removed) continue;
       const b = e.body;
-      out.push({ x: b.x, y: b.y, z: b.z, width: b.width, height: b.height, mob: e instanceof Mob, move: (dx, dy, dz) => { b.x += dx; b.y += dy; b.z += dz; } });
+      out.push({ x: b.x, y: b.y, z: b.z, width: b.width, height: b.height, mob: e instanceof Mob, cart: e instanceof Minecart, move: (dx, dy, dz) => { b.x += dx; b.y += dy; b.z += dz; } });
     }
     return out;
   }
@@ -636,7 +647,7 @@ export class Game {
       const d = Math.hypot(cx - x, cy - y, cz - z);
       const hit = blastImpact(power, d, exposure(this.world, x, y, z, box));
       if (hit.damage <= 0) continue;
-      if (e instanceof Mob) e.hurt(this.ctx, hit.damage, "explosion", x, z);
+      if (e instanceof Mob || e instanceof Vehicle) e.hurt(this.ctx, hit.damage, "explosion", x, z);
       else if (e instanceof ItemEntity || e instanceof XpOrb) { if (hit.damage > 4) e.removed = true; }
       const n = d || 1;
       e.body.vx += ((cx - x) / n) * hit.push; e.body.vy += ((cy - y) / n) * hit.push; e.body.vz += ((cz - z) / n) * hit.push;
@@ -1103,6 +1114,7 @@ export class Game {
     const local: RemotePlayerView = {
       id: p.id, name: p.name, x: ix, y: iy, z: iz, yaw: p.yaw, pitch: p.pitch, walk, speed, swing: this.actions.swingProgress(alpha),
       sneaking: p.sneaking, heldItem: heldId, variant: this.settings.skin, hurt: p.hurtTime > 0, dead: p.dead,
+      sitting: p.riding !== null,
     };
     const remote: RemotePlayerView[] = [];
     for (const r of this.remote.values()) {
@@ -1111,7 +1123,7 @@ export class Game {
         id: r.id, name: r.name, x: r.px + (r.x - r.px) * t, y: r.py + (r.y - r.py) * t, z: r.pz + (r.z - r.pz) * t,
         yaw: r.pyaw + angleDiff(r.pyaw, r.yaw) * t, pitch: r.pitch, walk: r.walk, speed: r.speed, swing: r.swing,
         sneaking: r.sneaking, heldItem: r.held, variant: r.variant, hurt: r.hurt, dead: r.dead || r.gameMode === "spectator",
-        invisible: r.invisible,
+        invisible: r.invisible, sitting: r.riding,
       });
     }
 
@@ -1167,11 +1179,20 @@ export class Game {
     const inputBlocked = !!this.screen && this.screen.kind !== "chat";
     const c = this.controls;
     const frozen = !this.world.isLoaded(Math.floor(b.x), Math.floor(b.z));
-    if (!frozen) {
+    const rules = { difficulty: this.meta.difficulty, naturalRegeneration: this.meta.rules.naturalRegeneration, raining: this.rain > 0.5 };
+    const vehicle = this.ridden();
+    if (!frozen && vehicle) {
+      // Sneak climbs out; everything else steers.
+      if (!inputBlocked && c.sneak) this.dismount();
+      else {
+        vehicle.input = { forward: inputBlocked ? 0 : c.forward, strafe: inputBlocked ? 0 : c.strafe, yaw: p.yaw };
+        p.tickRiding(this.world, rules);
+      }
+    } else if (!frozen) {
       p.tick(this.world, {
         forward: inputBlocked ? 0 : c.forward, strafe: inputBlocked ? 0 : c.strafe,
         jump: !inputBlocked && (c.jump || this.actions.autoJumpNow()), sneak: !inputBlocked && c.sneak, sprint: !inputBlocked && c.sprint,
-      }, { difficulty: this.meta.difficulty, naturalRegeneration: this.meta.rules.naturalRegeneration, raining: this.rain > 0.5 });
+      }, rules);
     }
     this.handlePlayerEvents(p.events.splice(0));
     this.actions.tick();
@@ -1189,6 +1210,7 @@ export class Game {
 
     if (this.simulates) this.simulate();
     else this.guestTick();
+    this.seatRider();
 
     this.net?.tick();
 
@@ -1273,7 +1295,13 @@ export class Game {
     const ctx = this.ctx;
     for (const e of this.entities.values()) {
       if (!world.isLoaded(Math.floor(e.x), Math.floor(e.z))) continue;
+      // A guest drives the vehicle they ride and reports where it went.
+      if (e instanceof Vehicle && e.rider && e.rider !== this.player.id && this.remote.has(e.rider)) continue;
       e.tick(ctx);
+    }
+    // A vehicle whose rider left the game is free again.
+    for (const e of this.entities.values()) {
+      if (e instanceof Vehicle && e.rider && e.rider !== this.player.id && !this.remote.has(e.rider)) e.rider = null;
     }
     for (const [id, e] of this.entities) if (e.removed) this.entities.delete(id);
 
@@ -1281,10 +1309,84 @@ export class Game {
     this.sleepTick();
   }
 
+  /** The vehicle this player rides, or null — letting go of one that vanished or was taken. */
+  ridden(): Vehicle | null {
+    const p = this.player;
+    if (p.riding === null) return null;
+    const v = this.entities.get(p.riding);
+    if (!(v instanceof Vehicle) || v.removed || p.dead || (v.rider !== null && v.rider !== p.id) || (v.rider === null && this.simulates)) {
+      this.dismount();
+      return null;
+    }
+    return v;
+  }
+
+  /** Climbs into a vehicle: at once here, and on the host too when this is a guest. */
+  mount(v: Vehicle): void {
+    const p = this.player;
+    if (v.rider && v.rider !== p.id) return;
+    if (p.riding !== null) this.dismount();
+    v.rider = p.id;
+    p.riding = v.id;
+    p.sleeping = null;
+    this.net?.mount?.(v.id, true);
+    this.showActionbar("Sneak to get out");
+  }
+
+  /** Climbs out, onto a free spot beside the vehicle. */
+  dismount(): void {
+    const p = this.player;
+    if (p.riding === null) return;
+    const v = this.entities.get(p.riding);
+    p.riding = null;
+    if (!(v instanceof Vehicle)) return;
+    if (v.rider === p.id) v.rider = null;
+    this.net?.mount?.(v.id, false);
+    const b = p.body;
+    const x = Math.floor(v.x), y = Math.floor(v.y + 0.5), z = Math.floor(v.z);
+    const free = (bx: number, by: number, bz: number) =>
+      !block(this.world.blockAt(bx, by, bz)).solid && !block(this.world.blockAt(bx, by + 1, bz)).solid && block(this.world.blockAt(bx, by - 1, bz)).solid;
+    const spots: [number, number, number][] = [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [1, 1, 0], [-1, 1, 0], [0, 1, 1], [0, 1, -1]];
+    const spot = spots.find(([dx, dy, dz]) => free(x + dx, y + dy, z + dz));
+    if (spot) { b.x = x + spot[0] + 0.5; b.y = y + spot[1]; b.z = z + spot[2] + 0.5; }
+    else b.y = v.y + v.body.height + 0.05;
+    b.vx = b.vy = b.vz = 0;
+    p.prevX = b.x; p.prevY = b.y; p.prevZ = b.z;
+  }
+
+  /** Keeps a rider on their seat after the vehicle moved. */
+  private seatRider(): void {
+    const v = this.ridden();
+    if (!v) return;
+    const b = this.player.body;
+    b.x = v.x; b.y = v.riderY(); b.z = v.z;
+    // A boat turns its rider with it.
+    if (v instanceof Boat) this.player.yaw += v.yaw - v.prevYaw;
+  }
+
+  /** Puts a vehicle into the world (the host's half of placing one). */
+  placeVehicle(kind: string, x: number, y: number, z: number, yaw: number, wood: number): Vehicle | null {
+    let v: Vehicle | null = null;
+    if (kind === "boat") v = new Boat(x, y, z, wood);
+    else if (kind === "minecart" || kind === "tnt_minecart") v = new Minecart(kind, x, y, z);
+    if (!v) return null;
+    v.yaw = yaw;
+    v.prevYaw = yaw;
+    this.spawn(v);
+    return v;
+  }
+
   private guestTick(): void {
     this.time++;
+    const own = this.ridden();
+    if (own) {
+      // The guest drives its own vehicle here, and tells the host.
+      own.tick(this.ctx);
+      this.net?.vehiclePose?.(own);
+    }
     // Between host snapshots, carry entities along their last velocity.
     for (const e of this.entities.values()) {
+      if (e === own) continue;
       const b = e.body;
       b.x += b.vx; b.y += b.vy * 0.5; b.z += b.vz;
       e.walkDist += Math.hypot(b.vx, b.vz);
@@ -1422,7 +1524,7 @@ export class Game {
       meta.playTime = this.playTimeBase + (performance.now() - this.startedAt) / 1000;
       meta.player = this.player.toJSON();
       meta.entities = [...this.entities.values()]
-        .filter((e) => (e instanceof Mob && e.persistent && !e.dying) || e instanceof ItemEntity)
+        .filter((e) => (e instanceof Mob && e.persistent && !e.dying) || e instanceof ItemEntity || e instanceof Vehicle)
         .slice(0, 600)
         .map((e) => e.snapshot());
       await this.saves.putWorld(meta);

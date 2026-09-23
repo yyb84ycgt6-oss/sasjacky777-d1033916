@@ -1182,11 +1182,72 @@ def("cauldron_item", (p) => {
   rect(p, 2, 13, 4, 14, cauldronMetal); rect(p, 11, 13, 13, 14, cauldronMetal);
 });
 
+// ---- rails ---------------------------------------------------------------------------------
+
+/** Straight track: two rails running along v over wooden ties, the rest see-through. */
+function track(p: Pixels, r: Rng, rail: C, middle: ((y: number) => C | null) | null, tieShade = 1): void {
+  p.clear();
+  const tie = shade(hex("#6b4a26"), tieShade);
+  for (const y0 of [1, 5, 9, 13]) for (let y = y0; y <= y0 + 1; y++) for (let x = 1; x <= 14; x++) p.set(x, y, shade(tie, 0.85 + r.next() * 0.3));
+  for (let y = 0; y < 16; y++) {
+    for (const x of [2, 3, 12, 13]) p.set(x, y, shade(rail, x === 3 || x === 12 ? 1.15 : 0.85));
+    const m = middle?.(y);
+    if (m) { p.set(7, y, m); p.set(8, y, m); }
+  }
+}
+const ironRail = hex("#a8a8a8"), goldRail = hex("#e8c040");
+def("rail", (p, r) => track(p, r, ironRail, null));
+def("powered_rail", (p, r) => track(p, r, goldRail, () => hex("#5a1a14")));
+def("powered_rail_on", (p, r) => track(p, r, goldRail, (y) => (y % 4 === 0 ? hex("#ff8a60") : hex("#e8281c"))));
+def("activator_rail", (p, r) => track(p, r, ironRail, () => hex("#5a1a14"), 0.7));
+def("activator_rail_on", (p, r) => track(p, r, ironRail, (y) => (y % 4 === 0 ? hex("#ff8a60") : hex("#e8281c")), 0.7));
+const detectorPlate = (lit: boolean) => (p: Pixels, r: Rng) => {
+  track(p, r, ironRail, null, 0.9);
+  rect(p, 5, 5, 10, 10, lit ? hex("#e8281c") : hex("#6a2a24"));
+  frame16(p, 5, 5, 10, 10, hex("#4a4a4a"));
+};
+def("detector_rail", detectorPlate(false));
+def("detector_rail_on", detectorPlate(true));
+def("rail_corner", (p, r) => {
+  p.clear();
+  // A quarter turn from the south edge to the east edge, centred on the south-east corner.
+  const tie = hex("#6b4a26");
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+    const dx = 16 - (x + 0.5), dy = 16 - (y + 0.5);
+    const d = Math.hypot(dx, dy);
+    const a = Math.atan2(dy, dx);
+    const onTie = d > 1.5 && d < 15 && Math.abs(((a + Math.PI / 16) % (Math.PI / 8)) - Math.PI / 16) < 0.09;
+    if (onTie) p.set(x, y, shade(tie, 0.85 + r.next() * 0.3));
+    if (Math.abs(d - 13) < 1 || Math.abs(d - 3) < 1) p.set(x, y, shade(ironRail, d > 13 || (d < 3.5 && d > 3) ? 0.85 : 1.1));
+  }
+});
+
 // ---- items ------------------------------------------------------------------------------
 
 type ItemPalette = Record<string, C>;
 const H = hex("#6b4a26"), HD = hex("#46301a"), HL = hex("#8a6536");
 const ITEM_TEMPLATES: Record<string, string[]> = {
+  boat: [
+    "................", "................", "................", "................",
+    "..a..........a..",
+    "..aa........aa..",
+    "..abaaaaaaaaba..",
+    "..abbbbbbbbbba..",
+    "...abcbbbcbba...",
+    "....abbbbbba....",
+    ".....aaaaaa.....",
+  ],
+  cart: [
+    "................", "................", "................", "................",
+    ".aaaaaaaaaaaaaa.",
+    ".acffffffffffca.",
+    ".abffffffffffba.",
+    ".abbbbbbbbbbbba.",
+    "..abbbbbbbbbba..",
+    "..aaaaaaaaaaaa..",
+    "...kk......kk...",
+    "...kk......kk...",
+  ],
   potion: [
     "......aaaa......",
     "......acca......",
@@ -1971,6 +2032,10 @@ art("glistering_melon_slice", "melon_slice", { a: hex("#8a6a10"), b: hex("#e0402
 art("golden_carrot", "carrot", paletteOf("#f0c020", { g: hex("#d8b020") }));
 art("pufferfish", "fish", paletteOf("#e8c030", { k: hex("#101010"), w: hex("#ffffff"), d: hex("#f4e6a8") }));
 art("enchanted_book", "book", paletteOf("#5a2a7a", { w: hex("#f2f0e6"), c: hex("#a060d0") }));
+const BOAT_WOOD_COLORS: Record<string, string> = { oak: "#9c7a45", spruce: "#6b5030", birch: "#c8b77a", jungle: "#a0724a", acacia: "#b0603a" };
+for (const [wood, color] of Object.entries(BOAT_WOOD_COLORS)) art(`${wood}_boat`, "boat", paletteOf(color));
+art("minecart", "cart", paletteOf("#8a8a8e", { f: hex("#2a2a2c"), k: hex("#1e1e20") }));
+art("tnt_minecart", "cart", paletteOf("#8a8a8e", { f: hex("#c8341c"), k: hex("#1e1e20") }));
 
 function paintItem(p: Pixels, name: string): boolean {
   const a = ITEM_ART[name];
