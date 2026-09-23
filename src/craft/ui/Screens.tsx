@@ -7,6 +7,7 @@ import {
   chestView, clickContainer, craftOutput, craftWidth, creativeTake, creativeTrash, dropCursor, fillRecipe, furnaceView,
   inventoryCounts, type Section,
 } from "../game/containers";
+import { boxRegions, skin } from "../render/skins";
 import { Button, CursorStack, ItemIcon, SlotButton, useTooltip } from "./common";
 
 function Grid({ slots, cols, section, game, offset = 0, onHover, quick }: {
@@ -192,6 +193,29 @@ function CreativeInventory({ game, onHover, mobile }: { game: Game; onHover: (s:
   );
 }
 
+/** The player's own skin, front on — the flat cousin of the turning model in the original's inventory. */
+function PlayerPreview({ variant }: { variant: number }) {
+  const url = useMemo(() => {
+    const src = skin("player", variant);
+    const c = document.createElement("canvas");
+    c.width = 16; c.height = 32;
+    const g = c.getContext("2d");
+    if (!g) return null;
+    const head = boxRegions(0, 0, 8, 8, 8).front, body = boxRegions(16, 16, 8, 12, 4).front;
+    const arm = boxRegions(40, 16, 4, 12, 4).front, leg = boxRegions(0, 16, 4, 12, 4).front;
+    const put = (r: { x: number; y: number; w: number; h: number }, x: number, y: number, mirror = false) => {
+      g.save();
+      if (mirror) { g.translate(x + r.w, y); g.scale(-1, 1); g.drawImage(src, r.x, r.y, r.w, r.h, 0, 0, r.w, r.h); }
+      else g.drawImage(src, r.x, r.y, r.w, r.h, x, y, r.w, r.h);
+      g.restore();
+    };
+    put(head, 4, 0); put(body, 4, 8); put(arm, 0, 8); put(arm, 12, 8, true); put(leg, 4, 20); put(leg, 8, 20, true);
+    return c.toDataURL();
+  }, [variant]);
+  if (!url) return null;
+  return <img src={url} alt="" style={{ height: "calc(var(--u) * 52)", imageRendering: "pixelated" }} draggable={false} />;
+}
+
 function SurvivalBody({ game, onHover, quick, creative }: { game: Game; onHover: (s: Slot, x: number, y: number) => void; quick: boolean; creative?: boolean }) {
   const inv = game.player.inventory;
   const ARMOR_GHOST = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"].map((n) => allItems().find((i) => i.name === n)!.id);
@@ -204,7 +228,8 @@ function SurvivalBody({ game, onHover, quick, creative }: { game: Game; onHover:
               onClick={(b, shift) => clickContainer(game, "armor", i, b, shift)} />
           ))}
         </div>
-        <div style={{ width: "calc(var(--u) * 44)", height: "calc(var(--slot) * 4)", background: "#000", border: "calc(var(--u) * 1) solid #373737", display: "flex", alignItems: "flex-end", justifyContent: "center", color: "#aaa", fontSize: "calc(var(--u) * 5)", padding: "calc(var(--u) * 2)" }}>
+        <div style={{ width: "calc(var(--u) * 44)", height: "calc(var(--slot) * 4)", background: "#000", border: "calc(var(--u) * 1) solid #373737", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", gap: "calc(var(--u) * 2)", color: "#aaa", fontSize: "calc(var(--u) * 5)", padding: "calc(var(--u) * 2)" }}>
+          <PlayerPreview variant={game.settings.skin} />
           {game.player.name}
         </div>
         <div style={{ display: "flex", flexDirection: "column", justifyContent: "flex-end", alignSelf: "stretch" }}>
