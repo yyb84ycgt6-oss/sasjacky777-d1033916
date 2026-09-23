@@ -229,6 +229,8 @@ export class Game {
     if (this.running) return;
     this.running = true;
     this.lastFrame = performance.now();
+    document.addEventListener("visibilitychange", this.syncBackground);
+    this.syncBackground();
     const loop = (t: number) => {
       if (!this.running) return;
       this.raf = requestAnimationFrame(loop);
@@ -246,6 +248,9 @@ export class Game {
   async stop(save = true): Promise<void> {
     this.running = false;
     cancelAnimationFrame(this.raf);
+    document.removeEventListener("visibilitychange", this.syncBackground);
+    if (this.backgroundTimer) clearInterval(this.backgroundTimer);
+    this.backgroundTimer = null;
     if (save && this.role !== "guest") await this.saveNow().catch((e: Error) => console.error("[blockcraft] final save failed", e));
     this.net?.close();
     this.net = null;
@@ -746,6 +751,48 @@ export class Game {
 
   // ---- the loop ------------------------------------------------------------------------------
 
+  /**
+   * A hidden tab gets no animation frames. Alone that is a pause, but online
+   * it would freeze the host's world for every guest (and time a hidden guest
+   * out), and a second tab on the same device is always hidden. So while
+   * linked, a timer keeps the ticks going — browsers slow it to about once a
+   * second, and each call catches up the ticks it missed.
+   */
+  private backgroundTimer: ReturnType<typeof setInterval> | null = null;
+  /** Re-checked when the tab's visibility or the link changes. */
+  readonly syncBackground = (): void => {
+    if (document.visibilityState === "hidden" && this.net && this.running) {
+      if (!this.backgroundTimer) this.backgroundTimer = setInterval(() => this.background(performance.now()), 50);
+    } else if (this.backgroundTimer) {
+      clearInterval(this.backgroundTimer);
+      this.backgroundTimer = null;
+    }
+  };
+
+  private background(now: number): void {
+    if (!this.running || !this.net) { this.syncBackground(); return; }
+    const dt = Math.min(5000, now - this.lastFrame);
+    this.lastFrame = now;
+    if (!this.placeAtSpawnIfNeeded()) return;
+    this.acc += dt;
+    let steps = 0;
+    while (this.acc >= TICK_MS && steps < 100) {
+      this.tick();
+      this.acc -= TICK_MS;
+      steps++;
+    }
+    if (steps === 100) this.acc = 0;
+    this.streamer.update(this.streamCentres(), now);
+  }
+
+  private streamCentres(): { x: number; z: number }[] {
+    const b = this.player.body;
+    const out = [{ x: b.x, z: b.z }];
+    // The host keeps the world loaded around every guest: their edits and the mobs near them run here.
+    if (this.net?.role === "host") for (const r of this.remote.values()) out.push({ x: r.x, z: r.z });
+    return out;
+  }
+
   private frame(now: number): void {
     const dt = Math.min(0.25, (now - this.lastFrame) / 1000);
     this.lastFrame = now;
@@ -768,7 +815,7 @@ export class Game {
 
     const p = this.player;
     const b = p.body;
-    this.streamer.update([{ x: b.x, z: b.z }, ...[...this.remote.values()].filter(() => this.net?.role === "host").map((r) => ({ x: r.x, z: r.z }))], now);
+    this.streamer.update(this.streamCentres(), now);
 
     this.actions.updateTarget();
     this.hurtTilt = Math.max(0, this.hurtTilt - dt * 3);

@@ -1,13 +1,14 @@
 /**
  * Chat commands, the familiar set: /time, /gamemode, /give, /tp, /weather,
  * /kill, /seed, /spawnpoint, /difficulty, /gamerule, /clear, /summon,
- * /effect, /xp, /help.
+ * /effect, /xp, /setblock, /fill, /help.
  *
  * World-changing commands need cheats on (as a world option) or creative
  * mode, as in the original. An online guest can only run the ones that affect
  * nobody else — the host owns the world.
  */
-import { DAY_TICKS } from "../engine/constants";
+import { blockByName } from "../engine/blocks";
+import { DAY_TICKS, WORLD_HEIGHT } from "../engine/constants";
 import { allItems, itemByName, type StatusEffect } from "../engine/items";
 import { Mob, MOB_KINDS, type MobKind } from "../engine/mobs";
 import type { GameMode } from "../engine/player";
@@ -31,6 +32,7 @@ const HELP = [
   "/gamemode survival|creative|adventure|spectator",
   "/give <item> [count]   (e.g. /give diamond_pickaxe)",
   "/tp <x> <y> <z>, /tp spawn",
+  "/setblock <x> <y> <z> <block>, /fill <x1> <y1> <z1> <x2> <y2> <z2> <block>",
   "/weather clear|rain|thunder",
   "/summon <pig|cow|sheep|chicken|zombie|skeleton|creeper|spider>",
   "/effect <regeneration|speed|night_vision|...> [seconds] | /effect clear",
@@ -132,6 +134,33 @@ export function runCommand(game: Game, line: string): Line[] {
       else if (kind === "thunder") { w.rain = 1; w.thunder = 1; w.rainTimer = 12000; w.thunderTimer = 12000; }
       else return [{ text: "Usage: /weather clear|rain|thunder", color: ERR }];
       return [{ text: `Set the weather to ${kind}` }];
+    }
+    case "setblock": case "fill": {
+      const denied = needCheats() ?? needHost();
+      if (denied) return denied;
+      const fill = cmd.toLowerCase() === "fill";
+      const n = fill ? 6 : 3;
+      const b = p.body;
+      const here = [b.x, b.y, b.z];
+      const c = args.slice(0, n).map((v, i) => Math.floor(num(v, here[i % 3])));
+      const usage = fill ? "Usage: /fill <x1> <y1> <z1> <x2> <y2> <z2> <block> (~ for relative)" : "Usage: /setblock <x> <y> <z> <block> (~ for relative)";
+      if (c.length < n || !c.every(Number.isFinite)) return [{ text: usage, color: ERR }];
+      const name = (args[n] ?? "").replace(/^minecraft:/, "").toLowerCase();
+      let id: number;
+      try { id = name === "air" ? 0 : blockByName(name).id; } catch { return [{ text: `Unknown block "${name}".`, color: ERR }]; }
+      const [x1, y1, z1] = c, [x2, y2, z2] = fill ? c.slice(3) : c;
+      const lo = [Math.min(x1, x2), Math.max(0, Math.min(y1, y2)), Math.min(z1, z2)];
+      const hi = [Math.max(x1, x2), Math.min(WORLD_HEIGHT - 1, Math.max(y1, y2)), Math.max(z1, z2)];
+      const volume = (hi[0] - lo[0] + 1) * (hi[1] - lo[1] + 1) * (hi[2] - lo[2] + 1);
+      if (volume > 32768) return [{ text: `Too many blocks in the specified area (${volume} > 32768)`, color: ERR }];
+      let changed = 0, unloaded = 0;
+      for (let y = lo[1]; y <= hi[1]; y++) for (let z = lo[2]; z <= hi[2]; z++) for (let x = lo[0]; x <= hi[0]; x++) {
+        if (!game.world.isLoaded(x, z)) { unloaded++; continue; }
+        if (game.world.setBlock(x, y, z, id, 0, "player")) changed++;
+      }
+      // Blocks outside the loaded world are not silently "done": say how many were skipped.
+      const skipped = unloaded ? ` (${unloaded} in unloaded chunks were not changed — go closer)` : "";
+      return [{ text: fill ? `Successfully filled ${changed} block(s)${skipped}` : changed ? `Changed the block at ${x1}, ${y1}, ${z1}` : `Could not set the block${skipped}`, color: unloaded ? ERR : undefined }];
     }
     case "kill":
       p.hurt(1000, "void");

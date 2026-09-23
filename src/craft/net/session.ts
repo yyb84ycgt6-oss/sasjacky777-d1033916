@@ -161,6 +161,7 @@ export class NetSession implements NetLink {
     this.updateStatus();
     // Edits broadcast between the welcome and the guest's world existing.
     for (const { from, ops } of this.early.splice(0)) this.onBatch(from, ops);
+    game.syncBackground();
   }
   private early: { from: string; ops: Op[] }[] = [];
 

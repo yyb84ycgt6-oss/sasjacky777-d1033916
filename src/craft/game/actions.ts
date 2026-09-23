@@ -109,10 +109,14 @@ export class Actions {
     const g = this.game;
     const p = g.player;
     const inv = p.inventory;
-    if (a.type === "close" || a.type === "pause") {
+    if (a.type === "close") {
       // Escape backs out of whatever is open; the death screen stays until a choice is made.
-      if (g.screen && g.screen.kind !== "death") { g.setScreen(null); return; }
-      if (a.type === "pause" && !g.screen) g.setScreen({ kind: "pause" });
+      if (g.screen && g.screen.kind !== "death") g.setScreen(null);
+      return;
+    }
+    if (a.type === "pause") {
+      // Never a toggle: losing the pointer lock and the Escape that caused it can both arrive.
+      if (!g.screen) g.setScreen({ kind: "pause" });
       return;
     }
     if (a.type === "chat") { if (!g.screen) g.setScreen({ kind: "chat", text: a.text ?? "" }); return; }

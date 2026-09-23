@@ -119,7 +119,8 @@ export function WorldSelect({ saves, ready, onPlay, onCreate, onBack }: {
       setError(`Could not read your saved worlds: ${(err as Error).message}`);
     }
   };
-  useEffect(() => { void reload(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Again when `ready` changes: the world just quit hands over its final save after this list mounts.
+  useEffect(() => { void reload(); }, [ready]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const sel = worlds?.find((w) => w.id === selected) ?? null;
   const shown = (worlds ?? []).filter((w) => !filter || w.name.toLowerCase().includes(filter.toLowerCase()));

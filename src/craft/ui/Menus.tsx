@@ -58,11 +58,9 @@ export function ChatInput({ initial, onSubmit, onClose }: { initial: string; onS
   const [text, setText] = useState(initial);
   const ref = useRef<HTMLInputElement>(null);
   const [h, setH] = useState(history.length);
-  useEffect(() => {
-    // A frame later, so the key that opened chat is not typed into it.
-    const t = setTimeout(() => ref.current?.focus(), 30);
-    return () => clearTimeout(t);
-  }, []);
+  // At once: the key that opened chat was already swallowed, and anything typed before focus lands
+  // would be read as movement keys instead.
+  useEffect(() => { ref.current?.focus(); }, []);
   return (
     <div className="absolute left-0 right-0 pointer-events-auto" style={{ bottom: "calc(var(--u) * 2)", padding: "0 calc(var(--u) * 2)", display: "flex", gap: "calc(var(--u) * 2)" }}>
       <input

@@ -71,6 +71,8 @@ export function GameView(props: GameViewProps) {
       return;
     }
     session?.attach(g);
+    // Development builds only: lets a browser test (or a curious developer) read the live game state.
+    if (import.meta.env.DEV) (window as unknown as { __blockcraft?: Game }).__blockcraft = g;
     const input = new DesktopInput(g, canvas);
     g.start();
     setRunning({ game: g, input });
@@ -130,13 +132,15 @@ function Overlay({ game, input, settings, onSettings, onQuit, onExitApp }: GameV
     return () => document.removeEventListener("pointerlockchange", onLock);
   }, [game]);
 
-  // Closing a screen with the keyboard or a button hands the mouse straight back to the game.
+  // Any screen needs the mouse free — a crafting table or chest opens from a click in the world, and
+  // death from anything — and closing it hands the mouse straight back to the game.
   const lastScreen = useRef<HudState["screen"]>(null);
   useEffect(() => {
     const was = lastScreen.current;
     lastScreen.current = hud.screen;
+    if (hud.screen && input.locked) input.exitLock();
     // Refused without a recent click (Chrome just after Escape): the "Click to play" prompt covers that.
-    if (was && !hud.screen && !mobile && !input.locked) input.requestLock();
+    else if (was && !hud.screen && !mobile && !input.locked) input.requestLock();
   }, [hud.screen, mobile, input]);
 
   const quit = (message?: string) => {

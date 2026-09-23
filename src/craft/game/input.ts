@@ -75,6 +75,12 @@ export class DesktopInput {
     // event arrives; pausing here would close the inventory E just opened.
     const deliberate = this.releasing;
     this.releasing = false;
+    // A lock asked for when the last screen closed can be granted after the next one opened
+    // (the inventory, a chest): a screen under a captured mouse cannot be clicked, so let go.
+    if (this.locked && this.game.screen) {
+      this.exitLock();
+      return;
+    }
     if (was && !this.locked && !deliberate && !this.game.screen && !this.game.isMobile) {
       this.releaseAll();
       this.game.controls.actions.push({ type: "pause" });
@@ -109,7 +115,8 @@ export class DesktopInput {
     // Keys that work with a screen open.
     if (e.code === "Escape") {
       e.preventDefault();
-      if (g.screen) a.push({ type: "close" });
+      // With the mouse captured the browser eats Escape and the lock loss pauses; without it, pause here.
+      a.push({ type: g.screen ? "close" : "pause" });
       return;
     }
     if (e.code === "KeyE" && g.screen && g.screen.kind !== "chat" && g.screen.kind !== "pause" && g.screen.kind !== "options" && g.screen.kind !== "death" && g.screen.kind !== "share") {
