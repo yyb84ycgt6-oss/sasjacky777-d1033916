@@ -87,10 +87,15 @@ jobs:
 
       # The [mcp] extra is what gives Hermes its HTTP MCP client; without it
       # Hermes cannot reach a URL-based server at all (docs/HARNESSES.md).
+      # A clone and an editable install, because Hermes refuses to build a
+      # wheel: `pip install git+https://…` fails with "Building wheels or
+      # sdists for hermes-agent is not supported".
       - name: Hermes Agent
         run: |
+          git clone --quiet https://github.com/NousResearch/hermes-agent /tmp/hermes-src
+          git -C /tmp/hermes-src checkout --quiet "${HERMES_REF}"
           python -m venv /tmp/hermes
-          /tmp/hermes/bin/pip install --quiet "hermes-agent[mcp] @ git+https://github.com/NousResearch/hermes-agent@${HERMES_REF}"
+          /tmp/hermes/bin/pip install --quiet -e "/tmp/hermes-src[mcp]"
           /tmp/hermes/bin/hermes --version
 
       - name: DeepSeek Harness
@@ -112,4 +117,9 @@ jobs:
       - name: Logs
         if: failure()
         run: |
-          for f in /tmp/e2e/logs/*; do echo "::group::$f"; tail -n 80 "$f"; echo "::endgroup::"; done
+          # A setup step can fail before the run writes any log; say so rather
+          # than fail again on the glob.
+          shopt -s nullglob
+          logs=(/tmp/e2e/logs/*)
+          [ ${#logs[@]} -gt 0 ] || { echo "No run logs: the failure is in a setup step above."; exit 0; }
+          for f in "${logs[@]}"; do echo "::group::$f"; tail -n 80 "$f"; echo "::endgroup::"; done

@@ -32,14 +32,17 @@ hardware. Your account needs the `owner` role (granted once by `core-claim`).
 
 ## Hermes Agent
 
-1. **Install** Hermes Agent, with its MCP support:
+1. **Install** Hermes Agent with its own installer (see
+   [its install guide](https://hermes-agent.nousresearch.com/docs/getting-started/installation)),
+   which includes MCP support. Or from a clone, with the `[mcp]` extra:
    ```bash
-   pip install "hermes-agent[mcp] @ git+https://github.com/NousResearch/hermes-agent"
+   git clone https://github.com/NousResearch/hermes-agent && cd hermes-agent
+   python3 -m venv .venv && .venv/bin/pip install -e ".[mcp]"
    ```
-   The `[mcp]` part matters. Without it, `hermes mcp test` says
+   `pip install git+https://…` does not work: Hermes refuses to build a wheel.
+   And the `[mcp]` part matters. Without it, `hermes mcp test` says
    *"mcp.client.streamable_http is not available"* and Hermes cannot reach a
-   URL-based server at all. (Hermes's own install script installs the `[all]`
-   extra, which includes it.)
+   URL-based server at all.
 
 2. **Configure.** Copy [`harness/hermes/config.yaml`](../harness/hermes/config.yaml)
    to `~/.hermes/config.yaml`, or merge its `model`, `mcp_servers` and `tools`
