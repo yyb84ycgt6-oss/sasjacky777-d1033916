@@ -8,6 +8,7 @@
 
 import type { ProviderId } from "./jackie-providers";
 import type { ChatMessage } from "./jackie-provider-stream";
+import type { LocalRuntime } from "./localModels";
 
 export interface LabAgent {
   id: string;
@@ -23,6 +24,15 @@ export interface LabAgent {
   tags: string[];
   /** Free-form R&D notes — findings, prompt iterations, observations. */
   notes: string;
+  /** May act on the app (tasks, memory, conversations) instead of only answering. */
+  canAct?: boolean;
+  /** May delete tasks and memory while acting. Off unless turned on. */
+  allowDestructive?: boolean;
+  /**
+   * Run on a model server on this computer (LM Studio / Ollama), reached
+   * straight from the browser, instead of through `provider`'s edge function.
+   */
+  local?: LocalRuntime;
   createdAt: number;
   updatedAt: number;
 }

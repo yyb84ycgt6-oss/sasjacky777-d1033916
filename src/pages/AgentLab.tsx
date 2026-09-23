@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   ArrowLeft, Beaker, Plus, Play, Square, Save, Trash2, Copy, Download,
-  Upload, FileDown, Gauge, Sparkles, History, RotateCcw, Bot,
+  Upload, FileDown, Gauge, Sparkles, History, RotateCcw, Bot, Wrench, Radar,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -31,6 +31,10 @@ import {
   listVersions, saveVersion, deleteVersion, deleteVersionsFor, diffSummary,
 } from "@/lib/agentLab";
 import { installLovableAgents } from "@/lib/lovableAgents";
+import { installOperatorAgents } from "@/lib/operatorAgents";
+import { runAppAgent, type AgentStep } from "@/lib/appAgent";
+import { executeAsUser, modelCaller } from "@/lib/appAgentRuntime";
+import { discoverLocalModels, isAgentFamily, LOCAL_RUNTIMES, type LocalRuntime } from "@/lib/localModels";
 
 const DEFAULT_PROVIDER = (PROVIDERS[0]?.id ?? "lovable") as ProviderId;
 const DEFAULT_MODEL = PROVIDERS[0]?.models[0]?.id ?? "";
@@ -46,7 +50,25 @@ export default function AgentLab() {
   const [versions, setVersions] = useState<PromptVersion[]>([]);
   const [versionLabel, setVersionLabel] = useState("");
   const stopRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const [steps, setSteps] = useState<AgentStep[]>([]);
+  const [localFound, setLocalFound] = useState<Record<LocalRuntime, { models: string[]; error?: string }> | null>(null);
+  const [detecting, setDetecting] = useState(false);
+
+  async function detectLocal() {
+    setDetecting(true);
+    const found = await discoverLocalModels();
+    setLocalFound(found);
+    setDetecting(false);
+    const total = found.lmstudio.models.length + found.ollama.models.length;
+    toast({
+      title: total ? `Found ${total} local model(s)` : "No local models found",
+      description: total
+        ? [...found.lmstudio.models, ...found.ollama.models].filter(isAgentFamily).join(", ") || "None of them are DeepSeek or Hermes builds."
+        : [found.lmstudio.error, found.ollama.error].filter(Boolean).join(" "),
+    });
+  }
 
   useEffect(() => {
     const list = listAgents();
@@ -149,6 +171,7 @@ export default function AgentLab() {
 
     setRunning(true);
     setOutput("");
+    setSteps([]);
     stopRef.current = false;
     const started = performance.now();
     let acc = "";
@@ -172,6 +195,37 @@ export default function AgentLab() {
       setRuns(listRuns());
       setRunning(false);
     };
+
+    if (agent.canAct || agent.local) {
+      // Acting agents (and any agent on a local server) run the action loop:
+      // each reply may name one action, which runs as the signed-in user, and
+      // the result goes back to the model until it answers. An agent without
+      // app control still goes through here when local, with no actions to take.
+      const controller = new AbortController();
+      abortRef.current = controller;
+      const where = agent.local ? LOCAL_RUNTIMES[agent.local].label : findProvider(agent.provider)?.label ?? agent.provider;
+      const result = await runAppAgent({
+        system: agent.system,
+        prompt: text,
+        callModel: modelCaller(
+          { provider: agent.provider, model: agent.model, local: agent.local, fallback: agent.fallback },
+          controller.signal,
+        ),
+        execute: executeAsUser,
+        allowDestructive: !!agent.allowDestructive,
+        canAct: !!agent.canAct,
+        maxSteps: 8,
+        signal: controller.signal,
+        onStep: (step) => setSteps((prev) => [...prev, step]),
+      });
+      abortRef.current = null;
+      acc = result.answer;
+      setOutput(result.answer || result.error || "");
+      meta = { servedBy: where, model: agent.model };
+      if (!result.ok) toast({ title: "Run failed", description: result.error, variant: "destructive" });
+      finish(result.ok ? undefined : result.error);
+      return;
+    }
 
     await streamProviderChat({
       provider: agent.provider,
@@ -225,6 +279,21 @@ export default function AgentLab() {
         </Button>
         <Button variant="outline" size="sm" onClick={installAgents}>
           <Bot size={13} className="mr-1" /> Add Lovable agents
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            const { added, skipped } = installOperatorAgents();
+            const list = listAgents();
+            setAgents(list);
+            toast({
+              title: added ? `Added ${added} DeepSeek & Hermes operator(s)` : "Operators already installed",
+              description: skipped ? `${skipped} already in the lab were left as they are.` : "They can act on your tasks, memory and conversations.",
+            });
+          }}
+        >
+          <Wrench size={13} className="mr-1" /> Add DeepSeek &amp; Hermes operators
         </Button>
         <Button size="sm" onClick={create}>
           <Plus size={13} className="mr-1" /> New agent
@@ -310,17 +379,94 @@ export default function AgentLab() {
                   </div>
                   <div className="space-y-1.5">
                     <Label className="text-[10px] uppercase tracking-widest text-muted-foreground">Model</Label>
+                    {draft.local ? (
+                      <>
+                        <Input
+                          list="agentlab-local-models"
+                          value={draft.model}
+                          placeholder="model name as the local server lists it"
+                          onChange={(e) => patch({ model: e.target.value })}
+                        />
+                        <datalist id="agentlab-local-models">
+                          {(localFound?.[draft.local].models ?? []).map((m) => <option key={m} value={m} />)}
+                        </datalist>
+                      </>
+                    ) : (
+                      <select
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        value={draft.model}
+                        onChange={(e) => patch({ model: e.target.value })}
+                      >
+                        {models.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.label}{m.free ? " · free" : ""}{m.reasoning ? " · reasoning" : ""}
+                            {m.note ? ` · ${m.note}` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                </div>
+
+                {/* Where the model runs, and whether the agent may act on the app */}
+                <div className="space-y-2 rounded-md border border-border p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Label className="text-[10px] uppercase tracking-widest text-muted-foreground">Runs on</Label>
                     <select
-                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                      value={draft.model}
-                      onChange={(e) => patch({ model: e.target.value })}
+                      className="rounded-md border border-input bg-background px-2 py-1 text-xs"
+                      value={draft.local ?? ""}
+                      onChange={(e) => {
+                        const local = (e.target.value || undefined) as LocalRuntime | undefined;
+                        patch({ local, ...(local ? { fallback: false } : {}) });
+                      }}
                     >
-                      {models.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.label}{m.free ? " · free" : ""}{m.reasoning ? " · reasoning" : ""}
-                        </option>
-                      ))}
+                      <option value="">{provider?.label ?? "Provider"} (edge function)</option>
+                      <option value="lmstudio">{LOCAL_RUNTIMES.lmstudio.label}</option>
+                      <option value="ollama">{LOCAL_RUNTIMES.ollama.label}</option>
                     </select>
+                    <Button type="button" variant="outline" size="sm" disabled={detecting} onClick={detectLocal}>
+                      <Radar size={13} className="mr-1" /> {detecting ? "Detecting…" : "Detect local models"}
+                    </Button>
+                  </div>
+                  {localFound && (
+                    <div className="space-y-1 text-[10px] text-muted-foreground">
+                      {(["lmstudio", "ollama"] as const).map((rt) => (
+                        <div key={rt} className="flex flex-wrap items-center gap-1">
+                          <span className="font-mono">{LOCAL_RUNTIMES[rt].label}:</span>
+                          {localFound[rt].models.length ? (
+                            localFound[rt].models.map((m) => (
+                              <button
+                                key={m}
+                                type="button"
+                                className={cn(
+                                  "rounded-sm border px-1.5 py-0.5 font-mono",
+                                  isAgentFamily(m) ? "border-primary text-primary" : "border-border",
+                                )}
+                                onClick={() => patch({ local: rt, model: m, fallback: false })}
+                              >
+                                {m}
+                              </button>
+                            ))
+                          ) : (
+                            <span>{localFound[rt].error ?? "nothing loaded"}</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex flex-wrap items-center gap-4">
+                    <div className="flex items-center gap-2">
+                      <Switch checked={!!draft.canAct} onCheckedChange={(v) => patch({ canAct: v })} id="act" />
+                      <Label htmlFor="act" className="text-xs text-muted-foreground">
+                        App control — may change your tasks, memory and conversations
+                      </Label>
+                    </div>
+                    {draft.canAct && (
+                      <div className="flex items-center gap-2">
+                        <Switch checked={!!draft.allowDestructive} onCheckedChange={(v) => patch({ allowDestructive: v })} id="del" />
+                        <Label htmlFor="del" className="text-xs text-muted-foreground">Allow deletes</Label>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -404,7 +550,7 @@ export default function AgentLab() {
                 />
                 <div className="flex items-center gap-2">
                   {running ? (
-                    <Button size="sm" variant="outline" onClick={() => { stopRef.current = true; }}>
+                    <Button size="sm" variant="outline" onClick={() => { stopRef.current = true; abortRef.current?.abort(); }}>
                       <Square size={13} className="mr-1" /> Stop
                     </Button>
                   ) : (
@@ -414,9 +560,26 @@ export default function AgentLab() {
                   )}
                   {running && <span className="font-mono text-[10px] text-muted-foreground animate-pulse">streaming…</span>}
                 </div>
+                {steps.length > 0 && (
+                  <div className="space-y-1">
+                    {steps.map((st, i) => (
+                      <div
+                        key={i}
+                        className={cn(
+                          "rounded-sm border px-2 py-1 font-mono text-[10px] break-words",
+                          st.result.ok ? "border-border" : "border-destructive/50 text-destructive",
+                        )}
+                      >
+                        <span className="text-primary">{i + 1}. {st.tool}</span> {JSON.stringify(st.args)}
+                        {" → "}
+                        {st.result.ok ? JSON.stringify(st.result.data).slice(0, 160) : st.result.error}
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {(output || running) && (
                   <div className="rounded-md bg-muted/30 p-3 font-mono text-xs whitespace-pre-wrap break-words max-h-80 overflow-y-auto">
-                    {output || "…"}
+                    {output || (running && draft.canAct ? "working…" : "…")}
                   </div>
                 )}
               </Card>
