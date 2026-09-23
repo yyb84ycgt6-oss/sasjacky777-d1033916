@@ -1,0 +1,348 @@
+/**
+ * Saving worlds in this browser (IndexedDB), and moving them in and out as
+ * files.
+ *
+ * Only chunks someone changed are stored; everything else regenerates from
+ * the seed, so a world explored for hours but built on in one corner stays a
+ * few hundred kilobytes. Chunks are gzip-compressed where the browser has
+ * CompressionStream (all current ones) — a 64 KB chunk is usually 3-6 KB.
+ *
+ * If IndexedDB is unavailable (some private-browsing modes) the store falls
+ * back to memory and says so: `persistent` is false and the UI warns that the
+ * world will be lost when the tab closes. Pretending to save would be worse
+ * than not saving.
+ */
+import type { BlockEntity } from "../engine/chunk";
+import type { EntitySnapshot } from "../engine/entities";
+import type { GameMode, PlayerSave } from "../engine/player";
+import type { WorldType } from "../engine/worldgen";
+
+export interface GameRules {
+  keepInventory: boolean;
+  doDaylightCycle: boolean;
+  doMobSpawning: boolean;
+  doWeatherCycle: boolean;
+  naturalRegeneration: boolean;
+  mobGriefing: boolean;
+  doFallDamage: boolean;
+}
+
+export const DEFAULT_RULES: GameRules = {
+  keepInventory: false,
+  doDaylightCycle: true,
+  doMobSpawning: true,
+  doWeatherCycle: true,
+  naturalRegeneration: true,
+  mobGriefing: true,
+  doFallDamage: true,
+};
+
+export interface WorldMeta {
+  id: string;
+  name: string;
+  seed: number;
+  seedText: string;
+  type: WorldType;
+  gameMode: GameMode;
+  difficulty: 0 | 1 | 2 | 3;
+  hardcore: boolean;
+  cheats: boolean;
+  created: number;
+  lastPlayed: number;
+  playTime: number;
+  time: number;
+  day: number;
+  weather: { rain: number; thunder: number; rainTimer: number; thunderTimer: number };
+  spawn: { x: number; y: number; z: number } | null;
+  rules: GameRules;
+  player: PlayerSave | null;
+  /** Online guests' saved state, by their stable client id. */
+  players: Record<string, PlayerSave & { name: string }>;
+  entities: EntitySnapshot[];
+  thumbnail?: string;
+  version: 1;
+}
+
+export interface ChunkData {
+  cx: number;
+  cz: number;
+  blocks: Uint8Array;
+  meta: Uint8Array;
+  entities: [number, BlockEntity][];
+}
+
+interface StoredChunk {
+  key: string;
+  world: string;
+  cx: number;
+  cz: number;
+  /** blocks followed by meta, possibly gzipped. */
+  data: Uint8Array;
+  gz: boolean;
+  entities: [number, BlockEntity][];
+}
+
+const DB_NAME = "blockcraft";
+const DB_VERSION = 1;
+
+export const chunkStoreKey = (world: string, cx: number, cz: number) => `${world}|${cx},${cz}`;
+
+async function gzip(data: Uint8Array): Promise<{ data: Uint8Array; gz: boolean }> {
+  if (typeof CompressionStream === "undefined") return { data, gz: false };
+  try {
+    const stream = new Blob([data]).stream().pipeThrough(new CompressionStream("gzip"));
+    return { data: new Uint8Array(await new Response(stream).arrayBuffer()), gz: true };
+  } catch {
+    return { data, gz: false };
+  }
+}
+
+async function gunzip(data: Uint8Array): Promise<Uint8Array> {
+  if (typeof DecompressionStream === "undefined") throw new Error("This browser cannot read compressed saves (no DecompressionStream).");
+  const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream("gzip"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+export async function packChunk(c: ChunkData): Promise<{ data: Uint8Array; gz: boolean }> {
+  const raw = new Uint8Array(c.blocks.length + c.meta.length);
+  raw.set(c.blocks, 0);
+  raw.set(c.meta, c.blocks.length);
+  return gzip(raw);
+}
+
+export async function unpackChunk(data: Uint8Array, gz: boolean): Promise<{ blocks: Uint8Array; meta: Uint8Array }> {
+  const raw = gz ? await gunzip(data) : data;
+  const half = raw.length / 2;
+  return { blocks: raw.slice(0, half), meta: raw.slice(half) };
+}
+
+function request<T>(r: IDBRequest<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => reject(r.error ?? new Error("IndexedDB request failed"));
+  });
+}
+
+function done(tx: IDBTransaction): Promise<void> {
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error ?? new Error("IndexedDB transaction failed"));
+    tx.onabort = () => reject(tx.error ?? new Error("IndexedDB transaction aborted (storage full?)"));
+  });
+}
+
+export class SaveStore {
+  private db: Promise<IDBDatabase> | null = null;
+  private memoryWorlds = new Map<string, WorldMeta>();
+  private memoryChunks = new Map<string, StoredChunk>();
+  persistent = true;
+  /** Why saving is not persistent, in words for the screen. */
+  problem: string | null = null;
+
+  private open(): Promise<IDBDatabase> | null {
+    if (!this.persistent) return null;
+    if (this.db) return this.db;
+    if (typeof indexedDB === "undefined") {
+      this.fallback("This browser has no IndexedDB");
+      return null;
+    }
+    this.db = new Promise<IDBDatabase>((resolve, reject) => {
+      const req = indexedDB.open(DB_NAME, DB_VERSION);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains("worlds")) db.createObjectStore("worlds", { keyPath: "id" });
+        if (!db.objectStoreNames.contains("chunks")) db.createObjectStore("chunks", { keyPath: "key" });
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error ?? new Error("could not open the save database"));
+      req.onblocked = () => reject(new Error("the save database is open in another tab with an older version"));
+    }).catch((err: Error) => {
+      this.fallback(err.message);
+      throw err;
+    });
+    return this.db;
+  }
+
+  private fallback(reason: string): void {
+    this.persistent = false;
+    this.problem = `${reason} — worlds are kept in memory only and will be lost when this tab closes. Export a world to keep it.`;
+    this.db = null;
+  }
+
+  private async store(name: "worlds" | "chunks", mode: IDBTransactionMode): Promise<{ os: IDBObjectStore; tx: IDBTransaction } | null> {
+    const p = this.open();
+    if (!p) return null;
+    try {
+      const db = await p;
+      const tx = db.transaction(name, mode);
+      return { os: tx.objectStore(name), tx };
+    } catch {
+      return null;
+    }
+  }
+
+  async listWorlds(): Promise<WorldMeta[]> {
+    const s = await this.store("worlds", "readonly");
+    const list = s ? await request(s.os.getAll() as IDBRequest<WorldMeta[]>) : [...this.memoryWorlds.values()];
+    return list.sort((a, b) => b.lastPlayed - a.lastPlayed);
+  }
+
+  async getWorld(id: string): Promise<WorldMeta | null> {
+    const s = await this.store("worlds", "readonly");
+    if (!s) return this.memoryWorlds.get(id) ?? null;
+    return (await request(s.os.get(id) as IDBRequest<WorldMeta | undefined>)) ?? null;
+  }
+
+  async putWorld(meta: WorldMeta): Promise<void> {
+    const s = await this.store("worlds", "readwrite");
+    if (!s) { this.memoryWorlds.set(meta.id, structuredClone(meta)); return; }
+    s.os.put(meta);
+    await done(s.tx);
+  }
+
+  async deleteWorld(id: string): Promise<void> {
+    const w = await this.store("worlds", "readwrite");
+    if (!w) {
+      this.memoryWorlds.delete(id);
+      for (const k of [...this.memoryChunks.keys()]) if (k.startsWith(`${id}|`)) this.memoryChunks.delete(k);
+      return;
+    }
+    w.os.delete(id);
+    await done(w.tx);
+    const c = await this.store("chunks", "readwrite");
+    if (c) {
+      c.os.delete(IDBKeyRange.bound(`${id}|`, `${id}|￿`));
+      await done(c.tx);
+    }
+  }
+
+  async getChunk(world: string, cx: number, cz: number): Promise<ChunkData | null> {
+    const key = chunkStoreKey(world, cx, cz);
+    const s = await this.store("chunks", "readonly");
+    const stored = s ? await request(s.os.get(key) as IDBRequest<StoredChunk | undefined>) : this.memoryChunks.get(key);
+    if (!stored) return null;
+    const { blocks, meta } = await unpackChunk(stored.data, stored.gz);
+    return { cx, cz, blocks, meta, entities: stored.entities ?? [] };
+  }
+
+  async putChunks(world: string, chunks: ChunkData[]): Promise<void> {
+    if (!chunks.length) return;
+    const packed: StoredChunk[] = [];
+    for (const c of chunks) {
+      const { data, gz } = await packChunk(c);
+      packed.push({ key: chunkStoreKey(world, c.cx, c.cz), world, cx: c.cx, cz: c.cz, data, gz, entities: c.entities });
+    }
+    const s = await this.store("chunks", "readwrite");
+    if (!s) { for (const p of packed) this.memoryChunks.set(p.key, p); return; }
+    for (const p of packed) s.os.put(p);
+    await done(s.tx);
+  }
+
+  /** Keys ("cx,cz") of every chunk this world has saved — what an online guest must fetch rather than generate. */
+  async savedChunkKeys(world: string): Promise<string[]> {
+    const s = await this.store("chunks", "readonly");
+    if (!s) return [...this.memoryChunks.keys()].filter((k) => k.startsWith(`${world}|`)).map((k) => k.split("|")[1]);
+    const keys = await request(s.os.getAllKeys(IDBKeyRange.bound(`${world}|`, `${world}|￿`)));
+    return (keys as string[]).map((k) => k.split("|")[1]);
+  }
+
+  async allChunks(world: string): Promise<StoredChunk[]> {
+    const s = await this.store("chunks", "readonly");
+    if (!s) return [...this.memoryChunks.values()].filter((c) => c.world === world);
+    return request(s.os.getAll(IDBKeyRange.bound(`${world}|`, `${world}|￿`)) as IDBRequest<StoredChunk[]>);
+  }
+
+  // ---- files ----------------------------------------------------------------------
+
+  async exportWorld(id: string): Promise<Blob> {
+    const meta = await this.getWorld(id);
+    if (!meta) throw new Error("That world is not in this browser any more.");
+    const chunks = await this.allChunks(id);
+    const file: ExportFile = {
+      format: "blockcraft-world",
+      version: 1,
+      meta,
+      chunks: chunks.map((c) => ({ cx: c.cx, cz: c.cz, gz: c.gz, data: toBase64(c.data), entities: c.entities })),
+    };
+    return new Blob([JSON.stringify(file)], { type: "application/json" });
+  }
+
+  async importWorld(text: string): Promise<WorldMeta> {
+    let file: ExportFile;
+    try {
+      file = JSON.parse(text);
+    } catch {
+      throw new Error("That file is not a BlockCraft world (it is not JSON).");
+    }
+    if (file?.format !== "blockcraft-world" || !file.meta || !Array.isArray(file.chunks)) {
+      throw new Error("That file is not a BlockCraft world export.");
+    }
+    const id = newWorldId();
+    const meta: WorldMeta = { ...file.meta, id, name: uniqueName(file.meta.name, await this.listWorlds()), lastPlayed: Date.now() };
+    await this.putWorld(meta);
+    const s = await this.store("chunks", "readwrite");
+    const stored: StoredChunk[] = file.chunks.map((c) => ({
+      key: chunkStoreKey(id, c.cx, c.cz), world: id, cx: c.cx, cz: c.cz, gz: !!c.gz, data: fromBase64(c.data), entities: c.entities ?? [],
+    }));
+    if (!s) for (const c of stored) this.memoryChunks.set(c.key, c);
+    else {
+      for (const c of stored) s.os.put(c);
+      await done(s.tx);
+    }
+    return meta;
+  }
+}
+
+export interface ExportFile {
+  format: "blockcraft-world";
+  version: 1;
+  meta: WorldMeta;
+  chunks: { cx: number; cz: number; gz: boolean; data: string; entities: [number, BlockEntity][] }[];
+}
+
+export function newWorldId(): string {
+  return `w${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function uniqueName(name: string, existing: WorldMeta[]): string {
+  const taken = new Set(existing.map((w) => w.name));
+  if (!taken.has(name)) return name;
+  for (let i = 2; ; i++) if (!taken.has(`${name} (${i})`)) return `${name} (${i})`;
+}
+
+export function toBase64(bytes: Uint8Array): string {
+  let s = "";
+  const step = 0x8000;
+  for (let i = 0; i < bytes.length; i += step) s += String.fromCharCode(...bytes.subarray(i, i + step));
+  return btoa(s);
+}
+
+export function fromBase64(b64: string): Uint8Array {
+  const s = atob(b64);
+  const out = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+  return out;
+}
+
+export function newWorldMeta(opts: {
+  name: string; seed: number; seedText: string; type: WorldType; gameMode: GameMode; difficulty: 0 | 1 | 2 | 3;
+  hardcore: boolean; cheats: boolean;
+}): WorldMeta {
+  const now = Date.now();
+  return {
+    id: newWorldId(),
+    ...opts,
+    created: now,
+    lastPlayed: now,
+    playTime: 0,
+    time: 0,
+    day: 0,
+    weather: { rain: 0, thunder: 0, rainTimer: 12000 + Math.floor(Math.random() * 168000), thunderTimer: 12000 + Math.floor(Math.random() * 168000) },
+    spawn: null,
+    rules: { ...DEFAULT_RULES },
+    player: null,
+    players: {},
+    entities: [],
+    version: 1,
+  };
+}

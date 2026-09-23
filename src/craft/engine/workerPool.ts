@@ -9,6 +9,8 @@
 import { JobRunner, type InitRequest, type JobRequest, type JobResult } from "./jobs";
 
 type Pending = { resolve: (r: JobResult) => void; reject: (e: Error) => void };
+/** A job request before the pool numbers it (Omit applied to each member of the union). */
+export type NewJob = JobRequest extends infer R ? (R extends unknown ? Omit<R, "job"> : never) : never;
 
 interface Slot {
   worker: Worker;
@@ -58,7 +60,7 @@ export class WorkerPool {
     return this.pending.size;
   }
 
-  run<T extends JobResult>(req: Omit<JobRequest, "job"> & { kind: JobRequest["kind"] }, transfer: Transferable[] = []): Promise<T> {
+  run<T extends JobResult>(req: NewJob, transfer: Transferable[] = []): Promise<T> {
     const job = this.nextJob++;
     const full = { ...req, job } as JobRequest;
     return new Promise<T>((resolve, reject) => {

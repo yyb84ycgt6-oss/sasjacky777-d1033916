@@ -790,6 +790,81 @@ def("cobweb", (p) => {
 });
 def("note_block", (p, r) => { planks(p, r, hex("#5c3b28")); frame(p, hex("#3a2518")); rect(p, 6, 6, 9, 9, hex("#2b1b12")); });
 
+// Particles, sun and moon.
+def("particle_smoke", (p) => {
+  p.clear();
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+    const d = Math.hypot(x - 7.5, y - 7.5);
+    if (d < 6.5) p.set(x, y, grey(200 - d * 8), Math.round(255 * (1 - d / 7)));
+  }
+});
+def("particle_heart", (p) => {
+  p.clear();
+  template(p, [
+    "................", "................", "................",
+    "...aaa....aaa...",
+    "..arrra..arrra..",
+    ".arwrrrraarrrra.",
+    ".arrrrrrrrrrrra.",
+    ".arrrrrrrrrrrra.",
+    "..arrrrrrrrrra..",
+    "...arrrrrrrra...",
+    "....arrrrrra....",
+    ".....arrrra.....",
+    "......arra......",
+    ".......aa.......",
+  ], { a: hex("#5a0a0a"), r: hex("#e8262a"), w: hex("#ffb3b3") });
+});
+def("particle_flame", (p) => {
+  p.clear();
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+    const d = Math.hypot((x - 7.5) * 1.3, (y - 9) * 0.9);
+    if (d < 6.5) p.set(x, y, mix(hex("#fff3a0"), hex("#ff6a00"), d / 6.5));
+  }
+});
+def("particle_spark", (p) => {
+  p.clear();
+  for (let i = 0; i < 16; i++) { p.set(i, 7, hex("#ffffff")); p.set(7, i, hex("#ffffff")); p.set(i, 8, hex("#ffffff")); p.set(8, i, hex("#ffffff")); }
+});
+def("particle_bubble", (p) => {
+  p.clear();
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+    const d = Math.hypot(x - 7.5, y - 7.5);
+    if (d < 6.5 && d > 4.8) p.set(x, y, hex("#dff4ff"));
+    if (d < 2 && x < 7 && y < 7) p.set(x, y, hex("#ffffff"));
+  }
+});
+def("particle_note", (p) => {
+  p.clear();
+  template(p, [
+    "................", "................",
+    ".........aaaa...",
+    ".........awwa...",
+    ".........a..a...",
+    ".........a..a...",
+    ".........a..a...",
+    ".........a..a...",
+    "......aaaa..a...",
+    ".....awwwa.aa...",
+    ".....awwwaawwa..",
+    "......aaa.awwa..",
+    "...........aa...",
+  ], { a: hex("#1a1a1a"), w: hex("#ffffff") });
+});
+def("sun", (p) => {
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+    const d = Math.max(Math.abs(x - 7.5), Math.abs(y - 7.5));
+    if (d < 4) p.set(x, y, hex("#fffbe0"));
+    else if (d < 6) p.set(x, y, hex("#ffe98a"), 200);
+    else p.set(x, y, hex("#ffd24a"), Math.round(Math.max(0, 1 - (d - 6) / 2) * 90));
+  }
+});
+def("moon", (p, r) => {
+  p.clear();
+  for (let y = 3; y < 13; y++) for (let x = 3; x < 13; x++) p.set(x, y, shade(hex("#e8ecf2"), 0.9 + r.next() * 0.1));
+  for (const [x, y] of [[5, 5], [9, 7], [6, 10], [10, 11]]) { p.set(x, y, hex("#b8c0cc")); p.set(x + 1, y, hex("#c8ced8")); }
+});
+
 // Water and lava are animated: ANIM_FRAMES consecutive layers, painted from a
 // looping path through 3D noise so the last frame flows into the first.
 const WATER_NOISE = new Simplex(4242);

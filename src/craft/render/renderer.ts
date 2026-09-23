@@ -1,0 +1,497 @@
+/**
+ * Draws the world for one frame.
+ *
+ * The game hands over a FrameState — where the camera is, what time it is,
+ * which entities exist and how far between ticks we are — and this turns it
+ * into a picture. Nothing in here changes the game; that separation is what
+ * lets the same renderer show a single-player world, a hosted one, or a
+ * guest's copy that only ever receives snapshots.
+ */
+import * as THREE from "three";
+import { block, modelBoxes } from "../engine/blocks";
+import { layerOf } from "../engine/atlas";
+import type { ChunkMesh } from "../engine/mesher";
+import type { Entity } from "../engine/entities";
+import { ItemEntity, PrimedTnt, FallingBlock, Projectile, XpOrb } from "../engine/entities";
+import { Mob } from "../engine/mobs";
+import type { World } from "../engine/world";
+import { itemId } from "../engine/items";
+import { ChunkMeshes } from "./chunkMeshes";
+import { Hand, type HandState } from "./hand";
+import { col, createChunkMaterial, createCrackMaterial, createLitBlockMaterial, createSharedUniforms, createSpriteMaterial, type ChunkPass, type SharedUniforms } from "./materials";
+import { buildModel, ItemView, nameTag, pose, type ModelInstance } from "./models";
+import { Particles } from "./particles";
+import { Sky, skyState } from "./sky";
+import { Weather } from "./weather";
+import { blockGeometry, itemModel, spriteGeometry } from "./itemModels";
+
+export interface RemotePlayerView {
+  id: string;
+  name: string;
+  x: number; y: number; z: number;
+  yaw: number; pitch: number;
+  walk: number; speed: number;
+  swing: number;
+  sneaking: boolean;
+  heldItem: number | null;
+  variant: number;
+  hurt: boolean;
+  dead: boolean;
+}
+
+export interface FrameState {
+  dt: number;
+  alpha: number;
+  camera: { x: number; y: number; z: number; yaw: number; pitch: number; fov: number };
+  /** 0 first person, 1 behind, 2 in front. */
+  perspective: 0 | 1 | 2;
+  bob: { walk: number; amount: number };
+  hurtTilt: number;
+  time: number;
+  rain: number;
+  thunder: number;
+  lightning: number;
+  snowing: boolean;
+  renderDistance: number;
+  underwater: boolean;
+  inLava: boolean;
+  nightVision: boolean;
+  entities: Iterable<Entity>;
+  localPlayer: RemotePlayerView;
+  remotePlayers: RemotePlayerView[];
+  target: { x: number; y: number; z: number } | null;
+  crack: number;
+  hand: HandState;
+  showHand: boolean;
+  clouds: boolean;
+  wave: boolean;
+}
+
+const WATER_FOG = col("#1f4f9a");
+const LAVA_FOG = col("#c2410c");
+
+interface EntityView {
+  entity: Entity;
+  object: THREE.Object3D;
+  model?: ModelInstance;
+  item?: ItemView;
+  lit?: THREE.RawShaderMaterial;
+  nameTag?: THREE.Sprite;
+}
+
+export class WorldRenderer {
+  readonly renderer: THREE.WebGLRenderer;
+  readonly scene = new THREE.Scene();
+  readonly camera = new THREE.PerspectiveCamera(70, 1, 0.05, 1000);
+  readonly shared: SharedUniforms;
+  readonly chunks: ChunkMeshes;
+  readonly particles: Particles;
+  private sky = new Sky();
+  private weather: Weather;
+  private hand: Hand;
+  private selection: THREE.LineSegments;
+  private crack: THREE.Mesh;
+  private crackMat: THREE.RawShaderMaterial;
+  private views = new Map<number, EntityView>();
+  private players = new Map<string, EntityView & { variant: number }>();
+  private localModel: ModelInstance | null = null;
+  private localVariant = -1;
+  private time = 0;
+  private flash = 0;
+  private width = 1;
+  private height = 1;
+  private lastTarget = "";
+  contextLost = false;
+
+  constructor(readonly canvas: HTMLCanvasElement, private world: World, pixelRatio: number) {
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: "high-performance", preserveDrawingBuffer: false, alpha: false });
+    this.renderer.setPixelRatio(pixelRatio);
+    // Display space end to end — see materials.ts.
+    this.renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
+    this.renderer.autoClear = false;
+    this.renderer.sortObjects = true;
+    canvas.addEventListener("webglcontextlost", (e) => { e.preventDefault(); this.contextLost = true; });
+    canvas.addEventListener("webglcontextrestored", () => { this.contextLost = false; });
+
+    this.shared = createSharedUniforms();
+    const materials: Record<ChunkPass, THREE.Material> = {
+      opaque: createChunkMaterial(this.shared, "opaque"),
+      cutout: createChunkMaterial(this.shared, "cutout"),
+      translucent: createChunkMaterial(this.shared, "translucent"),
+    };
+    this.chunks = new ChunkMeshes(materials);
+    this.particles = new Particles(this.shared, world);
+    this.weather = new Weather(world);
+    this.hand = new Hand(this.shared);
+
+    this.scene.add(this.sky.group, this.chunks.group, this.particles.points, this.weather.group);
+
+    const edges = new THREE.BufferGeometry();
+    edges.setAttribute("position", new THREE.Float32BufferAttribute(new Float32Array(24 * 3 * 4), 3));
+    this.selection = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.45, depthWrite: false }));
+    this.selection.visible = false;
+    this.selection.frustumCulled = false;
+    this.selection.renderOrder = 6;
+    this.scene.add(this.selection);
+
+    this.crackMat = createCrackMaterial(this.shared);
+    this.crack = new THREE.Mesh(new THREE.BoxGeometry(1.004, 1.004, 1.004), this.crackMat);
+    this.crack.visible = false;
+    this.crack.renderOrder = 5;
+    this.scene.add(this.crack);
+  }
+
+  resize(width: number, height: number, pixelRatio: number): void {
+    this.width = Math.max(1, width);
+    this.height = Math.max(1, height);
+    this.renderer.setPixelRatio(pixelRatio);
+    this.renderer.setSize(this.width, this.height, false);
+    this.camera.aspect = this.width / this.height;
+    this.camera.updateProjectionMatrix();
+    this.hand.resize(this.width / this.height);
+    this.particles.setViewportHeight(this.height * pixelRatio, this.camera.fov);
+  }
+
+  setChunk(id: number, cx: number, cz: number, mesh: ChunkMesh): void {
+    this.chunks.set(id, cx, cz, mesh);
+  }
+
+  removeChunk(id: number): void {
+    this.chunks.remove(id);
+  }
+
+  private updateSelection(target: FrameState["target"]): void {
+    if (!target) { this.selection.visible = false; this.lastTarget = ""; return; }
+    const id = this.world.blockAt(target.x, target.y, target.z);
+    const meta = this.world.getMeta(target.x, target.y, target.z);
+    const key = `${target.x},${target.y},${target.z},${id},${meta}`;
+    this.selection.visible = id !== 0;
+    if (key === this.lastTarget) return;
+    this.lastTarget = key;
+    const def = block(id);
+    const boxes = def.shape === "cross" || def.shape === "crop" ? [[2, 0, 2, 14, 13, 14] as const] : modelBoxes(def, meta);
+    const pos = this.selection.geometry.attributes.position as THREE.BufferAttribute;
+    const arr = pos.array as Float32Array;
+    let i = 0;
+    const e = 0.002;
+    for (const b of boxes.slice(0, 4)) {
+      const x0 = target.x + b[0] / 16 - e, y0 = target.y + b[1] / 16 - e, z0 = target.z + b[2] / 16 - e;
+      const x1 = target.x + b[3] / 16 + e, y1 = target.y + b[4] / 16 + e, z1 = target.z + b[5] / 16 + e;
+      const c = [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1], [x0, y1, z0], [x1, y1, z0], [x1, y1, z1], [x0, y1, z1]];
+      for (const [a, bb] of [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]]) {
+        arr.set(c[a], i); arr.set(c[bb], i + 3); i += 6;
+      }
+    }
+    arr.fill(0, i);
+    pos.needsUpdate = true;
+    this.selection.geometry.setDrawRange(0, i / 3);
+  }
+
+  private lightAt(x: number, y: number, z: number): [number, number] {
+    const l = this.world.getLight(Math.floor(x), Math.floor(y), Math.floor(z));
+    if (l < 0) return [1, 0];
+    return [(l >> 4) / 15, (l & 15) / 15];
+  }
+
+  private brightness(x: number, y: number, z: number): number {
+    const [s, b] = this.lightAt(x, y, z);
+    const l = Math.max(s * this.shared.uDaylight.value, b, this.shared.uNightVision.value);
+    return Math.max(0.12, l / (4 - 3 * l)) * 1.05;
+  }
+
+  private viewFor(e: Entity): EntityView {
+    let v = this.views.get(e.id);
+    if (v && v.entity === e) return v;
+    if (v) this.dropView(e.id);
+    const object = new THREE.Group();
+    v = { entity: e, object };
+    if (e instanceof Mob) {
+      v.model = buildModel(e.kind);
+      object.add(v.model.root);
+    } else if (e instanceof ItemEntity) {
+      v.item = new ItemView(this.shared, e.stack.id, e.stack.count);
+      object.add(v.item.root);
+    } else if (e instanceof FallingBlock || e instanceof PrimedTnt) {
+      v.lit = createLitBlockMaterial(this.shared);
+      const id = e instanceof FallingBlock ? e.blockId : block(87).id;
+      const m = new THREE.Mesh(blockGeometry(id, e instanceof FallingBlock ? e.meta : 0), v.lit);
+      object.add(m);
+    } else if (e instanceof Projectile) {
+      if (e.kind === "arrow") {
+        const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.5), new THREE.MeshBasicMaterial({ color: col("#6b4a26") }));
+        const tip = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 0.08), new THREE.MeshBasicMaterial({ color: col("#9a9a9a") }));
+        tip.position.z = 0.27;
+        const fl = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.01, 0.12), new THREE.MeshBasicMaterial({ color: col("#eeeeee") }));
+        fl.position.z = -0.22;
+        const g = new THREE.Group();
+        g.add(shaft, tip, fl);
+        object.add(g);
+      } else {
+        v.item = new ItemView(this.shared, itemIdFor(e.kind), 1, 0.7);
+        object.add(v.item.root);
+      }
+    } else if (e instanceof XpOrb) {
+      v.lit = createSpriteMaterial(this.shared);
+      v.lit.uniforms.uTint.value = col("#b6ff4a");
+      v.lit.uniforms.uSky.value = 1;
+      v.lit.uniforms.uBlock.value = 1;
+      const m = new THREE.Mesh(spriteGeometry("particle_spark"), v.lit);
+      m.scale.setScalar(0.25 + Math.min(0.2, e.value / 50));
+      object.add(m);
+    }
+    this.scene.add(object);
+    this.views.set(e.id, v);
+    return v;
+  }
+
+  private dropView(id: number): void {
+    const v = this.views.get(id);
+    if (!v) return;
+    this.scene.remove(v.object);
+    v.item?.dispose();
+    v.lit?.dispose();
+    v.model?.material.dispose();
+    v.model?.wool?.dispose();
+    this.views.delete(id);
+  }
+
+  private updateEntities(frame: FrameState): void {
+    const seen = new Set<number>();
+    const a = frame.alpha;
+    const camPos = this.camera.position;
+    const maxDist = frame.renderDistance * 16 + 16;
+    for (const e of frame.entities) {
+      if (e.removed) continue;
+      const x = e.prevX + (e.x - e.prevX) * a, y = e.prevY + (e.y - e.prevY) * a, z = e.prevZ + (e.z - e.prevZ) * a;
+      if (Math.abs(x - camPos.x) > maxDist || Math.abs(z - camPos.z) > maxDist) continue;
+      seen.add(e.id);
+      const v = this.viewFor(e);
+      const bright = this.brightness(x, y + e.body.height * 0.6, z);
+      if (v.model && e instanceof Mob) {
+        let yaw = e.prevYaw + angleDelta(e.prevYaw, e.yaw) * a;
+        const speed = Math.hypot(e.x - e.prevX, e.z - e.prevZ);
+        const walk = e.prevWalkDist + (e.walkDist - e.prevWalkDist) * a;
+        if (e.kind === "creeper" && e.fuse > 0) yaw += 0;
+        pose(v.model, e.kind, {
+          x, y, z, yaw, pitch: 0, walk, speed, light: bright, hurt: e.hurtTime > 0, death: e.deathTime > 0 ? e.deathTime + a : 0,
+          swing: 0, time: this.time, baby: e.baby, swell: e.kind === "creeper" ? e.fuse / 30 : 0,
+          flash: e.kind === "creeper" && e.fuse > 0 && Math.floor(this.time * 8) % 2 === 0,
+          woolColor: e.woolColor, sheared: e.sheared, onGround: e.body.onGround,
+          armsForward: e.kind === "zombie" || (e.kind === "skeleton" && e.targetId !== null),
+        });
+        v.object.position.set(0, 0, 0);
+        continue;
+      }
+      v.object.position.set(x, y, z);
+      if (v.item && e instanceof ItemEntity) {
+        const [s, b] = this.lightAt(x, y + 0.2, z);
+        v.item.setLight(s, b);
+        v.item.root.position.y = 0.12 + Math.sin(this.time * 2.5 + e.bob) * 0.06;
+        v.item.root.rotation.y = this.time * 1.6 + e.bob;
+      } else if (v.item) {
+        const [s, b] = this.lightAt(x, y, z);
+        v.item.setLight(s, b);
+        v.item.root.lookAt(camPos);
+      } else if (e instanceof Projectile) {
+        v.object.rotation.set(-e.pitch, e.yaw, 0, "YXZ");
+      } else if (v.lit && (e instanceof FallingBlock || e instanceof PrimedTnt)) {
+        const [s, b] = this.lightAt(x, y + 0.5, z);
+        v.lit.uniforms.uSky.value = s;
+        v.lit.uniforms.uBlock.value = b;
+        if (e instanceof PrimedTnt) {
+          v.lit.uniforms.uFlash.value = Math.floor(e.fuse / 5) % 2 === 0 ? 0.6 : 0;
+          const sc = e.fuse < 10 ? 1 + (1 - e.fuse / 10) * 0.2 : 1;
+          v.object.scale.setScalar(sc);
+        }
+      } else if (e instanceof XpOrb) {
+        v.object.position.y += 0.15 + Math.sin(this.time * 4 + e.id) * 0.05;
+        v.object.lookAt(camPos);
+      }
+    }
+    for (const id of [...this.views.keys()]) if (!seen.has(id)) this.dropView(id);
+  }
+
+  private playerView(p: RemotePlayerView, existing: (EntityView & { variant: number }) | undefined): EntityView & { variant: number } {
+    if (existing && existing.variant === p.variant) return existing;
+    if (existing) this.scene.remove(existing.object);
+    const model = buildModel("player", p.variant);
+    const object = new THREE.Group();
+    object.add(model.root);
+    const tag = nameTag(p.name);
+    tag.position.set(0, 2.25, 0);
+    object.add(tag);
+    this.scene.add(object);
+    return { entity: null as unknown as Entity, object, model, nameTag: tag, variant: p.variant };
+  }
+
+  private held = new Map<string, { id: number | null; mesh: THREE.Object3D | null; mat: THREE.RawShaderMaterial | null }>();
+
+  private attachHeld(key: string, model: ModelInstance, itemId: number | null, sky: number, blk: number): void {
+    let h = this.held.get(key);
+    if (!h) { h = { id: undefined as unknown as null, mesh: null, mat: null }; this.held.set(key, h); }
+    const arm = model.parts.get("rightArm");
+    if (!arm) return;
+    if (h.id !== itemId) {
+      if (h.mesh) arm.remove(h.mesh);
+      h.mat?.dispose();
+      h.mesh = null; h.mat = null; h.id = itemId;
+      if (itemId !== null) {
+        const m = itemModel(itemId);
+        h.mat = m.kind === "block" ? createLitBlockMaterial(this.shared) : createSpriteMaterial(this.shared);
+        const mesh = new THREE.Mesh(m.geometry, h.mat);
+        mesh.scale.setScalar(m.kind === "block" ? 0.3 : 0.5);
+        mesh.position.set(0, -0.62, -0.12);
+        mesh.rotation.set(m.kind === "block" ? 0 : -Math.PI / 2 + 0.3, m.kind === "block" ? Math.PI / 4 : Math.PI / 2, 0);
+        arm.add(mesh);
+        h.mesh = mesh;
+      }
+    }
+    if (h.mat) { h.mat.uniforms.uSky.value = sky; h.mat.uniforms.uBlock.value = blk; }
+  }
+
+  private updatePlayers(frame: FrameState): void {
+    const seen = new Set<string>();
+    for (const p of frame.remotePlayers) {
+      if (p.dead) continue;
+      seen.add(p.id);
+      const v = this.playerView(p, this.players.get(p.id));
+      this.players.set(p.id, v);
+      pose(v.model!, "player", {
+        x: p.x, y: p.y, z: p.z, yaw: p.yaw, pitch: p.pitch, walk: p.walk, speed: p.speed,
+        light: this.brightness(p.x, p.y + 1.6, p.z), hurt: p.hurt, death: 0, swing: p.swing, time: this.time, sneaking: p.sneaking,
+      });
+      const [s, b] = this.lightAt(p.x, p.y + 1, p.z);
+      this.attachHeld(p.id, v.model!, p.heldItem, s, b);
+      if (v.nameTag) v.nameTag.position.y = p.sneaking ? 2.0 : 2.25;
+    }
+    for (const [id, v] of this.players) {
+      if (!seen.has(id)) { this.scene.remove(v.object); this.players.delete(id); this.held.delete(id); }
+    }
+    // The local player's own body, for third person.
+    const lp = frame.localPlayer;
+    if (frame.perspective !== 0 && !lp.dead) {
+      if (!this.localModel || this.localVariant !== lp.variant) {
+        if (this.localModel) this.scene.remove(this.localModel.root);
+        this.localModel = buildModel("player", lp.variant);
+        this.localVariant = lp.variant;
+        this.held.delete("__local");
+        this.scene.add(this.localModel.root);
+      }
+      this.localModel.root.visible = true;
+      pose(this.localModel, "player", {
+        x: lp.x, y: lp.y, z: lp.z, yaw: lp.yaw, pitch: lp.pitch, walk: lp.walk, speed: lp.speed,
+        light: this.brightness(lp.x, lp.y + 1.6, lp.z), hurt: lp.hurt, death: 0, swing: lp.swing, time: this.time, sneaking: lp.sneaking,
+      });
+      const [s, b] = this.lightAt(lp.x, lp.y + 1, lp.z);
+      this.attachHeld("__local", this.localModel, lp.heldItem, s, b);
+    } else if (this.localModel) {
+      this.localModel.root.visible = false;
+    }
+  }
+
+  render(frame: FrameState): void {
+    if (this.contextLost) return;
+    this.time += frame.dt;
+    const sky = skyState(frame.time, frame.rain, frame.thunder);
+    if (frame.lightning > 0) this.flash = 1;
+    this.flash = Math.max(0, this.flash - frame.dt * 4);
+    const u = this.shared;
+    u.uTime.value = this.time;
+    u.uDaylight.value = Math.min(1, sky.daylight + this.flash * 0.8);
+    u.uNightVision.value = frame.nightVision ? 0.9 : 0;
+    u.uWave.value = frame.wave ? 1 : 0;
+
+    // Camera.
+    const c = frame.camera;
+    const cam = this.camera;
+    if (cam.fov !== c.fov) { cam.fov = c.fov; cam.updateProjectionMatrix(); this.particles.setViewportHeight(this.height * this.renderer.getPixelRatio(), c.fov); }
+    const renderFar = frame.renderDistance * 16;
+    cam.far = Math.max(64, renderFar + 64);
+    cam.updateProjectionMatrix();
+    cam.rotation.order = "YXZ";
+    let yaw = c.yaw, pitch = c.pitch;
+    let cx = c.x, cy = c.y, cz = c.z;
+    if (frame.perspective === 0) {
+      const w = frame.bob.walk * Math.PI, amt = frame.bob.amount;
+      const side = Math.sin(w) * amt * 0.5, up = -Math.abs(Math.cos(w) * amt);
+      cx += Math.cos(yaw) * side * 0.1; cz -= Math.sin(yaw) * side * 0.1;
+      cy += up * 0.1;
+      cam.rotation.set(pitch + Math.abs(Math.cos(w - 0.2) * amt) * 0.02, yaw, Math.sin(w) * amt * 0.05 + frame.hurtTilt * 0.25);
+    } else {
+      // Third person: pull back along the view, stopping short of walls.
+      const back = frame.perspective === 1 ? 1 : -1;
+      if (back < 0) { yaw += Math.PI; pitch = -pitch; }
+      const dx = Math.sin(yaw) * Math.cos(pitch), dy = -Math.sin(pitch), dz = Math.cos(yaw) * Math.cos(pitch);
+      let dist = 4;
+      for (let t = 0.5; t <= 4; t += 0.25) {
+        const id = this.world.blockAt(Math.floor(cx + dx * t), Math.floor(cy + dy * t), Math.floor(cz + dz * t));
+        if (id && block(id).opaque) { dist = Math.max(0.5, t - 0.3); break; }
+      }
+      cx += dx * dist; cy += dy * dist; cz += dz * dist;
+      cam.rotation.set(pitch, yaw, 0);
+    }
+    cam.position.set(cx, cy, cz);
+    cam.updateMatrixWorld();
+
+    // Fog and sky colour.
+    let fogColor = sky.horizon.clone();
+    let near = renderFar * 0.72, far = renderFar * 0.98;
+    if (frame.underwater) { fogColor = WATER_FOG.clone().multiplyScalar(0.3 + sky.daylight * 0.7); near = 2; far = 24; }
+    if (frame.inLava) { fogColor = LAVA_FOG.clone(); near = 0.2; far = 2.5; }
+    if (frame.rain > 0 && !frame.underwater) { near *= 1 - frame.rain * 0.4; }
+    u.uFogColor.value.copy(fogColor);
+    u.uFogNear.value = near;
+    u.uFogFar.value = far;
+    this.sky.cloudsVisible = frame.clouds && !frame.underwater;
+    this.sky.update(cam, sky, this.time * 20, renderFar);
+    this.renderer.setClearColor(fogColor);
+
+    this.updateSelection(frame.target);
+    if (frame.crack >= 0 && frame.target) {
+      this.crack.visible = true;
+      this.crack.position.set(frame.target.x + 0.5, frame.target.y + 0.5, frame.target.z + 0.5);
+      this.crackMat.uniforms.uLayer.value = layerOf(`destroy_stage_${Math.min(9, frame.crack)}`);
+    } else this.crack.visible = false;
+
+    this.updateEntities(frame);
+    this.updatePlayers(frame);
+    this.particles.update(frame.dt, sky.daylight);
+    const bright = this.brightness(c.x, c.y, c.z);
+    this.weather.update(frame.dt, cam.position, frame.rain, frame.snowing, this.time, bright);
+
+    this.renderer.clear();
+    this.renderer.render(this.scene, cam);
+    if (frame.showHand && frame.perspective === 0) {
+      this.hand.update(frame.hand);
+      this.renderer.clearDepth();
+      this.renderer.render(this.hand.scene, this.hand.camera);
+    }
+  }
+
+  stats(): { chunks: number; quads: number; calls: number; triangles: number } {
+    const info = this.renderer.info.render;
+    return { chunks: this.chunks.count, quads: this.chunks.quads, calls: info.calls, triangles: info.triangles };
+  }
+
+  screenshot(): string {
+    return this.canvas.toDataURL("image/png");
+  }
+
+  dispose(): void {
+    for (const id of [...this.views.keys()]) this.dropView(id);
+    this.chunks.clear();
+    this.renderer.dispose();
+  }
+}
+
+function angleDelta(a: number, b: number): number {
+  let d = b - a;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  return d;
+}
+
+/** Snowballs and eggs in flight look like the item that was thrown. */
+function itemIdFor(kind: string): number {
+  return itemId(kind);
+}
