@@ -48,6 +48,10 @@ const ALLOWED_MODELS = allowlistFromEnv("OLLAMA_MODEL_ALLOWLIST", [
   "llama3.2-vision:11b",
   "codellama:34b",
   "gemma2:9b",
+  // DeepSeek and Hermes, for the agents that drive the app (docs/HARNESSES.md).
+  "deepseek-r1:14b",
+  "hermes3:8b",
+  "hermes3:70b",
 ]);
 const MAX_MESSAGES = 64;
 const MAX_MESSAGE_CHARS = 100_000;

@@ -72,12 +72,12 @@ describe("the engine chain", () => {
   afterEach(() => vi.restoreAllMocks());
 
   it("puts Jacky first and the cloud gateway last", () => {
-    expect(ENGINE_CHAIN).toEqual(["jacky", "bionic", "ollama", "cloud"]);
+    expect(ENGINE_CHAIN).toEqual(["jacky", "bionic", "ollama", "deepseek", "cloud"]);
     expect(DEFAULT_ENGINE).toBe("jacky");
   });
 
   it("keeps the rest of the chain behind whichever engine was chosen", () => {
-    expect(chainFrom("ollama")).toEqual(["ollama", "jacky", "bionic", "cloud"]);
+    expect(chainFrom("ollama")).toEqual(["ollama", "jacky", "bionic", "deepseek", "cloud"]);
   });
 });
 
@@ -137,6 +137,7 @@ describe("falling back", () => {
       .mockResolvedValueOnce(refusal(502, { error: "unreachable" }))
       .mockResolvedValueOnce(refusal(503, { error: "not connected" }))
       .mockResolvedValueOnce(refusal(400, { error: "OLLAMA_BASE_URL not configured" }))
+      .mockResolvedValueOnce(refusal(503, { error: "DEEPSEEK_API_KEY not configured", needs_secret: "DEEPSEEK_API_KEY" }))
       .mockResolvedValueOnce(sse(token("cloud"), "data: [DONE]\n\n"));
     const c = collect();
     await routeChat({ messages: ask, engine: "jacky", ...c.handlers });
@@ -145,6 +146,7 @@ describe("falling back", () => {
       "jacky-proxy",
       "jackie-bionic",
       "jackie-ollama",
+      "jackie-deepseek",
       "jackie-chat",
     ]);
     expect(c.result?.engine).toBe("cloud");
@@ -173,7 +175,7 @@ describe("falling back", () => {
 
     expect(c.result).toBeNull();
     expect(c.errors).toHaveLength(1);
-    expect(c.errors[0]).toMatch(/jacky → bionic → ollama → cloud/);
+    expect(c.errors[0]).toMatch(/jacky → bionic → ollama → deepseek → cloud/);
   });
 
   it("treats an answer of nothing as a failure worth retrying elsewhere", async () => {
@@ -255,7 +257,7 @@ describe("when the whole chain refuses for one reason", () => {
     await routeChat({ messages: ask, engine: "jacky", ...c.handlers });
 
     expect(c.errors).toHaveLength(1);
-    expect(c.errors[0]).toMatch(/not one of 4 edge functions answered/i);
+    expect(c.errors[0]).toMatch(/not one of 5 edge functions answered/i);
     expect(c.errors[0]).toMatch(/not deployed|without CORS/i);
     // The engine list is the misleading part, so it is not what leads.
     expect(c.errors[0]).not.toMatch(/^Every engine refused \(/);
@@ -266,6 +268,7 @@ describe("when the whole chain refuses for one reason", () => {
       .mockResolvedValueOnce(refusal(502, { error: "jacky upstream unreachable" }))
       .mockResolvedValueOnce(refusal(503, { error: "Bionic is not connected" }))
       .mockResolvedValueOnce(refusal(400, { error: "OLLAMA_BASE_URL not configured" }))
+      .mockResolvedValueOnce(refusal(503, { error: "DEEPSEEK_API_KEY not configured" }))
       .mockResolvedValueOnce(refusal(503, { error: "Jackie has no model key" }));
     const c = collect();
     await routeChat({ messages: ask, engine: "jacky", ...c.handlers });

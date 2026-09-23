@@ -93,6 +93,7 @@ frequent event rather than an error.
 | `GOOGLE_AI_STUDIO_KEY` | `jackie-google` | Google AI Studio |
 | `OPENROUTER_API_KEY` | `jackie-openrouter` | OpenRouter |
 | `XAI_API_KEY` | `jackie-xai`, `jackie-xai-media` | xAI |
+| `DEEPSEEK_API_KEY` | `jackie-deepseek` | DeepSeek (also the chat chain's fourth engine, and the `deepseek` engine of the MCP `ask_jackie` tool) |
 
 ### Self-hosted engines
 

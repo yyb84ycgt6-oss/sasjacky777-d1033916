@@ -42,6 +42,10 @@ const ALLOWED_MODELS = allowlistFromEnv("OPENROUTER_MODEL_ALLOWLIST", [
   "deepseek/deepseek-chat:free",
   "nousresearch/hermes-3-llama-3.1-405b:free",
   "microsoft/phi-3-mini-128k-instruct:free",
+  // Paid, and named as paid in the picker: the Hermes 4 models Hermes Agent is
+  // tuned around. Override OPENROUTER_MODEL_ALLOWLIST to drop them.
+  "nousresearch/hermes-4-70b",
+  "nousresearch/hermes-4-405b",
 ]);
 
 const MAX_MESSAGES = 64;

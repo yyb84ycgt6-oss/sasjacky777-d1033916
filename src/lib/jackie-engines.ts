@@ -15,7 +15,9 @@
  *   2. **Bionic** — a BionicGPT (or any OpenAI-compatible) server on the
  *      operator's own hardware. Streams.
  *   3. **Ollama** — the local runner, through `jackie-ollama`. Streams.
- *   4. **Cloud** — the Lovable gateway, last. It costs money and leaves the
+ *   4. **DeepSeek** — DeepSeek's own API, through `jackie-deepseek`. Cheap,
+ *      strong, and only there when DEEPSEEK_API_KEY is set. Streams.
+ *   5. **Cloud** — the Lovable gateway, last. It costs money and leaves the
  *      building, so it is the safety net, not the default.
  *
  * Order is priority. The router walks it from the chosen engine downward, so a
@@ -28,7 +30,7 @@
 
 import { CHAT_MODELS } from "../../supabase/functions/_shared/chatRequest";
 
-export type EngineId = "jacky" | "bionic" | "ollama" | "cloud";
+export type EngineId = "jacky" | "bionic" | "ollama" | "deepseek" | "cloud";
 
 /** How the router talks to an engine. */
 export type EngineKind =
@@ -111,6 +113,22 @@ export const ENGINES: readonly EngineDef[] = [
       { id: "qwen2.5-coder:32b", label: "Qwen 2.5 Coder 32B", note: "Code" },
       { id: "deepseek-r1:32b", label: "DeepSeek R1 32B", note: "Reasoning" },
       { id: "llama3.2:1b", label: "Llama 3.2 1B", note: "Phone-friendly" },
+      { id: "hermes3:8b", label: "Hermes 3 8B", note: "Tool-calling tuned" },
+    ],
+  },
+  {
+    id: "deepseek",
+    label: "DeepSeek",
+    short: "DeepSeek",
+    kind: "sse",
+    fn: "jackie-deepseek",
+    description: "DeepSeek's own API. Low per-token cost; answers before the Lovable gateway when its key is set.",
+    requiresSecret: "DEEPSEEK_API_KEY",
+    helpUrl: "https://platform.deepseek.com/api_keys",
+    local: false,
+    models: [
+      { id: "deepseek-v4-flash", label: "DeepSeek V4 Flash", note: "Fast, cheap" },
+      { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro", note: "Stronger reasoning" },
     ],
   },
   {

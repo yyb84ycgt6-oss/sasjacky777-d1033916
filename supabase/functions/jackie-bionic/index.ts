@@ -38,6 +38,9 @@ const ALLOWED_MODELS = allowlistFromEnv("BIONIC_MODEL_ALLOWLIST", [
   "qwen2.5-coder:32b",
   "deepseek-r1:32b",
   "mistral:7b",
+  // LM Studio names its models this way; Bionic is how the app reaches it.
+  "hermes-3-llama-3.1-8b",
+  "deepseek-r1-distill-qwen-14b",
 ]);
 const MAX_MESSAGES = 64;
 const MAX_MESSAGE_CHARS = 100_000;

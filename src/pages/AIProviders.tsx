@@ -30,6 +30,7 @@ const ICONS: Record<ProviderId, typeof Zap> = {
   openai: Building2,
   anthropic: Building2,
   xai: Globe,
+  deepseek: Brain,
 };
 
 const TIER_LABEL: Record<ProviderTier, string> = {

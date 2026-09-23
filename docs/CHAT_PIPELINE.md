@@ -31,7 +31,8 @@ loaded. It has a chain now, and `jackie-router.ts` walks it.
 | 1 | **Jacky** | `jacky-proxy` | `JACKY_API_BASE` (+ optional `JACKY_API_TOKEN`) | The rig's own Flask engine. Picks its own route and model. Answers whole, so the router paces it onto the screen. |
 | 2 | **Bionic** | `jackie-bionic` | `BIONIC_BASE_URL` (+ optional `BIONIC_API_KEY`, `BIONIC_MODEL`) | BionicGPT, LM Studio, llama.cpp, vLLM — anything OpenAI-compatible on your hardware. Streams. |
 | 3 | **Ollama** | `jackie-ollama` | `OLLAMA_BASE_URL` (+ optional `OLLAMA_API_KEY`, `OLLAMA_MODEL`) | Your GPU or laptop over a tunnel. Streams. |
-| 4 | **Cloud** | `jackie-chat` | `LOVABLE_API_KEY` | The Lovable gateway. Leaves your hardware and costs credit, so it answers last. |
+| 4 | **DeepSeek** | `jackie-deepseek` | `DEEPSEEK_API_KEY` | DeepSeek's own API (V4 Flash by default). Cheap per token; skipped at no cost when the key is unset. Streams. |
+| 5 | **Cloud** | `jackie-chat` | `LOVABLE_API_KEY` | The Lovable gateway. Leaves your hardware and costs credit, so it answers last. |
 
 Order is priority. The engine picked in the composer is tried first and the rest
 follow in table order, so choosing Ollama by hand does not mean Jacky and Bionic
@@ -60,7 +61,7 @@ Two things, and only two, stop the walk:
 - **the user stopped the answer** — not a failure, and retrying it somewhere
   else would be the opposite of what was asked;
 - **there is no signed-in session** — every engine refuses that identically, so
-  trying four of them is four identical errors.
+  trying five of them is five identical errors.
 
 Everything else — a missing secret, a refused key, a rate limit, an unreachable
 host, an answer of nothing at all — moves to the next engine, because the next

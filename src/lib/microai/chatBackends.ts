@@ -47,7 +47,7 @@ export interface ChatBackend {
 }
 
 /** Providers offered on `/micro`. Others exist; these are the ones asked for. */
-const MICRO_PROVIDER_IDS: ProviderId[] = ["lovable", "groq", "openrouter", "ollama", "google"];
+const MICRO_PROVIDER_IDS: ProviderId[] = ["lovable", "groq", "openrouter", "ollama", "google", "deepseek"];
 
 function providerBackend(id: ProviderId): ChatBackend | null {
   const def = PROVIDERS.find((p) => p.id === id);

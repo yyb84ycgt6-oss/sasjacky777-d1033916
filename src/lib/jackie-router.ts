@@ -9,7 +9,7 @@
  *
  * This walks `jackie-engines`' chain instead. It starts at whichever engine is
  * chosen, and on any failure that another engine could plausibly answer it
- * moves down: Jacky → Bionic → Ollama → Cloud. Only two things stop the walk:
+ * moves down: Jacky → Bionic → Ollama → DeepSeek → Cloud. Only two things stop the walk:
  *
  *   - the user aborted, which is not a failure and must not be retried
  *     somewhere else, and

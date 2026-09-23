@@ -20,7 +20,8 @@ export type ProviderId =
   | "fireworks"
   | "openai"
   | "anthropic"
-  | "xai";
+  | "xai"
+  | "deepseek";
 
 export type ProviderTier = "default" | "free" | "freemium" | "paid";
 
@@ -105,6 +106,10 @@ export const PROVIDERS: ProviderDef[] = [
       { id: "google/gemma-3-27b-it:free", label: "Gemma 3 27B", free: true },
       { id: "mistralai/mistral-small-3.1-24b-instruct:free", label: "Mistral Small 3.1 24B", free: true },
       { id: "nousresearch/hermes-3-llama-3.1-405b:free", label: "Hermes 3 405B", free: true },
+      // Paid on OpenRouter. Offered because Hermes 4 is the model Hermes Agent
+      // is tuned around; the note says so, so nobody picks it thinking it is free.
+      { id: "nousresearch/hermes-4-70b", label: "Hermes 4 70B", reasoning: true, note: "Paid" },
+      { id: "nousresearch/hermes-4-405b", label: "Hermes 4 405B", reasoning: true, note: "Paid" },
     ],
   },
   {
@@ -172,6 +177,9 @@ export const PROVIDERS: ProviderDef[] = [
       { id: "llama3.3:70b", label: "Llama 3.3 70B", free: true },
       { id: "qwen2.5-coder:32b", label: "Qwen 2.5 Coder 32B", free: true, note: "Code" },
       { id: "deepseek-r1:32b", label: "DeepSeek R1 32B", free: true, reasoning: true },
+      // LM Studio's own model identifiers, for when Bionic points at LM Studio.
+      { id: "hermes-3-llama-3.1-8b", label: "Hermes 3 8B (LM Studio)", free: true },
+      { id: "deepseek-r1-distill-qwen-14b", label: "DeepSeek R1 Distill 14B (LM Studio)", free: true, reasoning: true },
     ],
   },
   {
@@ -190,6 +198,9 @@ export const PROVIDERS: ProviderDef[] = [
       { id: "llama3.2-vision:11b", label: "Llama 3.2 Vision 11B", free: true, vision: true },
       { id: "qwen2.5-coder:32b", label: "Qwen 2.5 Coder 32B", free: true, note: "Best local coder" },
       { id: "deepseek-r1:32b", label: "DeepSeek R1 32B", free: true, reasoning: true },
+      { id: "deepseek-r1:14b", label: "DeepSeek R1 14B", free: true, reasoning: true, note: "~10GB VRAM" },
+      { id: "hermes3:8b", label: "Hermes 3 8B", free: true, note: "Tool-calling tuned" },
+      { id: "hermes3:70b", label: "Hermes 3 70B", free: true, note: "~40GB VRAM" },
       { id: "codellama:34b", label: "CodeLlama 34B", free: true },
       { id: "gemma2:9b", label: "Gemma 2 9B", free: true },
       { id: "mistral:7b", label: "Mistral 7B", free: true },
@@ -295,6 +306,22 @@ export const PROVIDERS: ProviderDef[] = [
       { id: "claude-opus-5", label: "Claude Opus 5", vision: true, reasoning: true, note: "Default" },
       { id: "claude-sonnet-5", label: "Claude Sonnet 5", vision: true, reasoning: true },
       { id: "claude-haiku-4-5", label: "Claude Haiku 4.5", vision: true, note: "Fastest, lowest cost" },
+    ],
+  },
+  {
+    id: "deepseek",
+    label: "DeepSeek (direct)",
+    fn: "jackie-deepseek",
+    tier: "paid",
+    free: false,
+    requiresSecret: "DEEPSEEK_API_KEY",
+    helpUrl: "https://platform.deepseek.com/api_keys",
+    description: "DeepSeek's own API. Low per-token price, strong at code and tool use.",
+    models: [
+      { id: "deepseek-v4-flash", label: "DeepSeek V4 Flash", note: "Default · fast, cheap" },
+      { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro", reasoning: true },
+      { id: "deepseek-reasoner", label: "DeepSeek Reasoner", reasoning: true, note: "Legacy alias" },
+      { id: "deepseek-chat", label: "DeepSeek Chat", note: "Legacy alias" },
     ],
   },
   {
