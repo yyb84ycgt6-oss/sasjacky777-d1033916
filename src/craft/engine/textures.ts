@@ -18,6 +18,7 @@
  * take the tint — that is how the grass side's green fringe follows the biome
  * while the dirt beneath it stays brown.
  */
+import { POTIONS } from "./potions";
 import { Rng, seedFromString } from "./rng";
 import { Simplex } from "./noise";
 
@@ -1106,11 +1107,154 @@ def("daylight_detector_item", (p, r) => {
   for (let y = 8; y <= 13; y++) for (let x = 1; x <= 14; x++) p.set(x, y, y === 8 ? ((x + y) & 1 ? hex("#c8d8e8") : hex("#aac0d8")) : mix(hex("#9a7a4a"), hex("#7a5a30"), r.next()));
 });
 
+// ---- enchanting and brewing -------------------------------------------------------------
+
+const cloth = hex("#a3262a"), clothDark = hex("#6e1519"), tableDark = hex("#1a1320");
+def("enchanting_table_top", (p, r) => {
+  palette(p, r, [hex("#0f0d16"), hex("#1d1829"), hex("#2a2140")], 4, 0.5);
+  for (let y = 2; y <= 13; y++) for (let x = 2; x <= 13; x++) p.set(x, y, mix(cloth, clothDark, r.next() * 0.35));
+  // The pattern stitched into the cloth: a diamond with a lighter heart.
+  for (let i = 0; i < 6; i++) { p.set(7 - i, 2 + i, clothDark); p.set(8 + i, 2 + i, clothDark); p.set(7 - i, 13 - i, clothDark); p.set(8 + i, 13 - i, clothDark); }
+  rect(p, 7, 7, 8, 8, hex("#e8b040"));
+});
+def("enchanting_table_side", (p, r) => {
+  palette(p, r, [hex("#0f0d16"), hex("#15121f"), hex("#2a2140")], 4, 0.5);
+  for (let y = 0; y <= 3; y++) for (let x = 0; x < 16; x++) p.set(x, y, mix(cloth, clothDark, r.next() * 0.3 + (y === 3 ? 0.5 : 0)));
+  // A row of diamond studs along the table's flank.
+  for (let x = 2; x < 16; x += 4) { p.set(x, 8, hex("#5ae0d8")); p.set(x + 1, 8, hex("#3ab0a8")); p.set(x, 9, hex("#3ab0a8")); }
+  for (let x = 0; x < 16; x++) p.set(x, 15, tableDark);
+});
+def("enchanting_book", (p, r) => {
+  p.fill(hex("#6e3a1e"));
+  for (let y = 1; y <= 14; y++) for (let x = 1; x <= 14; x++) p.set(x, y, x === 7 || x === 8 ? hex("#c8c0a8") : mix(hex("#f2ecd8"), hex("#e0d6b8"), r.next() * 0.4));
+  // Lines of glowing script on both pages.
+  for (let y = 3; y <= 12; y += 2) for (let x = 2; x <= 13; x++) if (x !== 7 && x !== 8 && r.next() < 0.6) p.set(x, y, hex("#3a3a8a"));
+});
+def("enchanting_book_edge", (p, r) => { noisy(p, r, hex("#6e3a1e"), 0.12, 2); for (let x = 0; x < 16; x++) p.set(x, 7, hex("#f2ecd8")); });
+
+const anvilMetal = hex("#444447");
+def("anvil", (p, r) => { noisy(p, r, anvilMetal, 0.12, 2); frame(p, shade(anvilMetal, 0.7)); });
+const anvilTop = (cracks: number) => (p: Pixels, r: Rng) => {
+  noisy(p, r, anvilMetal, 0.1, 2);
+  // The worn face runs along the texture's width; the block turns it with the anvil.
+  for (let y = 3; y <= 12; y++) for (let x = 1; x <= 14; x++) p.set(x, y, mix(hex("#5a5a5e"), hex("#6c6c70"), r.next()));
+  frame16(p, 1, 3, 14, 12, shade(anvilMetal, 0.75));
+  for (let c = 0; c < cracks; c++) {
+    let x = 3 + r.int(10), y = 4 + r.int(7);
+    for (let i = 0; i < 6; i++) { p.set(x, y, hex("#252528")); x += r.int(3) - 1; y += r.int(3) - 1; x = Math.max(2, Math.min(13, x)); y = Math.max(4, Math.min(11, y)); }
+  }
+};
+def("anvil_top", anvilTop(0));
+def("anvil_top_chipped", anvilTop(2));
+def("anvil_top_damaged", anvilTop(5));
+
+def("brewing_stand_base", (p, r) => { stone(p, r, hex("#8a8a8a")); bevel(p, 1.2, 0.7); });
+def("brewing_stand_rod", (p, r) => { noisy(p, r, hex("#f0b030"), 0.15, 2); for (let y = 0; y < 16; y++) p.set(0, y, hex("#b07a10")); });
+def("brewing_bottle", (p) => {
+  p.clear();
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) p.set(x, y, y < 5 ? hex("#dfe9f2") : hex("#c8dcef"), y < 5 ? 150 : 190);
+  frame16(p, 0, 0, 15, 15, hex("#8aa6c0"));
+});
+
+const cauldronMetal = hex("#3c3c40");
+def("cauldron_side", (p, r) => {
+  noisy(p, r, cauldronMetal, 0.12, 2);
+  for (let x = 0; x < 16; x++) { p.set(x, 0, shade(cauldronMetal, 1.4)); p.set(x, 15, shade(cauldronMetal, 0.6)); }
+  // The legs' arch cut out of the bottom of each side.
+  for (let y = 13; y < 16; y++) for (let x = 4; x < 12; x++) p.set(x, y, hex("#000000"), 0);
+});
+def("cauldron_top", (p, r) => { noisy(p, r, shade(cauldronMetal, 1.2), 0.1, 2); frame(p, shade(cauldronMetal, 0.7)); });
+def("cauldron_inner", (p, r) => noisy(p, r, shade(cauldronMetal, 0.75), 0.1, 2));
+def("cauldron_bottom", (p, r) => { noisy(p, r, shade(cauldronMetal, 0.8), 0.1, 2); frame(p, shade(cauldronMetal, 0.55)); });
+def("cauldron_water", (p, r) => { noisy(p, r, hex("#3f6fd8"), 0.1, 4); speckle(p, r, [hex("#6a92f0")], 0.05); });
+
+def("brewing_stand_item", (p) => {
+  p.clear();
+  rect(p, 7, 1, 8, 13, hex("#f0b030"));
+  rect(p, 2, 13, 13, 14, hex("#8a8a8a"));
+  for (const x of [2, 10]) { rect(p, x, 6, x + 3, 11, hex("#c8dcef")); frame16(p, x, 6, x + 3, 11, hex("#6a86a0")); }
+});
+def("cauldron_item", (p) => {
+  p.clear();
+  rect(p, 2, 3, 13, 12, cauldronMetal);
+  rect(p, 4, 3, 11, 4, hex("#1a1a1c"));
+  frame16(p, 2, 3, 13, 12, shade(cauldronMetal, 0.6));
+  rect(p, 2, 13, 4, 14, cauldronMetal); rect(p, 11, 13, 13, 14, cauldronMetal);
+});
+
 // ---- items ------------------------------------------------------------------------------
 
 type ItemPalette = Record<string, C>;
 const H = hex("#6b4a26"), HD = hex("#46301a"), HL = hex("#8a6536");
 const ITEM_TEMPLATES: Record<string, string[]> = {
+  potion: [
+    "......aaaa......",
+    "......acca......",
+    "......aaaa......",
+    ".......gh.......",
+    "......agha......",
+    "......agga......",
+    ".....agggga.....",
+    ".....affffa.....",
+    "....afwfffda....",
+    "...afwffffdda...",
+    "...affffffdda...",
+    "...afffffddda...",
+    "....afffddda....",
+    ".....aaaaaa.....",
+  ],
+  splash: [
+    "......aaaa......",
+    "......acca......",
+    ".....aaaaaa.....",
+    ".....agghga.....",
+    "......agga......",
+    ".....agggga.....",
+    "....agggggga....",
+    "...affffffffa...",
+    "..afwffffffdda..",
+    "..afwfffffffda..",
+    "..affffffffdda..",
+    "...afffffddda...",
+    "....afffddda....",
+    ".....aaaaaa.....",
+  ],
+  wart: [
+    "................",
+    "......aa........",
+    ".....abba.aa....",
+    "....abcbbabba...",
+    "....abbbbbcba...",
+    ".....abbbbba....",
+    "...aa.abbba.....",
+    "..abba.aba......",
+    "..abcba.a.......",
+    "...abba.........",
+    "....aa..........",
+  ],
+  tear: [
+    ".......a........",
+    "......aba.......",
+    "......aba.......",
+    ".....abhba......",
+    ".....abbba......",
+    "....abhbbba.....",
+    "....abbbbba.....",
+    "....abbbbda.....",
+    ".....abdda......",
+    "......aaa.......",
+  ],
+  fish: [
+    "....a.a.a.......",
+    "...aabbbbaa.....",
+    "..abbbbbbbba.a..",
+    ".abwkbbbbbbbaba.",
+    ".abbbbbbbbbbbba.",
+    ".abbbbbbbbbbaba.",
+    "..abbddddbba.a..",
+    "...aaddddaa.....",
+    "....a.a.a.......",
+  ],
   pickaxe: [
     "................",
     "....aaaaaa......",
@@ -1799,6 +1943,34 @@ art("red_bed", "bed", { a: hex("#5a3a1a"), b: hex("#8a6a3a"), w: hex("#eeeeee"),
 art("iron_door", "door", paletteOf("#c4c4c4", { w: hex("#6a6a6a") }));
 art("slime_ball", "ball", paletteOf("#7bc86a"));
 art("quartz", "gem", paletteOf("#e8e0d6"));
+
+// Bottles: the glass is shared, the liquid takes the potion's colour.
+const GLASS = { a: hex("#3a4a5c"), c: hex("#8a5a2a"), g: hex("#dbe8f4"), h: hex("#ffffff") };
+const liquid = (color: string): ItemPalette => {
+  const c = hex(color);
+  return { ...GLASS, f: c, w: shade(c, 1.5), d: shade(c, 0.72) };
+};
+art("glass_bottle", "potion", { ...GLASS, f: hex("#dbe8f4"), w: hex("#ffffff"), d: hex("#c0d2e4") });
+{
+  const seen = new Set<string>();
+  for (const p of POTIONS) {
+    if (seen.has(p.art)) continue;
+    seen.add(p.art);
+    art(`potion_${p.art}`, "potion", liquid(p.color));
+    art(`splash_potion_${p.art}`, "splash", liquid(p.color));
+  }
+}
+art("experience_bottle", "potion", { ...liquid("#8ae03a"), w: hex("#f8f070") });
+art("nether_wart", "wart", paletteOf("#8a1a1e", { c: hex("#c83a3a") }));
+art("blaze_rod", "stick", { a: hex("#8a5a00"), b: hex("#f8c030"), d: hex("#d88a10") });
+art("blaze_powder", "dust", paletteOf("#f0a020"));
+art("ghast_tear", "tear", paletteOf("#cfe8ea", { h: hex("#ffffff") }));
+art("magma_cream", "ball", paletteOf("#d86a18", { c: hex("#ffd040") }));
+art("fermented_spider_eye", "eye", paletteOf("#8a4a2a", { w: hex("#e08a70") }));
+art("glistering_melon_slice", "melon_slice", { a: hex("#8a6a10"), b: hex("#e0402f"), w: hex("#ffe060"), g: hex("#f0c030") });
+art("golden_carrot", "carrot", paletteOf("#f0c020", { g: hex("#d8b020") }));
+art("pufferfish", "fish", paletteOf("#e8c030", { k: hex("#101010"), w: hex("#ffffff"), d: hex("#f4e6a8") }));
+art("enchanted_book", "book", paletteOf("#5a2a7a", { w: hex("#f2f0e6"), c: hex("#a060d0") }));
 
 function paintItem(p: Pixels, name: string): boolean {
   const a = ITEM_ART[name];

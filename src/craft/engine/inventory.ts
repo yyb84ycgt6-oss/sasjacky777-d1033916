@@ -7,12 +7,21 @@
  * single item, shift-click sends a stack to the other section. Getting any of
  * these subtly different is the fastest way to make the game feel wrong.
  */
+import { enchantDef } from "./enchanting";
 import { itemDef, maxStack, type ItemStack } from "./items";
 
 export type Slot = ItemStack | null;
 
+function sameEnchants(a: ItemStack, b: ItemStack): boolean {
+  const ea = a.ench ?? {}, eb = b.ench ?? {};
+  const ka = Object.keys(ea), kb = Object.keys(eb);
+  return ka.length === kb.length && ka.every((k) => ea[k] === eb[k]);
+}
+
+/** Whether two stacks may merge: the same item, wear, enchantments, name and anvil history. */
 export function sameItem(a: Slot, b: Slot): boolean {
-  return !!a && !!b && a.id === b.id && (a.damage ?? 0) === (b.damage ?? 0);
+  return !!a && !!b && a.id === b.id && (a.damage ?? 0) === (b.damage ?? 0)
+    && (a.name ?? "") === (b.name ?? "") && (a.repair ?? 0) === (b.repair ?? 0) && sameEnchants(a, b);
 }
 
 export function cloneStack(s: Slot): Slot {
@@ -47,7 +56,7 @@ export class Inventory {
     for (let i = 0; i < 36 && left > 0; i++) {
       if (!this.slots[i]) {
         const n = Math.min(left, cap);
-        this.slots[i] = { id: stack.id, count: n, damage: stack.damage };
+        this.slots[i] = { ...stack, count: n };
         left -= n;
       }
     }
@@ -138,10 +147,30 @@ export function sanitize(list: unknown, size: number): Slot[] {
   if (!Array.isArray(list)) return out;
   for (let i = 0; i < size; i++) {
     const s = list[i] as ItemStack | null;
-    if (s && typeof s.id === "number" && typeof s.count === "number" && s.count > 0 && itemDef(s.id)) {
-      out[i] = { id: s.id, count: Math.min(Math.floor(s.count), maxStack(s.id)), damage: typeof s.damage === "number" ? s.damage : undefined };
-    }
+    out[i] = sanitizeStack(list[i]);
+    if (out[i]) out[i] = { ...out[i]!, count: Math.min(out[i]!.count, maxStack(out[i]!.id)) };
   }
+  return out;
+}
+
+/**
+ * One stack from a save or another player, keeping only what is well formed:
+ * known enchantments at sane levels, a short name, a small anvil penalty.
+ */
+export function sanitizeStack(value: unknown): Slot {
+  const s = value as ItemStack | null;
+  if (!s || typeof s !== "object" || typeof s.id !== "number" || typeof s.count !== "number" || s.count <= 0 || !itemDef(s.id)) return null;
+  const out: ItemStack = { id: s.id, count: Math.floor(s.count) };
+  if (typeof s.damage === "number" && s.damage > 0) out.damage = Math.floor(s.damage);
+  if (s.ench && typeof s.ench === "object") {
+    const ench: Record<string, number> = {};
+    for (const [k, v] of Object.entries(s.ench)) {
+      if (enchantDef(k) && typeof v === "number" && v >= 1 && v <= 10) ench[k] = Math.floor(v);
+    }
+    if (Object.keys(ench).length) out.ench = ench;
+  }
+  if (typeof s.name === "string" && s.name.trim()) out.name = s.name.slice(0, 35);
+  if (typeof s.repair === "number" && s.repair > 0) out.repair = Math.min(63, Math.floor(s.repair));
   return out;
 }
 
@@ -200,7 +229,7 @@ export function mergeInto(stack: ItemStack, slots: Slot[], indices: number[]): S
   for (const i of indices) {
     if (left > 0 && !slots[i]) {
       const n = Math.min(left, cap);
-      slots[i] = { id: stack.id, count: n, damage: stack.damage };
+      slots[i] = { ...stack, count: n };
       left -= n;
     }
   }

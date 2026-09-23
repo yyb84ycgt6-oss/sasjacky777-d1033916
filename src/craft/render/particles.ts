@@ -37,6 +37,8 @@ const KINDS: Record<string, Kind> = {
   snow: { layer: "snow", gravity: 6, life: [0.4, 0.8], size: [0.06, 0.1], drag: 0.98, collide: true },
   egg: { layer: "egg", gravity: 9, life: [0.3, 0.7], size: [0.06, 0.1], drag: 0.98, collide: true },
   slime: { layer: "slime_ball", gravity: 9, life: [0.3, 0.7], size: [0.06, 0.12], drag: 0.98, collide: true },
+  // A burst of potion mist; tinted per potion through the particle's data colour.
+  potion: { layer: "particle_smoke", gravity: -0.6, life: [0.5, 1.2], size: [0.06, 0.12], drag: 0.88, collide: false, fullTexture: true },
   note: { layer: "particle_note", gravity: -0.5, life: [0.8, 1.0], size: [0.2, 0.2], drag: 0.9, collide: false, fullTexture: true },
   block: { layer: "stone", gravity: 14, life: [0.4, 1.2], size: [0.07, 0.12], drag: 0.98, collide: true },
 };
@@ -57,6 +59,8 @@ export class Particles {
   private attrTex: THREE.BufferAttribute;
   private data = new Float32Array(MAX * 4); // size, alpha, light, unused
   private tex = new Float32Array(MAX * 4); // layer, u offset, v offset, span
+  private color = new Float32Array(MAX * 3).fill(1);
+  private attrColor: THREE.BufferAttribute;
   private next = 0;
   budget = 1;
 
@@ -65,12 +69,15 @@ export class Particles {
     this.attrPos = new THREE.BufferAttribute(this.pos, 3);
     this.attrData = new THREE.BufferAttribute(this.data, 4);
     this.attrTex = new THREE.BufferAttribute(this.tex, 4);
+    this.attrColor = new THREE.BufferAttribute(this.color, 3);
+    this.attrColor.setUsage(THREE.DynamicDrawUsage);
     this.attrPos.setUsage(THREE.DynamicDrawUsage);
     this.attrData.setUsage(THREE.DynamicDrawUsage);
     this.attrTex.setUsage(THREE.DynamicDrawUsage);
     g.setAttribute("position", this.attrPos);
     g.setAttribute("aData", this.attrData);
     g.setAttribute("aTex", this.attrTex);
+    g.setAttribute("aColor", this.attrColor);
     const m = new THREE.RawShaderMaterial({
       glslVersion: THREE.GLSL3,
       vertexShader: `
@@ -81,11 +88,14 @@ export class Particles {
         in vec3 position;
         in vec4 aData;
         in vec4 aTex;
+        in vec3 aColor;
         out vec4 vTex;
         out float vAlpha;
         out float vLight;
+        out vec3 vColor;
         void main() {
           vTex = aTex;
+          vColor = aColor;
           vAlpha = aData.y;
           vLight = aData.z;
           vec4 mv = modelViewMatrix * vec4(position, 1.0);
@@ -99,12 +109,13 @@ export class Particles {
         in vec4 vTex;
         in float vAlpha;
         in float vLight;
+        in vec3 vColor;
         out vec4 outColor;
         void main() {
           vec2 uv = vTex.yz + vec2(gl_PointCoord.x, gl_PointCoord.y) * vTex.w;
           vec4 t = texture(uAtlas, vec3(uv, vTex.x));
           if (t.a * vAlpha < 0.1) discard;
-          outColor = vec4(t.rgb * vLight, t.a * vAlpha);
+          outColor = vec4(t.rgb * vColor * vLight, t.a * vAlpha);
         }`,
       uniforms: { uAtlas: shared.uAtlas, uScale: { value: 800 } },
       transparent: true,
@@ -119,6 +130,7 @@ export class Particles {
     (this.points.material as THREE.RawShaderMaterial).uniforms.uScale.value = h / (2 * Math.tan((fov * Math.PI) / 360));
   }
 
+  /** `blockId` is the block for "block" particles and an 0xRRGGBB tint for "potion" ones. */
   emit(kind: string, x: number, y: number, z: number, count = 1, blockId = 0, spread = 0.3): void {
     const k = KINDS[kind] ?? KINDS.smoke;
     const n = Math.max(1, Math.round(count * this.budget));
@@ -130,7 +142,7 @@ export class Particles {
       this.pos[p * 3] = x + (Math.random() - 0.5) * spread * 2;
       this.pos[p * 3 + 1] = y + (Math.random() - 0.5) * spread * 2;
       this.pos[p * 3 + 2] = z + (Math.random() - 0.5) * spread * 2;
-      const speed = kind === "explosion" ? 4 : kind === "block" || kind === "splash" || kind === "crit" ? 3 : 0.6;
+      const speed = kind === "explosion" ? 4 : kind === "block" || kind === "splash" || kind === "crit" || kind === "potion" ? 3 : 0.6;
       this.vel[p * 3] = (Math.random() - 0.5) * speed;
       this.vel[p * 3 + 1] = (Math.random() * 0.8 + (kind === "block" || kind === "splash" ? 0.6 : 0.1)) * speed;
       this.vel[p * 3 + 2] = (Math.random() - 0.5) * speed;
@@ -150,7 +162,12 @@ export class Particles {
       this.data[p * 4] = this.baseSize[p];
       this.data[p * 4 + 1] = 1;
       this.data[p * 4 + 2] = 1;
+      const tint = kind === "potion" ? blockId : 0xffffff;
+      this.color[p * 3] = ((tint >> 16) & 255) / 255;
+      this.color[p * 3 + 1] = ((tint >> 8) & 255) / 255;
+      this.color[p * 3 + 2] = (tint & 255) / 255;
     }
+    this.attrColor.needsUpdate = true;
   }
 
   update(dt: number, daylight: number): void {

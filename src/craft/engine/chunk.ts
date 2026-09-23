@@ -1,8 +1,8 @@
 import { blockIndex, CHUNK_VOLUME } from "./constants";
 import type { ItemStack } from "./items";
 
-/** Chests and furnaces keep inventories; they live beside the block, keyed by its index in the chunk. */
-export type BlockEntity = ChestEntity | FurnaceEntity;
+/** Chests, furnaces and brewing stands keep inventories; they live beside the block, keyed by its index in the chunk. */
+export type BlockEntity = ChestEntity | FurnaceEntity | BrewingEntity;
 
 export interface ChestEntity {
   kind: "chest";
@@ -21,6 +21,29 @@ export interface FurnaceEntity {
   cook: number;
   /** Experience banked by smelting, paid out when the output is taken. */
   xp: number;
+}
+
+export interface BrewingEntity {
+  kind: "brewing";
+  /** The three bottles, the ingredient on top, and blaze powder for fuel. */
+  bottles: (ItemStack | null)[];
+  ingredient: ItemStack | null;
+  fuel: ItemStack | null;
+  /** Brews left in the current blaze powder (twenty to a powder). */
+  fuelLeft: number;
+  /** Ticks until the current brew is done; 0 when idle. */
+  brew: number;
+}
+
+/** Every stack a block entity holds, in slot order (what spills when it breaks, what a comparator weighs). */
+export function entityStacks(e: BlockEntity): (ItemStack | null)[] {
+  if (e.kind === "chest") return e.items;
+  if (e.kind === "furnace") return [e.input, e.fuel, e.output];
+  return [...e.bottles, e.ingredient, e.fuel];
+}
+
+export function newBrewing(): BrewingEntity {
+  return { kind: "brewing", bottles: [null, null, null], ingredient: null, fuel: null, fuelLeft: 0, brew: 0 };
 }
 
 /** A chest-like inventory: 27 for a chest, 5 for a hopper, 9 for a dispenser or dropper. */

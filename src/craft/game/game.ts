@@ -15,16 +15,16 @@
  */
 import { B, block, containerSize, FACE_DIRS, isFluid, isLeaves, isLog, type Material } from "../engine/blocks";
 import { Redstone, type Body as RedstoneBody, type RedstoneContext } from "../engine/redstone";
-import { chunkId, newChest, newFurnace, type BlockEntity, type Chunk, type FurnaceEntity } from "../engine/chunk";
+import { chunkId, entityStacks, newBrewing, newChest, newFurnace, type BlockEntity, type BrewingEntity, type Chunk, type FurnaceEntity } from "../engine/chunk";
 import { DAY_TICKS, SEA_LEVEL, TICK_MS, WORLD_HEIGHT } from "../engine/constants";
 import { BlockRules, tickDelay } from "../engine/blockRules";
 import { COOK_TICKS, fuelTicks, smeltResult } from "../engine/crafting";
 import {
   bumpEntityIds, FallingBlock, ItemEntity, PrimedTnt, Projectile, XpOrb, xpOrbValues,
-  type DamageSource, type Entity, type EntityContext, type EntitySnapshot, type PlayerRef,
+  type DamageSource, type Entity, type EntityContext, type EntitySnapshot, type PlayerRef, type ProjectileKind,
 } from "../engine/entities";
 import { blastImpact, explosionBlocks, exposure } from "../engine/explosion";
-import { itemDef, itemId, maxStack, resolveDrops, type ItemStack } from "../engine/items";
+import { itemDef, itemId, maxStack, resolveDrops, type ItemStack, type StatusEffect } from "../engine/items";
 import { isSlimeChunk, Mob, MOB_KINDS, type MobKind } from "../engine/mobs";
 import { groundBlock } from "../engine/physics";
 import { Player, type PlayerEvent } from "../engine/player";
@@ -36,7 +36,11 @@ import { BiomeId, biomeDef } from "../engine/biomes";
 import { newlyEarned, type AdvancementEvent } from "../engine/advancements";
 import { GameAudio } from "../audio";
 import { WorldRenderer, type RemotePlayerView } from "../render/renderer";
+import { bottleBits, tickBrewing } from "../engine/brewing";
+import { levelOf } from "../engine/enchanting";
+import { potionOfItem, splashSeconds } from "../engine/potions";
 import { Actions } from "./actions";
+import type { ThrowExtra } from "../net/session";
 import { runCommand } from "./commands";
 import { SaveStore, type ChunkData, type WorldMeta } from "./save";
 import { effectiveControls, saveSettings, type Settings } from "./settings";
@@ -58,16 +62,17 @@ export interface NetLink {
   // guest → host
   requestChunk(cx: number, cz: number): Promise<ChunkData | null>;
   isModified(cx: number, cz: number): boolean;
-  attack(entityId: number, damage: number, fromX: number, fromZ: number): void;
+  attack(entityId: number, damage: number, fromX: number, fromZ: number, knockback?: number, fire?: number, looting?: number): void;
   interact(entityId: number, item: string | null): void;
   drops(x: number, y: number, z: number, stacks: ItemStack[], xp: number): void;
-  throwItem(kind: "arrow" | "snowball" | "egg", x: number, y: number, z: number, vx: number, vy: number, vz: number): void;
+  throwItem(kind: ProjectileKind, x: number, y: number, z: number, vx: number, vy: number, vz: number, extra?: ThrowExtra): void;
   primeTnt(x: number, y: number, z: number, fuse: number): void;
   blockEntity(x: number, y: number, z: number, e: BlockEntity | null): void;
   sleeping(on: boolean): void;
   chunkLoaded?(cx: number, cz: number, fromSave: boolean): void;
   // host → guests
-  hurtRemote(id: string, amount: number, source: DamageSource, fx: number, fz: number, kb: number): void;
+  hurtRemote(id: string, amount: number, source: DamageSource, fx: number, fz: number, kb: number, attacker?: number): void;
+  effectRemote?(id: string, effect: StatusEffect, seconds: number, amp: number): void;
   giveRemote(id: string, stack: ItemStack): void;
   xpRemote(id: string, amount: number): void;
   effect(kind: "sound" | "particles" | "explosion", data: unknown[]): void;
@@ -93,6 +98,8 @@ export interface RemotePlayer {
   dead: boolean;
   gameMode: string;
   sleeping: boolean;
+  /** Drank invisibility: drawn as nothing. */
+  invisible: boolean;
   lastSeen: number;
   receivedAt: number;
 }
@@ -140,6 +147,8 @@ export class Game {
   screen: Screen | null = null;
   cursor: Slot = null;
   craftGrid: Slot[] = [null, null, null, null];
+  /** The name typed into an open anvil, or null when untouched. */
+  anvilName: string | null = null;
   perspective: 0 | 1 | 2 = 0;
   hudHidden = false;
   debug = false;
@@ -449,11 +458,15 @@ export class Game {
     const fx = x + dx, fy = y + dy, fz = z + dz;
     const less: Slot = stack.count > 1 ? { ...stack, count: stack.count - 1 } : null;
     const w = this.world;
-    if (name === "arrow" || name === "snowball" || name === "egg") {
-      const speed = name === "arrow" ? 1.1 : 0.9;
+    const use = itemDef(stack.id)?.use;
+    if (name === "arrow" || name === "snowball" || name === "egg" || use === "splash" || use === "xp_bottle") {
+      const kind: ProjectileKind = use === "splash" ? "potion" : use === "xp_bottle" ? "xp_bottle" : (name as ProjectileKind);
+      const speed = name === "arrow" ? 1.1 : kind === "potion" || kind === "xp_bottle" ? 0.6 : 0.9;
       const spread = () => (Math.random() - 0.5) * 0.08;
-      this.spawn(new Projectile(name, x + 0.5 + dx * 0.7, y + 0.5 + dy * 0.7, z + 0.5 + dz * 0.7,
-        dx * speed + spread(), dy * speed + 0.1 + spread(), dz * speed + spread(), null));
+      const proj = new Projectile(kind, x + 0.5 + dx * 0.7, y + 0.5 + dy * 0.7, z + 0.5 + dz * 0.7,
+        dx * speed + spread(), dy * speed + 0.1 + spread(), dz * speed + spread(), null);
+      proj.item = kind === "potion" ? stack.id : 0;
+      this.spawn(proj);
       this.sound(name === "arrow" ? "bow" : "throw", x + 0.5, y + 0.5, z + 0.5, 0.6);
       return less;
     }
@@ -516,9 +529,9 @@ export class Game {
       get difficulty() { return game.meta.difficulty; },
       random: Math.random,
       players: () => this.playerRefs(),
-      hurtPlayer: (id, amount, source, fx, fz, kb) => {
-        if (id === this.player.id) this.hurtLocal(amount, source, fx, fz, kb);
-        else this.net?.hurtRemote(id, amount, source, fx, fz, kb);
+      hurtPlayer: (id, amount, source, fx, fz, kb, attacker) => {
+        if (id === this.player.id) this.hurtLocal(amount, source, fx, fz, kb, attacker);
+        else this.net?.hurtRemote(id, amount, source, fx, fz, kb, attacker);
       },
       givePlayer: (id, stack) => {
         if (id === this.player.id) {
@@ -530,9 +543,10 @@ export class Game {
         return 0;
       },
       giveXp: (id, amount) => {
-        if (id === this.player.id) this.addXp(amount);
+        if (id === this.player.id) this.collectXp(amount);
         else this.net?.xpRemote(id, amount);
       },
+      splashPotion: (item, x, y, z, direct, owner) => this.splashPotion(item, x, y, z, direct, owner),
       spawn: (e) => this.spawn(e),
       dropItem: (x, y, z, stack, vx, vy, vz) => this.dropItem(x, y, z, stack, vx, vy, vz),
       explode: (x, y, z, power, cause) => this.explode(x, y, z, power, cause),
@@ -559,14 +573,14 @@ export class Game {
     if (!p.dead) {
       refs.push({
         id: p.id, name: p.name, x: p.body.x, y: p.body.y, z: p.body.z, width: p.body.width, height: p.body.height,
-        targetable: p.survivalLike, heldItem: p.inventory.held?.id ?? -1, sneaking: p.sneaking,
+        targetable: p.survivalLike, heldItem: p.inventory.held?.id ?? -1, sneaking: p.sneaking, invisible: p.hasEffect("invisibility"),
       });
     }
     for (const r of this.remote.values()) {
       if (r.dead) continue;
       refs.push({
         id: r.id, name: r.name, x: r.x, y: r.y, z: r.z, width: 0.6, height: r.sneaking ? 1.5 : 1.8,
-        targetable: r.gameMode === "survival" || r.gameMode === "adventure", heldItem: r.held ?? -1, sneaking: r.sneaking,
+        targetable: r.gameMode === "survival" || r.gameMode === "adventure", heldItem: r.held ?? -1, sneaking: r.sneaking, invisible: r.invisible,
       });
     }
     return refs;
@@ -644,20 +658,20 @@ export class Game {
     if (this.simulates && isLog(c.prevId) && c.id !== c.prevId) this.rules.logRemoved(c.x, c.y, c.z);
   }
 
-  /** Spills a chest or furnace's contents when it is broken. */
+  /** Spills a container's contents when it is broken. */
   dropContainerContents(x: number, y: number, z: number): void {
     const e = this.world.getEntity(x, y, z);
     if (!e) return;
-    const stacks = e.kind === "chest" ? e.items : [e.input, e.fuel, e.output];
+    const stacks = entityStacks(e);
     for (const s of stacks) if (s) this.dropItem(x + 0.5, y + 0.5, z + 0.5, s);
     if (e.kind === "furnace" && e.xp > 0) this.spawnXp(x + 0.5, y + 0.5, z + 0.5, Math.floor(e.xp));
     this.world.setEntity(x, y, z, undefined);
   }
 
-  containerAt(x: number, y: number, z: number, kind: "chest" | "furnace"): BlockEntity {
+  containerAt(x: number, y: number, z: number, kind: "chest" | "furnace" | "brewing"): BlockEntity {
     let e = this.world.getEntity(x, y, z);
     if (!e || e.kind !== kind) {
-      e = kind === "chest" ? newChest(containerSize(this.world.blockAt(x, y, z)) || 27) : newFurnace();
+      e = kind === "chest" ? newChest(containerSize(this.world.blockAt(x, y, z)) || 27) : kind === "brewing" ? newBrewing() : newFurnace();
       this.world.setEntity(x, y, z, e);
     }
     return e;
@@ -671,14 +685,15 @@ export class Game {
     // Comparators reading this container look again.
     if (this.simulates) this.redstone.containerChanged(x, y, z);
     const s = this.screen;
-    if (s && (s.kind === "chest" || s.kind === "furnace") && s.x === x && s.y === y && s.z === z) this.bumpInv();
+    if (s && (s.kind === "chest" || s.kind === "furnace" || s.kind === "brewing") && s.x === x && s.y === y && s.z === z) this.bumpInv();
   }
 
   private tickFurnaces(): void {
     for (const c of this.world.loadedChunks()) {
       for (const [index, e] of c.entities) {
-        if (e.kind !== "furnace") continue;
         const x = c.cx * 16 + (index & 15), z = c.cz * 16 + ((index >> 4) & 15), y = index >> 8;
+        if (e.kind === "brewing") { this.tickBrewingStand(c, e, x, y, z); continue; }
+        if (e.kind !== "furnace") continue;
         if (this.tickFurnace(e, x, y, z)) {
           c.modified = true;
           this.dirtySave.add(c.id);
@@ -690,6 +705,28 @@ export class Game {
         }
       }
     }
+  }
+
+  private tickBrewingStand(c: Chunk, e: BrewingEntity, x: number, y: number, z: number): void {
+    if (this.world.blockAt(x, y, z) !== B.BREWING_STAND) return;
+    const r = tickBrewing(e);
+    // The stand shows a bottle for each filled slot; keep its look in step with what it holds.
+    const bits = bottleBits(e);
+    if ((this.world.getMeta(x, y, z) & 7) !== bits) {
+      this.world.setBlock(x, y, z, B.BREWING_STAND, bits, "world");
+      this.world.setEntity(x, y, z, e);
+    }
+    if (!r.changed) return;
+    c.modified = true;
+    this.dirtySave.add(c.id);
+    if (r.finished) {
+      this.sound("brew", x + 0.5, y + 0.5, z + 0.5, 0.8);
+      this.net?.blockEntity(x, y, z, e);
+      this.redstone.containerChanged(x, y, z);
+      // Whoever has the stand open saw it done.
+      if (this.screen?.kind === "brewing" && this.screen.x === x && this.screen.y === y && this.screen.z === z) this.advance({ kind: "brew" });
+    } else if (this.tickCount % 10 === 0) this.net?.blockEntity(x, y, z, e);
+    if (this.screen?.kind === "brewing" && this.screen.x === x && this.screen.y === y && this.screen.z === z) this.bumpInv();
   }
 
   /** One tick of a furnace, the original's rules: fuel burns only while there is something to smelt. Returns whether anything changed. */
@@ -736,13 +773,102 @@ export class Game {
 
   // ---- players ------------------------------------------------------------------------------
 
-  hurtLocal(amount: number, source: DamageSource, fx?: number, fz?: number, kb = 0): void {
+  hurtLocal(amount: number, source: DamageSource, fx?: number, fz?: number, kb = 0, attacker?: number): void {
     if (!this.meta.rules.doFallDamage && source === "fall") return;
     const dealt = this.player.hurt(amount, source, fx, fz, kb);
     if (dealt > 0 || kb > 0) {
       this.lastHurtAt = performance.now();
       this.hurtTilt = 1;
     }
+    if (dealt > 0 && attacker !== undefined) this.thorns(attacker);
+  }
+
+  /** Thorns: each piece has a chance to hurt the mob that struck, at the cost of extra wear. */
+  private thorns(attacker: number): void {
+    const inv = this.player.inventory;
+    let damage = 0;
+    inv.armor = inv.armor.map((a) => {
+      const lvl = levelOf(a, "thorns");
+      if (!a || !lvl || Math.random() >= 0.15 * lvl) return a;
+      damage += 1 + Math.floor(Math.random() * 4);
+      const max = itemDef(a.id)?.durability ?? 0;
+      const worn = (a.damage ?? 0) + 2;
+      return max && worn >= max ? null : { ...a, damage: worn };
+    });
+    if (!damage) return;
+    const b = this.player.body;
+    const mob = this.entities.get(attacker);
+    // The host owns every mob; a guest asks it to deal the damage.
+    if (this.role === "guest") this.net?.attack(attacker, damage, b.x, b.z);
+    else if (mob instanceof Mob) mob.hurt(this.ctx, damage, "player", b.x, b.z, this.player.id);
+    this.bumpInv();
+  }
+
+  /** Experience picked up: Mending spends it on worn gear first, two durability a point, as in the original. */
+  collectXp(amount: number): void {
+    const inv = this.player.inventory;
+    const mendable = () => [inv.selected, -1, -2, -3, -4, -5].filter((i) => {
+      const s = i >= 0 ? inv.slots[i] : i === -1 ? inv.offhand : inv.armor[-i - 2];
+      return !!s && levelOf(s, "mending") > 0 && (s.damage ?? 0) > 0;
+    });
+    let left = amount;
+    for (let guard = 0; left > 0 && guard < 20; guard++) {
+      const slots = mendable();
+      if (!slots.length) break;
+      const i = slots[Math.floor(Math.random() * slots.length)];
+      const s = (i >= 0 ? inv.slots[i] : i === -1 ? inv.offhand : inv.armor[-i - 2])!;
+      const repaired = Math.min(s.damage ?? 0, left * 2);
+      const mended = { ...s, damage: (s.damage ?? 0) - repaired || undefined };
+      if (!mended.damage) delete mended.damage;
+      if (i >= 0) inv.slots[i] = mended; else if (i === -1) inv.offhand = mended; else inv.armor[-i - 2] = mended;
+      left -= Math.ceil(repaired / 2);
+    }
+    if (left < amount) this.bumpInv();
+    if (left > 0) this.addXp(left);
+  }
+
+  /**
+   * A splash potion burst: every mob and player within four blocks takes its
+   * effects, weaker with distance; whatever it struck takes the full dose.
+   */
+  splashPotion(item: number, x: number, y: number, z: number, direct: Entity | PlayerRef | null, owner: string | null): void {
+    const def = itemDef(item);
+    const potion = def ? potionOfItem(def.name) : undefined;
+    this.sound("glass_break", x, y, z, 0.8);
+    this.particles("potion", x, y, z, 24, potion ? parseInt(potion.potion.color.slice(1), 16) : 0x385dc6);
+    if (!potion) return;
+    const effects = potion.potion.effects;
+    const strength = (ex: number, ey: number, ez: number, hit: boolean) => {
+      if (hit) return 1;
+      const d = Math.hypot(ex - x, ey - y, ez - z);
+      return d > 4 ? 0 : 1 - d / 4;
+    };
+    const attacker = owner && !owner.startsWith("mob:") ? owner : undefined;
+    for (const e of this.entities.values()) {
+      if (!(e instanceof Mob) || e.dying) continue;
+      const f = strength(e.x, e.y + e.body.height / 2, e.z, e === direct);
+      if (f <= 0) continue;
+      for (const fx of effects) {
+        const instant = fx.effect === "instant_health" || fx.effect === "instant_damage";
+        // Instant effects scale by distance; lasting ones shorten with it.
+        if (instant) { if (f > 0.5 || e === direct) e.applyEffect(this.ctx, fx.effect, 0, fx.amp, attacker); }
+        else e.applyEffect(this.ctx, fx.effect, Math.floor(splashSeconds(fx.seconds) * f), fx.amp, attacker);
+      }
+    }
+    for (const p of this.playerRefs()) {
+      const hit = direct !== null && !(direct instanceof Mob) && "id" in direct && typeof direct.id === "string" && direct.id === p.id;
+      const f = strength(p.x, p.y + 0.9, p.z, hit);
+      if (f <= 0) continue;
+      for (const fx of effects) {
+        const instant = fx.effect === "instant_health" || fx.effect === "instant_damage";
+        if (instant && f <= 0.5 && !hit) continue;
+        const seconds = instant ? 0 : Math.floor(splashSeconds(fx.seconds) * f);
+        if (!instant && seconds <= 0) continue;
+        if (p.id === this.player.id) this.player.applyEffect(fx.effect, seconds, fx.amp);
+        else this.net?.effectRemote?.(p.id, fx.effect, seconds, fx.amp);
+      }
+    }
+    this.bumpInv();
   }
 
   addXp(amount: number): void {
@@ -796,7 +922,7 @@ export class Game {
 
   setScreen(screen: Screen | null): void {
     const was = this.screen;
-    if (was && (was.kind === "inventory" || was.kind === "crafting")) this.returnGrid();
+    if (was && (was.kind === "inventory" || was.kind === "crafting" || was.kind === "enchanting" || was.kind === "anvil")) this.returnGrid();
     if (this.cursor && (!screen || screen.kind === "pause")) {
       const left = this.player.inventory.add(this.cursor);
       if (left > 0) this.actions.throwStack({ ...this.cursor, count: left });
@@ -804,6 +930,8 @@ export class Game {
     }
     if (screen?.kind === "crafting") this.craftGrid = new Array(9).fill(null);
     else if (screen?.kind === "inventory") this.craftGrid = [null, null, null, null];
+    // The enchanting table and the anvil hold their two stacks only while open, like a crafting grid.
+    else if (screen?.kind === "enchanting" || screen?.kind === "anvil") { this.craftGrid = [null, null]; this.anvilName = null; }
     if (was?.kind === "chest" && screen?.kind !== "chest") this.sound("chest_close", was.x + 0.5, was.y + 0.5, was.z + 0.5, 0.5);
     this.screen = screen;
     if (screen) { this.controls.attack = false; this.controls.use = false; this.actions.stopUsing(); }
@@ -983,6 +1111,7 @@ export class Game {
         id: r.id, name: r.name, x: r.px + (r.x - r.px) * t, y: r.py + (r.y - r.py) * t, z: r.pz + (r.z - r.pz) * t,
         yaw: r.pyaw + angleDiff(r.pyaw, r.yaw) * t, pitch: r.pitch, walk: r.walk, speed: r.speed, swing: r.swing,
         sneaking: r.sneaking, heldItem: r.held, variant: r.variant, hurt: r.hurt, dead: r.dead || r.gameMode === "spectator",
+        invisible: r.invisible,
       });
     }
 
@@ -1343,7 +1472,8 @@ export class Game {
       absorption: p.hasEffect("absorption") ? 4 : 0,
       hotbar: inv.slots.slice(0, 9),
       selected: inv.selected,
-      heldName: inv.held ? itemDef(inv.held.id)?.displayName ?? "" : "",
+      heldName: inv.held ? inv.held.name ?? itemDef(inv.held.id)?.displayName ?? "" : "",
+      effects: p.effects.map((e) => ({ kind: e.kind, amp: e.amp, seconds: Math.ceil(e.ticks / 20) })),
       heldNameAt: this.heldNameAt,
       gameMode: p.gameMode,
       hardcore: this.meta.hardcore,

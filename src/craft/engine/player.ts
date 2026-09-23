@@ -8,6 +8,7 @@
  * on difficulty. A player who knows the original can plan a trip by it.
  */
 import { B, block } from "./blocks";
+import { levelOf, protectionFactor, wears } from "./enchanting";
 import { Inventory } from "./inventory";
 import { itemDef, type FoodInfo, type ItemStack, type StatusEffect } from "./items";
 import { newBody, travel, type Body, type BlockReader } from "./physics";
@@ -90,6 +91,13 @@ export class Player {
   fireTicks = 0;
   private foodTimer = 0;
   effects: Effect[] = [];
+  /** Chance source for Unbreaking and Respiration; tests pin it. */
+  rng: () => number = Math.random;
+  /**
+   * Seeds the enchanting table's offers. It changes only when the player
+   * enchants, so closing and reopening the table cannot re-roll a bad offer.
+   */
+  enchantSeed = Math.floor(Math.random() * 0x7fffffff);
   sneaking = false;
   sprinting = false;
   /** Ticks since the last swing; the attack meter charges back up over 1 / attackSpeed seconds. */
@@ -144,6 +152,27 @@ export class Player {
     return this.effects.some((e) => e.kind === kind);
   }
 
+  /** The amplifier of an active effect (0 is level I), or -1 when it is not active. */
+  effectLevel(kind: StatusEffect): number {
+    return this.effects.find((e) => e.kind === kind)?.amp ?? -1;
+  }
+
+  /**
+   * An effect from a potion or a splash: instant ones act now (healing heals
+   * 4 per level, harming hurts 6 per level), the rest are added as timed effects.
+   */
+  applyEffect(kind: StatusEffect, seconds: number, amp = 0): void {
+    if (kind === "instant_health") { this.heal(4 << amp); return; }
+    if (kind === "instant_damage") { this.hurt(6 << amp, "magic"); return; }
+    if (seconds > 0) this.addEffect(kind, seconds, amp);
+  }
+
+  /** Melee damage added (Strength) or taken away (Weakness) by effects. */
+  get meleeBonus(): number {
+    const s = this.effectLevel("strength"), w = this.effectLevel("weakness");
+    return (s >= 0 ? 3 * (s + 1) : 0) - (w >= 0 ? 4 * (w + 1) : 0);
+  }
+
   addExhaustion(n: number): void {
     if (this.survivalLike) this.exhaustion = Math.min(40, this.exhaustion + n);
   }
@@ -181,6 +210,11 @@ export class Player {
     return this.xpPoints / xpToNext(this.xpLevel);
   }
 
+  /** Pays whole levels (enchanting, the anvil), keeping progress into the current level. */
+  spendLevels(n: number): void {
+    this.xpLevel = Math.max(0, this.xpLevel - n);
+  }
+
   /** Experience dropped on death: 7 per level, capped at 100. */
   deathXp(): number {
     return Math.min(100, this.xpLevel * 7);
@@ -194,6 +228,7 @@ export class Player {
     if (this.dead || amount <= 0) return 0;
     if (!this.survivalLike && source !== "void") return 0;
     if (this.sleeping) this.sleeping = null;
+    if ((source === "fire" || source === "lava") && this.hasEffect("fire_resistance")) return 0;
     let dealt = amount;
     if (this.invulnerable > 10) {
       if (amount <= this.lastDamage) return 0;
@@ -207,12 +242,15 @@ export class Player {
       dealt *= 1 - reduced / 25;
       const wear = Math.max(1, Math.floor(amount / 4));
       this.inventory.armor = this.inventory.armor.map((a) => {
-        if (!a) return a;
+        if (!a || !wears(a, this.rng, true)) return a;
         const max = itemDef(a.id)?.durability ?? 0;
         const damage = (a.damage ?? 0) + wear;
         return max && damage >= max ? null : { ...a, damage };
       });
     }
+    // Protection enchantments stack on top of the armour, up to 80% off.
+    const epf = protectionFactor(this.inventory.armor, source);
+    if (epf > 0) dealt *= 1 - epf / 25;
     // Absorption hearts (golden apple) soak damage first.
     const absorb = this.effects.find((e) => e.kind === "absorption");
     if (absorb) {
@@ -293,7 +331,8 @@ export class Player {
     if (input.forward <= 0.5 || this.sneaking || !canSprint || (b.collidedH && !this.flying)) this.sprinting = false;
 
     const wasInWater = b.inWater;
-    const speedBoost = this.hasEffect("speed") ? 1.2 : 1;
+    const swift = this.effectLevel("speed"), slow = this.effectLevel("slowness");
+    const speedBoost = Math.max(0, (1 + (swift >= 0 ? 0.2 * (swift + 1) : 0)) * (1 - (slow >= 0 ? 0.15 * (slow + 1) : 0)));
     const res = travel(world, b, {
       forward: input.forward, strafe: input.strafe, yaw: this.yaw, jump: input.jump, sneak: input.sneak,
       sprint: this.sprinting, flying: this.flying, speed: 0.1 * speedBoost,
@@ -326,8 +365,10 @@ export class Player {
   private environment(world: BlockReader, rules: SurvivalRules): void {
     const b = this.body;
     if (!this.survivalLike) return;
-    if (b.eyesInWater && !this.hasEffect("night_vision")) {
-      this.air--;
+    if (b.eyesInWater && !this.hasEffect("water_breathing")) {
+      // Respiration: each level is another chance the breath is not spent.
+      const resp = levelOf(this.inventory.armor[0], "respiration");
+      if (!resp || this.rng() >= resp / (resp + 1)) this.air--;
       if (this.air <= -20) { this.air = 0; this.hurt(2, "drown"); }
     } else this.air = Math.min(300, this.air + 5);
     if (b.inLava) {
@@ -414,6 +455,7 @@ export class Player {
       saturation: this.saturation, exhaustion: this.exhaustion, air: this.air, xpLevel: this.xpLevel, xpPoints: this.xpPoints,
       gameMode: this.gameMode, flying: this.flying, spawn: this.spawn, inventory: this.inventory.toJSON(), effects: this.effects,
       fireTicks: this.fireTicks, dead: this.dead, score: this.score, advancements: [...this.advancements],
+      enchantSeed: this.enchantSeed,
     };
   }
 
@@ -433,6 +475,7 @@ export class Player {
     this.inventory.load(s.inventory);
     this.effects = Array.isArray(s.effects) ? s.effects.filter((e) => e && typeof e.ticks === "number") : [];
     this.fireTicks = num(s.fireTicks, 0);
+    this.enchantSeed = num(s.enchantSeed, this.enchantSeed);
     if (s.dead || this.health <= 0) { this.dead = true; this.health = 0; }
   }
 }
@@ -448,4 +491,5 @@ export interface PlayerSave {
   dead: boolean;
   score?: number;
   advancements?: string[];
+  enchantSeed?: number;
 }

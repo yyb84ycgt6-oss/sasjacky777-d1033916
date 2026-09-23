@@ -19,7 +19,9 @@ export type Trigger =
   | { kind: "level"; level: number }
   | { kind: "kill"; hostile: boolean }
   | { kind: "sleep" }
-  | { kind: "eat" };
+  | { kind: "eat" }
+  | { kind: "enchant" }
+  | { kind: "brew" };
 
 export interface Advancement {
   id: string;
@@ -57,6 +59,8 @@ export const ADVANCEMENTS: readonly Advancement[] = [
   { id: "lava", title: "Hot Stuff", description: "Carry lava in a bucket", icon: "lava_bucket", trigger: has("lava_bucket") },
   { id: "kaboom", title: "Kaboom", description: "Get your hands on TNT", icon: "tnt", trigger: has("tnt") },
   { id: "level10", title: "Seasoned", description: "Reach experience level 10", icon: "gold_ingot", trigger: { kind: "level", level: 10 } },
+  { id: "enchanter", title: "Enchanter", description: "Enchant an item at an enchanting table", icon: "enchanting_table", trigger: { kind: "enchant" } },
+  { id: "brewery", title: "Local Brewery", description: "Brew a potion", icon: "potion_healing", trigger: { kind: "brew" } },
 ];
 
 export function advancement(id: string): Advancement | undefined {
@@ -80,7 +84,7 @@ export interface PlayerState {
   level: number;
 }
 
-export type AdvancementEvent = { kind: "kill"; hostile: boolean } | { kind: "sleep" } | { kind: "eat" };
+export type AdvancementEvent = { kind: "kill"; hostile: boolean } | { kind: "sleep" } | { kind: "eat" } | { kind: "enchant" } | { kind: "brew" };
 
 /**
  * Which not-yet-earned advancements the player has now earned: from their
@@ -109,6 +113,8 @@ export function newlyEarned(done: ReadonlySet<string>, state: PlayerState, event
       case "kill": earned = event?.kind === "kill" && (!t.hostile || event.hostile); break;
       case "sleep": earned = event?.kind === "sleep"; break;
       case "eat": earned = event?.kind === "eat"; break;
+      case "enchant": earned = event?.kind === "enchant"; break;
+      case "brew": earned = event?.kind === "brew"; break;
     }
     if (earned) out.push(a);
   }

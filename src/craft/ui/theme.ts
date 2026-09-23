@@ -88,4 +88,23 @@ export const THEME_CSS = `
 @keyframes bc-toast { 0% { transform: translateX(110%) } 8% { transform: translateX(0) } 88% { transform: translateX(0) } 100% { transform: translateX(110%) } }
 @keyframes bc-fadeout { 0% { opacity: 1 } 80% { opacity: 1 } 100% { opacity: 0 } }
 @keyframes bc-pulse { 0%, 100% { transform: scale(1) } 50% { transform: scale(1.12) } }
+.bc-glint {
+  position: absolute; width: calc(var(--u) * 16); height: calc(var(--u) * 16); pointer-events: none;
+  background:
+    linear-gradient(115deg, transparent 30%, rgba(200,140,255,0.85) 45%, rgba(140,80,255,0.25) 55%, transparent 70%),
+    linear-gradient(rgba(128,64,255,0.22), rgba(128,64,255,0.22));
+  background-size: 300% 300%, 100% 100%; animation: bc-glint 3.2s linear infinite; mix-blend-mode: screen;
+  -webkit-mask-size: 100% 100%; mask-size: 100% 100%;
+}
+@keyframes bc-glint { from { background-position: 150% 0, 0 0 } to { background-position: -150% 0, 0 0 } }
+.bc-offer {
+  display: flex; align-items: center; gap: calc(var(--u) * 4); width: calc(var(--u) * 108); min-height: calc(var(--u) * 19);
+  padding: 0 calc(var(--u) * 3); background: #8d6e63; border: calc(var(--u) * 1) solid #3a2a24; color: #e8d8b0; cursor: pointer;
+  font-size: calc(var(--u) * 5.5); text-align: left;
+}
+.bc-offer:hover:not(:disabled) { background: #a1887f; }
+.bc-offer:disabled { background: #5d4a44; color: #7a6a60; cursor: default; }
+.bc-offer .lvl { color: #80ff20; font-size: calc(var(--u) * 7); min-width: calc(var(--u) * 12); text-align: right; }
+.bc-offer:disabled .lvl { color: #407010; }
+.bc-rune { font-family: serif; letter-spacing: 0.08em; flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 `;

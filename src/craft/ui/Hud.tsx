@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { Hud as HudState } from "../game/types";
 import { glyph, textureBackground } from "./icons";
 import { ItemIcon, StackView } from "./common";
+import { clock, effectName } from "./itemText";
 import { itemId } from "../engine/items";
 
 function Row({ full, max, icon, half, empty, reverse, shake }: {
@@ -51,6 +52,16 @@ export function Hud({ hud, mobile, crosshair }: { hud: HudState; mobile: boolean
         <div className="absolute left-0 right-0 text-center" style={{ top: "30%", animation: "bc-fadeout 4s forwards" }}>
           <div style={{ fontSize: "calc(var(--u) * 20)" }}>{hud.title.text}</div>
           {hud.title.sub && <div style={{ fontSize: "calc(var(--u) * 9)", color: "#ddd" }}>{hud.title.sub}</div>}
+        </div>
+      )}
+
+      {hud.effects.length > 0 && !hud.screen && (
+        <div className="absolute flex flex-col items-end" style={{ right: "calc(var(--u) * 3)", top: mobile ? "calc(var(--u) * 26)" : "calc(var(--u) * 3)", gap: "calc(var(--u) * 1)" }}>
+          {hud.effects.map((e) => (
+            <div key={e.kind} style={{ background: "rgba(0,0,0,0.45)", padding: "calc(var(--u) * 1) calc(var(--u) * 3)", fontSize: "calc(var(--u) * 5.5)" }}>
+              {effectName(e.kind, e.amp)} <span style={{ color: e.seconds <= 10 ? "#ff8080" : "#c0c0c0" }}>{clock(e.seconds)}</span>
+            </div>
+          ))}
         </div>
       )}
 

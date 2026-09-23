@@ -1,12 +1,14 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { allRecipes, canAfford, recipeResult, type Recipe } from "../engine/crafting";
-import { allItems, itemDef, type Category } from "../engine/items";
+import { allItems, itemDef, itemId, type Category, type ItemStack } from "../engine/items";
 import { B } from "../engine/blocks";
+import { BREW_TICKS, BREWS_PER_FUEL } from "../engine/brewing";
+import { enchantedBook, enchantLabel, ENCHANTMENTS, MAX_SHELVES } from "../engine/enchanting";
 import type { Slot } from "../engine/inventory";
 import type { Game } from "../game/game";
 import {
-  chestView, clickContainer, craftOutput, craftWidth, creativeTake, creativeTrash, dropCursor, fillRecipe, furnaceView,
-  inventoryCounts, type Section,
+  anvilView, brewingView, chestView, clickContainer, craftOutput, craftWidth, creativeTake, creativeTrash, dropCursor, enchantItem,
+  enchantOffers, fillRecipe, furnaceView, inventoryCounts, type Section,
 } from "../game/containers";
 import { boxRegions, skin } from "../render/skins";
 import { Button, CursorStack, ItemIcon, SlotButton, useTooltip } from "./common";
@@ -154,13 +156,18 @@ function CreativeInventory({ game, onHover, mobile }: { game: Game; onHover: (s:
   const [search, setSearch] = useState("");
   const [quick, setQuick] = useState(false);
   const inv = game.player.inventory;
-  const items = useMemo(() => {
+  const items = useMemo((): ItemStack[] => {
     const all = allItems().filter((i) => !i.hidden);
+    // One enchanted book per enchantment, at its highest level, as the original's creative menu lists them.
+    const books = ENCHANTMENTS.map((e) => enchantedBook(e.name, e.maxLevel));
     if (tab === "search") {
       const q = search.trim().toLowerCase();
-      return all.filter((i) => !q || i.displayName.toLowerCase().includes(q) || i.name.includes(q));
+      return [
+        ...all.filter((i) => !q || i.displayName.toLowerCase().includes(q) || i.name.includes(q)).map((d) => ({ id: d.id, count: 1 })),
+        ...(q ? books.filter((b) => Object.keys(b.ench!).some((n) => enchantLabel(n, 1).toLowerCase().includes(q) || "enchanted book".includes(q))) : []),
+      ];
     }
-    return all.filter((i) => i.category === tab);
+    return [...all.filter((i) => i.category === tab).map((d) => ({ id: d.id, count: 1 })), ...(tab === "ingredients" ? books : [])];
   }, [tab, search]);
   const tabIcon = (name: string) => {
     const def = allItems().find((i) => i.name === name);
@@ -180,9 +187,9 @@ function CreativeInventory({ game, onHover, mobile }: { game: Game; onHover: (s:
         <>
           {tab === "search" && <input autoFocus={!mobile} className="bc-input" placeholder="Search items…" value={search} onChange={(e) => setSearch(e.target.value)} />}
           <div className="bc-scroll" style={{ display: "grid", gridTemplateColumns: "repeat(9, var(--slot))", maxHeight: "calc(var(--slot) * 5)", alignContent: "start" }}>
-            {items.map((d) => (
-              <SlotButton key={d.id} stack={{ id: d.id, count: 1 }} onHover={onHover}
-                onClick={(b, shift) => creativeTake(game, d.id, b, shift || quick)} />
+            {items.map((d, i) => (
+              <SlotButton key={`${d.id}:${i}`} stack={d} onHover={onHover}
+                onClick={(b, shift) => creativeTake(game, d.id, b, shift || quick, d)} />
             ))}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "calc(var(--u) * 3)" }}>
@@ -326,6 +333,129 @@ export function ChestScreen({ game, mobile }: { game: Game; mobile: boolean }) {
       <Frame game={game} title={title} mobile={mobile} quick={quick} setQuick={setQuick}>
         <div style={{ display: "flex", justifyContent: "center" }}>
           <Grid slots={chest.items} cols={cols} section="chest" game={game} onHover={onHover} quick={quick} />
+        </div>
+        <div className="bc-label">Inventory</div>
+        <PlayerSlots game={game} onHover={onHover} quick={quick} />
+      </Frame>
+      {tip}
+    </>
+  );
+}
+
+/** The enchanting table: an item and lapis in, three offers out, each costing levels and lapis. */
+export function EnchantingScreen({ game, mobile }: { game: Game; mobile: boolean }) {
+  const { tip, onHover } = useTooltip();
+  const [quick, setQuick] = useState(false);
+  const view = enchantOffers(game);
+  if (!view) return null;
+  const p = game.player;
+  // The table's script: decorative, as in the original. Kept to single code units so indexing never splits a character.
+  const runes = "ᔑʖᓵ↸ᒷ⎓⊣⍑╎⋮ꖌꖎᒲリ!¡ᑑ∷ᓭℸ⚍⍊∴";
+  const runic = (seed: number) => Array.from({ length: 10 }, (_, i) => runes[(seed * 31 + i * 17) % runes.length]).join("");
+  return (
+    <>
+      <Frame game={game} title="Enchant" mobile={mobile} quick={quick} setQuick={setQuick}>
+        <div style={{ display: "flex", gap: "calc(var(--u) * 6)", alignItems: "center" }}>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "calc(var(--u) * 2)" }}>
+            <div style={{ display: "flex", gap: "calc(var(--u) * 2)" }}>
+              <SlotButton stack={game.craftGrid[0]} onHover={onHover} quickMove={quick} ghost={itemId("book")}
+                onClick={(b, sh) => clickContainer(game, "work", 0, b, sh)} />
+              <SlotButton stack={game.craftGrid[1]} onHover={onHover} quickMove={quick} ghost={itemId("lapis_lazuli")}
+                onClick={(b, sh) => clickContainer(game, "work", 1, b, sh)} />
+            </div>
+            <div className="bc-label" style={{ fontSize: "calc(var(--u) * 5)" }}>📚 {view.shelves}/{MAX_SHELVES}</div>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "calc(var(--u) * 1)" }}>
+            {[0, 1, 2].map((slot) => {
+              const o = view.offers[slot];
+              const label = o?.clue ? `${enchantLabel(o.clue[0], o.clue[1])} . . . ?` : "";
+              return (
+                <button key={slot} type="button" className="bc-offer" disabled={!o?.affordable}
+                  title={o?.clue ? `${label}\n${o.cost} Lapis Lazuli, ${o.cost} Enchantment Level${o.cost > 1 ? "s" : ""}` : undefined}
+                  onClick={() => enchantItem(game, slot)}>
+                  <span style={{ minWidth: "calc(var(--u) * 8)", color: "#8fd8ff" }}>{o?.clue ? "💎".repeat(o.cost) : ""}</span>
+                  <span className="bc-rune">{o?.clue ? (mobile ? label : `${runic(p.enchantSeed + slot)} · ${label}`) : ""}</span>
+                  <span className="lvl">{o?.clue ? o.level : ""}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        {p.survivalLike && <div className="bc-label" style={{ fontSize: "calc(var(--u) * 5)" }}>Your level: {p.xpLevel}</div>}
+        <div className="bc-label">Inventory</div>
+        <PlayerSlots game={game} onHover={onHover} quick={quick} />
+      </Frame>
+      {tip}
+    </>
+  );
+}
+
+/** The anvil: combine, repair and rename, at a cost in levels. */
+export function AnvilScreen({ game, mobile }: { game: Game; mobile: boolean }) {
+  const { tip, onHover } = useTooltip();
+  const [quick, setQuick] = useState(false);
+  const left = game.craftGrid[0];
+  const view = anvilView(game);
+  const name = game.anvilName ?? (left ? left.name ?? itemDef(left.id)?.displayName ?? "" : "");
+  const cost = view
+    ? view.tooExpensive
+      ? { text: "Too Expensive!", color: "#ff6060" }
+      : { text: `Enchantment Cost: ${view.cost}`, color: view.affordable ? "#80ff20" : "#ff6060" }
+    : null;
+  return (
+    <>
+      <Frame game={game} title="Repair & Name" mobile={mobile} quick={quick} setQuick={setQuick}>
+        <input className="bc-input" value={name} disabled={!left} maxLength={35} placeholder="Name"
+          onChange={(e) => { game.anvilName = e.target.value; game.bumpInv(); }}
+          onKeyDown={(e) => e.stopPropagation()} />
+        <div style={{ display: "flex", alignItems: "center", gap: "calc(var(--u) * 4)", justifyContent: "center" }}>
+          <SlotButton stack={left} onHover={onHover} quickMove={quick} onClick={(b, sh) => clickContainer(game, "work", 0, b, sh)} />
+          <span style={{ fontSize: "calc(var(--u) * 10)", color: "#555" }}>+</span>
+          <SlotButton stack={game.craftGrid[1]} onHover={onHover} quickMove={quick} onClick={(b, sh) => clickContainer(game, "work", 1, b, sh)} />
+          <Arrow />
+          <SlotButton stack={view?.stack ?? null} className="bc-result" onHover={onHover} quickMove={quick}
+            onClick={(b, sh) => clickContainer(game, "anvil_out", 0, b, sh)} />
+        </div>
+        {cost && <div style={{ color: cost.color, fontSize: "calc(var(--u) * 6)", textAlign: "right" }}>{cost.text}</div>}
+        <div className="bc-label">Inventory</div>
+        <PlayerSlots game={game} onHover={onHover} quick={quick} />
+      </Frame>
+      {tip}
+    </>
+  );
+}
+
+/** The brewing stand: ingredient on top, blaze powder beside it, three bottles below. */
+export function BrewingScreen({ game, mobile }: { game: Game; mobile: boolean }) {
+  const { tip, onHover } = useTooltip();
+  const [quick, setQuick] = useState(false);
+  const e = brewingView(game);
+  if (!e) return null;
+  const progress = e.brew > 0 ? 1 - e.brew / BREW_TICKS : 0;
+  const click = (i: number) => (b: "left" | "right", sh: boolean) => clickContainer(game, "brewing", i, b, sh);
+  return (
+    <>
+      <Frame game={game} title="Brewing Stand" mobile={mobile} quick={quick} setQuick={setQuick}>
+        <div style={{ display: "flex", justifyContent: "center", gap: "calc(var(--u) * 8)", alignItems: "flex-start" }}>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "calc(var(--u) * 2)" }}>
+            <SlotButton stack={e.fuel} onHover={onHover} quickMove={quick} ghost={itemId("blaze_powder")} onClick={click(4)} />
+            <div title="Fuel" style={{ width: "calc(var(--u) * 18)", height: "calc(var(--u) * 3)", background: "#3a2a1a" }}>
+              <div style={{ width: `${(e.fuelLeft / BREWS_PER_FUEL) * 100}%`, height: "100%", background: "#f0a020" }} />
+            </div>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "calc(var(--u) * 3)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "calc(var(--u) * 3)" }}>
+              <SlotButton stack={e.ingredient} onHover={onHover} quickMove={quick} onClick={click(3)} />
+              <div title="Brewing" style={{ width: "calc(var(--u) * 4)", height: "calc(var(--u) * 18)", background: "#3a3a3a", display: "flex", alignItems: "flex-end" }}>
+                <div style={{ width: "100%", height: `${progress * 100}%`, background: "#e8e8e8" }} />
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: "calc(var(--u) * 3)" }}>
+              {[0, 1, 2].map((i) => (
+                <SlotButton key={i} stack={e.bottles[i]} onHover={onHover} quickMove={quick} ghost={itemId("glass_bottle")} onClick={click(i)} />
+              ))}
+            </div>
+          </div>
         </div>
         <div className="bc-label">Inventory</div>
         <PlayerSlots game={game} onHover={onHover} quick={quick} />

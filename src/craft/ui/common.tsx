@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { isEnchanted } from "../engine/enchanting";
 import { itemDef } from "../engine/items";
+import { tooltipLines } from "./itemText";
 import type { Slot } from "../engine/inventory";
 import { iconFor } from "./icons";
 
@@ -31,9 +33,12 @@ export function StackView({ stack }: { stack: Slot }) {
   const max = def?.durability;
   const dmg = stack.damage ?? 0;
   const frac = max ? Math.max(0, 1 - dmg / max) : 1;
+  const url = isEnchanted(stack) ? iconFor(stack.id) : null;
   return (
     <>
       <ItemIcon id={stack.id} />
+      {/* The shimmer is masked by the icon itself, so it runs over the item and not its empty corners. */}
+      {url && <span className="bc-glint" style={{ maskImage: `url(${url})`, WebkitMaskImage: `url(${url})` }} />}
       {stack.count > 1 && <span className="bc-count">{stack.count}</span>}
       {max && dmg > 0 && (
         <span className="bc-dura">
@@ -89,18 +94,12 @@ export function SlotButton({ stack, onClick, onHover, quickMove, className = "",
 export function useTooltip(): { tip: ReactNode; onHover: (s: Slot, x: number, y: number) => void } {
   const [state, setState] = useState<{ s: Slot; x: number; y: number } | null>(null);
   const onHover = (s: Slot, x: number, y: number) => setState(s ? { s, x, y } : null);
-  const def = state?.s ? itemDef(state.s.id) : undefined;
-  const lines: string[] = [];
-  if (def) {
-    lines.push(def.displayName);
-    if (def.tool && def.damage > 1) lines.push(`${def.damage} Attack Damage`);
-    if (def.armor) lines.push(`+${def.armor.points} Armor`);
-    if (def.food) lines.push(`Restores ${def.food.hunger / 2} hunger`);
-    if (def.durability) lines.push(`Durability: ${def.durability - (state?.s?.damage ?? 0)} / ${def.durability}`);
-  }
-  const tip = def && state ? (
+  const lines = tooltipLines(state?.s ?? null);
+  const tip = lines.length && state ? (
     <div className="bc-tooltip" style={{ left: state.x + 14, top: state.y - 10 }}>
-      {lines.map((l, i) => <div key={i} style={{ color: i === 0 ? "#fff" : "#9fd0ff", fontSize: i ? "0.85em" : undefined }}>{l}</div>)}
+      {lines.map((l, i) => (
+        <div key={i} style={{ color: l.color, fontSize: l.small ? "0.85em" : undefined, fontStyle: l.italic ? "italic" : undefined }}>{l.text}</div>
+      ))}
     </div>
   ) : null;
   return { tip, onHover };

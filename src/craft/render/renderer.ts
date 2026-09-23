@@ -37,6 +37,8 @@ export interface RemotePlayerView {
   variant: number;
   hurt: boolean;
   dead: boolean;
+  /** Under invisibility: only the held item shows, as in the original. */
+  invisible?: boolean;
 }
 
 export interface FrameState {
@@ -235,7 +237,9 @@ export class WorldRenderer {
         g.add(shaft, tip, fl);
         object.add(g);
       } else {
-        v.item = new ItemView(this.shared, itemIdFor(e.kind), 1, 0.7);
+        // A thrown bottle shows the potion it holds.
+        const id = e.kind === "potion" ? e.item || itemId("splash_water_bottle") : e.kind === "xp_bottle" ? itemId("experience_bottle") : itemIdFor(e.kind);
+        v.item = new ItemView(this.shared, id, 1, 0.7);
         object.add(v.item.root);
       }
     } else if (e instanceof XpOrb) {
@@ -289,6 +293,7 @@ export class WorldRenderer {
           armsForward: e.kind === "zombie" || (e.kind === "skeleton" && e.targetId !== null),
           size: e.size, squish: e.squish,
         });
+        v.model.root.visible = !e.hasEffect("invisibility");
         v.object.position.set(0, 0, 0);
         continue;
       }
@@ -372,7 +377,8 @@ export class WorldRenderer {
       });
       const [s, b] = this.lightAt(p.x, p.y + 1, p.z);
       this.attachHeld(p.id, v.model!, p.heldItem, s, b);
-      if (v.nameTag) v.nameTag.position.y = p.sneaking ? 2.0 : 2.25;
+      if (v.nameTag) { v.nameTag.position.y = p.sneaking ? 2.0 : 2.25; v.nameTag.visible = !p.invisible; }
+      setBodyVisible(v.model!, !p.invisible);
     }
     for (const [id, v] of this.players) {
       if (!seen.has(id)) { this.scene.remove(v.object); this.players.delete(id); this.held.delete(id); }
@@ -513,6 +519,13 @@ function angleDelta(a: number, b: number): number {
 }
 
 /** Snowballs and eggs in flight look like the item that was thrown. */
+/** Hides a player model's own boxes but keeps whatever it holds in its hand. */
+function setBodyVisible(model: ModelInstance, on: boolean): void {
+  model.root.traverse((o) => {
+    if (o instanceof THREE.Mesh && o.material === model.material) o.visible = on;
+  });
+}
+
 function itemIdFor(kind: string): number {
   return itemId(kind);
 }

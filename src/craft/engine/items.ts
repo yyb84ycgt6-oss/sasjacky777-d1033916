@@ -12,6 +12,7 @@
  * they remember, and a steak fills the same number of shanks.
  */
 import { allBlocks, B, block, type Drop, type ToolType } from "./blocks";
+import { POTIONS } from "./potions";
 
 export interface ToolInfo {
   type: ToolType;
@@ -31,7 +32,11 @@ export interface FoodInfo {
   remainder?: string;
 }
 
-export type StatusEffect = "regeneration" | "hunger" | "poison" | "absorption" | "speed" | "night_vision";
+export type StatusEffect =
+  | "regeneration" | "hunger" | "poison" | "absorption" | "speed" | "night_vision"
+  | "slowness" | "strength" | "weakness" | "fire_resistance" | "invisibility" | "water_breathing"
+  /** Instant effects: applied once, never listed. */
+  | "instant_health" | "instant_damage";
 
 export interface ArmorInfo {
   /** 0 head, 1 chest, 2 legs, 3 feet. */
@@ -43,7 +48,9 @@ export interface ArmorInfo {
 
 export type ItemUse =
   | "bucket" | "water_bucket" | "lava_bucket" | "milk_bucket" | "bow" | "flint_and_steel"
-  | "bone_meal" | "throw" | "shears" | "hoe" | "plant";
+  | "bone_meal" | "throw" | "shears" | "hoe" | "plant"
+  /** Drunk like milk (potions); thrown to burst (splash potions, bottles o' enchanting); filled at water (glass bottles). */
+  | "drink" | "splash" | "xp_bottle" | "bottle";
 
 export type Category = "building" | "colored" | "natural" | "functional" | "redstone" | "tools" | "combat" | "food" | "ingredients";
 
@@ -97,6 +104,7 @@ const FLAT_BLOCK_ICONS: Record<string, string> = {
   glass_pane: "glass", redstone_torch: "redstone_torch", lever: "lever_item", stone_button: "button_item_stone",
   oak_button: "button_item_oak", stone_pressure_plate: "plate_item_stone", oak_pressure_plate: "plate_item_oak",
   repeater: "repeater", comparator: "comparator", hopper: "hopper_item", daylight_detector: "daylight_detector_item",
+  brewing_stand: "brewing_stand_item", cauldron: "cauldron_item",
 };
 const REDSTONE = new Set([
   "redstone_torch", "lever", "stone_button", "oak_button", "stone_pressure_plate", "oak_pressure_plate", "redstone_lamp",
@@ -115,6 +123,7 @@ const NATURAL = new Set([
 const FUNCTIONAL = new Set([
   "crafting_table", "furnace", "chest", "torch", "lantern", "ladder", "tnt", "bookshelf", "glowstone",
   "sea_lantern", "jack_o_lantern", "carved_pumpkin", "note_block", "hay_block", "oak_fence", "glass_pane",
+  "enchanting_table", "anvil", "chipped_anvil", "damaged_anvil", "brewing_stand", "cauldron",
 ]);
 
 for (const def of allBlocks()) {
@@ -299,6 +308,28 @@ item("iron_door", "Iron Door", { places: B.IRON_DOOR, category: "redstone" });
 item("slime_ball", "Slimeball");
 item("quartz", "Nether Quartz");
 
+// Enchanting and brewing.
+item("glass_bottle", "Glass Bottle", { use: "bottle", category: "ingredients" });
+for (const p of POTIONS) {
+  item(p.key, p.displayName, { maxStack: 1, use: "drink", category: "food", icon: `potion_${p.art}` });
+}
+for (const p of POTIONS) {
+  const name = p.key === "water_bottle" ? "Splash Water Bottle" : `Splash ${p.displayName}`;
+  item(`splash_${p.key}`, name, { maxStack: 1, use: "splash", category: "food", icon: `splash_potion_${p.art}` });
+}
+item("nether_wart", "Nether Wart");
+item("blaze_rod", "Blaze Rod", { fuel: 2400 });
+item("blaze_powder", "Blaze Powder");
+item("ghast_tear", "Ghast Tear");
+item("magma_cream", "Magma Cream");
+item("fermented_spider_eye", "Fermented Spider Eye");
+item("glistering_melon_slice", "Glistering Melon Slice");
+food("golden_carrot", "Golden Carrot", 6, 14.4);
+food("pufferfish", "Pufferfish", 1, 0.2, { effect: ["poison", 60, 1] });
+// Plain enchanted books are listed per enchantment in the creative menu instead (Screens.tsx).
+item("enchanted_book", "Enchanted Book", { maxStack: 1, category: "ingredients", hidden: true });
+item("experience_bottle", "Bottle o' Enchanting", { use: "xp_bottle", category: "ingredients" });
+
 // ---- lookups -----------------------------------------------------------------------
 
 export function itemDef(id: number): ItemDef | undefined {
@@ -324,6 +355,12 @@ export interface ItemStack {
   count: number;
   /** Uses spent, for items with durability. */
   damage?: number;
+  /** Enchantments, by name → level (enchanting.ts). */
+  ench?: Record<string, number>;
+  /** A name given at an anvil. */
+  name?: string;
+  /** The anvil's prior-work penalty: 0, 1, 3, 7… levels added to the next job. */
+  repair?: number;
 }
 
 export function maxStack(id: number): number {

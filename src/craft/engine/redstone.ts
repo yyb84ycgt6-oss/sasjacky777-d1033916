@@ -30,10 +30,11 @@ import {
   B, block, containerSize, FACE_DIRS, FACE_OF_FACING, FACING_DIRS, FACING_OF_FACE, Face, isButton, isDoor,
   isFluid, isPiston, isPlate, isRedstoneTorch, isTrapdoor, OPPOSITE_FACE,
 } from "./blocks";
-import type { BlockEntity, Chunk } from "./chunk";
+import { entityStacks, type BlockEntity, type Chunk } from "./chunk";
 import { WORLD_HEIGHT } from "./constants";
 import { maxStack, resolveDrops, type ItemStack } from "./items";
-import { mergeInto, range, type Slot } from "./inventory";
+import { mergeInto, range, sameItem, type Slot } from "./inventory";
+import { isBottle, isBrewingFuel, isBrewingIngredient } from "./brewing";
 import { smeltResult, fuelTicks } from "./crafting";
 import { posKey, unpackPos, type BlockChange, type World } from "./world";
 
@@ -671,10 +672,10 @@ export class Redstone {
   /** The original's fullness signal for a container, or -1 when it is not one. */
   containerSignal(x: number, y: number, z: number): number {
     const id = this.id(x, y, z);
-    if (!containerSize(id) && id !== B.FURNACE && id !== B.LIT_FURNACE) return -1;
+    if (!containerSize(id) && id !== B.FURNACE && id !== B.LIT_FURNACE && id !== B.BREWING_STAND) return -1;
     const e = this.world.getEntity(x, y, z);
     if (!e) return 0;
-    const slots: Slot[] = e.kind === "chest" ? e.items : [e.input, e.fuel, e.output];
+    const slots: Slot[] = entityStacks(e);
     let fill = 0, any = false;
     for (const s of slots) if (s) { any = true; fill += s.count / maxStack(s.id); }
     if (!any) return 0;
@@ -801,6 +802,16 @@ export class Redstone {
           break;
         }
       }
+    } else if (above === B.BREWING_STAND) {
+      // A hopper under a stand takes the finished bottles, never a brew in progress.
+      const e = this.world.getEntity(x, y + 1, z);
+      const i = e?.kind === "brewing" && e.brew === 0 ? e.bottles.findIndex((b) => b !== null) : -1;
+      if (e?.kind === "brewing" && i >= 0 && mergeInto({ ...e.bottles[i]!, count: 1 }, own, range(0, own.length)) === null) {
+        e.bottles[i] = null;
+        this.ctx.containerChanged(x, y + 1, z);
+        this.ctx.containerChanged(x, y, z);
+        moved = true;
+      }
     } else if (above === B.FURNACE || above === B.LIT_FURNACE) {
       const e = this.world.getEntity(x, y + 1, z);
       if (e?.kind === "furnace" && e.output) {
@@ -848,6 +859,26 @@ export class Redstone {
       if (!e.fuel) { e.fuel = one; return true; }
       if (e.fuel.id === s.id && e.fuel.count < maxStack(s.id)) { e.fuel = { ...e.fuel, count: e.fuel.count + 1 }; return true; }
       return false;
+    }
+    if (id === B.BREWING_STAND) {
+      const e = this.world.getEntity(x, y, z);
+      if (e?.kind !== "brewing") return false;
+      // From above: the ingredient. From the sides: blaze powder, or a bottle into a free slot.
+      if (from === Face.Up) {
+        if (!isBrewingIngredient(s)) return false;
+        if (!e.ingredient) { e.ingredient = one; return true; }
+        if (sameItem(e.ingredient, s) && e.ingredient.count < maxStack(s.id)) { e.ingredient = { ...e.ingredient, count: e.ingredient.count + 1 }; return true; }
+        return false;
+      }
+      if (isBrewingFuel(s)) {
+        if (!e.fuel) { e.fuel = one; return true; }
+        if (e.fuel.count < maxStack(s.id)) { e.fuel = { ...e.fuel, count: e.fuel.count + 1 }; return true; }
+        return false;
+      }
+      const free = isBottle(s) ? e.bottles.findIndex((b) => b === null) : -1;
+      if (free < 0) return false;
+      e.bottles[free] = one;
+      return true;
     }
     const slots = this.slotsAt(x, y, z);
     if (!slots) return false;

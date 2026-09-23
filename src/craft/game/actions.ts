@@ -16,9 +16,12 @@ import {
   type BlockDef,
 } from "../engine/blocks";
 import { cropDrops, supported } from "../engine/blockRules";
-import { PrimedTnt, Projectile } from "../engine/entities";
+import { applyFortune, damageBonus, efficiencyBonus, levelOf, wears } from "../engine/enchanting";
+import { PrimedTnt, Projectile, type ProjectileKind } from "../engine/entities";
 import { itemDef, itemId, resolveDrops, type ItemDef, type ItemStack } from "../engine/items";
-import { Mob } from "../engine/mobs";
+import { isArthropod, isUndead, Mob } from "../engine/mobs";
+import { potionOfItem } from "../engine/potions";
+import type { ThrowExtra } from "../net/session";
 import { aabbIntersects, bodyBox } from "../engine/physics";
 import { raycastBlocks, rayBox, type BlockHit } from "../engine/raycast";
 import { WORLD_HEIGHT } from "../engine/constants";
@@ -35,7 +38,9 @@ const FACE_NORMALS: [number, number, number][] = [[1, 0, 0], [-1, 0, 0], [0, 1, 
 const SHEARABLE = new Set<number>([B.OAK_LEAVES, B.BIRCH_LEAVES, B.SPRUCE_LEAVES, B.JUNGLE_LEAVES, B.ACACIA_LEAVES, B.SHORT_GRASS, B.FERN, B.DEAD_BUSH, B.COBWEB]);
 
 /** Ticks to break a block with a held item; 0 is instant, Infinity never. */
-export function breakTicks(def: BlockDef, held: ItemDef | undefined, inWater: boolean, onGround: boolean): { ticks: number; harvest: boolean } {
+export function breakTicks(
+  def: BlockDef, held: ItemDef | undefined, inWater: boolean, onGround: boolean, stack: ItemStack | null = null, aquaAffinity = false,
+): { ticks: number; harvest: boolean } {
   if (def.hardness < 0) return { ticks: Infinity, harvest: false };
   const tool = held?.tool;
   const harvest = def.harvestTier === undefined || (!!tool && tool.type === def.tool && tool.tier >= def.harvestTier);
@@ -48,11 +53,24 @@ export function breakTicks(def: BlockDef, held: ItemDef | undefined, inWater: bo
     else if (def.material === "wool") speed = 5;
   }
   if (tool?.type === "sword" && (isLeaves(def.id) || def.material === "plant")) speed = 1.5;
-  if (inWater) speed /= 5;
+  // Efficiency only helps a tool that is already the right one.
+  if (speed > 1) speed += efficiencyBonus(stack);
+  if (inWater && !aquaAffinity) speed /= 5;
   if (!onGround) speed /= 5;
   const perTick = speed / def.hardness / (harvest ? 30 : 100);
   if (perTick >= 1) return { ticks: 0, harvest };
   return { ticks: Math.ceil(1 / perTick), harvest };
+}
+
+/**
+ * Whether Silk Touch lifts a block whole: anything that normally drops
+ * something other than itself and has an item of its own (stone, ores, glass,
+ * leaves, bookshelves), but not the multi-block or stateful things whose item
+ * is different (doors, beds, crops, a double slab, a lit lamp).
+ */
+function silkTouchable(id: number): boolean {
+  const def = block(id);
+  return def.drops !== undefined && !def.hidden && !!itemDef(id) && !isCrop(id) && !isDoor(id) && id !== B.RED_BED && !isSlab(id);
 }
 
 /** Horizontal facing (0 north, 1 south, 2 west, 3 east) the player is looking along. */
@@ -122,7 +140,8 @@ export class Actions {
     }
     if (a.type === "chat") { if (!g.screen) g.setScreen({ kind: "chat", text: a.text ?? "" }); return; }
     if (a.type === "inventory") {
-      if (g.screen?.kind === "inventory" || g.screen?.kind === "crafting" || g.screen?.kind === "furnace" || g.screen?.kind === "chest") g.setScreen(null);
+      const k = g.screen?.kind;
+      if (k === "inventory" || k === "crafting" || k === "furnace" || k === "chest" || k === "brewing" || k === "enchanting" || k === "anvil") g.setScreen(null);
       else if (!g.screen && !p.dead && p.gameMode !== "spectator") g.setScreen({ kind: "inventory" });
       return;
     }
@@ -328,7 +347,8 @@ export class Actions {
       this.mining = { x, y, z, progress: 0, ticks: 0 };
     }
     const held = p.inventory.held ? itemDef(p.inventory.held.id) : undefined;
-    const { ticks } = breakTicks(def, held, p.body.eyesInWater, p.body.onGround || p.flying);
+    const aqua = levelOf(p.inventory.armor[0], "aqua_affinity") > 0;
+    const { ticks } = breakTicks(def, held, p.body.eyesInWater, p.body.onGround || p.flying, p.inventory.held, aqua);
     if (ticks === Infinity) return;
     const m = this.mining;
     m.ticks++;
@@ -354,15 +374,17 @@ export class Actions {
     const def = block(id);
     const held = p.inventory.held ? itemDef(p.inventory.held.id) : undefined;
     const { harvest } = breakTicks(def, held, false, true);
+    const silk = levelOf(p.inventory.held, "silk_touch") > 0 && silkTouchable(id);
 
     let stacks: ItemStack[] = [];
     if (drops && harvest) {
       if (held?.tool?.type === "shears" && SHEARABLE.has(id)) stacks = [{ id, count: 1 }];
+      else if (silk) stacks = [{ id, count: 1 }];
       else if (isCrop(id)) stacks = cropDrops(id, meta, Math.random);
       else if (isDoor(id) && meta & 8) stacks = [];
       else if (id === B.RED_BED && meta & 4) stacks = [];
       else if (isSlab(id) && meta === 2) stacks = [{ id, count: 2 }];
-      else stacks = resolveDrops(def.drops, id, Math.random);
+      else stacks = applyFortune(resolveDrops(def.drops, id, Math.random), levelOf(p.inventory.held, "fortune"), Math.random, id);
     }
     if (drops) g.dropContainerContents(x, y, z);
     else g.world.setEntity(x, y, z, undefined);
@@ -381,14 +403,14 @@ export class Actions {
       if (head && drops) stacks = [{ id: itemId("red_bed"), count: 1 }];
     }
     // Ice over something turns to water, as it melts in your hands.
-    const replacement = id === B.ICE && drops && block(g.world.blockAt(x, y - 1, z)).solid ? B.WATER : B.AIR;
+    const replacement = id === B.ICE && drops && !silk && block(g.world.blockAt(x, y - 1, z)).solid ? B.WATER : B.AIR;
     g.world.setBlock(x, y, z, replacement, 0, "player");
     // Not broadcast: everyone else plays these from the block change itself, and would hear it twice.
     g.blockSound(def.material, "break", x + 0.5, y + 0.5, z + 0.5, false);
     g.particles("block", x + 0.5, y + 0.5, z + 0.5, 16, id, false);
 
     for (const s of stacks) g.dropItem(x + 0.5, y + 0.3, z + 0.5, s);
-    if (drops && harvest && def.xp) {
+    if (drops && harvest && def.xp && !silk) {
       const [lo, hi] = def.xp;
       g.spawnXp(x + 0.5, y + 0.5, z + 0.5, lo + Math.floor(Math.random() * (hi - lo + 1)));
     }
@@ -401,7 +423,11 @@ export class Actions {
   private wearHeld(amount: number): void {
     const g = this.game;
     if (!g.player.survivalLike) return;
-    if (g.player.inventory.damageHeld(amount)) {
+    // Unbreaking spares each point of wear by chance, so the saving shows up as uses, not a rounded total.
+    let wear = 0;
+    for (let i = 0; i < amount; i++) if (wears(g.player.inventory.held, Math.random)) wear++;
+    if (!wear) return;
+    if (g.player.inventory.damageHeld(wear)) {
       g.sound("break_tool", null, 0, 0, 0.8);
       g.audio.block("wood", "break", g.player.body.x, g.player.body.y, g.player.body.z);
       g.showActionbar("Your tool broke");
@@ -414,11 +440,18 @@ export class Actions {
   private attackTarget(t: Target): void {
     const g = this.game;
     const p = g.player;
-    const held = p.inventory.held ? itemDef(p.inventory.held.id) : undefined;
+    const stack = p.inventory.held;
+    const held = stack ? itemDef(stack.id) : undefined;
     const strength = p.attackStrength();
-    let damage = (held?.damage ?? 1) * (0.2 + strength * strength * 0.8);
+    const kind = t.entity instanceof Mob ? t.entity.kind : null;
+    const bonus = damageBonus(stack, kind ? { undead: isUndead(kind), arthropod: isArthropod(kind) } : null);
+    // Strength and Weakness shift the base; the enchantment bonus scales with the swing, as in the original.
+    let damage = Math.max(0, (held?.damage ?? 1) + p.meleeBonus) * (0.2 + strength * strength * 0.8) + bonus * strength;
     const crit = strength > 0.9 && p.body.fallDistance > 0 && !p.body.onGround && !p.body.inWater && !p.body.onLadder;
     if (crit) damage *= 1.5;
+    const knockback = levelOf(stack, "knockback") * 0.5;
+    const fire = levelOf(stack, "fire_aspect") * 80;
+    const looting = levelOf(stack, "looting");
     this.swing();
     p.attackTicks = 0;
     p.addExhaustion(0.1);
@@ -426,11 +459,19 @@ export class Actions {
     if (t.entity) {
       const e = t.entity;
       if (crit) g.particles("crit", e.x, e.y + e.body.height * 0.7, e.z, 10);
-      if (g.role === "guest") g.net?.attack(e.id, damage, b.x, b.z);
-      else if (e instanceof Mob) e.hurt(g.ctx, damage, "player", b.x, b.z, p.id);
+      if (g.role === "guest") g.net?.attack(e.id, damage, b.x, b.z, knockback, fire, looting);
+      else if (e instanceof Mob) {
+        e.looting = looting;
+        if (e.hurt(g.ctx, damage, "player", b.x, b.z, p.id, knockback)) {
+          if (fire) e.fireTicks = Math.max(e.fireTicks, fire);
+          const bane = levelOf(stack, "bane_of_arthropods");
+          if (bane && isArthropod(e.kind)) e.applyEffect(g.ctx, "slowness", 1 + Math.random() * 0.5 * bane, 3);
+        }
+      }
       g.sound("hit", e.x, e.y + 1, e.z, 0.5);
+      if (bonus > 0) g.particles("crit", e.x, e.y + e.body.height * 0.7, e.z, 6);
     } else if (t.remote) {
-      g.net?.hurtRemote(t.remote.id, damage, "player", b.x, b.z, 0.4);
+      g.net?.hurtRemote(t.remote.id, damage, "player", b.x, b.z, 0.4 + knockback);
       if (crit) g.particles("crit", t.remote.x, t.remote.y + 1.2, t.remote.z, 10);
     }
     if (held?.durability && held.tool) this.wearHeld(held.tool.type === "sword" ? 1 : 2);
@@ -485,8 +526,19 @@ export class Actions {
       if (p.canEat(def.food)) this.eating = { ticks: 0, slot: p.inventory.selected, id: def.id };
       return;
     }
-    if (def.use === "milk_bucket") {
+    if (def.use === "milk_bucket" || def.use === "drink") {
       this.eating = { ticks: 0, slot: p.inventory.selected, id: def.id };
+      return;
+    }
+    if (def.use === "splash" || def.use === "xp_bottle") {
+      this.throwProjectile(def.use === "splash" ? "potion" : "xp_bottle", 0.7, 1, { item: def.id });
+      if (p.survivalLike) this.consumeHeld();
+      g.sound("bow", p.body.x, p.body.y + 1.5, p.body.z, 0.4, 0.5);
+      this.swing();
+      return;
+    }
+    if (def.use === "bottle") {
+      this.fillBottle();
       return;
     }
     if (def.use === "bow") {
@@ -513,7 +565,7 @@ export class Actions {
     }
   }
 
-  private throwProjectile(kind: "arrow" | "snowball" | "egg", speed: number, pull = 1): void {
+  private throwProjectile(kind: ProjectileKind, speed: number, pull = 1, extra: ThrowExtra = {}): void {
     const g = this.game;
     const p = g.player;
     const d = this.dir;
@@ -523,12 +575,17 @@ export class Actions {
     const vx = (d.x + (Math.random() - 0.5) * spread) * speed + b.vx;
     const vy = (d.y + (Math.random() - 0.5) * spread) * speed + (b.onGround ? 0 : b.vy);
     const vz = (d.z + (Math.random() - 0.5) * spread) * speed + b.vz;
-    if (g.role === "guest") { g.net?.throwItem(kind, x, y, z, vx, vy, vz); return; }
+    // The arrow's damage is settled here, so a guest's and a host's arrows hit the same.
+    const damage = kind === "arrow" ? (extra.damage ?? 2) + (pull >= 1 && Math.random() < 0.25 ? 1 : 0) : 0;
+    if (g.role === "guest") { g.net?.throwItem(kind, x, y, z, vx, vy, vz, { ...extra, damage }); return; }
     const proj = new Projectile(kind, x, y, z, vx, vy, vz, p.id);
     if (kind === "arrow") {
-      proj.damage = 2 + (pull >= 1 && Math.random() < 0.25 ? 1 : 0);
-      proj.pickup = p.gameMode !== "creative";
+      proj.damage = damage;
+      proj.pickup = p.gameMode !== "creative" && !this.infiniteArrows();
     }
+    proj.knockback = extra.knockback ?? 0;
+    proj.fire = !!extra.fire;
+    proj.item = extra.item ?? 0;
     g.spawn(proj);
   }
 
@@ -541,13 +598,63 @@ export class Actions {
     f = (f * f + f * 2) / 3;
     if (f < 0.1) return;
     f = Math.min(1, f);
-    this.throwProjectile("arrow", f * 3, f);
+    const bow = p.inventory.held;
+    const power = levelOf(bow, "power");
+    this.throwProjectile("arrow", f * 3, f, {
+      damage: 2 + (power ? power * 0.5 + 0.5 : 0),
+      knockback: levelOf(bow, "punch"),
+      fire: levelOf(bow, "flame") > 0,
+    });
     g.sound("bow", p.body.x, p.body.y + 1.5, p.body.z, 0.8, 1 / (Math.random() * 0.4 + 1.2) + f * 0.5);
     if (p.survivalLike) {
-      p.inventory.remove(itemId("arrow"), 1);
+      // Infinity: the arrow is still needed to draw, but never spent.
+      if (!this.infiniteArrows()) p.inventory.remove(itemId("arrow"), 1);
       this.wearHeld(1);
     }
     this.swing();
+  }
+
+  private infiniteArrows(): boolean {
+    const held = this.game.player.inventory.held;
+    return !!held && itemDef(held.id)?.use === "bow" && levelOf(held, "infinity") > 0;
+  }
+
+  /** A glass bottle dipped in water becomes a water bottle. */
+  private fillBottle(): boolean {
+    const g = this.game;
+    const hit = this.fluidHit();
+    if (!hit || g.world.blockAt(hit.x, hit.y, hit.z) !== B.WATER) return false;
+    g.sound("bucket_fill", hit.x + 0.5, hit.y + 0.5, hit.z + 0.5, 0.6, 1.4);
+    this.replaceHeld({ id: itemId("water_bottle"), count: 1 });
+    this.swing();
+    return true;
+  }
+
+  /** Buckets and bottles in and out of a cauldron: three bottles to a bucket. */
+  private useCauldron(x: number, y: number, z: number, meta: number, held: ItemDef | undefined): boolean {
+    const g = this.game;
+    const level = meta & 3;
+    const set = (n: number) => g.world.setBlock(x, y, z, B.CAULDRON, n, "player");
+    const name = held?.name;
+    if (name === "water_bucket" && level < 3) {
+      set(3);
+      g.sound("bucket_empty", x + 0.5, y + 0.5, z + 0.5);
+      if (g.player.survivalLike) this.replaceHeld({ id: itemId("bucket"), count: 1 });
+    } else if (name === "bucket" && level === 3) {
+      set(0);
+      g.sound("bucket_fill", x + 0.5, y + 0.5, z + 0.5);
+      this.replaceHeld({ id: itemId("water_bucket"), count: 1 });
+    } else if (name === "glass_bottle" && level > 0) {
+      set(level - 1);
+      g.sound("bucket_fill", x + 0.5, y + 0.5, z + 0.5, 0.6, 1.4);
+      this.replaceHeld({ id: itemId("water_bottle"), count: 1 });
+    } else if (name === "water_bottle" && level < 3) {
+      set(level + 1);
+      g.sound("bucket_empty", x + 0.5, y + 0.5, z + 0.5, 0.6, 1.4);
+      if (g.player.survivalLike) this.replaceHeld({ id: itemId("glass_bottle"), count: 1 });
+    } else return false;
+    this.swing();
+    return true;
   }
 
   private eatTick(): void {
@@ -556,8 +663,9 @@ export class Actions {
     const e = this.eating!;
     e.ticks++;
     const b = p.body;
+    const drinking = itemDef(e.id)?.use === "drink" || itemDef(e.id)?.use === "milk_bucket";
     if (e.ticks % 4 === 0 && e.ticks < 32) {
-      g.sound("eat", b.x, b.y + 1.4, b.z, 0.5, 0.8 + Math.random() * 0.4);
+      g.sound(drinking ? "drink" : "eat", b.x, b.y + 1.4, b.z, 0.5, 0.8 + Math.random() * 0.4);
       const d = this.dir;
       g.particles("block", b.x + d.x * 0.5, b.y + b.eyeHeight - 0.2, b.z + d.z * 0.5, 2, 0, false);
     }
@@ -569,6 +677,13 @@ export class Actions {
     if (def?.use === "milk_bucket") {
       p.effects = [];
       if (p.survivalLike) this.replaceHeld({ id: itemId("bucket"), count: 1 });
+      return;
+    }
+    if (def?.use === "drink") {
+      const potion = potionOfItem(def.name);
+      for (const fx of potion?.potion.effects ?? []) p.applyEffect(fx.effect, fx.seconds, fx.amp);
+      if (p.survivalLike) this.replaceHeld({ id: itemId("glass_bottle"), count: 1 });
+      g.bumpInv();
       return;
     }
     p.eat(held, Math.random);
@@ -668,6 +783,7 @@ export class Actions {
         return true;
       }
       if (def.use === "bucket") return this.fillBucket();
+      if (def.use === "bottle" && this.fillBottle()) return true;
       if (def.use === "water_bucket" || def.use === "lava_bucket") return this.emptyBucket(hit, def);
     }
 
@@ -693,6 +809,18 @@ export class Actions {
         return true;
       case "redstone":
         return this.useRedstone(x, y, z, id, meta);
+      case "enchanting":
+        g.setScreen({ kind: "enchanting", x, y, z });
+        return true;
+      case "anvil":
+        g.setScreen({ kind: "anvil", x, y, z });
+        return true;
+      case "brewing":
+        g.containerAt(x, y, z, "brewing");
+        g.setScreen({ kind: "brewing", x, y, z });
+        return true;
+      case "cauldron":
+        return this.useCauldron(x, y, z, meta, held);
       case "door": {
         if (isTrapdoor(id)) {
           const open = (meta & 4) === 0;

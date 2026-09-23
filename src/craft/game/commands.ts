@@ -1,6 +1,6 @@
 /**
  * Chat commands, the familiar set: /time, /gamemode, /give, /tp, /weather,
- * /kill, /seed, /spawnpoint, /difficulty, /gamerule, /clear, /summon,
+ * /kill, /seed, /spawnpoint, /difficulty, /gamerule, /clear, /summon, /enchant,
  * /effect, /xp, /setblock, /fill, /help.
  *
  * World-changing commands need cheats on (as a world option) or creative
@@ -9,7 +9,8 @@
  */
 import { blockByName } from "../engine/blocks";
 import { DAY_TICKS, WORLD_HEIGHT } from "../engine/constants";
-import { allItems, itemByName, type StatusEffect } from "../engine/items";
+import { allItems, itemByName, itemDef, type StatusEffect } from "../engine/items";
+import { canApply, compatible, enchantDef, enchantLabel, ENCHANTMENTS } from "../engine/enchanting";
 import { Mob, MOB_KINDS, type MobKind } from "../engine/mobs";
 import type { GameMode } from "../engine/player";
 import type { Game } from "./game";
@@ -35,7 +36,8 @@ const HELP = [
   "/setblock <x> <y> <z> <block>, /fill <x1> <y1> <z1> <x2> <y2> <z2> <block>",
   "/weather clear|rain|thunder",
   "/summon <mob> [size]  (pig, cow, sheep, chicken, zombie, skeleton, creeper, spider, slime)",
-  "/effect <regeneration|speed|night_vision|...> [seconds] | /effect clear",
+  "/effect <speed|strength|fire_resistance|...> [seconds] [level] | /effect clear",
+  "/enchant <enchantment> [level]   (the held item, e.g. /enchant sharpness 5)",
   "/xp add <amount>, /clear, /kill, /seed, /spawnpoint",
   "/difficulty peaceful|easy|normal|hard, /gamerule <rule> <true|false>",
 ];
@@ -227,11 +229,32 @@ export function runCommand(game: Game, line: string): Line[] {
       const denied = needCheats();
       if (denied) return denied;
       if (args[0] === "clear") { p.effects = []; return [{ text: "Removed every effect" }]; }
-      const kinds: StatusEffect[] = ["regeneration", "hunger", "poison", "absorption", "speed", "night_vision"];
+      const kinds: StatusEffect[] = [
+        "regeneration", "hunger", "poison", "absorption", "speed", "night_vision", "slowness", "strength", "weakness",
+        "fire_resistance", "invisibility", "water_breathing", "instant_health", "instant_damage",
+      ];
       const kind = args[0] as StatusEffect;
       if (!kinds.includes(kind)) return [{ text: `Usage: /effect ${kinds.join("|")} [seconds] [level], or /effect clear`, color: ERR }];
-      p.addEffect(kind, Math.max(1, Number(args[1] ?? 30) || 30), Math.max(0, (Number(args[2] ?? 1) || 1) - 1));
+      p.applyEffect(kind, Math.max(1, Number(args[1] ?? 30) || 30), Math.max(0, Math.min(4, (Number(args[2] ?? 1) || 1) - 1)));
+      game.bumpInv();
       return [{ text: `Applied ${kind} to ${p.name}` }];
+    }
+    case "enchant": {
+      const denied = needCheats();
+      if (denied) return denied;
+      const held = p.inventory.held;
+      const name = (args[0] ?? "").replace(/^minecraft:/, "");
+      const e = enchantDef(name);
+      if (!e) return [{ text: `Usage: /enchant <${ENCHANTMENTS.map((x) => x.name).join("|")}> [level]`, color: ERR }];
+      const def = held ? itemDef(held.id) : undefined;
+      if (!held || !def) return [{ text: "Hold the item to enchant in your hand.", color: ERR }];
+      if (!canApply(e, def)) return [{ text: `${enchantLabel(e.name, 1)} cannot go on ${def.displayName}.`, color: ERR }];
+      const level = Math.max(1, Math.min(e.maxLevel, Number(args[1] ?? 1) || 1));
+      const clash = Object.keys(held.ench ?? {}).find((n) => !compatible(n, e.name));
+      if (clash) return [{ text: `${enchantLabel(e.name, level)} cannot be combined with ${enchantLabel(clash, held.ench![clash])}.`, color: ERR }];
+      p.inventory.slots[p.inventory.selected] = { ...held, ench: { ...(held.ench ?? {}), [e.name]: level } };
+      game.bumpInv();
+      return [{ text: `Applied ${enchantLabel(e.name, level)} to ${def.displayName}` }];
     }
     case "xp": case "experience": {
       const denied = needCheats();

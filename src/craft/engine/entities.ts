@@ -9,13 +9,14 @@
  * bar or sending a message to someone else's browser.
  */
 import { block, B } from "./blocks";
-import type { ItemStack } from "./items";
+import { sameItem } from "./inventory";
+import { maxStack, type ItemStack } from "./items";
 import { bodyBox, moveBody, newBody, senseEnvironment, type AABB, type Body } from "./physics";
 import { raycastBlocks, rayBox } from "./raycast";
 import type { World } from "./world";
 
 export type EntityKind =
-  | "item" | "xp" | "arrow" | "snowball" | "egg" | "falling_block" | "tnt"
+  | "item" | "xp" | "arrow" | "snowball" | "egg" | "potion" | "xp_bottle" | "falling_block" | "tnt"
   | "pig" | "cow" | "sheep" | "chicken" | "zombie" | "skeleton" | "creeper" | "spider" | "slime";
 
 export interface PlayerRef {
@@ -28,6 +29,8 @@ export interface PlayerRef {
   /** Item the player is holding (tempts animals). */
   heldItem: number;
   sneaking: boolean;
+  /** Under an invisibility potion: monsters notice them only up close. */
+  invisible?: boolean;
 }
 
 export type DamageSource = "mob" | "arrow" | "explosion" | "fall" | "fire" | "lava" | "drown" | "starve" | "void" | "cactus" | "player" | "magic" | "suffocation";
@@ -40,7 +43,8 @@ export interface EntityContext {
   difficulty: 0 | 1 | 2 | 3;
   random: () => number;
   players(): PlayerRef[];
-  hurtPlayer(id: string, amount: number, source: DamageSource, fromX: number, fromZ: number, knockback: number): void;
+  /** `attacker` is the mob's entity id, when a mob struck (so Thorns can strike back). */
+  hurtPlayer(id: string, amount: number, source: DamageSource, fromX: number, fromZ: number, knockback: number, attacker?: number): void;
   /** Tries to hand a stack to a player; returns how many they could not take. */
   givePlayer(id: string, stack: ItemStack): number;
   giveXp(id: string, amount: number): void;
@@ -54,6 +58,8 @@ export interface EntityContext {
   placeBlock(x: number, y: number, z: number, id: number, meta: number): boolean;
   /** A player's blow finished a mob off (for advancements). */
   creditKill?(playerId: string, hostile: boolean): void;
+  /** A thrown potion burst here; `direct` is what it struck, which takes the full dose. */
+  splashPotion?(itemId: number, x: number, y: number, z: number, direct: Entity | PlayerRef | null, owner: string | null): void;
 }
 
 let nextEntityId = 1;
@@ -115,8 +121,8 @@ export abstract class Entity {
 
   abstract tick(ctx: EntityContext): void;
 
-  /** Hit by a player or mob. Returns true if it took the hit. */
-  hurt(_ctx: EntityContext, _amount: number, _source: DamageSource, _fromX: number, _fromZ: number, _attackerId?: string): boolean {
+  /** Hit by a player or mob; `knockback` adds to the usual shove (Knockback, Punch). Returns true if it took the hit. */
+  hurt(_ctx: EntityContext, _amount: number, _source: DamageSource, _fromX: number, _fromZ: number, _attackerId?: string, _knockback = 0): boolean {
     return false;
   }
 
@@ -177,7 +183,8 @@ export class ItemEntity extends Entity {
     // Merge with a nearby identical stack, so a mined vein is one pile, not forty.
     if (this.age % 10 === 0) {
       for (const e of ctx.entitiesNear(this.x, this.y, this.z, 0.8)) {
-        if (e !== this && e instanceof ItemEntity && !e.removed && e.stack.id === this.stack.id && (e.stack.damage ?? 0) === (this.stack.damage ?? 0) && e.stack.count + this.stack.count <= 64) {
+        // Two swords are two swords: only stacks that could share a slot merge.
+        if (e !== this && e instanceof ItemEntity && !e.removed && sameItem(e.stack, this.stack) && e.stack.count + this.stack.count <= maxStack(this.stack.id)) {
           this.stack.count += e.stack.count;
           e.removed = true;
         }
@@ -262,6 +269,10 @@ export function xpOrbValues(total: number): number[] {
 
 // ---- projectiles -----------------------------------------------------------------------
 
+export type ProjectileKind = "arrow" | "snowball" | "egg" | "potion" | "xp_bottle";
+export const isProjectileKind = (k: unknown): k is ProjectileKind =>
+  k === "arrow" || k === "snowball" || k === "egg" || k === "potion" || k === "xp_bottle";
+
 export class Projectile extends Entity {
   inGround = false;
   groundTicks = 0;
@@ -270,8 +281,14 @@ export class Projectile extends Entity {
   /** Players may pick up arrows they shot; skeleton arrows only break. */
   pickup: boolean;
   damage: number;
+  /** Punch: extra knockback on a hit. */
+  knockback = 0;
+  /** Flame: sets what it hits alight. */
+  fire = false;
+  /** The potion a thrown bottle holds (item id). */
+  item = 0;
 
-  constructor(public readonly kind: "arrow" | "snowball" | "egg", x: number, y: number, z: number, vx: number, vy: number, vz: number, owner: string | null, id?: number) {
+  constructor(public readonly kind: ProjectileKind, x: number, y: number, z: number, vx: number, vy: number, vz: number, owner: string | null, id?: number) {
     super(x, y, z, 0.25, 0.25, id);
     this.body.vx = vx; this.body.vy = vy; this.body.vz = vz;
     this.owner = owner;
@@ -326,9 +343,16 @@ export class Projectile extends Entity {
     if ((hitEntity || hitPlayer) && best < blockT) {
       const dmg = this.kind === "arrow" ? Math.ceil(speed * this.damage) : this.kind === "snowball" ? 0 : 0;
       const nx = b.vx / (speed || 1), nz = b.vz / (speed || 1);
-      if (hitEntity) hitEntity.hurt(ctx, Math.max(dmg, 0.001), this.kind === "arrow" ? "arrow" : "player", b.x - nx, b.z - nz, this.owner ?? undefined);
-      if (hitPlayer && dmg > 0) ctx.hurtPlayer(hitPlayer.id, dmg, "arrow", b.x - nx, b.z - nz, 0.4);
-      this.impact(ctx);
+      // A bottle bursts on whatever it meets; only arrows and snowballs strike.
+      if (this.kind !== "potion" && this.kind !== "xp_bottle") {
+        if (hitEntity) {
+          if (hitEntity.hurt(ctx, Math.max(dmg, 0.001), this.kind === "arrow" ? "arrow" : "player", b.x - nx, b.z - nz, this.owner ?? undefined, this.knockback * 0.5) && this.fire) {
+            hitEntity.fireTicks = Math.max(hitEntity.fireTicks, 100);
+          }
+        }
+        if (hitPlayer && dmg > 0) ctx.hurtPlayer(hitPlayer.id, dmg, "arrow", b.x - nx, b.z - nz, 0.4 + this.knockback * 0.5);
+      }
+      this.impact(ctx, hitEntity ?? hitPlayer);
       return;
     }
     if (blockHit) {
@@ -352,9 +376,16 @@ export class Projectile extends Entity {
     if (this.age > 1200 || b.y < -64) this.removed = true;
   }
 
-  private impact(ctx: EntityContext): void {
+  private impact(ctx: EntityContext, struck: Entity | PlayerRef | null = null): void {
     this.removed = true;
     const b = this.body;
+    if (this.kind === "potion") ctx.splashPotion?.(this.item, b.x, b.y, b.z, struck, this.owner);
+    if (this.kind === "xp_bottle") {
+      ctx.sound("glass_break", b.x, b.y, b.z, 0.8);
+      ctx.particles("splash", b.x, b.y, b.z, 12);
+      // Three to eleven points, as the original's bottle o' enchanting.
+      for (const v of xpOrbValues(3 + Math.floor(ctx.random() * 5) + Math.floor(ctx.random() * 5))) ctx.spawn(new XpOrb(b.x, b.y, b.z, v));
+    }
     if (this.kind === "snowball") ctx.particles("snow", b.x, b.y, b.z, 8);
     if (this.kind === "egg") {
       ctx.particles("egg", b.x, b.y, b.z, 8);
@@ -367,11 +398,13 @@ export class Projectile extends Entity {
   }
 
   snapshot(): EntitySnapshot {
-    return { ...super.snapshot(), pitch: round(this.pitch), data: { k: this.kind, g: this.inGround } };
+    return { ...super.snapshot(), pitch: round(this.pitch), data: { k: this.kind, g: this.inGround, i: this.item || undefined, f: this.fire ? 1 : undefined } };
   }
   applySnapshot(s: EntitySnapshot): void {
     super.applySnapshot(s);
     this.inGround = !!s.data?.g;
+    if (typeof s.data?.i === "number") this.item = s.data.i;
+    this.fire = s.data?.f === 1;
   }
 }
 

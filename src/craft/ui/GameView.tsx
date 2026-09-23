@@ -19,7 +19,7 @@ import { clientId, newRoomCode } from "../net/transport";
 import { Button } from "./common";
 import { Hud } from "./Hud";
 import { AdvancementsScreen, ChatInput, DeathScreen, MenuFrame, OptionsScreen, PauseMenu, ShareScreen } from "./Menus";
-import { ChestScreen, CraftingScreen, FurnaceScreen, InventoryScreen } from "./Screens";
+import { AnvilScreen, BrewingScreen, ChestScreen, CraftingScreen, EnchantingScreen, FurnaceScreen, InventoryScreen } from "./Screens";
 import { TouchControls } from "./TouchControls";
 
 export interface GameViewProps {
@@ -245,6 +245,9 @@ function Overlay({ game, input, settings, onSettings, onQuit, onExitApp }: GameV
       {screen?.kind === "crafting" && <CraftingScreen game={game} mobile={mobile} />}
       {screen?.kind === "furnace" && <FurnaceScreen game={game} mobile={mobile} />}
       {screen?.kind === "chest" && <ChestScreen game={game} mobile={mobile} />}
+      {screen?.kind === "brewing" && <BrewingScreen game={game} mobile={mobile} />}
+      {screen?.kind === "enchanting" && <EnchantingScreen game={game} mobile={mobile} />}
+      {screen?.kind === "anvil" && <AnvilScreen game={game} mobile={mobile} />}
     </>
   );
 }

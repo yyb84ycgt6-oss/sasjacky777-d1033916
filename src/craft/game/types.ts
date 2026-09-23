@@ -43,6 +43,9 @@ export type Screen =
   | { kind: "crafting"; x: number; y: number; z: number }
   | { kind: "furnace"; x: number; y: number; z: number }
   | { kind: "chest"; x: number; y: number; z: number }
+  | { kind: "brewing"; x: number; y: number; z: number }
+  | { kind: "enchanting"; x: number; y: number; z: number }
+  | { kind: "anvil"; x: number; y: number; z: number }
   | { kind: "chat"; text: string }
   | { kind: "options" }
   | { kind: "share" }
@@ -93,6 +96,8 @@ export interface Hud {
   onFire: boolean;
   underwater: boolean;
   perspective: 0 | 1 | 2;
+  /** Active status effects, for the list in the corner. */
+  effects: { kind: string; amp: number; seconds: number }[];
   /** Advancements earned in the last few seconds, newest last. */
   toasts: { id: string; title: string; icon: string; at: number }[];
 }

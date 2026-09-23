@@ -18,8 +18,12 @@
  */
 import type { BlockEntity } from "../engine/chunk";
 import { chunkKey } from "../engine/constants";
-import { Entity, FallingBlock, ItemEntity, PrimedTnt, Projectile, XpOrb, type DamageSource, type EntitySnapshot } from "../engine/entities";
-import { itemDef, type ItemStack } from "../engine/items";
+import {
+  Entity, FallingBlock, isProjectileKind, ItemEntity, PrimedTnt, Projectile, XpOrb,
+  type DamageSource, type EntitySnapshot, type ProjectileKind,
+} from "../engine/entities";
+import { itemDef, type ItemStack, type StatusEffect } from "../engine/items";
+import { sanitizeStack } from "../engine/inventory";
 import { Mob, isMobKind } from "../engine/mobs";
 import { block } from "../engine/blocks";
 import type { PlayerSave } from "../engine/player";
@@ -222,7 +226,7 @@ export class NetSession implements NetLink {
     const b = p.body;
     this.stateOp = ["st", r2(b.x), r2(b.y), r2(b.z), r2(p.yaw), r2(p.pitch), r2(p.walkDist), r2(Math.hypot(b.x - p.prevX, b.z - p.prevZ)),
       r2(g.actions.swingProgress(1)), p.sneaking ? 1 : 0, p.inventory.held?.id ?? -1, g.settings.skin, p.name, p.hurtTime > 0 ? 1 : 0,
-      p.dead ? 1 : 0, p.gameMode, p.sleeping ? 1 : 0];
+      p.dead ? 1 : 0, p.gameMode, p.sleeping ? 1 : 0, p.hasEffect("invisibility") ? 1 : 0];
     if (this.role === "host") {
       if (this.ticks % ENTITY_TICKS === 0 && g.remote.size) this.push(["en", this.entitySnapshots()]);
       if (this.ticks % ENV_TICKS === 0) this.push(["env", g.time, r2(g.rain), r2(g.thunder), g.meta.difficulty]);
@@ -274,20 +278,24 @@ export class NetSession implements NetLink {
   }
 
   // Guest → host actions.
-  attack(entityId: number, damage: number, fx: number, fz: number): void { this.push(["at", entityId, r2(damage), r2(fx), r2(fz)]); }
+  attack(entityId: number, damage: number, fx: number, fz: number, knockback = 0, fire = 0, looting = 0): void {
+    this.push(["at", entityId, r2(damage), r2(fx), r2(fz), r2(knockback), fire, looting]);
+  }
   interact(entityId: number, item: string | null): void { this.push(["in", entityId, item]); }
   drops(x: number, y: number, z: number, stacks: ItemStack[], xp: number): void { this.push(["dr", r2(x), r2(y), r2(z), stacks, xp]); }
-  throwItem(kind: "arrow" | "snowball" | "egg", x: number, y: number, z: number, vx: number, vy: number, vz: number): void {
-    this.push(["th", kind, r2(x), r2(y), r2(z), r3(vx), r3(vy), r3(vz)]);
+  throwItem(kind: ProjectileKind, x: number, y: number, z: number, vx: number, vy: number, vz: number, extra: ThrowExtra = {}): void {
+    this.push(["th", kind, r2(x), r2(y), r2(z), r3(vx), r3(vy), r3(vz), extra.item ?? 0, r2(extra.damage ?? 0), extra.knockback ?? 0, extra.fire ? 1 : 0]);
   }
   primeTnt(x: number, y: number, z: number, fuse: number): void { this.push(["tn", x, y, z, fuse]); }
   blockEntity(x: number, y: number, z: number, e: BlockEntity | null): void { this.push(["be", x, y, z, e]); }
   sleeping(on: boolean): void { this.push(["sl", on ? 1 : 0]); }
 
   // Host → guests (and player-versus-player from anyone).
-  hurtRemote(id: string, amount: number, source: DamageSource, fx: number, fz: number, kb: number): void {
-    this.push(["hu", id, r2(amount), source, r2(fx), r2(fz), r2(kb)]);
+  hurtRemote(id: string, amount: number, source: DamageSource, fx: number, fz: number, kb: number, attacker?: number): void {
+    this.push(["hu", id, r2(amount), source, r2(fx), r2(fz), r2(kb), attacker ?? -1]);
   }
+  /** A splash potion reached a guest: they own their effects, so the host only tells them. */
+  effectRemote(id: string, effect: StatusEffect, seconds: number, amp: number): void { this.push(["ef", id, effect, seconds, amp]); }
   giveRemote(id: string, stack: ItemStack): void { this.push(["gv", id, stack]); }
   advanceRemote(id: string, event: AdvancementEvent): void { this.push(["av", id, event]); }
   pushRemote(id: string, dx: number, dy: number, dz: number): void { this.push(["pu", id, dx, dy, dz]); }
@@ -444,7 +452,7 @@ export class NetSession implements NetLink {
       r = {
         id, name: this.names.get(id) ?? "Player", x: 0, y: 0, z: 0, yaw: 0, pitch: 0, px: 0, py: 0, pz: 0, pyaw: 0, walk: 0, speed: 0,
         swing: 0, sneaking: false, held: null, variant: 0, hurt: false, dead: false, gameMode: "survival", sleeping: false,
-        lastSeen: now, receivedAt: 0, ...init,
+        invisible: false, lastSeen: now, receivedAt: 0, ...init,
       };
       r.px = r.x; r.py = r.y; r.pz = r.z;
       g.remote.set(id, r);
@@ -491,20 +499,27 @@ export class NetSession implements NetLink {
           break;
         case "fx": if (this.role === "guest" && fromHost) this.onEffect(op); break;
         case "hu":
-          if (op[1] === this.myId && finite(op[2], op[4], op[5], op[6])) g.hurtLocal(op[2] as number, op[3] as DamageSource, op[4] as number, op[5] as number, op[6] as number);
+          if (op[1] === this.myId && finite(op[2], op[4], op[5], op[6])) {
+            g.hurtLocal(op[2] as number, op[3] as DamageSource, op[4] as number, op[5] as number, op[6] as number, int(op[7]) && (op[7] as number) >= 0 ? (op[7] as number) : undefined);
+          }
+          break;
+        case "ef":
+          if (op[1] === this.myId && fromHost && typeof op[2] === "string" && finite(op[3], op[4])) {
+            g.player.applyEffect(op[2] as StatusEffect, Math.min(600, op[3] as number), Math.max(0, Math.min(4, op[4] as number)));
+          }
           break;
         case "gv":
           if (op[1] === this.myId) {
-            const st = op[2] as ItemStack;
-            if (st && int(st.id) && int(st.count) && itemDef(st.id)) {
-              const left = g.player.inventory.add({ id: st.id, count: st.count });
-              if (left > 0) this.drops(g.player.body.x, g.player.body.y + 1, g.player.body.z, [{ id: st.id, count: left }], 0);
+            const st = sanitizeStack(op[2]);
+            if (st) {
+              const left = g.player.inventory.add(st);
+              if (left > 0) this.drops(g.player.body.x, g.player.body.y + 1, g.player.body.z, [{ ...st, count: left }], 0);
               g.audio.play("pop", null, 0, 0, 0.25, 1.6);
               g.bumpInv();
             }
           }
           break;
-        case "xp": if (op[1] === this.myId && finite(op[2])) g.addXp(op[2] as number); break;
+        case "xp": if (op[1] === this.myId && finite(op[2])) g.collectXp(op[2] as number); break;
         case "pu":
           // Shoved by a piston on the host.
           if (op[1] === this.myId && fromHost && finite(op[2], op[3], op[4])) {
@@ -558,6 +573,7 @@ export class NetSession implements NetLink {
     r.dead = op[14] === 1;
     r.gameMode = String(op[15] ?? "survival");
     r.sleeping = op[16] === 1;
+    r.invisible = op[17] === 1;
     r.receivedAt = now;
   }
 
@@ -616,11 +632,12 @@ export class NetSession implements NetLink {
     const [, x, y, z, data] = op;
     if (!finite(x, y, z)) return;
     if (this.role === "guest" && from !== this.hostId) return;
-    const e = data && typeof data === "object" && ((data as BlockEntity).kind === "chest" || (data as BlockEntity).kind === "furnace") ? (data as BlockEntity) : undefined;
+    const kind = data && typeof data === "object" ? (data as BlockEntity).kind : undefined;
+    const e = kind === "chest" || kind === "furnace" || kind === "brewing" ? (data as BlockEntity) : undefined;
     g.world.setEntity(x as number, y as number, z as number, e);
     if (this.role === "host") this.push(["be", x, y, z, e ?? null]);
     const s = g.screen;
-    if (s && (s.kind === "chest" || s.kind === "furnace") && s.x === x && s.y === y && s.z === z) g.bumpInv();
+    if (s && (s.kind === "chest" || s.kind === "furnace" || s.kind === "brewing") && s.x === x && s.y === y && s.z === z) g.bumpInv();
   }
 
   private onEntities(list: EntitySnapshot[]): void {
@@ -667,10 +684,15 @@ export class NetSession implements NetLink {
 
   private onAttack(from: string, op: Op): void {
     const g = this.game!;
-    const [, id, dmg, fx, fz] = op;
+    const [, id, dmg, fx, fz, kb, fire, looting] = op;
     if (!finite(id, dmg, fx, fz)) return;
     const e = g.entities.get(id as number);
-    if (e instanceof Mob) e.hurt(g.ctx, Math.min(30, dmg as number), "player", fx as number, fz as number, from);
+    if (e instanceof Mob) {
+      e.looting = int(looting) ? Math.max(0, Math.min(3, looting as number)) : 0;
+      const took = e.hurt(g.ctx, Math.min(40, dmg as number), "player", fx as number, fz as number, from, Math.min(2, Math.max(0, Number(kb) || 0)));
+      // Fire Aspect from a guest's sword: the host owns the mob, so it lights it here.
+      if (took && finite(fire) && (fire as number) > 0) e.fireTicks = Math.max(e.fireTicks, Math.min(200, fire as number));
+    }
   }
 
   private onInteract(from: string, op: Op): void {
@@ -685,8 +707,9 @@ export class NetSession implements NetLink {
     const [, x, y, z, stacks, xp] = op;
     if (!finite(x, y, z)) return;
     if (Array.isArray(stacks)) {
-      for (const s of stacks.slice(0, 64)) {
-        if (s && int(s.id) && int(s.count) && s.count > 0 && itemDef(s.id)) g.dropItem(x as number, y as number, z as number, { id: s.id, count: Math.min(64, s.count), damage: s.damage });
+      for (const raw of stacks.slice(0, 64)) {
+        const s = sanitizeStack(raw);
+        if (s) g.dropItem(x as number, y as number, z as number, { ...s, count: Math.min(64, s.count) });
       }
     }
     if (finite(xp) && (xp as number) > 0) g.spawnXp(x as number, y as number, z as number, Math.min(1000, xp as number));
@@ -694,22 +717,33 @@ export class NetSession implements NetLink {
 
   private onThrow(from: string, op: Op): void {
     const g = this.game!;
-    const [, kind, x, y, z, vx, vy, vz] = op;
-    if ((kind !== "arrow" && kind !== "snowball" && kind !== "egg") || !finite(x, y, z, vx, vy, vz)) return;
+    const [, kind, x, y, z, vx, vy, vz, item, damage, knockback, fire] = op;
+    if (!isProjectileKind(kind) || !finite(x, y, z, vx, vy, vz)) return;
     const p = new Projectile(kind, x as number, y as number, z as number, vx as number, vy as number, vz as number, from);
+    if (kind === "potion") {
+      if (!int(item) || !itemDef(item as number)) return;
+      p.item = item as number;
+    }
+    // A guest's bow enchantments ride along, bounded so a message cannot forge a one-shot arrow.
+    if (kind === "arrow" && finite(damage) && (damage as number) > 0) p.damage = Math.min(6, damage as number);
+    if (finite(knockback)) p.knockback = Math.max(0, Math.min(2, knockback as number));
+    p.fire = fire === 1;
     g.spawn(p);
   }
 }
 
 /** Rebuilds an entity a host described, on a guest. */
+/** What travels with a thrown or shot projectile beyond its path: the potion inside, the bow's enchantments. */
+export interface ThrowExtra { item?: number; damage?: number; knockback?: number; fire?: boolean }
+
 export function entityFromSnapshot(s: EntitySnapshot): Entity | null {
   let e: Entity | null = null;
   if (isMobKind(s.kind)) e = new Mob(s.kind, s.x, s.y, s.z, s.id);
   else if (s.kind === "item") {
-    const st = s.data?.stack as ItemStack | undefined;
-    if (st && itemDef(st.id)) e = new ItemEntity(s.x, s.y, s.z, st, 0, s.id);
+    const st = sanitizeStack(s.data?.stack);
+    if (st) e = new ItemEntity(s.x, s.y, s.z, st, 0, s.id);
   } else if (s.kind === "xp") e = new XpOrb(s.x, s.y, s.z, Number(s.data?.value ?? 1), s.id);
-  else if (s.kind === "arrow" || s.kind === "snowball" || s.kind === "egg") e = new Projectile(s.kind, s.x, s.y, s.z, s.vx ?? 0, s.vy ?? 0, s.vz ?? 0, null, s.id);
+  else if (isProjectileKind(s.kind)) e = new Projectile(s.kind, s.x, s.y, s.z, s.vx ?? 0, s.vy ?? 0, s.vz ?? 0, null, s.id);
   else if (s.kind === "falling_block") e = new FallingBlock(s.x, s.y, s.z, Number(s.data?.b ?? 12), Number(s.data?.m ?? 0), s.id);
   else if (s.kind === "tnt") e = new PrimedTnt(s.x, s.y, s.z, Number(s.data?.fuse ?? 80), s.id);
   if (e) {

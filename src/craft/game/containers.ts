@@ -9,11 +9,16 @@
  */
 import { clickSlot, mergeInto, range, sameItem, type ClickButton, type Slot } from "../engine/inventory";
 import { consumeGrid, fuelTicks, layout, matchRecipe, recipeResult, smeltResult, type Recipe } from "../engine/crafting";
-import { itemDef, maxStack, type ItemStack } from "../engine/items";
-import type { ChestEntity, FurnaceEntity } from "../engine/chunk";
+import { itemDef, itemId, maxStack, type ItemStack } from "../engine/items";
+import { B } from "../engine/blocks";
+import type { BrewingEntity, ChestEntity, FurnaceEntity } from "../engine/chunk";
+import { isBottle, isBrewingFuel, isBrewingIngredient } from "../engine/brewing";
+import {
+  ANVIL_LIMIT, anvilResult, countBookshelves, isEnchantable, rollEnchantments, tableClue, tableLevels, type AnvilResult,
+} from "../engine/enchanting";
 import type { Game } from "./game";
 
-export type Section = "inv" | "armor" | "offhand" | "grid" | "result" | "chest" | "furnace";
+export type Section = "inv" | "armor" | "offhand" | "grid" | "result" | "chest" | "furnace" | "brewing" | "work" | "anvil_out";
 
 function chestOf(game: Game): ChestEntity | null {
   const s = game.screen;
@@ -29,6 +34,15 @@ function furnaceOf(game: Game): FurnaceEntity | null {
   return e?.kind === "furnace" ? e : null;
 }
 
+function brewingOf(game: Game): BrewingEntity | null {
+  const s = game.screen;
+  if (s?.kind !== "brewing") return null;
+  const e = game.world.getEntity(s.x, s.y, s.z);
+  return e?.kind === "brewing" ? e : null;
+}
+
+const LAPIS = () => itemId("lapis_lazuli");
+
 export function craftWidth(game: Game): number {
   return game.screen?.kind === "crafting" ? 3 : 2;
 }
@@ -41,15 +55,34 @@ export function craftOutput(game: Game): { recipe: Recipe; stack: ItemStack } | 
 
 function changed(game: Game): void {
   const s = game.screen;
-  if (s && (s.kind === "chest" || s.kind === "furnace")) game.containerChanged(s.x, s.y, s.z);
+  if (s && (s.kind === "chest" || s.kind === "furnace" || s.kind === "brewing")) game.containerChanged(s.x, s.y, s.z);
   else game.bumpInv();
 }
 
-function accepts(section: Section, index: number): (s: ItemStack) => boolean {
+function accepts(section: Section, index: number, game?: Game): (s: ItemStack) => boolean {
   if (section === "armor") return (s) => itemDef(s.id)?.armor?.slot === index;
   if (section === "furnace" && index === 1) return (s) => fuelTicks(s.id) > 0;
   if (section === "furnace" && index === 2) return () => false;
+  if (section === "brewing") return index < 3 ? isBottle : index === 3 ? isBrewingIngredient : isBrewingFuel;
+  if (section === "work" && game?.screen?.kind === "enchanting") {
+    return index === 0 ? (s) => isEnchantable({ ...s, count: 1 }) || itemDef(s.id)?.name === "book" : (s) => s.id === LAPIS();
+  }
   return () => true;
+}
+
+/** Most slots hold a stack; a bottle slot, and the enchanting table's item slot, hold one. */
+function slotCap(game: Game, section: Section, index: number): number {
+  if (section === "armor") return 1;
+  if (section === "brewing" && index < 3) return 1;
+  if (section === "work" && index === 0 && game.screen?.kind === "enchanting") return 1;
+  return 64;
+}
+
+function getBrewingSlot(e: BrewingEntity, i: number): Slot {
+  return i < 3 ? e.bottles[i] : i === 3 ? e.ingredient : e.fuel;
+}
+function setBrewingSlot(e: BrewingEntity, i: number, s: Slot): void {
+  if (i < 3) e.bottles[i] = s; else if (i === 3) e.ingredient = s; else e.fuel = s;
 }
 
 function sectionSlots(game: Game, section: Section): Slot[] | null {
@@ -57,7 +90,7 @@ function sectionSlots(game: Game, section: Section): Slot[] | null {
   switch (section) {
     case "inv": return inv.slots;
     case "armor": return inv.armor;
-    case "grid": return game.craftGrid;
+    case "grid": case "work": return game.craftGrid;
     case "chest": return chestOf(game)?.items ?? null;
     default: return null;
   }
@@ -96,6 +129,36 @@ function quickMove(game: Game, from: Section, index: number, stack: ItemStack): 
       const armor = itemDef(stack.id)?.armor;
       if (armor && !inv.armor[armor.slot]) { inv.armor[armor.slot] = stack; return null; }
     }
+    if (kind === "brewing") {
+      const e = brewingOf(game);
+      if (e) {
+        // Bottles fill the free bottle slots one each; ingredients and powder go to their own slots.
+        if (isBottle(stack)) {
+          let left: Slot = stack;
+          for (let i = 0; i < 3 && left; i++) {
+            if (e.bottles[i]) continue;
+            e.bottles[i] = { ...left, count: 1 };
+            left = left.count > 1 ? { ...left, count: left.count - 1 } : null;
+          }
+          if (left?.count !== stack.count) return left;
+        }
+        const target = isBrewingFuel(stack) ? 4 : isBrewingIngredient(stack) ? 3 : -1;
+        if (target >= 0) {
+          const slots: Slot[] = [getBrewingSlot(e, target)];
+          const left = mergeInto(stack, slots, [0]);
+          setBrewingSlot(e, target, slots[0]);
+          return left;
+        }
+      }
+    }
+    if (kind === "enchanting") {
+      if (stack.id === LAPIS()) return mergeInto(stack, game.craftGrid, [1]);
+      if (!game.craftGrid[0] && accepts("work", 0, game)(stack)) {
+        game.craftGrid[0] = { ...stack, count: 1 };
+        return stack.count > 1 ? { ...stack, count: stack.count - 1 } : null;
+      }
+    }
+    if (kind === "anvil") return mergeInto(stack, game.craftGrid, [0, 1]);
     return mergeInto(stack, inv.slots, index < 9 ? range(9, 36) : range(0, 9));
   }
   // Everything else goes back into the player's inventory, hotbar last like the original.
@@ -105,6 +168,22 @@ function quickMove(game: Game, from: Section, index: number, stack: ItemStack): 
 export function clickContainer(game: Game, section: Section, index: number, button: ClickButton, shift: boolean): void {
   const inv = game.player.inventory;
   if (section === "result") { takeResult(game, shift); return; }
+
+  if (section === "brewing") {
+    const e = brewingOf(game);
+    if (!e) return;
+    const cur = getBrewingSlot(e, index);
+    if (shift && cur) setBrewingSlot(e, index, quickMove(game, "brewing", index, cur));
+    else {
+      const [slot, cursor] = clickSlot(cur, game.cursor, button, accepts("brewing", index), slotCap(game, "brewing", index));
+      setBrewingSlot(e, index, slot);
+      game.cursor = cursor;
+    }
+    changed(game);
+    return;
+  }
+
+  if (section === "anvil_out") { takeAnvilResult(game, shift); return; }
 
   if (section === "furnace") {
     const f = furnaceOf(game);
@@ -147,8 +226,8 @@ export function clickContainer(game: Game, section: Section, index: number, butt
     if (!cur) return;
     slots[index] = quickMove(game, section, index, cur);
   } else {
-    const cap = section === "armor" ? 1 : 64;
-    const [slot, cursor] = clickSlot(slots[index], game.cursor, button, accepts(section, index), cap);
+    const cap = slotCap(game, section, index);
+    const [slot, cursor] = clickSlot(slots[index], game.cursor, button, accepts(section, index, game), cap);
     slots[index] = slot;
     game.cursor = cursor;
   }
@@ -193,16 +272,18 @@ export function dropCursor(game: Game, one: boolean): void {
 }
 
 /** Creative palette: pick up a full stack (shift/middle: into the hotbar). */
-export function creativeTake(game: Game, itemId: number, button: ClickButton, shift: boolean): void {
+export function creativeTake(game: Game, itemId: number, button: ClickButton, shift: boolean, template?: ItemStack): void {
   const def = itemDef(itemId);
   if (!def) return;
   const count = button === "right" ? 1 : def.maxStack;
+  // A template carries what the palette entry is beyond its id (an enchanted book's enchantment).
+  const base: ItemStack = template ? { ...template, id: itemId } : { id: itemId, count: 1 };
   if (shift) {
-    game.player.inventory.add({ id: itemId, count: def.maxStack });
-  } else if (game.cursor && game.cursor.id === itemId && button === "left") {
+    game.player.inventory.add({ ...base, count: def.maxStack });
+  } else if (game.cursor && sameItem(game.cursor, base) && button === "left") {
     game.cursor = { ...game.cursor, count: Math.min(def.maxStack, game.cursor.count + 1) };
   } else {
-    game.cursor = { id: itemId, count };
+    game.cursor = { ...base, count };
   }
   game.bumpInv();
 }
@@ -268,6 +349,115 @@ export function inventoryCounts(game: Game): Map<number, number> {
   const counts = new Map<number, number>();
   for (const s of [...game.player.inventory.slots, ...game.craftGrid]) if (s) counts.set(s.id, (counts.get(s.id) ?? 0) + s.count);
   return counts;
+}
+
+// ---- the enchanting table ------------------------------------------------------------------
+
+export interface EnchantOffer {
+  /** Level requirement shown on the button (0 when the slot offers nothing). */
+  level: number;
+  /** Lapis and levels actually taken: 1, 2 or 3. */
+  cost: number;
+  /** The one enchantment the table reveals. */
+  clue: [string, number] | null;
+  /** Whether this player can take it right now. */
+  affordable: boolean;
+}
+
+export function enchantOffers(game: Game): { shelves: number; offers: EnchantOffer[] } | null {
+  const s = game.screen;
+  if (s?.kind !== "enchanting") return null;
+  const w = game.world;
+  const shelves = countBookshelves((x, y, z) => w.blockAt(x, y, z), s.x, s.y, s.z, B.BOOKSHELF);
+  const item = game.craftGrid[0];
+  const def = item ? itemDef(item.id) : undefined;
+  if (!item || !def || !accepts("work", 0, game)(item)) return { shelves, offers: [] };
+  const p = game.player;
+  const lapis = game.craftGrid[1]?.count ?? 0;
+  const levels = tableLevels(p.enchantSeed, shelves, def);
+  const creative = !p.survivalLike;
+  return {
+    shelves,
+    offers: levels.map((level, slot) => {
+      const cost = slot + 1;
+      const clue = level > 0 ? tableClue(p.enchantSeed, slot, level, def) : null;
+      return { level, cost, clue, affordable: !!clue && (creative || (p.xpLevel >= level && lapis >= cost)) };
+    }),
+  };
+}
+
+/** Takes one of the table's three offers: pays lapis and levels, enchants, and re-seeds the table. */
+export function enchantItem(game: Game, slot: number): boolean {
+  const view = enchantOffers(game);
+  const offer = view?.offers[slot];
+  const item = game.craftGrid[0];
+  const def = item ? itemDef(item.id) : undefined;
+  if (!offer?.affordable || !item || !def) return false;
+  const p = game.player;
+  const ench = rollEnchantments(p.enchantSeed, slot, offer.level, def);
+  if (!Object.keys(ench).length) return false;
+  const toBook = def.name === "book";
+  game.craftGrid[0] = { ...(toBook ? { id: itemId("enchanted_book"), count: 1 } : item), ench };
+  if (p.survivalLike) {
+    p.spendLevels(offer.cost);
+    const lapis = game.craftGrid[1]!;
+    game.craftGrid[1] = lapis.count > offer.cost ? { ...lapis, count: lapis.count - offer.cost } : null;
+  }
+  p.enchantSeed = Math.floor(Math.random() * 0x7fffffff);
+  const s = game.screen!;
+  if (s.kind === "enchanting") game.sound("enchant", s.x + 0.5, s.y + 0.5, s.z + 0.5, 1);
+  game.advance({ kind: "enchant" });
+  game.bumpInv();
+  return true;
+}
+
+// ---- the anvil -------------------------------------------------------------------------------
+
+export function anvilView(game: Game): (AnvilResult & { tooExpensive: boolean; affordable: boolean }) | null {
+  if (game.screen?.kind !== "anvil") return null;
+  const r = anvilResult(game.craftGrid[0], game.craftGrid[1], game.anvilName);
+  if (!r) return null;
+  const p = game.player;
+  const tooExpensive = r.cost >= ANVIL_LIMIT && p.survivalLike;
+  return { ...r, tooExpensive, affordable: !tooExpensive && (!p.survivalLike || p.xpLevel >= r.cost) };
+}
+
+/** The anvils' wear: a used anvil sometimes chips, and a damaged one breaks. */
+const ANVIL_WEAR: Record<number, number> = { [B.ANVIL]: B.CHIPPED_ANVIL, [B.CHIPPED_ANVIL]: B.DAMAGED_ANVIL, [B.DAMAGED_ANVIL]: B.AIR };
+
+function takeAnvilResult(game: Game, shift: boolean): void {
+  const view = anvilView(game);
+  const s = game.screen;
+  if (!view || !view.affordable || s?.kind !== "anvil") return;
+  const out = view.stack;
+  if (shift) {
+    if (mergeInto(out, game.player.inventory.slots, [...range(9, 36), ...range(0, 9)])) return;
+  } else {
+    if (game.cursor) return;
+    game.cursor = out;
+  }
+  if (game.player.survivalLike) game.player.spendLevels(view.cost);
+  game.craftGrid[0] = null;
+  const right = game.craftGrid[1];
+  game.craftGrid[1] = right && right.count > view.rightUsed ? { ...right, count: right.count - view.rightUsed } : null;
+  game.anvilName = null;
+  const id = game.world.blockAt(s.x, s.y, s.z);
+  if (game.player.survivalLike && id in ANVIL_WEAR && Math.random() < 0.12) {
+    const next = ANVIL_WEAR[id];
+    const meta = game.world.getMeta(s.x, s.y, s.z);
+    game.world.setBlock(s.x, s.y, s.z, next, next ? meta : 0, "player");
+    if (!next) {
+      game.sound("anvil_break", s.x + 0.5, s.y + 0.5, s.z + 0.5, 1);
+      game.setScreen(null);
+      return;
+    }
+  }
+  game.sound("anvil_use", s.x + 0.5, s.y + 0.5, s.z + 0.5, 0.8);
+  game.bumpInv();
+}
+
+export function brewingView(game: Game): BrewingEntity | null {
+  return brewingOf(game);
 }
 
 export function furnaceView(game: Game): FurnaceEntity | null {

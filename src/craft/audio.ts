@@ -220,6 +220,20 @@ export class GameAudio {
       case "bucket_empty": this.noiseBurst(out, t, 0.35, "bandpass", 1400, 1.2, 0.6, 0.5); break;
       case "fire": this.noiseBurst(out, t, 0.3, "bandpass", 1200, 0.8, 0.4, 0.8); break;
       case "ignite": this.noiseBurst(out, t, 0.2, "highpass", 3000, 1, 0.5); this.tone(out, t, "square", 1500, 1000, 0.05, 0.1); break;
+      case "drink": this.noiseBurst(out, t, 0.12, "lowpass", 500, 1.5, 0.35, 0.7); this.tone(out, t, "sine", 180 * p, 120 * p, 0.1, 0.2); break;
+      case "brew":
+        for (let i = 0; i < 5; i++) this.tone(out, t + i * 0.07, "sine", 300 + Math.random() * 400, 200 + Math.random() * 200, 0.06, 0.12);
+        break;
+      case "glass_break":
+        this.noiseBurst(out, t, 0.25, "highpass", 3500, 0.7, 0.5);
+        for (let i = 0; i < 4; i++) this.tone(out, t + i * 0.03, "triangle", 2400 + i * 500, 1800 + i * 400, 0.08, 0.1);
+        break;
+      case "enchant":
+        // A rising shimmer: the table's pages turning into light.
+        [523, 659, 784, 1047, 1319].forEach((f, i) => this.tone(out, t + i * 0.06, "sine", f, f * 1.01, 0.5, 0.12));
+        break;
+      case "anvil_use": this.tone(out, t, "square", 1100 * p, 1050 * p, 0.25, 0.18); this.tone(out, t, "triangle", 2250 * p, 2200 * p, 0.35, 0.12); this.noiseBurst(out, t, 0.05, "highpass", 4000, 1, 0.3); break;
+      case "anvil_break": this.noiseBurst(out, t, 0.5, "bandpass", 900, 0.8, 0.6); this.tone(out, t, "square", 400, 150, 0.4, 0.2); break;
       default:
         this.mob(name, out, t, p);
     }

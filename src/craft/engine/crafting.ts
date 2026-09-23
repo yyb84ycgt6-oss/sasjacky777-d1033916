@@ -170,6 +170,18 @@ shaped("iron_trapdoor", ["II", "II"], { I: "iron_ingot" }, "iron_trapdoor");
 shaped("slime_block", ["SSS", "SSS", "SSS"], { S: "slime_ball" }, "slime_block");
 shapeless("slime_ball_from_block", ["slime_block"], "slime_ball", 9);
 
+// Enchanting and brewing
+shaped("enchanting_table", [" B ", "D#D", "###"], { B: "book", D: "diamond", "#": "obsidian" }, "enchanting_table");
+shaped("anvil", ["BBB", " I ", "III"], { B: "iron_block", I: "iron_ingot" }, "anvil");
+shaped("brewing_stand", [" R ", "CCC"], { R: "blaze_rod", C: "cobblestone" }, "brewing_stand");
+shaped("cauldron", ["I I", "I I", "III"], { I: "iron_ingot" }, "cauldron");
+shaped("glass_bottle", ["G G", " G "], { G: "glass" }, "glass_bottle", 3);
+shapeless("blaze_powder", ["blaze_rod"], "blaze_powder", 2);
+shapeless("magma_cream", ["blaze_powder", "slime_ball"], "magma_cream");
+shapeless("fermented_spider_eye", ["spider_eye", "brown_mushroom", "sugar"], "fermented_spider_eye");
+shaped("glistering_melon_slice", ["NNN", "NMN", "NNN"], { N: "gold_nugget", M: "melon_slice" }, "glistering_melon_slice");
+shaped("golden_carrot", ["NNN", "NCN", "NNN"], { N: "gold_nugget", C: "carrot" }, "golden_carrot");
+
 // Dyes and colour
 shapeless("yellow_dye", ["dandelion"], "yellow_dye");
 shapeless("red_dye", ["poppy"], "red_dye");

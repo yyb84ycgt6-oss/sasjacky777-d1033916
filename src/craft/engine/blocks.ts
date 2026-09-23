@@ -105,7 +105,8 @@ export interface BlockDef {
   /** Places with a horizontal facing taken from the player. */
   facing?: "player" | "away" | "wall";
   /** Has an inventory or a screen. */
-  interact?: "crafting" | "furnace" | "chest" | "bed" | "door" | "tnt" | "noteblock" | "redstone";
+  interact?: "crafting" | "furnace" | "chest" | "bed" | "door" | "tnt" | "noteblock" | "redstone"
+    | "enchanting" | "anvil" | "brewing" | "cauldron";
   flammable?: boolean;
   /** Hidden from the creative inventory (technical blocks). */
   hidden?: boolean;
@@ -358,6 +359,38 @@ export function hopperBoxes(meta: number): Box[] {
 }
 
 /** Trapdoor meta: bits 0-1 facing (the hinge side), bit 2 open, bit 3 in the top half, bit 5 powered. */
+/** An anvil: a foot, a waist and a long top, broadside to whoever placed it (facing in bits 0-1). */
+export function anvilBoxes(meta: number): Box[] {
+  const alongX = (meta & 3) < 2;
+  const boxes: Box[] = [[2, 0, 2, 14, 4, 14], [4, 4, 3, 12, 5, 13], [6, 5, 4, 10, 10, 12], [3, 10, 0, 13, 16, 16]];
+  // Drawn with the top running along z; swapping x and z turns it a quarter.
+  return alongX ? boxes.map(([x0, y0, z0, x1, y1, z1]) => [z0, y0, x0, z1, y1, x1] as Box) : boxes;
+}
+
+/** A brewing stand: three feet, the rod, and a hanging bottle for each filled slot (meta bits 0-2). */
+export function brewingStandBoxes(meta: number): Box[] {
+  const boxes: Box[] = [[9, 0, 5, 15, 2, 11], [2, 0, 1, 8, 2, 7], [2, 0, 9, 8, 2, 15], [7, 0, 7, 9, 14, 9]];
+  const BOTTLES: Box[] = [[11, 2, 6, 15, 9, 10], [3, 2, 2, 7, 9, 6], [3, 2, 10, 7, 9, 14]];
+  for (let i = 0; i < 3; i++) if (meta & (1 << i)) boxes.push(BOTTLES[i]);
+  return boxes;
+}
+
+/**
+ * A cauldron: a floor, four walls on four legs, and — box 9 — the water, whose
+ * surface rises with the level in meta bits 0-1. The water stops just short of
+ * the walls so the two never fight over the same plane.
+ */
+export function cauldronBoxes(meta: number): Box[] {
+  const boxes: Box[] = [
+    [2, 3, 2, 14, 4, 14],
+    [0, 3, 0, 2, 16, 16], [14, 3, 0, 16, 16, 16], [2, 3, 0, 14, 16, 2], [2, 3, 14, 14, 16, 16],
+    [0, 0, 0, 4, 3, 4], [12, 0, 0, 16, 3, 4], [0, 0, 12, 4, 3, 16], [12, 0, 12, 16, 3, 16],
+  ];
+  const level = meta & 3;
+  if (level > 0) boxes.push([2.01, 4, 2.01, 13.99, 6 + level * 3, 13.99]);
+  return boxes;
+}
+
 export function trapdoorBoxes(meta: number): Box[] {
   if ((meta & 4) !== 0) return [panelBox(meta & 3, 3)];
   return [(meta & 8) !== 0 ? [0, 13, 0, 16, 16, 16] : [0, 0, 0, 16, 3, 16]];
@@ -781,6 +814,37 @@ add(178, "slime_block", "Slime Block", {
   layer: "translucent", opaque: false, lightFilter: 1, hardness: 0, material: "wool", slipperiness: 0.8,
 });
 
+// ---- enchanting and brewing (179+) -----------------------------------------------------
+
+add(179, "enchanting_table", "Enchanting Table", {
+  shape: "boxes", layer: "cutout", opaque: false, boxes: () => [[0, 0, 0, 16, 12, 16], [4, 13, 5, 12, 14, 11]],
+  collision: () => [[0, 0, 0, 16, 12, 16]],
+  textures: tex("enchanting_table_top", "enchanting_table_side", "obsidian"), hardness: 5, tool: P, harvestTier: 0,
+  emission: 7, interact: "enchanting",
+  // The open book resting above the table (the original's floats and turns; this one rests).
+  boxTexture: (_m, box, face) => (box === 1 ? (face === Face.Up ? "enchanting_book" : "enchanting_book_edge") : undefined),
+});
+const anvil = (id: number, name: string, displayName: string, top: string) => add(id, name, displayName, {
+  shape: "boxes", layer: "cutout", opaque: false, boxes: anvilBoxes, facing: "player", gravity: true,
+  textures: tex(top, "anvil", "anvil"), hardness: 5, tool: P, harvestTier: 0, material: "metal", interact: "anvil",
+  boxTexture: (_m, box, face) => (box === 3 && face === Face.Up ? top : "anvil"),
+  uvRotation: (m, face) => (face === Face.Up && (m & 3) >= 2 ? 1 : 0),
+});
+anvil(180, "anvil", "Anvil", "anvil_top");
+anvil(181, "chipped_anvil", "Chipped Anvil", "anvil_top_chipped");
+anvil(182, "damaged_anvil", "Damaged Anvil", "anvil_top_damaged");
+add(183, "brewing_stand", "Brewing Stand", {
+  shape: "boxes", layer: "cutout", opaque: false, boxes: brewingStandBoxes, collision: () => [[1, 0, 1, 15, 2, 15], [7, 0, 7, 9, 14, 9]],
+  textures: tex("brewing_stand_base"), hardness: 0.5, tool: P, harvestTier: 0, material: "metal", emission: 1, interact: "brewing",
+  boxTexture: (_m, box) => (box <= 2 ? "brewing_stand_base" : box === 3 ? "brewing_stand_rod" : "brewing_bottle"),
+});
+add(184, "cauldron", "Cauldron", {
+  shape: "boxes", layer: "cutout", opaque: false, boxes: cauldronBoxes, collision: () => cauldronBoxes(0),
+  textures: tex("cauldron_top", "cauldron_side", "cauldron_bottom"), hardness: 2, tool: P, harvestTier: 0, material: "metal",
+  interact: "cauldron",
+  boxTexture: (m, box, face) => ((m & 3) > 0 && box === 9 ? "cauldron_water" : box === 0 ? (face === Face.Up ? "cauldron_inner" : "cauldron_bottom") : undefined),
+});
+
 export const BLOCK_COUNT = BLOCKS.length;
 
 const AIR_DEF = BLOCKS[0];
@@ -827,6 +891,7 @@ export const B = {
   REPEATER: 165, COMPARATOR: 166, PISTON: 167, STICKY_PISTON: 168, PISTON_HEAD: 169, OBSERVER: 170,
   DAYLIGHT_DETECTOR: 171, HOPPER: 172, DISPENSER: 173, DROPPER: 174, IRON_DOOR: 175, OAK_TRAPDOOR: 176,
   IRON_TRAPDOOR: 177, SLIME_BLOCK: 178,
+  ENCHANTING_TABLE: 179, ANVIL: 180, CHIPPED_ANVIL: 181, DAMAGED_ANVIL: 182, BREWING_STAND: 183, CAULDRON: 184,
 } as const;
 
 export const isFluid = (id: number): boolean => id === B.WATER || id === B.LAVA;

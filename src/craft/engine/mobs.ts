@@ -14,7 +14,7 @@ import {
   Entity, Projectile, registerChickenSpawner, XpOrb, xpOrbValues,
   type DamageSource, type EntityContext, type EntityKind, type EntitySnapshot, type PlayerRef,
 } from "./entities";
-import { itemByName, type ItemStack } from "./items";
+import { itemByName, type ItemStack, type StatusEffect } from "./items";
 import { travel } from "./physics";
 import { raycastBlocks } from "./raycast";
 import { hashFloat } from "./rng";
@@ -50,6 +50,15 @@ export const MOB_SPECS: Record<MobKind, MobSpec> = {
 };
 
 export const MOB_KINDS = Object.keys(MOB_SPECS) as MobKind[];
+
+/** Undead take Smite's extra damage, are hurt by healing and healed by harming, and shrug off poison. */
+const UNDEAD = new Set<string>(["zombie", "skeleton"]);
+/** Arthropods take Bane of Arthropods' extra damage. */
+const ARTHROPODS = new Set<string>(["spider"]);
+export const isUndead = (kind: string): boolean => UNDEAD.has(kind);
+export const isArthropod = (kind: string): boolean => ARTHROPODS.has(kind);
+
+interface MobEffect { kind: StatusEffect; ticks: number; amp: number }
 export const isMobKind = (k: string): k is MobKind => k in MOB_SPECS;
 
 /**
@@ -110,6 +119,10 @@ export class Mob extends Entity {
   private hopDelay = 0;
   /** The slime's stretch (+) on a hop and squash (−) on landing, decaying to 0; drawn by the renderer. */
   squish = 0;
+  /** Timed effects from splash potions and poison. */
+  effects: MobEffect[] = [];
+  /** Looting on the weapon that last struck it, for its drops. */
+  looting = 0;
 
   constructor(kind: MobKind, x: number, y: number, z: number, id?: number) {
     const spec = MOB_SPECS[kind];
@@ -153,9 +166,56 @@ export class Mob extends Entity {
     return this.deathTime > 0;
   }
 
-  hurt(ctx: EntityContext, amount: number, source: DamageSource, fromX: number, fromZ: number, attacker?: string): boolean {
+  get maxHealth(): number {
+    return this.spec.health * this.size * this.size;
+  }
+
+  heal(n: number): void {
+    if (!this.dying) this.health = Math.min(this.maxHealth, this.health + n);
+  }
+
+  hasEffect(kind: StatusEffect): boolean {
+    return this.effects.some((e) => e.kind === kind);
+  }
+
+  private effectLevel(kind: StatusEffect): number {
+    return this.effects.find((e) => e.kind === kind)?.amp ?? -1;
+  }
+
+  /** A potion's effect on a mob; healing and harming swap for the undead, who also ignore poison and regeneration. */
+  applyEffect(ctx: EntityContext, kind: StatusEffect, seconds: number, amp: number, attacker?: string): void {
+    const undead = isUndead(this.kind);
+    if (kind === "instant_health" || kind === "instant_damage") {
+      const harm = (kind === "instant_damage") !== undead;
+      if (harm) {
+        this.invulnerable = 0;
+        this.hurt(ctx, 6 << amp, "magic", this.x, this.z, attacker);
+      } else this.heal(4 << amp);
+      return;
+    }
+    if (undead && (kind === "poison" || kind === "regeneration")) return;
+    if (seconds <= 0) return;
+    const existing = this.effects.find((e) => e.kind === kind);
+    if (existing) { existing.ticks = Math.max(existing.ticks, seconds * 20); existing.amp = Math.max(existing.amp, amp); }
+    else this.effects.push({ kind, ticks: seconds * 20, amp });
+  }
+
+  private tickEffects(ctx: EntityContext): void {
+    for (const e of this.effects) {
+      e.ticks--;
+      if (e.kind === "poison" && e.ticks % Math.max(1, 25 >> e.amp) === 0 && this.health > 1) {
+        this.invulnerable = 0;
+        this.hurt(ctx, 1, "magic", this.x, this.z);
+      }
+      if (e.kind === "regeneration" && e.ticks % Math.max(1, 50 >> e.amp) === 0) this.heal(1);
+    }
+    this.effects = this.effects.filter((e) => e.ticks > 0);
+  }
+
+  hurt(ctx: EntityContext, amount: number, source: DamageSource, fromX: number, fromZ: number, attacker?: string, knockback = 0): boolean {
     if (this.dying || this.removed) return false;
     if (this.invulnerable > 0 && source !== "void") return false;
+    if ((source === "fire" || source === "lava") && this.hasEffect("fire_resistance")) return false;
     this.health -= amount;
     this.hurtTime = 10;
     this.invulnerable = 10;
@@ -166,9 +226,9 @@ export class Mob extends Entity {
     // Knockback away from the source.
     const dx = this.body.x - fromX, dz = this.body.z - fromZ;
     const d = Math.hypot(dx, dz) || 1;
-    if (source !== "fire" && source !== "drown" && source !== "fall" && source !== "starve") {
-      this.body.vx = this.body.vx / 2 + (dx / d) * 0.4;
-      this.body.vz = this.body.vz / 2 + (dz / d) * 0.4;
+    if (source !== "fire" && source !== "drown" && source !== "fall" && source !== "starve" && source !== "magic") {
+      this.body.vx = this.body.vx / 2 + (dx / d) * (0.4 + knockback);
+      this.body.vz = this.body.vz / 2 + (dz / d) * (0.4 + knockback);
       if (this.body.onGround) this.body.vy = Math.min(0.4, this.body.vy / 2 + 0.4);
     }
     if (!this.spec.hostile) this.panic = 100;
@@ -202,6 +262,8 @@ export class Mob extends Entity {
       if (this.growth === 0) { this.body.width = this.spec.width; this.body.height = this.spec.height; }
     }
 
+    this.tickEffects(ctx);
+    if (this.dying) return;
     const move = { forward: 0, jump: false, yaw: this.yaw, speedMul: 1 };
     if (this.kind === "slime") this.slimeAi(ctx, move);
     else if (this.spec.hostile) this.hostileAi(ctx, move);
@@ -209,9 +271,11 @@ export class Mob extends Entity {
 
     this.yaw = turnToward(this.yaw, move.yaw, 0.35);
     const wasGround = b.onGround;
+    const swift = this.effectLevel("speed"), slow = this.effectLevel("slowness");
+    const potionSpeed = Math.max(0, (1 + (swift >= 0 ? 0.2 * (swift + 1) : 0)) * (1 - (slow >= 0 ? 0.15 * (slow + 1) : 0)));
     const res = travel(ctx.world, b, {
       forward: move.forward, strafe: 0, yaw: this.yaw, jump: move.jump, sneak: false, sprint: false, flying: false,
-      speed: this.spec.speed * move.speedMul * (this.baby ? 1.3 : 1), floats: true,
+      speed: this.spec.speed * move.speedMul * (this.baby ? 1.3 : 1) * potionSpeed, floats: true,
     });
     // Spiders climb walls.
     if (this.kind === "spider" && b.collidedH && move.forward > 0) b.vy = 0.2;
@@ -292,6 +356,8 @@ export class Mob extends Entity {
     for (const p of ctx.players()) {
       if (!filter(p)) continue;
       const d = Math.hypot(p.x - this.body.x, p.y - this.body.y, p.z - this.body.z);
+      // An invisible player is noticed only at arm's length.
+      if (p.invisible && d > range * 0.15) continue;
       if (d < bestD) { best = p; bestD = d; }
     }
     return best;
@@ -503,8 +569,11 @@ export class Mob extends Entity {
   /** Melee damage scaled by difficulty the way the original does it. */
   private bite(ctx: EntityContext, target: PlayerRef, base: number): void {
     const diff = ctx.difficulty;
+    const s = this.effectLevel("strength"), w = this.effectLevel("weakness");
+    base = Math.max(0, base + (s >= 0 ? 3 * (s + 1) : 0) - (w >= 0 ? 4 * (w + 1) : 0));
     const dmg = diff === 1 ? Math.min(base, base / 2 + 1) : diff === 3 ? base * 1.5 : base;
-    if (diff > 0) ctx.hurtPlayer(target.id, dmg, "mob", this.body.x, this.body.z, 0.4);
+    // The attacker's id lets Thorns answer back.
+    if (diff > 0 && dmg > 0) ctx.hurtPlayer(target.id, dmg, "mob", this.body.x, this.body.z, 0.4, this.id);
   }
 
   private shoot(ctx: EntityContext, target: PlayerRef): void {
@@ -583,7 +652,8 @@ export class Mob extends Entity {
   }
 
   private loot(ctx: EntityContext): ItemStack[] {
-    const r = (lo: number, hi: number) => lo + Math.floor(ctx.random() * (hi - lo + 1));
+    // Looting adds up to one more of each ordinary drop per level.
+    const r = (lo: number, hi: number) => lo + Math.floor(ctx.random() * (hi - lo + 1)) + (hi > 0 ? Math.floor(ctx.random() * (this.looting + 1)) : 0);
     const it = (name: string, count: number): ItemStack[] => (count > 0 ? [{ id: itemByName(name).id, count }] : []);
     const burnt = this.fireTicks > 0;
     switch (this.kind) {
@@ -607,6 +677,7 @@ export class Mob extends Entity {
         ht: this.hurtTime, dt: this.deathTime, g: this.growth, sh: this.sheared, wc: this.woolColor,
         fu: this.fuse, fi: this.fireTicks > 0 ? 1 : 0, lv: this.love > 0 ? 1 : 0, p: this.persistent ? 1 : 0,
         sz: this.size, sq: Math.round(this.squish * 10),
+        ef: this.effects.length ? this.effects.map((e) => [e.kind, e.ticks, e.amp]) : undefined,
       },
     };
   }
@@ -631,6 +702,10 @@ export class Mob extends Entity {
     // After the growth reset above, which would otherwise shrink a big slime's box back to one unit.
     if (this.kind === "slime" && (d.sz === 1 || d.sz === 2 || d.sz === 4)) this.setSize(d.sz, false);
     if (typeof d.sq === "number") this.squish = d.sq / 10;
+    if (Array.isArray(d.ef)) {
+      this.effects = (d.ef as unknown[]).flatMap((e) => (Array.isArray(e) && typeof e[0] === "string" && typeof e[1] === "number" && typeof e[2] === "number"
+        ? [{ kind: e[0] as StatusEffect, ticks: e[1], amp: e[2] }] : []));
+    } else this.effects = [];
   }
 }
 
