@@ -16,7 +16,7 @@ import type { World } from "./world";
 
 export type EntityKind =
   | "item" | "xp" | "arrow" | "snowball" | "egg" | "falling_block" | "tnt"
-  | "pig" | "cow" | "sheep" | "chicken" | "zombie" | "skeleton" | "creeper" | "spider";
+  | "pig" | "cow" | "sheep" | "chicken" | "zombie" | "skeleton" | "creeper" | "spider" | "slime";
 
 export interface PlayerRef {
   id: string;

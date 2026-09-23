@@ -189,6 +189,17 @@ export function skin(kind: string, variant = 0): HTMLCanvasElement {
       p.box(0, 32, 16, 2, 2, hex("#2a2018"));
       break;
     }
+    case "slime": {
+      // The outer gel is drawn see-through (models.ts); the core inside it carries the face.
+      const gel = hex("#86cc70"), rim = hex("#6fb35c");
+      p.box(0, 0, 8, 8, 8, (_f, x, y) => (x === 0 || y === 0 || x === 7 || y === 7 ? rim : gel), 0.06);
+      const core = p.box(0, 16, 6, 6, 6, hex("#5c9f4a"), 0.12);
+      const dark = hex("#1d3818");
+      p.fill({ x: core.front.x, y: core.front.y + 1, w: 2, h: 2 }, dark, 0);
+      p.fill({ x: core.front.x + 4, y: core.front.y + 1, w: 2, h: 2 }, dark, 0);
+      p.px(core.front.x + 3, core.front.y + 4, dark, 0);
+      break;
+    }
     case "player": {
       const hues = [
         ["#3aa8a8", "#2e3a8c"], ["#a83a3a", "#3a3a3a"], ["#3a8a3a", "#5a4a2a"], ["#8a3aa8", "#2a2a5a"],

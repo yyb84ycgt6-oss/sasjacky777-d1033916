@@ -13,25 +13,26 @@
  * and asks the host for everything else, so there is exactly one answer to
  * where the water went.
  */
-import { B, block, isFluid, isLeaves, isLog, type Material } from "../engine/blocks";
+import { B, block, containerSize, FACE_DIRS, isFluid, isLeaves, isLog, type Material } from "../engine/blocks";
+import { Redstone, type Body as RedstoneBody, type RedstoneContext } from "../engine/redstone";
 import { chunkId, newChest, newFurnace, type BlockEntity, type Chunk, type FurnaceEntity } from "../engine/chunk";
 import { DAY_TICKS, SEA_LEVEL, TICK_MS, WORLD_HEIGHT } from "../engine/constants";
 import { BlockRules, tickDelay } from "../engine/blockRules";
 import { COOK_TICKS, fuelTicks, smeltResult } from "../engine/crafting";
 import {
-  bumpEntityIds, FallingBlock, ItemEntity, PrimedTnt, XpOrb, xpOrbValues,
+  bumpEntityIds, FallingBlock, ItemEntity, PrimedTnt, Projectile, XpOrb, xpOrbValues,
   type DamageSource, type Entity, type EntityContext, type EntitySnapshot, type PlayerRef,
 } from "../engine/entities";
 import { blastImpact, explosionBlocks, exposure } from "../engine/explosion";
 import { itemDef, itemId, maxStack, resolveDrops, type ItemStack } from "../engine/items";
-import { Mob, MOB_KINDS, type MobKind } from "../engine/mobs";
+import { isSlimeChunk, Mob, MOB_KINDS, type MobKind } from "../engine/mobs";
 import { groundBlock } from "../engine/physics";
 import { Player, type PlayerEvent } from "../engine/player";
 import { Generator } from "../engine/worldgen";
 import { buildAtlas } from "../engine/atlas";
 import { WorkerPool } from "../engine/workerPool";
 import { World, type BlockChange } from "../engine/world";
-import { biomeDef } from "../engine/biomes";
+import { BiomeId, biomeDef } from "../engine/biomes";
 import { newlyEarned, type AdvancementEvent } from "../engine/advancements";
 import { GameAudio } from "../audio";
 import { WorldRenderer, type RemotePlayerView } from "../render/renderer";
@@ -72,6 +73,8 @@ export interface NetLink {
   effect(kind: "sound" | "particles" | "explosion", data: unknown[]): void;
   /** A guest earned an advancement through something only the host simulates (a kill, a night slept through). */
   advanceRemote?(id: string, event: AdvancementEvent): void;
+  /** A piston shoved a guest: move them on their own screen, which owns their position. */
+  pushRemote?(id: string, dx: number, dy: number, dz: number): void;
   close(): void;
 }
 
@@ -119,6 +122,7 @@ export class Game {
   readonly audio = new GameAudio();
   readonly streamer: Streamer;
   readonly rules: BlockRules;
+  readonly redstone: Redstone;
   readonly saves: SaveStore;
   readonly player: Player;
   readonly controls: Controls = emptyControls();
@@ -208,12 +212,18 @@ export class Game {
       random: Math.random,
     });
 
+    this.redstone = new Redstone(this.world, this.redstoneContext());
+    this.unsubscribers.push(this.world.onChange((c) => this.redstone.onChange(c)));
+
     this.streamer = new Streamer(
       this.world, this.pool,
       { load: (cx, cz) => this.loadChunk(cx, cz), unload: (c) => this.unloadChunk(c) },
       { setChunk: (id, cx, cz, mesh) => this.renderer.setChunk(id, cx, cz, mesh), removeChunk: (id) => this.renderer.removeChunk(id) },
       opts.settings.renderDistance,
-      (chunk, fromSave) => this.net?.chunkLoaded?.(chunk.cx, chunk.cz, fromSave),
+      (chunk, fromSave) => {
+        this.net?.chunkLoaded?.(chunk.cx, chunk.cz, fromSave);
+        if (this.simulates) this.redstone.onChunkLoaded(chunk);
+      },
     );
     this.applySettings(opts.settings);
 
@@ -377,6 +387,124 @@ export class Game {
     }
   }
 
+  private redstoneContext(): RedstoneContext {
+    return {
+      sound: (name, x, y, z, v, p) => this.sound(name, x, y, z, v, p),
+      particles: (kind, x, y, z, count) => this.particles(kind, x, y, z, count ?? 1),
+      dropItems: (x, y, z, stacks) => { for (const s of stacks) this.dropItem(x, y, z, s); },
+      primeTnt: (x, y, z) => {
+        this.spawn(new PrimedTnt(x + 0.5, y, z + 0.5, 80));
+        this.sound("fuse", x + 0.5, y + 0.5, z + 0.5);
+      },
+      bodies: () => this.redstoneBodies(),
+      takeItemsIn: (x0, y0, z0, x1, y1, z1, take) => {
+        for (const e of this.entities.values()) {
+          if (!(e instanceof ItemEntity) || e.removed || e.pickupDelay > 0) continue;
+          const b = e.body;
+          if (b.x < x0 || b.x >= x1 || b.y < y0 || b.y >= y1 || b.z < z0 || b.z >= z1) continue;
+          const n = take(e.stack);
+          if (n >= e.stack.count) e.removed = true;
+          else if (n > 0) e.stack = { ...e.stack, count: e.stack.count - n };
+        }
+      },
+      dispense: (x, y, z, face, stack) => this.dispense(x, y, z, face, stack),
+      dropOne: (x, y, z, face, stack) => {
+        const [dx, dy, dz] = FACE_DIRS[face];
+        this.dropItem(x + 0.5 + dx * 0.7, y + 0.35 + dy * 0.7, z + 0.5 + dz * 0.7, { ...stack, count: 1 },
+          dx * 0.25 + (Math.random() - 0.5) * 0.05, 0.1 + dy * 0.25, dz * 0.25 + (Math.random() - 0.5) * 0.05, null, 5);
+      },
+      sunlight: () => this.sunlight(),
+      containerChanged: (x, y, z) => this.containerChanged(x, y, z),
+      ensureContainer: (x, y, z) => this.containerAt(x, y, z, "chest"),
+    };
+  }
+
+  /** Players (here and online) and entities, as things a pressure plate feels and a piston shoves. */
+  private redstoneBodies(): RedstoneBody[] {
+    const out: RedstoneBody[] = [];
+    const p = this.player, pb = p.body;
+    if (!p.dead && p.gameMode !== "spectator") {
+      out.push({ x: pb.x, y: pb.y, z: pb.z, width: pb.width, height: pb.height, mob: true, move: (dx, dy, dz) => { pb.x += dx; pb.y += dy; pb.z += dz; } });
+    }
+    for (const r of this.remote.values()) {
+      if (r.dead || r.gameMode === "spectator") continue;
+      out.push({ x: r.x, y: r.y, z: r.z, width: 0.6, height: 1.8, mob: true, move: (dx, dy, dz) => this.net?.pushRemote?.(r.id, dx, dy, dz) });
+    }
+    for (const e of this.entities.values()) {
+      if (e.removed) continue;
+      const b = e.body;
+      out.push({ x: b.x, y: b.y, z: b.z, width: b.width, height: b.height, mob: e instanceof Mob, move: (dx, dy, dz) => { b.x += dx; b.y += dy; b.z += dz; } });
+    }
+    return out;
+  }
+
+  /**
+   * What a dispenser does with an item: arrows and snowballs fly, buckets fill
+   * and empty, TNT is lit, bone meal grows what is in front. Returns what is
+   * left in the slot, or undefined to have the item simply dropped.
+   */
+  private dispense(x: number, y: number, z: number, face: number, stack: ItemStack): Slot | undefined {
+    const name = itemDef(stack.id)?.name;
+    const [dx, dy, dz] = FACE_DIRS[face];
+    const fx = x + dx, fy = y + dy, fz = z + dz;
+    const less: Slot = stack.count > 1 ? { ...stack, count: stack.count - 1 } : null;
+    const w = this.world;
+    if (name === "arrow" || name === "snowball" || name === "egg") {
+      const speed = name === "arrow" ? 1.1 : 0.9;
+      const spread = () => (Math.random() - 0.5) * 0.08;
+      this.spawn(new Projectile(name, x + 0.5 + dx * 0.7, y + 0.5 + dy * 0.7, z + 0.5 + dz * 0.7,
+        dx * speed + spread(), dy * speed + 0.1 + spread(), dz * speed + spread(), null));
+      this.sound(name === "arrow" ? "bow" : "throw", x + 0.5, y + 0.5, z + 0.5, 0.6);
+      return less;
+    }
+    if (name === "water_bucket" || name === "lava_bucket") {
+      const cur = w.blockAt(fx, fy, fz);
+      if (cur !== 0 && !(block(cur).replaceable && !isFluid(cur))) return undefined;
+      w.setBlock(fx, fy, fz, name === "water_bucket" ? B.WATER : B.LAVA, 0, "world");
+      this.sound("bucket_empty", fx + 0.5, fy + 0.5, fz + 0.5);
+      return { id: itemId("bucket"), count: 1 };
+    }
+    if (name === "bucket") {
+      const cur = w.blockAt(fx, fy, fz);
+      if (!isFluid(cur) || (w.getMeta(fx, fy, fz) & 15) !== 0) return undefined;
+      w.setBlock(fx, fy, fz, B.AIR, 0, "world");
+      const full: ItemStack = { id: itemId(cur === B.WATER ? "water_bucket" : "lava_bucket"), count: 1 };
+      this.sound("bucket_fill", fx + 0.5, fy + 0.5, fz + 0.5);
+      if (stack.count === 1) return full;
+      this.dropItem(fx + 0.5, fy + 0.3, fz + 0.5, full);
+      return less;
+    }
+    if (name === "bone_meal") {
+      if (this.rules.boneMeal(fx, fy, fz)) {
+        this.particles("crit", fx + 0.5, fy + 0.8, fz + 0.5, 8);
+        return less;
+      }
+      return stack;
+    }
+    if (name === "tnt") {
+      if (w.blockAt(fx, fy, fz) !== 0 && block(w.blockAt(fx, fy, fz)).solid) return undefined;
+      this.spawn(new PrimedTnt(fx + 0.5, fy, fz + 0.5, 80));
+      this.sound("fuse", fx + 0.5, fy + 0.5, fz + 0.5);
+      return less;
+    }
+    if (name === "flint_and_steel") {
+      if (w.blockAt(fx, fy, fz) !== B.TNT) return stack;
+      w.setBlock(fx, fy, fz, B.AIR, 0, "world");
+      this.spawn(new PrimedTnt(fx + 0.5, fy, fz + 0.5, 80));
+      this.sound("fuse", fx + 0.5, fy + 0.5, fz + 0.5);
+      const used = (stack.damage ?? 0) + 1;
+      return used >= (itemDef(stack.id)?.durability ?? 64) ? null : { ...stack, damage: used };
+    }
+    return undefined;
+  }
+
+  /** How bright the sun itself is (0 at night): daylight without the floor that keeps nights visible. */
+  sunlight(): number {
+    const angle = ((this.time % DAY_TICKS) / DAY_TICKS) * Math.PI * 2;
+    const d = Math.max(0, Math.min(1, Math.sin(angle) * 2.2 + 0.2));
+    return d * (1 - this.rain * 0.25 - this.thunder * 0.25);
+  }
+
   private makeContext(): EntityContext {
     // The getters below run with `this` bound to the object literal, so they need the game by name.
     // eslint-disable-next-line @typescript-eslint/no-this-alias
@@ -529,7 +657,7 @@ export class Game {
   containerAt(x: number, y: number, z: number, kind: "chest" | "furnace"): BlockEntity {
     let e = this.world.getEntity(x, y, z);
     if (!e || e.kind !== kind) {
-      e = kind === "chest" ? newChest() : newFurnace();
+      e = kind === "chest" ? newChest(containerSize(this.world.blockAt(x, y, z)) || 27) : newFurnace();
       this.world.setEntity(x, y, z, e);
     }
     return e;
@@ -540,7 +668,10 @@ export class Game {
     const c = this.world.chunkAt(x, z);
     if (c) { c.modified = true; this.dirtySave.add(c.id); }
     this.net?.blockEntity(x, y, z, this.world.getEntity(x, y, z) ?? null);
-    this.bumpInv();
+    // Comparators reading this container look again.
+    if (this.simulates) this.redstone.containerChanged(x, y, z);
+    const s = this.screen;
+    if (s && (s.kind === "chest" || s.kind === "furnace") && s.x === x && s.y === y && s.z === z) this.bumpInv();
   }
 
   private tickFurnaces(): void {
@@ -551,7 +682,10 @@ export class Game {
         if (this.tickFurnace(e, x, y, z)) {
           c.modified = true;
           this.dirtySave.add(c.id);
-          if (this.tickCount % 10 === 0) this.net?.blockEntity(x, y, z, e);
+          if (this.tickCount % 10 === 0) {
+            this.net?.blockEntity(x, y, z, e);
+            this.redstone.containerChanged(x, y, z);
+          }
           if (this.screen?.kind === "furnace" && this.screen.x === x && this.screen.y === y && this.screen.z === z) this.bumpInv();
         }
       }
@@ -1003,6 +1137,7 @@ export class Game {
     // Scheduled block updates, budgeted so a lava lake settling cannot stall a frame.
     const due = world.takeDue(2000);
     for (const [x, y, z] of due) this.rules.onTick(x, y, z);
+    this.redstone.step(world.tick);
     this.rules.randomTicks(this.playerRefs().map((r) => ({ x: r.x, z: r.z })), 4);
     this.tickFurnaces();
 
@@ -1096,8 +1231,15 @@ export class Game {
     const sky = (l >> 4) * daylight, blockLight = l & 15;
     const biome = biomeDef(chunk.biomes[((z & 15) << 4) | (x & 15)]);
     if (hostile) {
+      // Slime chunks breed slimes deep underground whatever the light, which is what makes them findable.
+      if (y < 40 && isSlimeChunk(this.meta.seed, x >> 4, z >> 4) && Math.random() < 0.3) {
+        this.spawn(new Mob("slime", x + 0.5, y, z + 0.5));
+        return;
+      }
       if (blockLight > 0 || sky >= 8) return;
-      const kinds: MobKind[] = ["zombie", "skeleton", "creeper", "spider"];
+      // Swamps add slimes to the night's surface spawns.
+      const swamp = biome.id === BiomeId.Swamp && y > SEA_LEVEL - 4;
+      const kinds: MobKind[] = swamp ? ["zombie", "skeleton", "creeper", "spider", "slime", "slime"] : ["zombie", "skeleton", "creeper", "spider"];
       const kind = kinds[Math.floor(Math.random() * kinds.length)];
       const group = 1 + Math.floor(Math.random() * 3);
       for (let i = 0; i < group; i++) this.spawn(new Mob(kind, x + 0.5 + (i % 2), y, z + 0.5 + Math.floor(i / 2)));

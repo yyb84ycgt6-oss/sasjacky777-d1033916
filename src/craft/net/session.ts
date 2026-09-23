@@ -290,6 +290,7 @@ export class NetSession implements NetLink {
   }
   giveRemote(id: string, stack: ItemStack): void { this.push(["gv", id, stack]); }
   advanceRemote(id: string, event: AdvancementEvent): void { this.push(["av", id, event]); }
+  pushRemote(id: string, dx: number, dy: number, dz: number): void { this.push(["pu", id, dx, dy, dz]); }
   xpRemote(id: string, amount: number): void { this.push(["xp", id, amount]); }
   effect(kind: "sound" | "particles" | "explosion", data: unknown[]): void {
     if (this.role === "host") this.push(["fx", kind, ...data]);
@@ -504,6 +505,13 @@ export class NetSession implements NetLink {
           }
           break;
         case "xp": if (op[1] === this.myId && finite(op[2])) g.addXp(op[2] as number); break;
+        case "pu":
+          // Shoved by a piston on the host.
+          if (op[1] === this.myId && fromHost && finite(op[2], op[3], op[4])) {
+            const b = g.player.body;
+            b.x += Math.max(-1, Math.min(1, op[2] as number)); b.y += Math.max(-1.1, Math.min(1.1, op[3] as number)); b.z += Math.max(-1, Math.min(1, op[4] as number));
+          }
+          break;
         case "av": {
           const ev = op[2] as AdvancementEvent | null;
           if (op[1] === this.myId && fromHost && ev && (ev.kind === "kill" || ev.kind === "sleep" || ev.kind === "eat")) g.advance(ev);

@@ -34,7 +34,7 @@ const HELP = [
   "/tp <x> <y> <z>, /tp spawn",
   "/setblock <x> <y> <z> <block>, /fill <x1> <y1> <z1> <x2> <y2> <z2> <block>",
   "/weather clear|rain|thunder",
-  "/summon <pig|cow|sheep|chicken|zombie|skeleton|creeper|spider>",
+  "/summon <mob> [size]  (pig, cow, sheep, chicken, zombie, skeleton, creeper, spider, slime)",
   "/effect <regeneration|speed|night_vision|...> [seconds] | /effect clear",
   "/xp add <amount>, /clear, /kill, /seed, /spawnpoint",
   "/difficulty peaceful|easy|normal|hard, /gamerule <rule> <true|false>",
@@ -214,7 +214,13 @@ export function runCommand(game: Game, line: string): Line[] {
       if (!MOB_KINDS.includes(kind)) return [{ text: `Usage: /summon ${MOB_KINDS.join("|")}`, color: ERR }];
       const b = p.body;
       const d = 2;
-      game.spawn(new Mob(kind, b.x - Math.sin(p.yaw) * d, b.y, b.z - Math.cos(p.yaw) * d));
+      const mob = new Mob(kind, b.x - Math.sin(p.yaw) * d, b.y, b.z - Math.cos(p.yaw) * d);
+      if (kind === "slime" && args[1] !== undefined) {
+        const size = Number(args[1]);
+        if (size !== 1 && size !== 2 && size !== 4) return [{ text: "A slime's size is 1, 2 or 4", color: ERR }];
+        mob.setSize(size);
+      }
+      game.spawn(mob);
       return [{ text: `Summoned new ${kind}` }];
     }
     case "effect": {

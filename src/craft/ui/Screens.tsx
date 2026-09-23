@@ -1,6 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { allRecipes, canAfford, recipeResult, type Recipe } from "../engine/crafting";
 import { allItems, itemDef, type Category } from "../engine/items";
+import { B } from "../engine/blocks";
 import type { Slot } from "../engine/inventory";
 import type { Game } from "../game/game";
 import {
@@ -139,6 +140,7 @@ const TABS: { id: Category | "search" | "survival"; label: string; icon: string 
   { id: "colored", label: "Colored Blocks", icon: "cyan_wool" },
   { id: "natural", label: "Natural Blocks", icon: "grass_block" },
   { id: "functional", label: "Functional Blocks", icon: "crafting_table" },
+  { id: "redstone", label: "Redstone Blocks", icon: "redstone" },
   { id: "tools", label: "Tools & Utilities", icon: "iron_pickaxe" },
   { id: "combat", label: "Combat", icon: "diamond_sword" },
   { id: "food", label: "Food & Drinks", icon: "cooked_beef" },
@@ -314,10 +316,17 @@ export function ChestScreen({ game, mobile }: { game: Game; mobile: boolean }) {
   const [quick, setQuick] = useState(false);
   const chest = chestView(game);
   if (!chest) return null;
+  const s = game.screen;
+  const blockId = s && s.kind === "chest" ? game.world.blockAt(s.x, s.y, s.z) : B.CHEST;
+  // The same screen serves chests (27), hoppers (a row of 5) and dispensers and droppers (3×3).
+  const title = blockId === B.HOPPER ? "Item Hopper" : blockId === B.DISPENSER ? "Dispenser" : blockId === B.DROPPER ? "Dropper" : "Chest";
+  const cols = chest.items.length === 9 ? 3 : chest.items.length === 5 ? 5 : 9;
   return (
     <>
-      <Frame game={game} title="Chest" mobile={mobile} quick={quick} setQuick={setQuick}>
-        <Grid slots={chest.items} cols={9} section="chest" game={game} onHover={onHover} quick={quick} />
+      <Frame game={game} title={title} mobile={mobile} quick={quick} setQuick={setQuick}>
+        <div style={{ display: "flex", justifyContent: "center" }}>
+          <Grid slots={chest.items} cols={cols} section="chest" game={game} onHover={onHover} quick={quick} />
+        </div>
         <div className="bc-label">Inventory</div>
         <PlayerSlots game={game} onHover={onHover} quick={quick} />
       </Frame>

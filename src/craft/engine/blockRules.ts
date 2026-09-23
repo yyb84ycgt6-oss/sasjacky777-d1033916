@@ -8,7 +8,8 @@
  * it is saved and sent to guests on the same path.
  */
 import {
-  B, block, CROP_MAX_AGE, FACING_DIRS, isCrop, isFluid, isLeaves, isLog, isSapling, OPPOSITE_FACING,
+  B, block, CROP_MAX_AGE, FACE_DIRS, FACING_DIRS, isButton, isCrop, isDoor, isFluid, isLeaves, isLog, isRedstoneTorch, isSapling,
+  isSlab, OPPOSITE_FACING,
 } from "./blocks";
 import { biomeDef } from "./biomes";
 import { blockIndex, WORLD_HEIGHT } from "./constants";
@@ -42,6 +43,17 @@ export function supported(world: World, x: number, y: number, z: number, id: num
   if (below < 0) return true; // unloaded: assume fine rather than break things at the edge
   const belowDef = block(below);
   switch (id) {
+    case B.REDSTONE_WIRE: case B.REPEATER: case B.COMPARATOR:
+      // On anything with a full top: a solid block, a top slab, a hopper.
+      return belowDef.opaque || below === B.HOPPER || (isSlab(below) && world.getMeta(x, y - 1, z) !== 0);
+    case B.LEVER: case B.STONE_BUTTON: case B.OAK_BUTTON: {
+      const [dx, dy, dz] = FACE_DIRS[meta & 7];
+      const holder = world.getBlock(x + dx, y + dy, z + dz);
+      return holder < 0 || block(holder).opaque;
+    }
+    case B.STONE_PLATE: case B.OAK_PLATE:
+      return belowDef.opaque || below === B.OAK_FENCE || below === B.HOPPER || (isSlab(below) && world.getMeta(x, y - 1, z) !== 0);
+    case B.REDSTONE_TORCH: case B.REDSTONE_TORCH_OFF:
     case B.TORCH: {
       if (meta === 0) return belowDef.solid && (belowDef.opaque || below === B.OAK_FENCE || below === B.GLASS);
       const [dx, dz] = FACING_DIRS[(meta - 1) & 3];
@@ -77,10 +89,10 @@ export function supported(world: World, x: number, y: number, z: number, id: num
       return below === B.WATER || below === B.ICE;
     case B.SNOW: case B.LANTERN:
       return belowDef.solid && below !== B.ICE;
-    case B.OAK_DOOR: {
+    case B.OAK_DOOR: case B.IRON_DOOR: {
       const upper = (meta & 8) !== 0;
-      if (upper) return world.blockAt(x, y - 1, z) === B.OAK_DOOR;
-      return belowDef.opaque && world.blockAt(x, y + 1, z) === B.OAK_DOOR;
+      if (upper) return world.blockAt(x, y - 1, z) === id;
+      return belowDef.opaque && world.blockAt(x, y + 1, z) === id;
     }
     case B.RED_BED: {
       const head = (meta & 4) !== 0;
@@ -111,7 +123,7 @@ export class BlockRules {
       let stacks = resolveDrops(def.drops, id, this.ctx.random);
       if (isCrop(id)) stacks = cropDrops(id, meta, this.ctx.random);
       // A door or bed drops once, from its lower half / foot.
-      if (id === B.OAK_DOOR && meta & 8) stacks = [];
+      if (isDoor(id) && meta & 8) stacks = [];
       if (id === B.RED_BED && meta & 4) stacks = [];
       this.ctx.dropItems(x + 0.5, y + 0.3, z + 0.5, stacks);
     }
@@ -167,7 +179,9 @@ export class BlockRules {
     if (id === 0) return true;
     if (isFluid(id)) return false;
     const def = block(id);
-    return !def.solid && id !== B.LADDER && id !== B.OAK_DOOR && (def.replaceable || def.shape === "cross" || def.shape === "crop" || id === B.TORCH || id === B.SNOW)
+    // Water washes away dust, torches, levers, buttons and diodes, as it does plants.
+    if (def.shape === "wire" || isRedstoneTorch(id) || id === B.LEVER || isButton(id) || id === B.REPEATER || id === B.COMPARATOR) return true;
+    return !def.solid && id !== B.LADDER && !isDoor(id) && (def.replaceable || def.shape === "cross" || def.shape === "crop" || id === B.TORCH || id === B.SNOW)
       && !(fluid === B.WATER && id === B.LILY_PAD);
   }
 

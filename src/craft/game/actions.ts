@@ -11,7 +11,8 @@
  */
 import * as THREE from "three";
 import {
-  B, block, CLOCKWISE_FACING, collisionBoxes, Face, FACING_DIRS, isCrop, isFluid, isLeaves, isLog, isSlab, isStairs, OPPOSITE_FACING,
+  B, block, CLOCKWISE_FACING, collisionBoxes, Face, FACE_OF_FACING, FACING_DIRS, isButton, isCrop, isDoor, isFluid, isLeaves, isLog,
+  isRedstoneTorch, isSlab, isStairs, isTrapdoor, OPPOSITE_FACE, OPPOSITE_FACING,
   type BlockDef,
 } from "../engine/blocks";
 import { cropDrops, supported } from "../engine/blockRules";
@@ -358,7 +359,7 @@ export class Actions {
     if (drops && harvest) {
       if (held?.tool?.type === "shears" && SHEARABLE.has(id)) stacks = [{ id, count: 1 }];
       else if (isCrop(id)) stacks = cropDrops(id, meta, Math.random);
-      else if (id === B.OAK_DOOR && meta & 8) stacks = [];
+      else if (isDoor(id) && meta & 8) stacks = [];
       else if (id === B.RED_BED && meta & 4) stacks = [];
       else if (isSlab(id) && meta === 2) stacks = [{ id, count: 2 }];
       else stacks = resolveDrops(def.drops, id, Math.random);
@@ -367,10 +368,10 @@ export class Actions {
     else g.world.setEntity(x, y, z, undefined);
 
     // Two-block things come down together.
-    if (id === B.OAK_DOOR) {
+    if (isDoor(id)) {
       const other = meta & 8 ? y - 1 : y + 1;
-      if (g.world.blockAt(x, other, z) === B.OAK_DOOR) g.world.setBlock(x, other, z, B.AIR, 0, "player");
-      if (meta & 8 && drops && harvest) stacks = [{ id: itemId("oak_door"), count: 1 }];
+      if (g.world.blockAt(x, other, z) === id) g.world.setBlock(x, other, z, B.AIR, 0, "player");
+      if (meta & 8 && drops && harvest) stacks = [{ id: itemId(id === B.IRON_DOOR ? "iron_door" : "oak_door"), count: 1 }];
     }
     if (id === B.RED_BED) {
       const [dx, dz] = FACING_DIRS[meta & 3];
@@ -690,7 +691,16 @@ export class Actions {
         g.sound("chest_open", x + 0.5, y + 0.5, z + 0.5, 0.5);
         g.setScreen({ kind: "chest", x, y, z });
         return true;
+      case "redstone":
+        return this.useRedstone(x, y, z, id, meta);
       case "door": {
+        if (isTrapdoor(id)) {
+          const open = (meta & 4) === 0;
+          w.setBlock(x, y, z, id, meta ^ 4, "player");
+          g.sound(open ? "door_open" : "door_close", x + 0.5, y + 0.5, z + 0.5, 0.6, 1.2);
+          this.swing();
+          return true;
+        }
         const lowerY = meta & 8 ? y - 1 : y;
         const lower = w.getMeta(x, lowerY, z);
         const open = (lower & 4) === 0;
@@ -718,6 +728,42 @@ export class Actions {
       }
     }
     return false;
+  }
+
+  /** Flicking a lever, pressing a button, setting a repeater's delay or a comparator's mode, inverting a detector. */
+  private useRedstone(x: number, y: number, z: number, id: number, meta: number): boolean {
+    const g = this.game;
+    const w = g.world;
+    const click = (pitch: number) => g.sound("click", x + 0.5, y + 0.5, z + 0.5, 0.35, pitch);
+    if (id === B.LEVER) {
+      w.setBlock(x, y, z, id, meta ^ 8, "player");
+      click((meta & 8) !== 0 ? 0.5 : 0.6);
+    } else if (isButton(id)) {
+      if ((meta & 8) === 0) {
+        w.setBlock(x, y, z, id, meta | 8, "player");
+        click(0.6);
+      }
+    } else if (id === B.REPEATER) {
+      const delay = ((((meta >> 2) & 3) + 1) & 3) << 2;
+      w.setBlock(x, y, z, id, (meta & ~12) | delay, "player");
+      click(0.55);
+    } else if (id === B.COMPARATOR) {
+      w.setBlock(x, y, z, id, meta ^ 4, "player");
+      click((meta & 4) !== 0 ? 0.5 : 0.55);
+    } else if (id === B.DAYLIGHT_DETECTOR) {
+      w.setBlock(x, y, z, id, meta ^ 16, "player");
+      click(0.6);
+    } else return false;
+    this.swing();
+    return true;
+  }
+
+  /** Six-way facing for a placed block: toward the player, including up or down when looking steeply. */
+  private facing6(): number {
+    const p = this.game.player;
+    if (p.pitch < -0.8) return Face.Up;
+    if (p.pitch > 0.8) return Face.Down;
+    return FACE_OF_FACING[OPPOSITE_FACING[lookFacing(p.yaw)]];
   }
 
   private trySleep(x: number, y: number, z: number, meta: number): void {
@@ -816,7 +862,7 @@ export class Actions {
       meta = hit.face === Face.Up || hit.face === Face.Down ? 0 : hit.face === Face.East || hit.face === Face.West ? 1 : 2;
     }
     if (isSlab(id)) meta = hit.face === Face.Down || (hit.face !== Face.Up && fracY > 0.5) ? 1 : 0;
-    if (id === B.TORCH) {
+    if (id === B.TORCH || isRedstoneTorch(id)) {
       if (hit.face === Face.Down) return false;
       if (hit.face === Face.Up) meta = 0;
       else meta = 1 + facingOfNormal(hit.face);
@@ -830,6 +876,23 @@ export class Actions {
       if (hit.face === Face.Up || hit.face === Face.Down) return false;
       meta = OPPOSITE_FACING[facingOfNormal(hit.face)];
     }
+    if (id === B.LEVER || isButton(id)) {
+      // Hangs on the face that was clicked; a floor lever lies along the way the player faces.
+      const attach = OPPOSITE_FACE[hit.face];
+      meta = attach;
+      if (id === B.LEVER && (attach === Face.Down || attach === Face.Up) && look >= 2) meta |= 16;
+      if (!supported(w, x, y, z, id, meta)) return false;
+    }
+    if (def.facing6) {
+      // A hopper points into the block it was placed against; the rest face the player.
+      if (id === B.HOPPER) meta = hit.face === Face.Up || hit.face === Face.Down ? Face.Down : OPPOSITE_FACE[hit.face];
+      else meta = this.facing6();
+    }
+    if (isTrapdoor(id)) {
+      const hinge = facingOfNormal(OPPOSITE_FACE[hit.face]);
+      meta = hinge >= 0 ? hinge : OPPOSITE_FACING[look];
+      if (hit.face === Face.Down || (hit.face !== Face.Up && fracY > 0.5)) meta |= 8;
+    }
     if (isLeaves(id)) meta = 1; // placed leaves never decay
 
     // Crops go on farmland; lily pads on water.
@@ -842,19 +905,20 @@ export class Actions {
       x = fluid.x; y = fluid.y + 1; z = fluid.z;
       if (w.blockAt(x, y, z) !== 0) return false;
     }
-    if (def.needsSupport && id !== B.TORCH && id !== B.LADDER && id !== B.OAK_DOOR && id !== B.RED_BED && !supported(w, x, y, z, id, meta)) return false;
+    const selfChecked = id === B.TORCH || isRedstoneTorch(id) || id === B.LADDER || isDoor(id) || id === B.RED_BED || id === B.LEVER || isButton(id);
+    if (def.needsSupport && !selfChecked && !supported(w, x, y, z, id, meta)) return false;
 
-    if (id === B.OAK_DOOR) {
+    if (isDoor(id)) {
       if (!block(w.blockAt(x, y - 1, z)).opaque) return false;
       const above = w.getBlock(x, y + 1, z);
       if (above < 0 || !(above === 0 || block(above).replaceable)) return false;
       const facing = look;
       // Hinge on the side away from a neighbouring door, so double doors open outward.
       const [lx, lz] = FACING_DIRS[CLOCKWISE_FACING[CLOCKWISE_FACING[CLOCKWISE_FACING[facing]]]];
-      const hinge = w.blockAt(x + lx, y, z + lz) === B.OAK_DOOR ? 16 : 0;
+      const hinge = w.blockAt(x + lx, y, z + lz) === id ? 16 : 0;
       if (this.collidesWithEntity(x, y, z, id, facing) || this.collidesWithEntity(x, y + 1, z, id, facing | 8)) return false;
-      w.setBlock(x, y, z, B.OAK_DOOR, facing | hinge, "player");
-      w.setBlock(x, y + 1, z, B.OAK_DOOR, facing | 8 | hinge, "player");
+      w.setBlock(x, y, z, id, facing | hinge, "player");
+      w.setBlock(x, y + 1, z, id, facing | 8 | hinge, "player");
       return this.afterPlace(x, y, z, def, item);
     }
     if (id === B.RED_BED) {
@@ -964,6 +1028,11 @@ export class Actions {
     let id = g.world.blockAt(t.x, t.y, t.z);
     if (id === B.LIT_FURNACE) id = B.FURNACE;
     if (id === B.OAK_DOOR) id = itemId("oak_door");
+    if (id === B.IRON_DOOR) id = itemId("iron_door");
+    if (id === B.REDSTONE_WIRE) id = itemId("redstone");
+    if (id === B.REDSTONE_TORCH_OFF) id = B.REDSTONE_TORCH;
+    if (id === B.REDSTONE_LAMP_ON) id = B.REDSTONE_LAMP;
+    if (id === B.PISTON_HEAD) id = (g.world.getMeta(t.x, t.y, t.z) & 8) !== 0 ? B.STICKY_PISTON : B.PISTON;
     if (id === B.RED_BED) id = itemId("red_bed");
     if (id === B.WHEAT) id = itemId("wheat_seeds");
     if (id === B.CARROTS) id = itemId("carrot");

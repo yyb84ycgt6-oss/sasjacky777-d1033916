@@ -49,11 +49,28 @@ around, and buttons jump, sneak, mine and place — or "Tap to interact": tap to
 place or use, hold to mine. Inventories have a quick-move toggle in place of
 shift-click, and a long press is a right click.
 
+## Redstone
+
+`engine/redstone.ts` runs dust, torches, levers, buttons, pressure plates,
+repeaters, comparators, lamps, pistons (sticky, with slime blocks dragging what
+touches them), observers, daylight detectors, hoppers, droppers, dispensers,
+iron doors and trapdoors, note blocks and TNT. It follows the original's rules
+closely enough that circuits built from memory work: dust loses a level a block
+and does not power more dust through the block it points into; a torch inverts
+a redstone tick later and burns out if it is flicked more than eight times in
+three seconds; a piston pushes at most twelve blocks and never obsidian, so a
+slime block resting on the ground cannot be shoved sideways (it drags the
+ground). Only the world's host runs it; guests see the result as block changes.
+
+Slimes (swamps at night, and one chunk in ten below y 40 at any light) drop
+the slimeballs sticky pistons and slime blocks need.
+
 ## Commands
 
 With cheats on (a world option) or in creative: `/time`, `/gamemode`, `/give`,
 `/tp`, `/weather`, `/summon`, `/effect`, `/xp`, `/setblock`, `/fill`, `/kill`,
-`/clear`, `/spawnpoint`, `/difficulty`, `/gamerule`; `/seed` and `/help` for
+`/clear`, `/spawnpoint`, `/difficulty`, `/gamerule`; `/summon slime 4` takes a
+size; `/seed` and `/help` for
 everyone. An online guest cannot run the ones that change the shared world.
 
 ## Saving

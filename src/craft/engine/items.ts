@@ -45,7 +45,7 @@ export type ItemUse =
   | "bucket" | "water_bucket" | "lava_bucket" | "milk_bucket" | "bow" | "flint_and_steel"
   | "bone_meal" | "throw" | "shears" | "hoe" | "plant";
 
-export type Category = "building" | "colored" | "natural" | "functional" | "tools" | "combat" | "food" | "ingredients";
+export type Category = "building" | "colored" | "natural" | "functional" | "redstone" | "tools" | "combat" | "food" | "ingredients";
 
 export interface ItemDef {
   id: number;
@@ -94,8 +94,15 @@ function add(def: Partial<ItemDef> & { id: number; name: string; displayName: st
 /** Blocks whose item is drawn flat, the way they read in a hand, not as a cube. */
 const FLAT_BLOCK_ICONS: Record<string, string> = {
   torch: "torch", ladder: "ladder", lantern: "lantern_item", cobweb: "cobweb", lily_pad: "lily_pad",
-  glass_pane: "glass",
+  glass_pane: "glass", redstone_torch: "redstone_torch", lever: "lever_item", stone_button: "button_item_stone",
+  oak_button: "button_item_oak", stone_pressure_plate: "plate_item_stone", oak_pressure_plate: "plate_item_oak",
+  repeater: "repeater", comparator: "comparator", hopper: "hopper_item", daylight_detector: "daylight_detector_item",
 };
+const REDSTONE = new Set([
+  "redstone_torch", "lever", "stone_button", "oak_button", "stone_pressure_plate", "oak_pressure_plate", "redstone_lamp",
+  "repeater", "comparator", "piston", "sticky_piston", "observer", "daylight_detector", "hopper", "dispenser", "dropper",
+  "oak_trapdoor", "iron_trapdoor", "slime_block", "redstone_block", "tnt", "note_block",
+]);
 
 const COLORED = /_wool$|terracotta$/;
 const NATURAL = new Set([
@@ -114,7 +121,9 @@ for (const def of allBlocks()) {
   if (def.hidden || def.id === 0) continue;
   const flat = FLAT_BLOCK_ICONS[def.name] ?? (def.shape === "cross" ? def.textures.side : undefined);
   const woodBurns = def.material === "wood" && def.flammable;
-  const category: Category = COLORED.test(def.name)
+  const category: Category = REDSTONE.has(def.name)
+    ? "redstone"
+    : COLORED.test(def.name)
     ? "colored"
     : NATURAL.has(def.name) || /_ore$|_log$|_leaves$|_sapling$/.test(def.name) || def.shape === "cross"
       ? "natural"
@@ -152,7 +161,7 @@ item("copper_ingot", "Copper Ingot");
 item("diamond", "Diamond");
 item("emerald", "Emerald");
 item("lapis_lazuli", "Lapis Lazuli");
-item("redstone", "Redstone Dust");
+item("redstone", "Redstone Dust", { places: B.REDSTONE_WIRE, category: "redstone" });
 item("flint", "Flint");
 item("feather", "Feather");
 item("string", "String");
@@ -282,6 +291,13 @@ for (const a of ARMOR) {
     });
   });
 }
+
+// ---- redstone and later additions (400+) -----------------------------------------------
+
+next = 400;
+item("iron_door", "Iron Door", { places: B.IRON_DOOR, category: "redstone" });
+item("slime_ball", "Slimeball");
+item("quartz", "Nether Quartz");
 
 // ---- lookups -----------------------------------------------------------------------
 

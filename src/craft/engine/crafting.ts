@@ -147,6 +147,29 @@ for (const [ingot, blockName] of STORAGE) {
   shapeless(`${ingot}_from_block`, [blockName], ingot, 9);
 }
 
+// Redstone
+shaped("redstone_torch", ["R", "S"], { R: "redstone", S: "stick" }, "redstone_torch");
+shaped("lever", ["S", "C"], { S: "stick", C: "cobblestone" }, "lever");
+shapeless("stone_button", ["stone"], "stone_button");
+shapeless("oak_button", ["#planks"], "oak_button");
+shaped("stone_pressure_plate", ["SS"], { S: "stone" }, "stone_pressure_plate");
+shaped("oak_pressure_plate", ["##"], { "#": "#planks" }, "oak_pressure_plate");
+shaped("redstone_lamp", [" R ", "RGR", " R "], { R: "redstone", G: "glowstone" }, "redstone_lamp");
+shaped("repeater", ["TRT", "SSS"], { T: "redstone_torch", R: "redstone", S: "stone" }, "repeater");
+shaped("comparator", [" T ", "TQT", "SSS"], { T: "redstone_torch", Q: "quartz", S: "stone" }, "comparator");
+shaped("piston", ["PPP", "CIC", "CRC"], { P: "#planks", C: "cobblestone", I: "iron_ingot", R: "redstone" }, "piston");
+shaped("sticky_piston", ["S", "P"], { S: "slime_ball", P: "piston" }, "sticky_piston");
+shaped("observer", ["CCC", "RRQ", "CCC"], { C: "cobblestone", R: "redstone", Q: "quartz" }, "observer");
+shaped("daylight_detector", ["GGG", "QQQ", "SSS"], { G: "glass", Q: "quartz", S: "oak_slab" }, "daylight_detector");
+shaped("hopper", ["I I", "ICI", " I "], { I: "iron_ingot", C: "chest" }, "hopper");
+shaped("dispenser", ["CCC", "CBC", "CRC"], { C: "cobblestone", B: "bow", R: "redstone" }, "dispenser");
+shaped("dropper", ["CCC", "C C", "CRC"], { C: "cobblestone", R: "redstone" }, "dropper");
+shaped("iron_door", ["II", "II", "II"], { I: "iron_ingot" }, "iron_door", 3);
+shaped("oak_trapdoor", ["###", "###"], { "#": "#planks" }, "oak_trapdoor", 2);
+shaped("iron_trapdoor", ["II", "II"], { I: "iron_ingot" }, "iron_trapdoor");
+shaped("slime_block", ["SSS", "SSS", "SSS"], { S: "slime_ball" }, "slime_block");
+shapeless("slime_ball_from_block", ["slime_block"], "slime_ball", 9);
+
 // Dyes and colour
 shapeless("yellow_dye", ["dandelion"], "yellow_dye");
 shapeless("red_dye", ["poppy"], "red_dye");

@@ -8,11 +8,11 @@ import { newBody, travel, moveBody } from "@/craft/engine/physics";
 import { raycastBlocks } from "@/craft/engine/raycast";
 import { clickSlot, Inventory } from "@/craft/engine/inventory";
 import { allRecipes, canAfford, matchRecipe, recipeResult, smeltResult } from "@/craft/engine/crafting";
-import { itemByName, itemId } from "@/craft/engine/items";
+import { itemByName, itemId, type ItemStack } from "@/craft/engine/items";
 import { BlockRules, cropDrops } from "@/craft/engine/blockRules";
 import { Player, xpToNext } from "@/craft/engine/player";
 import { explosionBlocks, blastImpact } from "@/craft/engine/explosion";
-import { Mob } from "@/craft/engine/mobs";
+import { createEntityFromSnapshot, Mob } from "@/craft/engine/mobs";
 import type { EntityContext } from "@/craft/engine/entities";
 import { ADVANCEMENTS, newlyEarned } from "@/craft/engine/advancements";
 
@@ -386,5 +386,55 @@ describe("mobs", () => {
     const ctx = makeCtx(world, [player]);
     for (let i = 0; i < 200; i++) { cow.beginTick(); cow.tick(ctx); }
     expect(cow.x).toBeGreaterThan(3);
+  });
+
+  it("splits a big slime into smaller ones and drops slimeballs only from the smallest", () => {
+    const world = flatWorld(ground);
+    const spawned: Mob[] = [];
+    const drops: ItemStack[] = [];
+    const ctx: EntityContext = {
+      ...makeCtx(world),
+      random: () => 0.99,
+      spawn: (e) => { if (e instanceof Mob) spawned.push(e); },
+      dropItem: (_x, _y, _z, stack) => { drops.push(stack); },
+    };
+    const kill = (m: Mob) => {
+      m.hurt(ctx, 100, "player", m.x, m.z, "p");
+      for (let i = 0; i < 25 && !m.removed; i++) { m.beginTick(); m.tick(ctx); }
+    };
+    const big = new Mob("slime", 0.5, 11, 0.5);
+    big.setSize(4);
+    expect(big.health).toBe(16);
+    expect(big.body.width).toBeCloseTo(2.08);
+    kill(big);
+    expect(spawned.map((m) => m.size)).toEqual([2, 2, 2, 2]);
+    expect(drops.filter((d) => d.id === itemId("slime_ball"))).toEqual([]);
+
+    spawned.length = 0;
+    const small = new Mob("slime", 0.5, 11, 0.5);
+    small.setSize(1);
+    kill(small);
+    expect(spawned).toEqual([]);
+    expect(drops.filter((d) => d.id === itemId("slime_ball")).reduce((n, d) => n + d.count, 0)).toBe(2);
+  });
+
+  it("keeps a slime's size through a save and a network snapshot", () => {
+    const big = new Mob("slime", 0.5, 11, 0.5);
+    big.setSize(4);
+    const copy = createEntityFromSnapshot(big.snapshot()) as Mob;
+    expect(copy.size).toBe(4);
+    expect(copy.body.height).toBeCloseTo(2.08);
+  });
+
+  it("moves a slime toward its target only by hopping", () => {
+    const world = flatWorld(ground);
+    const slime = new Mob("slime", 0.5, 11, 0.5);
+    slime.setSize(2);
+    const player = { id: "p", name: "P", x: 8.5, y: 11, z: 0.5, width: 0.6, height: 1.8, targetable: true, heldItem: 0, sneaking: false };
+    const ctx = makeCtx(world, [player]);
+    let airborne = 0;
+    for (let i = 0; i < 160; i++) { slime.beginTick(); slime.tick(ctx); if (!slime.body.onGround) airborne++; }
+    expect(slime.x).toBeGreaterThan(4);
+    expect(airborne).toBeGreaterThan(20);
   });
 });

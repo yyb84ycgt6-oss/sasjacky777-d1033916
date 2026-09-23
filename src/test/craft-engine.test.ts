@@ -30,6 +30,16 @@ describe("the art", () => {
           if (!paintTexture(name)) missing.add(`${def.name}:${name}`);
         }
       }
+      // Multi-part models (repeaters, pistons, observers) name a texture per part and state.
+      if (def.boxTexture) {
+        for (let meta = 0; meta < 128; meta++) {
+          const parts = def.boxes ? def.boxes(meta).length : 1;
+          for (let box = 0; box < parts; box++) for (let face = 0; face < 6; face++) {
+            const name = def.boxTexture(meta, box, face);
+            if (name && !paintTexture(name)) missing.add(`${def.name}:${name}`);
+          }
+        }
+      }
     }
     expect([...missing]).toEqual([]);
   });
@@ -38,6 +48,11 @@ describe("the art", () => {
     const missing = allItems().filter((i) => i.icon && !paintTexture(i.icon)).map((i) => `${i.name}:${i.icon}`);
     expect(missing).toEqual([]);
     expect(itemTextureNames().length).toBeGreaterThan(80);
+  });
+
+  it("paints the dust that the mesher draws redstone with", () => {
+    expect(paintTexture("redstone_dust_line")).not.toBeNull();
+    expect(paintTexture("redstone_dust_dot")).not.toBeNull();
   });
 
   it("paints the same pixels every time, so every player sees the same world", () => {

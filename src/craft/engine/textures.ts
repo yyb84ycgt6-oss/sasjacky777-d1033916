@@ -380,6 +380,30 @@ function rect(p: Pixels, x0: number, y0: number, x1: number, y1: number, c: C | 
   for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) p.set(x, y, typeof c === "function" ? c(x, y) : c, a);
 }
 
+/** Planks across a band of rows — a piston's wooden face seen side-on. */
+function planksRows(p: Pixels, rng: Rng, y0: number, y1: number): void {
+  const base = hex("#9c7c4a");
+  for (let y = y0; y <= y1; y++) for (let x = 0; x < 16; x++) p.set(x, y, shade(base, 0.9 + rng.next() * 0.2));
+}
+
+/** A furnace-like stone face without the furnace's mouth. */
+function furnaceFace(p: Pixels, rng: Rng): void {
+  noisy(p, rng, hex("#6f6f6f"), 0.1, 4);
+  bevel(p, 1.2, 0.7);
+}
+
+/** Riveted metal sheet, for iron doors and trapdoors. */
+function metalPanel(p: Pixels, rng: Rng, c: C): void {
+  noisy(p, rng, c, 0.05, 2);
+  frame(p, shade(c, 0.7));
+}
+
+/** An outline of a rectangle. */
+function frame16(p: Pixels, x0: number, y0: number, x1: number, y1: number, c: C): void {
+  for (let x = x0; x <= x1; x++) { p.set(x, y0, c); p.set(x, y1, c); }
+  for (let y = y0; y <= y1; y++) { p.set(x0, y, c); p.set(x1, y, c); }
+}
+
 // ---- block painters ----------------------------------------------------------------------
 
 type Painter = (p: Pixels, rng: Rng) => void;
@@ -903,6 +927,184 @@ function destroyStage(p: Pixels, stage: number): void {
     }
   }
 }
+
+// ---- redstone -------------------------------------------------------------------------------
+
+// Dust is painted pale and tinted red by power level in the shader, so one texture serves all sixteen levels.
+def("redstone_dust_line", (p, r) => {
+  p.clear();
+  for (let y = 0; y < 16; y++) for (let x = 5; x <= 10; x++) {
+    const edge = x === 5 || x === 10;
+    if (edge && r.next() < 0.45) continue;
+    const v = 150 + Math.floor(r.next() * 100);
+    p.set(x, y, [v, v, v], edge ? 200 : 255);
+  }
+});
+def("redstone_dust_dot", (p, r) => {
+  p.clear();
+  for (let y = 3; y <= 12; y++) for (let x = 3; x <= 12; x++) {
+    const d = Math.hypot(x - 7.5, y - 7.5);
+    if (d > 4.8 || (d > 3.8 && r.next() < 0.5)) continue;
+    const v = 160 + Math.floor(r.next() * 95);
+    p.set(x, y, [v, v, v]);
+  }
+});
+const torchStick = (p: Pixels) => rect(p, 7, 8, 8, 15, (x) => (x === 7 ? hex("#8a6a3a") : hex("#6b4e28")));
+def("redstone_torch", (p) => {
+  p.clear(); torchStick(p);
+  p.set(7, 6, hex("#ff6a5a")); p.set(8, 6, hex("#ff2a1a"));
+  p.set(7, 7, hex("#e01a10")); p.set(8, 7, hex("#b00e08"));
+  p.set(7, 5, hex("#ffb0a0"), 200); p.set(8, 5, hex("#ff5040"), 160);
+});
+def("redstone_torch_off", (p) => {
+  p.clear(); torchStick(p);
+  p.set(7, 6, hex("#5a1a14")); p.set(8, 6, hex("#4a120e"));
+  p.set(7, 7, hex("#3a0e0a")); p.set(8, 7, hex("#2e0a08"));
+});
+def("lever", (p) => {
+  p.clear();
+  rect(p, 7, 6, 8, 15, (x) => (x === 7 ? hex("#8a6a3a") : hex("#6b4e28")));
+  rect(p, 7, 6, 8, 7, hex("#a8a8a8"));
+});
+const lamp = (p: Pixels, r: Rng, lit: boolean) => {
+  const glow = lit ? [hex("#f9d38a"), hex("#fbe0a6"), hex("#ffeecb"), hex("#e8b060")] : [hex("#6a3a1c"), hex("#7a4822"), hex("#5a2e16"), hex("#8a5628")];
+  palette(p, r, glow, 4, 0.5);
+  const bar = lit ? hex("#c88a3a") : hex("#3a2210");
+  for (let i = 0; i < 16; i++) { p.set(i, 0, bar); p.set(i, 15, bar); p.set(0, i, bar); p.set(15, i, bar); p.set(i, 7, bar); p.set(7, i, bar); }
+};
+def("redstone_lamp", (p, r) => lamp(p, r, false));
+def("redstone_lamp_on", (p, r) => lamp(p, r, true));
+const diode = (p: Pixels, r: Rng, lit: boolean, comparator: boolean) => {
+  noisy(p, r, hex("#a0a0a0"), 0.05, 2);
+  frame(p, hex("#8a8a8a"));
+  const wire = lit ? hex("#ff3322") : hex("#6a1c14");
+  for (let y = 2; y <= 13; y++) { p.set(7, y, wire); p.set(8, y, wire); }
+  if (comparator) {
+    for (let x = 3; x <= 12; x++) p.set(x, 12, wire);
+    p.set(4, 11, wire); p.set(11, 11, wire);
+  } else {
+    // An arrow toward the output end (north, the texture's top).
+    p.set(6, 3, wire); p.set(9, 3, wire); p.set(5, 4, wire); p.set(10, 4, wire);
+  }
+};
+def("repeater", (p, r) => diode(p, r, false, false));
+def("repeater_on", (p, r) => diode(p, r, true, false));
+def("comparator", (p, r) => diode(p, r, false, true));
+def("comparator_on", (p, r) => diode(p, r, true, true));
+const pistonWood = hex("#9c7c4a");
+def("piston_side", (p, r) => {
+  cobble(p, r, [hex("#7c7c7c"), hex("#6c6c6c"), hex("#8a8a8a")], hex("#4a4a4a"));
+  planksRows(p, r, 0, 3);
+  for (let x = 0; x < 16; x++) p.set(x, 4, hex("#3a2c18"));
+});
+def("piston_head_side", (p, r) => {
+  p.clear();
+  planksRows(p, r, 0, 3);
+  for (let x = 0; x < 16; x++) p.set(x, 4, hex("#3a2c18"));
+});
+def("piston_arm", (p, r) => { planks(p, r, pistonWood); });
+def("piston_top", (p, r) => { planks(p, r, pistonWood); frame(p, hex("#6b5530")); rect(p, 6, 6, 9, 9, hex("#8a8a8a")); });
+def("piston_top_sticky", (p, r) => {
+  planks(p, r, pistonWood); frame(p, hex("#6b5530"));
+  for (let y = 2; y <= 13; y++) for (let x = 2; x <= 13; x++) p.set(x, y, mix(hex("#5bb04a"), hex("#86d470"), r.next()));
+});
+def("piston_bottom", (p, r) => { stone(p, r); frame(p, hex("#5a5a5a")); rect(p, 5, 5, 10, 10, hex("#4a4a4a")); });
+def("piston_inner", (p, r) => { stone(p, r); rect(p, 6, 6, 9, 9, pistonWood); frame(p, hex("#5a5a5a")); });
+const observerBase = (p: Pixels, r: Rng) => { noisy(p, r, hex("#5e5e5e"), 0.1, 4); bevel(p, 1.15, 0.75); };
+def("observer_front", (p, r) => {
+  observerBase(p, r);
+  rect(p, 2, 5, 6, 9, hex("#1a1a1a")); rect(p, 9, 5, 13, 9, hex("#1a1a1a"));
+  p.set(4, 7, hex("#8a8a8a")); p.set(11, 7, hex("#8a8a8a"));
+  for (let x = 1; x < 15; x++) p.set(x, 12, hex("#3a3a3a"));
+});
+def("observer_side", (p, r) => {
+  observerBase(p, r);
+  const a = hex("#9a2a1a");
+  for (let y = 3; y <= 12; y++) { p.set(7, y, a); p.set(8, y, a); }
+  p.set(6, 4, a); p.set(9, 4, a); p.set(5, 5, a); p.set(10, 5, a);
+});
+def("observer_back", (p, r) => { observerBase(p, r); rect(p, 6, 6, 9, 9, hex("#3a1410")); });
+def("observer_back_on", (p, r) => { observerBase(p, r); rect(p, 6, 6, 9, 9, hex("#ff3a22")); p.set(7, 7, hex("#ffb0a0")); });
+const detector = (p: Pixels, r: Rng, inverted: boolean) => {
+  planks(p, r, hex("#8a6a3a"));
+  const glass = inverted ? [hex("#2a3a6a"), hex("#344a7c")] : [hex("#c8d8e8"), hex("#aac0d8")];
+  for (let y = 2; y <= 13; y++) for (let x = 2; x <= 13; x++) {
+    if (x === 7 || x === 8 || y === 7 || y === 8) { p.set(x, y, hex("#5a4a30")); continue; }
+    p.set(x, y, glass[(x + y) & 1]);
+  }
+};
+def("daylight_detector_top", (p, r) => detector(p, r, false));
+def("daylight_detector_inverted_top", (p, r) => detector(p, r, true));
+def("daylight_detector_side", (p, r) => { planks(p, r, hex("#8a6a3a")); for (let x = 0; x < 16; x++) p.set(x, 0, hex("#5a4a30")); });
+const hopperMetal = hex("#4a4a4c");
+def("hopper_outside", (p, r) => { noisy(p, r, hopperMetal, 0.12, 2); frame(p, hex("#2e2e30")); });
+def("hopper_top", (p, r) => {
+  noisy(p, r, hopperMetal, 0.12, 2);
+  rect(p, 2, 2, 13, 13, hex("#1a1a1c"));
+  rect(p, 5, 5, 10, 10, hex("#0e0e10"));
+});
+const mouth = (p: Pixels, r: Rng, dispenser: boolean, vertical: boolean) => {
+  furnaceFace(p, r);
+  if (vertical) {
+    rect(p, 5, 5, 10, 10, hex("#1e1e1e"));
+    rect(p, 6, 6, 9, 9, hex("#0a0a0a"));
+  } else if (dispenser) {
+    rect(p, 5, 5, 10, 10, hex("#1e1e1e")); rect(p, 6, 6, 9, 7, hex("#0a0a0a")); rect(p, 7, 8, 8, 9, hex("#0a0a0a"));
+  } else {
+    rect(p, 5, 6, 10, 9, hex("#1e1e1e")); rect(p, 6, 7, 9, 8, hex("#0a0a0a"));
+  }
+};
+def("dispenser_front", (p, r) => mouth(p, r, true, false));
+def("dispenser_front_vertical", (p, r) => mouth(p, r, true, true));
+def("dropper_front", (p, r) => mouth(p, r, false, false));
+def("dropper_front_vertical", (p, r) => mouth(p, r, false, true));
+const ironDoor = hex("#c4c4c4");
+def("iron_door_bottom", (p, r) => {
+  metalPanel(p, r, ironDoor);
+  rect(p, 3, 3, 12, 6, shade(ironDoor, 0.85)); rect(p, 3, 9, 12, 13, shade(ironDoor, 0.85));
+  p.set(12, 1, hex("#6a6a6a"));
+});
+def("iron_door_top", (p, r) => {
+  metalPanel(p, r, ironDoor);
+  rect(p, 3, 3, 6, 7, hex("#000000"), 0); rect(p, 9, 3, 12, 7, hex("#000000"), 0);
+  rect(p, 3, 10, 12, 13, shade(ironDoor, 0.85));
+});
+def("oak_trapdoor", (p, r) => {
+  planks(p, r, hex("#9c7a45"));
+  frame(p, hex("#6b5130"));
+  for (const [x, y] of [[4, 4], [10, 4], [4, 10], [10, 10]]) rect(p, x, y, x + 1, y + 1, hex("#000000"), 0);
+});
+def("iron_trapdoor", (p, r) => {
+  metalPanel(p, r, ironDoor);
+  for (let y = 3; y <= 12; y += 3) for (let x = 3; x <= 12; x += 3) rect(p, x, y, x + 1, y + 1, hex("#000000"), 0);
+});
+def("slime_block", (p, r) => {
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+    const outer = x === 0 || y === 0 || x === 15 || y === 15;
+    const inner = x >= 3 && x <= 12 && y >= 3 && y <= 12 && (x === 3 || y === 3 || x === 12 || y === 12);
+    const c = mix(hex("#6fc95a"), hex("#8ddf78"), r.next());
+    p.set(x, y, outer || inner ? shade(c, 0.8) : c, outer || inner ? 230 : 170);
+  }
+});
+// Flat inventory pictures for the small parts.
+def("button_item_stone", (p, r) => { p.clear(); for (let y = 6; y <= 10; y++) for (let x = 4; x <= 11; x++) p.set(x, y, mix(hex("#9a9a9a"), hex("#7a7a7a"), r.next())); frame16(p, 4, 6, 11, 10, hex("#555")); });
+def("button_item_oak", (p, r) => { p.clear(); for (let y = 6; y <= 10; y++) for (let x = 4; x <= 11; x++) p.set(x, y, mix(hex("#b08a52"), hex("#8e6c3c"), r.next())); frame16(p, 4, 6, 11, 10, hex("#5a4020")); });
+def("plate_item_stone", (p, r) => { p.clear(); for (let y = 9; y <= 12; y++) for (let x = 1; x <= 14; x++) p.set(x, y, mix(hex("#9a9a9a"), hex("#7a7a7a"), r.next())); frame16(p, 1, 9, 14, 12, hex("#555")); });
+def("plate_item_oak", (p, r) => { p.clear(); for (let y = 9; y <= 12; y++) for (let x = 1; x <= 14; x++) p.set(x, y, mix(hex("#b08a52"), hex("#8e6c3c"), r.next())); frame16(p, 1, 9, 14, 12, hex("#5a4020")); });
+def("lever_item", (p) => {
+  p.clear();
+  for (let i = 0; i < 8; i++) { p.set(5 + i, 11 - i, hex("#8a6a3a")); p.set(6 + i, 11 - i, hex("#6b4e28")); }
+  rect(p, 3, 11, 12, 14, hex("#7a7a7a")); frame16(p, 3, 11, 12, 14, hex("#4a4a4a"));
+});
+def("hopper_item", (p) => {
+  p.clear();
+  rect(p, 1, 2, 14, 6, hopperMetal); rect(p, 3, 3, 12, 5, hex("#1a1a1c"));
+  rect(p, 4, 7, 11, 10, shade(hopperMetal, 0.9)); rect(p, 6, 11, 9, 14, shade(hopperMetal, 0.8));
+});
+def("daylight_detector_item", (p, r) => {
+  p.clear();
+  for (let y = 8; y <= 13; y++) for (let x = 1; x <= 14; x++) p.set(x, y, y === 8 ? ((x + y) & 1 ? hex("#c8d8e8") : hex("#aac0d8")) : mix(hex("#9a7a4a"), hex("#7a5a30"), r.next()));
+});
 
 // ---- items ------------------------------------------------------------------------------
 
@@ -1594,6 +1796,9 @@ art("flint_and_steel", "flint_and_steel", { a: hex("#3a3a3a"), b: hex("#c8c8c8")
 art("shears", "shears", { a: hex("#5a5a5a"), b: hex("#dcdcdc"), r: hex("#8a3a2a") });
 art("oak_door", "door", paletteOf("#9c7a45", { w: hex("#dcdcdc") }));
 art("red_bed", "bed", { a: hex("#5a3a1a"), b: hex("#8a6a3a"), w: hex("#eeeeee"), r: hex("#b02e26") });
+art("iron_door", "door", paletteOf("#c4c4c4", { w: hex("#6a6a6a") }));
+art("slime_ball", "ball", paletteOf("#7bc86a"));
+art("quartz", "gem", paletteOf("#e8e0d6"));
 
 function paintItem(p: Pixels, name: string): boolean {
   const a = ITEM_ART[name];

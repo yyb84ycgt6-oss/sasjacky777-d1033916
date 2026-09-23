@@ -17,8 +17,9 @@ import {
 import { itemByName, type ItemStack } from "./items";
 import { travel } from "./physics";
 import { raycastBlocks } from "./raycast";
+import { hashFloat } from "./rng";
 
-export type MobKind = "pig" | "cow" | "sheep" | "chicken" | "zombie" | "skeleton" | "creeper" | "spider";
+export type MobKind = "pig" | "cow" | "sheep" | "chicken" | "zombie" | "skeleton" | "creeper" | "spider" | "slime";
 
 interface MobSpec {
   health: number;
@@ -44,10 +45,18 @@ export const MOB_SPECS: Record<MobKind, MobSpec> = {
   skeleton: { health: 20, width: 0.6, height: 1.99, speed: 0.0625, hostile: true, attack: 2, tempt: [], burnsInDay: true, followRange: 16, xp: [5, 5] },
   creeper: { health: 20, width: 0.6, height: 1.7, speed: 0.0625, hostile: true, attack: 0, tempt: [], burnsInDay: false, followRange: 16, xp: [5, 5] },
   spider: { health: 16, width: 1.4, height: 0.9, speed: 0.09, hostile: true, attack: 2, tempt: [], burnsInDay: false, followRange: 16, xp: [5, 5] },
+  // Width, height and health are per unit of size; see Mob.setSize.
+  slime: { health: 1, width: 0.52, height: 0.52, speed: 0.1, hostile: true, attack: 0, tempt: [], burnsInDay: false, followRange: 16, xp: [1, 1] },
 };
 
 export const MOB_KINDS = Object.keys(MOB_SPECS) as MobKind[];
 export const isMobKind = (k: string): k is MobKind => k in MOB_SPECS;
+
+/**
+ * One chunk in ten lets slimes spawn underground at any light level. Fixed by
+ * the seed, so a player who finds one can build a farm there and it stays one.
+ */
+export const isSlimeChunk = (seed: number, cx: number, cz: number): boolean => hashFloat(seed, cx, cz, 987234911) < 0.1;
 
 /** Natural sheep colours, weighted as in the original: mostly white, a few greys and browns, a rare pink. */
 function naturalWool(r: number): number {
@@ -95,6 +104,12 @@ export class Mob extends Entity {
   headYaw = 0;
   /** Persistent mobs (named, bred, farm animals) never despawn. */
   persistent: boolean;
+  /** A slime's size: 1, 2 or 4. Everything else is 1. */
+  size = 1;
+  /** Ticks until a slime's next hop. */
+  private hopDelay = 0;
+  /** The slime's stretch (+) on a hop and squash (−) on landing, decaying to 0; drawn by the renderer. */
+  squish = 0;
 
   constructor(kind: MobKind, x: number, y: number, z: number, id?: number) {
     const spec = MOB_SPECS[kind];
@@ -107,6 +122,21 @@ export class Mob extends Entity {
     this.body.stepHeight = 0.6;
     if (kind === "sheep") this.woolColor = naturalWool(Math.random());
     if (kind === "chicken") this.eggTimer = 6000 + Math.floor(Math.random() * 6000);
+    if (kind === "slime") this.setSize(1 << Math.floor(Math.random() * 3));
+  }
+
+  /** Slimes come in sizes 1, 2 and 4: the box, the health and the bite all scale with it. */
+  setSize(n: number, heal = true): void {
+    this.size = n;
+    this.body.width = this.spec.width * n;
+    this.body.height = this.spec.height * n;
+    if (heal) this.health = this.spec.health * n * n;
+  }
+
+  /** Voices pitch up for babies and small slimes, down for big ones. */
+  private get voice(): number {
+    if (this.kind === "slime") return 1.6 - this.size * 0.2;
+    return this.baby ? 1.5 : 1;
   }
 
   get baby(): boolean {
@@ -142,10 +172,10 @@ export class Mob extends Entity {
       if (this.body.onGround) this.body.vy = Math.min(0.4, this.body.vy / 2 + 0.4);
     }
     if (!this.spec.hostile) this.panic = 100;
-    ctx.sound(`${this.kind}_hurt`, this.body.x, this.body.y + 0.5, this.body.z, 0.8, this.baby ? 1.5 : 1);
+    ctx.sound(`${this.kind}_hurt`, this.body.x, this.body.y + 0.5, this.body.z, 0.8, this.voice);
     if (this.health <= 0) {
       this.deathTime = 1;
-      ctx.sound(`${this.kind}_death`, this.body.x, this.body.y + 0.5, this.body.z, 0.8, this.baby ? 1.5 : 1);
+      ctx.sound(`${this.kind}_death`, this.body.x, this.body.y + 0.5, this.body.z, 0.8, this.voice);
     }
     return true;
   }
@@ -173,10 +203,12 @@ export class Mob extends Entity {
     }
 
     const move = { forward: 0, jump: false, yaw: this.yaw, speedMul: 1 };
-    if (this.spec.hostile) this.hostileAi(ctx, move);
+    if (this.kind === "slime") this.slimeAi(ctx, move);
+    else if (this.spec.hostile) this.hostileAi(ctx, move);
     else this.passiveAi(ctx, move);
 
     this.yaw = turnToward(this.yaw, move.yaw, 0.35);
+    const wasGround = b.onGround;
     const res = travel(ctx.world, b, {
       forward: move.forward, strafe: 0, yaw: this.yaw, jump: move.jump, sneak: false, sprint: false, flying: false,
       speed: this.spec.speed * move.speedMul * (this.baby ? 1.3 : 1), floats: true,
@@ -186,7 +218,16 @@ export class Mob extends Entity {
     // Chickens flutter down.
     if (this.kind === "chicken" && !b.onGround && b.vy < -0.06) { b.vy = -0.06; b.fallDistance = 0; }
     this.walkDist += res.moved;
-    if (res.landedFrom > 3 && this.kind !== "chicken") this.hurt(ctx, Math.ceil(res.landedFrom - 3), "fall", b.x, b.z);
+    if (this.kind === "slime") {
+      this.squish *= 0.6;
+      if (b.onGround && !wasGround) {
+        this.squish = -0.5;
+        ctx.sound("slime_squish", b.x, b.y, b.z, 0.3 + this.size * 0.1, this.voice);
+        if (this.size > 1) ctx.particles("slime", b.x, b.y + 0.1, b.z, this.size * 4);
+      }
+    }
+    // Chickens flutter and slimes bounce; neither is hurt by a fall.
+    if (res.landedFrom > 3 && this.kind !== "chicken" && this.kind !== "slime") this.hurt(ctx, Math.ceil(res.landedFrom - 3), "fall", b.x, b.z);
     this.environment(ctx);
     if (b.y < -64) this.removed = true;
   }
@@ -416,11 +457,54 @@ export class Mob extends Entity {
     const reach = (b.width + target.width) / 2 + 0.7;
     if (dist < reach && Math.abs(dy) < 1.6 && this.attackCooldown <= 0) {
       this.attackCooldown = 20;
-      const diff = ctx.difficulty;
-      const base = this.spec.attack;
-      const dmg = diff === 1 ? Math.min(base, base / 2 + 1) : diff === 3 ? base * 1.5 : base;
-      if (diff > 0) ctx.hurtPlayer(target.id, dmg, "mob", b.x, b.z, 0.4);
+      this.bite(ctx, target, this.spec.attack);
     }
+  }
+
+  /**
+   * Slimes cannot walk: they gather themselves on the ground, hop, and steer
+   * only while in the air. With a target they hop three times as often and
+   * face it the whole way; a medium or large slime hurts whoever it touches,
+   * the smallest only nudges.
+   */
+  private slimeAi(ctx: EntityContext, move: { forward: number; jump: boolean; yaw: number; speedMul: number }): void {
+    const b = this.body;
+    if (this.age % 20 === 0) {
+      const current = this.targetId ? ctx.players().find((p) => p.id === this.targetId) : null;
+      if (!current || !current.targetable || Math.hypot(current.x - b.x, current.z - b.z) > this.spec.followRange) {
+        const candidate = this.nearestPlayer(ctx, this.spec.followRange, (p) => p.targetable);
+        this.targetId = candidate && this.canSee(ctx, candidate) ? candidate.id : null;
+      }
+    }
+    const target = this.targetId ? ctx.players().find((p) => p.id === this.targetId && p.targetable) ?? null : null;
+    if (target) move.yaw = this.faceTo(target.x, target.z);
+    else if (b.onGround && ctx.random() < 1 / 40) move.yaw = this.yaw + (ctx.random() - 0.5) * Math.PI;
+    if (b.onGround) {
+      if (--this.hopDelay <= 0) {
+        this.hopDelay = Math.floor((10 + ctx.random() * 20) / (target ? 3 : 1));
+        move.jump = true;
+        move.forward = 1;
+        this.squish = 0.6;
+      }
+    } else move.forward = 1;
+    if (b.inWater || b.inLava) move.jump = true;
+    if (!target) {
+      this.targetId = null;
+      return;
+    }
+    const dist = Math.hypot(target.x - b.x, target.z - b.z);
+    const reach = (b.width + target.width) / 2 + 0.2;
+    if (this.size > 1 && dist < reach && target.y < b.y + b.height && target.y + target.height > b.y && this.attackCooldown <= 0) {
+      this.attackCooldown = 10;
+      this.bite(ctx, target, this.size);
+    }
+  }
+
+  /** Melee damage scaled by difficulty the way the original does it. */
+  private bite(ctx: EntityContext, target: PlayerRef, base: number): void {
+    const diff = ctx.difficulty;
+    const dmg = diff === 1 ? Math.min(base, base / 2 + 1) : diff === 3 ? base * 1.5 : base;
+    if (diff > 0) ctx.hurtPlayer(target.id, dmg, "mob", this.body.x, this.body.z, 0.4);
   }
 
   private shoot(ctx: EntityContext, target: PlayerRef): void {
@@ -476,13 +560,24 @@ export class Mob extends Entity {
     const b = this.body;
     ctx.particles("poof", b.x, b.y + b.height / 2, b.z, 12);
     if (this.baby) return;
+    // A slime bigger than the smallest comes apart into two to four of half its size.
+    if (this.kind === "slime" && this.size > 1) {
+      const n = 2 + Math.floor(ctx.random() * 3);
+      for (let i = 0; i < n; i++) {
+        const ox = ((i % 2) - 0.5) * this.size * 0.25, oz = (Math.floor(i / 2) - 0.5) * this.size * 0.25;
+        const child = new Mob("slime", b.x + ox, b.y + 0.5, b.z + oz);
+        child.setSize(this.size / 2);
+        child.targetId = this.lastAttacker && !this.lastAttacker.startsWith("mob:") ? this.lastAttacker : null;
+        ctx.spawn(child);
+      }
+    }
     for (const s of this.loot(ctx)) {
       ctx.dropItem(b.x, b.y + 0.5, b.z, s, (ctx.random() - 0.5) * 0.2, 0.2, (ctx.random() - 0.5) * 0.2);
     }
     // Experience only for kills a player had a hand in, as in the original.
     if (this.lastAttacker && !this.lastAttacker.startsWith("mob:")) {
       ctx.creditKill?.(this.lastAttacker, this.spec.hostile);
-      const [lo, hi] = this.spec.xp;
+      const [lo, hi] = this.kind === "slime" ? [this.size, this.size] : this.spec.xp;
       for (const v of xpOrbValues(lo + Math.floor(ctx.random() * (hi - lo + 1)))) ctx.spawn(new XpOrb(b.x, b.y + 0.5, b.z, v));
     }
   }
@@ -500,6 +595,7 @@ export class Mob extends Entity {
       case "skeleton": return [...it("bone", r(0, 2)), ...it("arrow", r(0, 2))];
       case "creeper": return it("gunpowder", r(0, 2));
       case "spider": return [...it("string", r(0, 2)), ...(ctx.random() < 0.33 ? it("spider_eye", 1) : [])];
+      case "slime": return this.size === 1 ? it("slime_ball", r(0, 2)) : [];
     }
   }
 
@@ -510,6 +606,7 @@ export class Mob extends Entity {
       data: {
         ht: this.hurtTime, dt: this.deathTime, g: this.growth, sh: this.sheared, wc: this.woolColor,
         fu: this.fuse, fi: this.fireTicks > 0 ? 1 : 0, lv: this.love > 0 ? 1 : 0, p: this.persistent ? 1 : 0,
+        sz: this.size, sq: Math.round(this.squish * 10),
       },
     };
   }
@@ -531,6 +628,9 @@ export class Mob extends Entity {
     this.fireTicks = d.fi ? 20 : 0;
     this.love = d.lv ? 20 : 0;
     if (typeof d.p === "number") this.persistent = d.p === 1;
+    // After the growth reset above, which would otherwise shrink a big slime's box back to one unit.
+    if (this.kind === "slime" && (d.sz === 1 || d.sz === 2 || d.sz === 4)) this.setSize(d.sz, false);
+    if (typeof d.sq === "number") this.squish = d.sq / 10;
   }
 }
 

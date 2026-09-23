@@ -36,6 +36,7 @@ const KINDS: Record<string, Kind> = {
   splash: { layer: "water_still", gravity: 9, life: [0.3, 0.7], size: [0.06, 0.1], drag: 0.98, collide: true },
   snow: { layer: "snow", gravity: 6, life: [0.4, 0.8], size: [0.06, 0.1], drag: 0.98, collide: true },
   egg: { layer: "egg", gravity: 9, life: [0.3, 0.7], size: [0.06, 0.1], drag: 0.98, collide: true },
+  slime: { layer: "slime_ball", gravity: 9, life: [0.3, 0.7], size: [0.06, 0.12], drag: 0.98, collide: true },
   note: { layer: "particle_note", gravity: -0.5, life: [0.8, 1.0], size: [0.2, 0.2], drag: 0.9, collide: false, fullTexture: true },
   block: { layer: "stone", gravity: 14, life: [0.4, 1.2], size: [0.07, 0.12], drag: 0.98, collide: true },
 };

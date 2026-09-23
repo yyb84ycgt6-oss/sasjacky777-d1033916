@@ -14,8 +14,9 @@
  * plain floats would be four times that, across a few hundred chunks.
  */
 import {
-  block, faceTexture, isLeaves, modelBoxes, B, Face, type BlockDef, type Box,
+  block, faceTexture, isDoor, isLeaves, isRedstoneTorch, modelBoxes, B, Face, FACING_DIRS, type BlockDef, type Box,
 } from "./blocks";
+import { dustColor, dustConnection } from "./redstone";
 import { WORLD_HEIGHT } from "./constants";
 
 export const PAD = 18;
@@ -236,7 +237,7 @@ export class Mesher {
                   if (snowy) override = "grass_block_snow";
                 }
               }
-              this.cubeFace(target, input, x, y, z, f, this.layer(def, m, f, override), flags, tr, tg, tb, tintMode);
+              this.cubeFace(target, input, x, y, z, f, this.layer(def, m, f, override), flags, tr, tg, tb, tintMode, def.uvRotation ? def.uvRotation(m, f) : 0);
             }
           } else if (def.shape === "cross") {
             this.cross(target, input, x, y, z, def, m, tr, tg, tb, def.tint === "none" ? TINT_NONE : TINT_FULL);
@@ -246,6 +247,8 @@ export class Mesher {
             this.boxes(target, input, x, y, z, def, m, tr, tg, tb, def.tint === "none" ? TINT_NONE : TINT_FULL);
           } else if (def.shape === "fluid") {
             this.fluid(target, input, x, y, z, def, m, tr, tg, tb);
+          } else if (def.shape === "wire") {
+            this.wire(target, input, x, y, z, m);
           }
         }
       }
@@ -255,7 +258,7 @@ export class Mesher {
 
   private cubeFace(
     b: Builder, input: MeshInput, x: number, y: number, z: number, f: number, layer: number,
-    flags: number, r: number, g: number, bl: number, tintMode: number,
+    flags: number, r: number, g: number, bl: number, tintMode: number, rotation = 0,
   ): void {
     const { blocks, light } = input;
     const n = NORMALS[f];
@@ -265,7 +268,8 @@ export class Mesher {
     for (let i = 0; i < 4; i++) {
       const c = corners[i];
       sx[i] = (x + c[0]) * 16; sy[i] = (y + c[1]) * 16; sz[i] = (z + c[2]) * 16;
-      const uv = faceUV(f, c[0] * 16, c[1] * 16, c[2] * 16);
+      let uv = faceUV(f, c[0] * 16, c[1] * 16, c[2] * 16);
+      if (rotation) uv = rotateUV(uv[0], uv[1], rotation);
       su[i] = uv[0]; sv[i] = uv[1];
       if (!input.smoothLighting) {
         sSky[i] = (frontLight >> 4) * 17; sBlk[i] = (frontLight & 15) * 17;
@@ -369,8 +373,10 @@ export class Mesher {
     const facing = m & 3;
     const bed = def.id === B.RED_BED;
     // A wall torch is the standing torch moved; its texture must not move with it.
-    const uvFrom: Box | null = def.id === B.TORCH && m > 0 ? [7, 0, 7, 9, 10, 9] : null;
-    for (const box of list) {
+    const torchUV: Box | null = (def.id === B.TORCH || isRedstoneTorch(def.id)) && m > 0 ? [7, 0, 7, 9, 10, 9] : null;
+    for (let bi = 0; bi < list.length; bi++) {
+      const box = list[bi];
+      const uvFrom = def.boxUV ? def.boxUV(m, bi) : torchUV;
       const [x0, y0, z0, x1, y1, z1] = box;
       for (let f = 0; f < 6; f++) {
         const n = NORMALS[f];
@@ -380,7 +386,7 @@ export class Mesher {
         const ni = padIndex(x + n[0], y + n[1], z + n[2]);
         if (onEdge && this.opaque[blocks[ni]]) continue;
         // Faces flush against the same block (glass pane arms, double slabs) would z-fight.
-        if (onEdge && blocks[ni] === def.id && def.id !== B.OAK_DOOR && def.id !== B.RED_BED) continue;
+        if (onEdge && blocks[ni] === def.id && !isDoor(def.id) && def.id !== B.RED_BED) continue;
         const corners = FACE_CORNERS[f];
         const l = light[onEdge ? ni : padIndex(x, y, z)];
         const lookFrom = onEdge ? l : Math.max(l, light[ni]);
@@ -392,13 +398,78 @@ export class Mesher {
             ? faceUV(f, px - x0 + uvFrom[0], py - y0 + uvFrom[1], pz - z0 + uvFrom[2])
             : faceUV(f, px, py, pz);
           if (bed && f === Face.Up) uv = rotateUV(uv[0], uv[1], facing);
+          else if (def.uvRotation) {
+            const rot = def.uvRotation(m, f);
+            if (rot) uv = rotateUV(uv[0], uv[1], rot);
+          }
           su[i] = uv[0]; sv[i] = uv[1];
           sSky[i] = (lookFrom >> 4) * 17; sBlk[i] = (lookFrom & 15) * 17;
           sShade[i] = Math.round(FACE_SHADE[f] * 255);
         }
-        const layer = this.layer(def, m, f);
+        const named = def.boxTexture ? def.boxTexture(m, bi, f) : undefined;
+        const layer = named ? this.lookupCached(named) : this.layer(def, m, f);
         b.quad(sx, sy, sz, su, sv, layer, sSky, sBlk, sShade, 0, r, g, bl, tintMode);
       }
+    }
+  }
+
+  private named = new Map<string, number>();
+  private lookupCached(name: string): number {
+    let l = this.named.get(name);
+    if (l === undefined) { l = this.lookup(name); this.named.set(name, l); }
+    return l;
+  }
+
+  /**
+   * Redstone dust: a flat trail on the floor toward each connection (and up
+   * the side of a block it climbs), tinted from dull to bright by its power.
+   * Drawn from a centre blob plus half-lines so every one of the sixteen
+   * shapes comes from two small textures.
+   */
+  private wire(b: Builder, input: MeshInput, x: number, y: number, z: number, m: number): void {
+    const get = (px: number, py: number, pz: number) => input.blocks[padIndex(px, py, pz)];
+    const meta = (px: number, py: number, pz: number) => input.meta[padIndex(px, py, pz)];
+    const conn = [0, 1, 2, 3].map((d) => dustConnection(get, meta, x, y, z, d));
+    const on = conn.map((c) => c !== 0);
+    const count = on.filter(Boolean).length;
+    if (count === 1) on[on.indexOf(true) ^ 1] = true;
+    const straight = (on[0] && on[1] && !on[2] && !on[3]) || (on[2] && on[3] && !on[0] && !on[1]);
+    const [r, g, bl] = dustColor(m & 15);
+    const line = this.lookupCached("redstone_dust_line");
+    const dot = this.lookupCached("redstone_dust_dot");
+    this.flatLight(input, x, y, z, 1);
+    const bx = x * 16, bz = z * 16, fy = y * 16 + 1;
+    // Floor quads in +y corner order: (x0,z1) (x1,z1) (x1,z0) (x0,z0).
+    const floor = (x0: number, z0: number, x1: number, z1: number, alongX: boolean, layer: number) => {
+      const xs = [x0, x1, x1, x0], zs = [z1, z1, z0, z0];
+      for (let i = 0; i < 4; i++) {
+        sx[i] = bx + xs[i]; sy[i] = fy; sz[i] = bz + zs[i];
+        // The line runs along v; for an east-west arm, turn it.
+        if (alongX) { su[i] = zs[i]; sv[i] = xs[i]; } else { su[i] = xs[i]; sv[i] = zs[i]; }
+      }
+      b.quad(sx, sy, sz, su, sv, layer, sSky, sBlk, sShade, 0, r, g, bl, TINT_FULL);
+    };
+    if (count === 0 || !straight) floor(0, 0, 16, 16, false, dot);
+    if (on[0]) floor(0, 0, 16, 8, false, line);   // north
+    if (on[1]) floor(0, 8, 16, 16, false, line);  // south
+    if (on[2]) floor(0, 0, 8, 16, true, line);    // west
+    if (on[3]) floor(8, 0, 16, 16, true, line);   // east
+    // Up the side of the next block.
+    for (let d = 0; d < 4; d++) {
+      if (conn[d] !== 2) continue;
+      const [dx, dz] = FACING_DIRS[d];
+      const face = dx > 0 ? 1 : dx < 0 ? 0 : dz > 0 ? 5 : 4; // the wall's face that looks back at the dust
+      const corners = FACE_CORNERS[face];
+      for (let i = 0; i < 4; i++) {
+        const c = corners[i];
+        let px = c[0] * 16, pz = c[2] * 16;
+        if (dx > 0) px = 15; else if (dx < 0) px = 1;
+        if (dz > 0) pz = 15; else if (dz < 0) pz = 1;
+        const py = c[1] * 16;
+        sx[i] = bx + px; sy[i] = y * 16 + py; sz[i] = bz + pz;
+        su[i] = dx !== 0 ? c[2] * 16 : c[0] * 16; sv[i] = 16 - py;
+      }
+      b.quad(sx, sy, sz, su, sv, line, sSky, sBlk, sShade, 0, r, g, bl, TINT_FULL);
     }
   }
 

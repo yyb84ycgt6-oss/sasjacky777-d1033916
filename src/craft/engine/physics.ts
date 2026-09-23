@@ -301,9 +301,15 @@ export function travel(world: BlockReader, b: Body, input: MoveInput): MoveResul
       if (input.sneak && b.vy < 0) b.vy = 0;
     }
     const wasGround = b.onGround;
+    const falling = b.vy;
     moveBody(world, b, b.vx, b.vy, b.vz, input.sneak);
     if (b.onLadder && (b.collidedH || input.jump)) b.vy = 0.2;
-    if (b.onGround) {
+    // A slime block throws back whatever lands on it, and the landing does not hurt — unless sneaking.
+    if (b.onGround && !wasGround && !input.sneak && falling < -0.1 && groundBlock(world, b) === B.SLIME_BLOCK) {
+      b.vy = -falling * 0.95;
+      b.onGround = false;
+      b.fallDistance = 0;
+    } else if (b.onGround) {
       if (!wasGround && b.fallDistance > 0) result.landedFrom = b.fallDistance;
       b.fallDistance = 0;
     } else if (b.vy < 0) {

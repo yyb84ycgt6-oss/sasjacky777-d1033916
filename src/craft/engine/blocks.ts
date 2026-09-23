@@ -37,7 +37,7 @@ export const OPPOSITE_FACING = [1, 0, 3, 2] as const;
 /** Clockwise rotation of a facing seen from above: north → east → south → west. */
 export const CLOCKWISE_FACING = [3, 2, 0, 1] as const;
 
-export type Shape = "none" | "cube" | "cross" | "crop" | "boxes" | "fluid";
+export type Shape = "none" | "cube" | "cross" | "crop" | "boxes" | "fluid" | "wire";
 export type RenderLayer = "none" | "opaque" | "cutout" | "translucent";
 export type ToolType = "pickaxe" | "axe" | "shovel" | "hoe" | "sword" | "shears";
 export type Material =
@@ -105,7 +105,7 @@ export interface BlockDef {
   /** Places with a horizontal facing taken from the player. */
   facing?: "player" | "away" | "wall";
   /** Has an inventory or a screen. */
-  interact?: "crafting" | "furnace" | "chest" | "bed" | "door" | "tnt" | "noteblock";
+  interact?: "crafting" | "furnace" | "chest" | "bed" | "door" | "tnt" | "noteblock" | "redstone";
   flammable?: boolean;
   /** Hidden from the creative inventory (technical blocks). */
   hidden?: boolean;
@@ -113,6 +113,17 @@ export interface BlockDef {
   slipperiness?: number;
   /** Walking speed multiplier (soul sand style). */
   speedFactor?: number;
+  /**
+   * Per-box texture for multi-part models (a repeater's torches are not its
+   * base). Returning undefined falls back to faceTexture.
+   */
+  boxTexture?: (meta: number, box: number, face: number) => string | undefined;
+  /** Where a box samples its texture from, when that is not where it sits (a small torch shows the torch's head). */
+  boxUV?: (meta: number, box: number) => Box | null;
+  /** Quarter turns for a face's texture (rotateUV codes), so a sideways piston's wood faces its head. */
+  uvRotation?: (meta: number, face: number) => number;
+  /** Six-way facing kept in meta bits 0-2 as a Face index (pistons, observers, dispensers, hoppers). */
+  facing6?: boolean;
 }
 
 type Partial2<T> = { [K in keyof T]?: T[K] };
@@ -211,6 +222,149 @@ export function torchBoxes(meta: number): Box[] {
   const ox = 7 + dx * 6, oz = 7 + dz * 6;
   return [[ox, 3, oz, ox + 2, 13, oz + 2]];
 }
+
+/** Face on the other side: East↔West, Up↔Down, South↔North. */
+export const OPPOSITE_FACE = [1, 0, 3, 2, 5, 4] as const;
+/** The Face a horizontal facing (0 north, 1 south, 2 west, 3 east) points out of. */
+export const FACE_OF_FACING = FACING_TO_FACE;
+/** The horizontal facing for a horizontal Face, or -1 for up and down. */
+export const FACING_OF_FACE = [3, 2, -1, -1, 1, 0] as const;
+
+const norm = (a: number, b: number): [number, number] => (a <= b ? [a, b] : [b, a]);
+function boxFrom(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number): Box {
+  const [ax, bx] = norm(x0, x1), [ay, by] = norm(y0, y1), [az, bz] = norm(z0, z1);
+  return [ax, ay, az, bx, by, bz];
+}
+
+/**
+ * Moves a box drawn lying on the floor onto the face it hangs from: `attach`
+ * is the Face pointing from the part to the block holding it (Down for the
+ * floor, Up for a ceiling, a side for a wall). Levers and buttons are drawn
+ * once and placed six ways by this.
+ */
+export function attachBox(b: Box, attach: number): Box {
+  const [x0, y0, z0, x1, y1, z1] = b;
+  switch (attach) {
+    case Face.Up: return boxFrom(x0, 16 - y0, z0, x1, 16 - y1, z1);
+    case Face.North: return boxFrom(x0, z0, y0, x1, z1, y1);
+    case Face.South: return boxFrom(x0, z0, 16 - y0, x1, z1, 16 - y1);
+    case Face.West: return boxFrom(y0, z0, x0, y1, z1, x1);
+    case Face.East: return boxFrom(16 - y0, z0, x0, 16 - y1, z1, x1);
+    default: return b;
+  }
+}
+
+/** Turns a box drawn facing up (+y) to face any of the six directions — pistons, observers. */
+export function facingBox(b: Box, facing: number): Box {
+  const [x0, y0, z0, x1, y1, z1] = b;
+  switch (facing) {
+    case Face.Down: return boxFrom(x0, 16 - y0, z0, x1, 16 - y1, z1);
+    case Face.North: return boxFrom(x0, z0, 16 - y0, x1, z1, 16 - y1);
+    case Face.South: return boxFrom(x0, z0, y0, x1, z1, y1);
+    case Face.West: return boxFrom(16 - y0, x0, z0, 16 - y1, x1, z1);
+    case Face.East: return boxFrom(y0, x0, z0, y1, x1, z1);
+    default: return b;
+  }
+}
+
+/** Turns a box drawn facing north to one of the four horizontal facings — repeaters, comparators. */
+export function hFacingBox(b: Box, facing: number): Box {
+  const [x0, y0, z0, x1, y1, z1] = b;
+  switch (facing) {
+    case 1: return boxFrom(16 - x0, y0, 16 - z0, 16 - x1, y1, 16 - z1);
+    case 2: return boxFrom(z0, y0, 16 - x0, z1, y1, 16 - x1);
+    case 3: return boxFrom(16 - z0, y0, x0, 16 - z1, y1, x1);
+    default: return b;
+  }
+}
+
+/** World direction that texture +u and +v run along on each face, from the mesher's faceUV. */
+const FACE_U: ReadonlyArray<readonly [number, number, number]> = [[0, 0, -1], [0, 0, 1], [1, 0, 0], [-1, 0, 0], [1, 0, 0], [-1, 0, 0]];
+const FACE_V: ReadonlyArray<readonly [number, number, number]> = [[0, -1, 0], [0, -1, 0], [0, 0, 1], [0, 0, 1], [0, -1, 0], [0, -1, 0]];
+const same = (a: readonly number[], b: readonly number[], sign: number) => a[0] === b[0] * sign && a[1] === b[1] * sign && a[2] === b[2] * sign;
+
+/**
+ * The rotateUV code that makes a face's texture "up" point along a world
+ * direction: how a sideways piston keeps its wooden edge toward its head.
+ */
+export function uvTowards(face: number, dir: readonly [number, number, number]): number {
+  if (same(dir, FACE_V[face], -1)) return 0;
+  if (same(dir, FACE_V[face], 1)) return 1;
+  if (same(dir, FACE_U[face], -1)) return 2;
+  if (same(dir, FACE_U[face], 1)) return 3;
+  return 0;
+}
+
+/** For a six-way block: texture "up" on its side faces points out of its front. */
+const sixWayUV = (meta: number, face: number): number => {
+  const f = meta & 7;
+  if (face === f || face === OPPOSITE_FACE[f]) return 0;
+  return uvTowards(face, FACE_DIRS[f]);
+};
+
+const LEVER_BASE: Box = [5, 0, 4, 11, 3, 12];
+/** Lever meta: bits 0-2 the Face it hangs from, bit 3 on, bit 4 turned 90° (floor and ceiling only). */
+export function leverBoxes(meta: number): Box[] {
+  const attach = meta & 7, on = (meta & 8) !== 0, turned = (meta & 16) !== 0;
+  let handle: Box = on ? [7, 3, 9, 9, 11, 11] : [7, 3, 5, 9, 11, 7];
+  let base = LEVER_BASE;
+  if (turned) { base = [base[2], base[1], base[0], base[5], base[4], base[3]]; handle = [handle[2], handle[1], handle[0], handle[5], handle[4], handle[3]]; }
+  return [attachBox(base, attach), attachBox(handle, attach)];
+}
+
+/** Button meta: bits 0-2 the Face it hangs from, bit 3 pressed. */
+export function buttonBoxes(meta: number): Box[] {
+  return [attachBox((meta & 8) !== 0 ? [5, 0, 6, 11, 1, 10] : [5, 0, 6, 11, 2, 10], meta & 7)];
+}
+
+/** Repeater meta: bits 0-1 facing (the way the signal leaves), bits 2-3 delay − 1, bit 4 powered, bit 5 locked. */
+export function repeaterBoxes(meta: number): Box[] {
+  const f = meta & 3, delay = ((meta >> 2) & 3) + 1;
+  const rear = 6 + (delay - 1) * 2;
+  const boxes: Box[] = [[0, 0, 0, 16, 2, 16], [7, 2, 2, 9, 7, 4]];
+  // A locked repeater shows a bar across instead of its moving torch.
+  boxes.push((meta & 32) !== 0 ? [2, 2, rear, 14, 4, rear + 2] : [7, 2, rear, 9, 7, rear + 2]);
+  return boxes.map((b) => hFacingBox(b, f));
+}
+
+/** Comparator meta: bits 0-1 facing, bit 2 subtract mode, bits 3-6 output strength. */
+export function comparatorBoxes(meta: number): Box[] {
+  const f = meta & 3;
+  const boxes: Box[] = [[0, 0, 0, 16, 2, 16], [7, 2, 2, 9, 5, 4], [3, 2, 11, 5, 7, 13], [11, 2, 11, 13, 7, 13]];
+  return boxes.map((b) => hFacingBox(b, f));
+}
+
+/** Piston meta: bits 0-2 facing, bit 3 extended. */
+export function pistonBoxes(meta: number): Box[] {
+  return [facingBox((meta & 8) !== 0 ? [0, 0, 0, 16, 12, 16] : FULL_BOX, meta & 7)];
+}
+
+/** Piston head meta: bits 0-2 facing, bit 3 sticky. The arm reaches back into the base. */
+export function pistonHeadBoxes(meta: number): Box[] {
+  const f = meta & 7;
+  return [facingBox([0, 12, 0, 16, 16, 16], f), facingBox([6, -4, 6, 10, 12, 10], f)];
+}
+
+/** Hopper meta: bits 0-2 the Face it outputs through (down or a side), bit 3 disabled by power. */
+export function hopperBoxes(meta: number): Box[] {
+  const out = meta & 7;
+  const spout: Box =
+    out === Face.North ? [6, 4, 0, 10, 8, 4] :
+    out === Face.South ? [6, 4, 12, 10, 8, 16] :
+    out === Face.West ? [0, 4, 6, 4, 8, 10] :
+    out === Face.East ? [12, 4, 6, 16, 8, 10] :
+    [6, 0, 6, 10, 4, 10];
+  return [[0, 10, 0, 16, 16, 16], [4, 4, 4, 12, 10, 12], spout];
+}
+
+/** Trapdoor meta: bits 0-1 facing (the hinge side), bit 2 open, bit 3 in the top half, bit 5 powered. */
+export function trapdoorBoxes(meta: number): Box[] {
+  if ((meta & 4) !== 0) return [panelBox(meta & 3, 3)];
+  return [(meta & 8) !== 0 ? [0, 13, 0, 16, 16, 16] : [0, 0, 0, 16, 3, 16]];
+}
+
+const redstoneTorchBoxes = torchBoxes;
+const SMALL_TORCH_UV: Box = [7, 5, 7, 9, 10, 9];
 
 // ---- the list (append-only) ----------------------------------------------
 
@@ -498,6 +652,135 @@ add(152, "polished_andesite", "Polished Andesite", { hardness: 1.5, tool: P, har
 add(153, "chiseled_stone_bricks", "Chiseled Stone Bricks", { hardness: 1.5, tool: P, harvestTier: 0 });
 add(154, "cracked_stone_bricks", "Cracked Stone Bricks", { hardness: 1.5, tool: P, harvestTier: 0 });
 
+// ---- redstone (155-178) ----
+add(155, "redstone_wire", "Redstone Dust", {
+  shape: "wire", layer: "cutout", solid: false, opaque: false, hardness: 0, material: "none", needsSupport: true,
+  boxes: () => [[0, 0, 0, 16, 1, 16]], collision: () => [],
+  textures: tex("redstone_dust_line"), hidden: true, drops: [{ item: "redstone", min: 1, max: 1 }],
+});
+add(156, "redstone_torch", "Redstone Torch", {
+  shape: "boxes", layer: "cutout", solid: false, opaque: false, boxes: redstoneTorchBoxes, collision: () => [],
+  textures: tex("redstone_torch"), emission: 7, hardness: 0, material: "wood", needsSupport: true, facing: "wall",
+});
+add(157, "redstone_torch_off", "Redstone Torch", {
+  shape: "boxes", layer: "cutout", solid: false, opaque: false, boxes: redstoneTorchBoxes, collision: () => [],
+  textures: tex("redstone_torch_off"), hardness: 0, material: "wood", needsSupport: true, facing: "wall", hidden: true,
+  drops: [{ item: "redstone_torch", min: 1, max: 1 }],
+});
+add(158, "lever", "Lever", {
+  shape: "boxes", layer: "cutout", solid: false, opaque: false, boxes: leverBoxes, collision: () => [],
+  textures: tex("cobblestone"), boxTexture: (_m, box) => (box === 1 ? "lever" : undefined),
+  hardness: 0.5, material: "wood", needsSupport: true, interact: "redstone",
+});
+add(159, "stone_button", "Stone Button", {
+  shape: "boxes", layer: "cutout", solid: false, opaque: false, boxes: buttonBoxes, collision: () => [],
+  textures: tex("stone"), hardness: 0.5, material: "stone", needsSupport: true, interact: "redstone",
+});
+add(160, "oak_button", "Oak Button", {
+  shape: "boxes", layer: "cutout", solid: false, opaque: false, boxes: buttonBoxes, collision: () => [],
+  textures: tex("oak_planks"), hardness: 0.5, material: "wood", needsSupport: true, interact: "redstone",
+});
+add(161, "stone_pressure_plate", "Stone Pressure Plate", {
+  shape: "boxes", layer: "cutout", solid: false, opaque: false, boxes: () => [[1, 0, 1, 15, 1, 15]], collision: () => [],
+  textures: tex("stone"), hardness: 0.5, tool: P, harvestTier: 0, needsSupport: true,
+});
+add(162, "oak_pressure_plate", "Oak Pressure Plate", {
+  shape: "boxes", layer: "cutout", solid: false, opaque: false, boxes: () => [[1, 0, 1, 15, 1, 15]], collision: () => [],
+  textures: tex("oak_planks"), hardness: 0.5, tool: A, material: "wood", needsSupport: true,
+});
+add(163, "redstone_lamp", "Redstone Lamp", { hardness: 0.3, material: "glass" });
+add(164, "redstone_lamp_on", "Redstone Lamp", { hardness: 0.3, material: "glass", emission: 15, hidden: true, drops: [{ item: "redstone_lamp", min: 1, max: 1 }] });
+add(165, "repeater", "Redstone Repeater", {
+  shape: "boxes", layer: "cutout", opaque: false, boxes: repeaterBoxes, collision: () => [[0, 0, 0, 16, 2, 16]],
+  textures: tex("repeater", "smooth_stone"), hardness: 0, material: "stone", needsSupport: true, facing: "away", interact: "redstone",
+  boxTexture: (m, box, face) => (box === 0 ? (face === Face.Up ? ((m & 16) !== 0 ? "repeater_on" : "repeater") : "smooth_stone")
+    : box === 2 && (m & 32) !== 0 ? "bedrock" : (m & 16) !== 0 ? "redstone_torch" : "redstone_torch_off"),
+  boxUV: (m, box) => (box === 0 || (box === 2 && (m & 32) !== 0) ? null : SMALL_TORCH_UV),
+  uvRotation: (m, face) => (face === Face.Up ? m & 3 : 0),
+});
+add(166, "comparator", "Redstone Comparator", {
+  shape: "boxes", layer: "cutout", opaque: false, boxes: comparatorBoxes, collision: () => [[0, 0, 0, 16, 2, 16]],
+  textures: tex("comparator", "smooth_stone"), hardness: 0, material: "stone", needsSupport: true, facing: "away", interact: "redstone",
+  boxTexture: (m, box, face) => (box === 0 ? (face === Face.Up ? ((m & 0x78) !== 0 ? "comparator_on" : "comparator") : "smooth_stone")
+    : box === 1 ? ((m & 4) !== 0 ? "redstone_torch" : "redstone_torch_off") : (m & 0x78) !== 0 ? "redstone_torch" : "redstone_torch_off"),
+  boxUV: (_m, box) => (box === 0 ? null : SMALL_TORCH_UV),
+  uvRotation: (m, face) => (face === Face.Up ? m & 3 : 0),
+});
+const pistonTex = (sticky: boolean) => (m: number, _box: number, face: number): string | undefined => {
+  const f = m & 7;
+  if (face === f) return (m & 8) !== 0 ? "piston_inner" : sticky ? "piston_top_sticky" : "piston_top";
+  if (face === OPPOSITE_FACE[f]) return "piston_bottom";
+  return "piston_side";
+};
+add(167, "piston", "Piston", {
+  shape: "boxes", layer: "opaque", opaque: false, boxes: pistonBoxes, facing6: true, textures: tex("piston_side"),
+  boxTexture: pistonTex(false), uvRotation: sixWayUV, hardness: 1.5, tool: P, material: "stone",
+});
+add(168, "sticky_piston", "Sticky Piston", {
+  shape: "boxes", layer: "opaque", opaque: false, boxes: pistonBoxes, facing6: true, textures: tex("piston_side"),
+  boxTexture: pistonTex(true), uvRotation: sixWayUV, hardness: 1.5, tool: P, material: "stone",
+});
+add(169, "piston_head", "Piston Head", {
+  shape: "boxes", layer: "opaque", opaque: false, boxes: pistonHeadBoxes, facing6: true, textures: tex("piston_side"),
+  boxTexture: (m, box, face) => {
+    const f = m & 7;
+    if (box === 1) return "piston_arm";
+    if (face === f) return (m & 8) !== 0 ? "piston_top_sticky" : "piston_top";
+    if (face === OPPOSITE_FACE[f]) return "piston_top";
+    return "piston_head_side";
+  },
+  uvRotation: sixWayUV, hardness: 1.5, material: "stone", hidden: true, drops: [],
+});
+add(170, "observer", "Observer", {
+  facing6: true, textures: tex("observer_side"), hardness: 3, tool: P, harvestTier: 0, uvRotation: sixWayUV,
+  boxTexture: (m, _box, face) => {
+    const f = m & 7;
+    if (face === f) return "observer_front";
+    if (face === OPPOSITE_FACE[f]) return (m & 8) !== 0 ? "observer_back_on" : "observer_back";
+    return "observer_side";
+  },
+});
+add(171, "daylight_detector", "Daylight Detector", {
+  shape: "boxes", layer: "opaque", opaque: false, boxes: () => [[0, 0, 0, 16, 6, 16]],
+  textures: tex("daylight_detector_top", "daylight_detector_side"), hardness: 0.2, tool: A, material: "wood", interact: "redstone",
+  boxTexture: (m, _b, face) => (face === Face.Up && (m & 16) !== 0 ? "daylight_detector_inverted_top" : undefined),
+});
+add(172, "hopper", "Hopper", {
+  shape: "boxes", layer: "opaque", opaque: false, boxes: hopperBoxes, collision: () => [FULL_BOX], facing6: true,
+  textures: tex("hopper_top", "hopper_outside", "hopper_outside"), hardness: 3, tool: P, harvestTier: 0, material: "metal",
+  interact: "chest",
+});
+const dispenserTex = (front: string) => (m: number, _b: number, face: number): string | undefined => {
+  const f = m & 7;
+  if (face === f) return f === Face.Up || f === Face.Down ? `${front}_vertical` : front;
+  if (face === Face.Up || face === Face.Down) return "furnace_top";
+  return "furnace_side";
+};
+add(173, "dispenser", "Dispenser", {
+  facing6: true, textures: tex("furnace_side"), boxTexture: dispenserTex("dispenser_front"),
+  hardness: 3.5, tool: P, harvestTier: 0, interact: "chest",
+});
+add(174, "dropper", "Dropper", {
+  facing6: true, textures: tex("furnace_side"), boxTexture: dispenserTex("dropper_front"),
+  hardness: 3.5, tool: P, harvestTier: 0, interact: "chest",
+});
+add(175, "iron_door", "Iron Door", {
+  shape: "boxes", layer: "cutout", opaque: false, boxes: doorBoxes,
+  textures: tex("iron_door_top"), hardness: 5, tool: P, harvestTier: 0, material: "metal", hidden: true,
+  drops: [{ item: "iron_door", min: 1, max: 1 }],
+});
+add(176, "oak_trapdoor", "Oak Trapdoor", {
+  shape: "boxes", layer: "cutout", opaque: false, boxes: trapdoorBoxes, textures: tex("oak_trapdoor"),
+  hardness: 3, tool: A, material: "wood", interact: "door",
+});
+add(177, "iron_trapdoor", "Iron Trapdoor", {
+  shape: "boxes", layer: "cutout", opaque: false, boxes: trapdoorBoxes, textures: tex("iron_trapdoor"),
+  hardness: 5, tool: P, harvestTier: 0, material: "metal",
+});
+add(178, "slime_block", "Slime Block", {
+  layer: "translucent", opaque: false, lightFilter: 1, hardness: 0, material: "wool", slipperiness: 0.8,
+});
+
 export const BLOCK_COUNT = BLOCKS.length;
 
 const AIR_DEF = BLOCKS[0];
@@ -539,6 +822,11 @@ export const B = {
   SEA_LANTERN: 137, PACKED_ICE: 138, PODZOL: 139, COARSE_DIRT: 140, MUD: 141, MOSS: 142,
   AMETHYST: 143, COBWEB: 144, OAK_FENCE: 145, GLASS_PANE: 146, NOTE_BLOCK: 147, CALCITE: 148,
   TUFF: 149,
+  REDSTONE_WIRE: 155, REDSTONE_TORCH: 156, REDSTONE_TORCH_OFF: 157, LEVER: 158, STONE_BUTTON: 159,
+  OAK_BUTTON: 160, STONE_PLATE: 161, OAK_PLATE: 162, REDSTONE_LAMP: 163, REDSTONE_LAMP_ON: 164,
+  REPEATER: 165, COMPARATOR: 166, PISTON: 167, STICKY_PISTON: 168, PISTON_HEAD: 169, OBSERVER: 170,
+  DAYLIGHT_DETECTOR: 171, HOPPER: 172, DISPENSER: 173, DROPPER: 174, IRON_DOOR: 175, OAK_TRAPDOOR: 176,
+  IRON_TRAPDOOR: 177, SLIME_BLOCK: 178,
 } as const;
 
 export const isFluid = (id: number): boolean => id === B.WATER || id === B.LAVA;
@@ -550,6 +838,16 @@ export const isCrop = (id: number): boolean => id === B.WHEAT || id === B.CARROT
 export const isSapling = (id: number): boolean => id >= B.OAK_SAPLING && id <= B.ACACIA_SAPLING;
 export const isSlab = (id: number): boolean => id >= B.OAK_SLAB && id <= B.STONE_BRICK_SLAB;
 export const isStairs = (id: number): boolean => id >= B.OAK_STAIRS && id <= B.STONE_BRICK_STAIRS;
+export const isDoor = (id: number): boolean => id === B.OAK_DOOR || id === B.IRON_DOOR;
+export const isTrapdoor = (id: number): boolean => id === B.OAK_TRAPDOOR || id === B.IRON_TRAPDOOR;
+export const isButton = (id: number): boolean => id === B.STONE_BUTTON || id === B.OAK_BUTTON;
+export const isPlate = (id: number): boolean => id === B.STONE_PLATE || id === B.OAK_PLATE;
+export const isRedstoneTorch = (id: number): boolean => id === B.REDSTONE_TORCH || id === B.REDSTONE_TORCH_OFF;
+export const isPiston = (id: number): boolean => id === B.PISTON || id === B.STICKY_PISTON;
+/** Blocks that keep an inventory in a block entity, and how many slots. */
+export function containerSize(id: number): number {
+  return id === B.CHEST ? 27 : id === B.HOPPER ? 5 : id === B.DISPENSER || id === B.DROPPER ? 9 : 0;
+}
 
 /** Maximum growth stage for crops (meta holds the age). */
 export const CROP_MAX_AGE: Record<number, number> = { [B.WHEAT]: 7, [B.CARROTS]: 3, [B.POTATOES]: 3 };
@@ -566,7 +864,12 @@ export function faceTexture(def: BlockDef, meta: number, face: number): string {
     const end = axis === 0 ? face === Face.Up || face === Face.Down : axis === 1 ? face === Face.East || face === Face.West : face === Face.South || face === Face.North;
     return end ? t.top : t.side;
   }
+  if (def.boxTexture) {
+    const t2 = def.boxTexture(meta, 0, face);
+    if (t2) return t2;
+  }
   if (def.id === B.OAK_DOOR) return (meta & 8) !== 0 ? "oak_door_top" : "oak_door_bottom";
+  if (def.id === B.IRON_DOOR) return (meta & 8) !== 0 ? "iron_door_top" : "iron_door_bottom";
   if (def.id === B.RED_BED) {
     const head = (meta & 4) !== 0;
     if (face === Face.Up) return head ? "bed_head_top" : "bed_foot_top";

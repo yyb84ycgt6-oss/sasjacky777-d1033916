@@ -39,7 +39,7 @@ interface PartSpec {
   offset?: [number, number, number];
   rotation?: [number, number, number];
   inflate?: number;
-  material?: "main" | "wool";
+  material?: "main" | "wool" | "gel";
   children?: PartSpec[];
 }
 
@@ -64,6 +64,11 @@ const legs4 = (size: [number, number, number], uv: [number, number], x: number, 
 ];
 
 const MODELS: Record<string, PartSpec[]> = {
+  // A cube of jelly with a darker core; scaled by the slime's size in pose().
+  slime: [
+    { name: "core", size: [6, 6, 6], uv: [0, 16], pivot: [0, 4, 0] },
+    { name: "gel", size: [8, 8, 8], uv: [0, 0], pivot: [0, 4, 0], material: "gel" },
+  ],
   player: HUMANOID(false),
   zombie: HUMANOID(false),
   skeleton: HUMANOID(true),
@@ -123,6 +128,7 @@ export interface ModelInstance {
   parts: Map<string, THREE.Object3D>;
   material: THREE.MeshBasicMaterial;
   wool?: THREE.MeshBasicMaterial;
+  gel?: THREE.MeshBasicMaterial;
 }
 
 const textures = new Map<string, THREE.CanvasTexture>();
@@ -144,6 +150,10 @@ const geometryCache = new Map<string, THREE.BufferGeometry>();
 export function buildModel(kind: string, variant = 0): ModelInstance {
   const material = new THREE.MeshBasicMaterial({ map: skinTexture(kind, variant) });
   const wool = kind === "sheep" ? new THREE.MeshBasicMaterial({ map: skinTexture(kind, variant) }) : undefined;
+  // Depth writes off so the core shows through the jelly from every side.
+  const gel = kind === "slime"
+    ? new THREE.MeshBasicMaterial({ map: skinTexture(kind, variant), transparent: true, opacity: 0.6, depthWrite: false })
+    : undefined;
   const root = new THREE.Group();
   const scaleGroup = new THREE.Group();
   scaleGroup.scale.setScalar(1);
@@ -156,7 +166,7 @@ export function buildModel(kind: string, variant = 0): ModelInstance {
     const gkey = `${spec.size}:${spec.uv}:${spec.inflate ?? 0}`;
     let g = geometryCache.get(gkey);
     if (!g) { g = boxGeometry(spec.size[0], spec.size[1], spec.size[2], spec.uv[0], spec.uv[1], spec.inflate); geometryCache.set(gkey, g); }
-    const mesh = new THREE.Mesh(g, spec.material === "wool" && wool ? wool : material);
+    const mesh = new THREE.Mesh(g, spec.material === "wool" && wool ? wool : spec.material === "gel" && gel ? gel : material);
     if (spec.offset) mesh.position.set(spec.offset[0] / 16, spec.offset[1] / 16, spec.offset[2] / 16);
     pivot.add(mesh);
     parent.add(pivot);
@@ -165,7 +175,7 @@ export function buildModel(kind: string, variant = 0): ModelInstance {
   };
   for (const spec of MODELS[kind] ?? MODELS.pig) build(spec, scaleGroup);
   parts.set("__scale", scaleGroup);
-  return { root, parts, material, wool };
+  return { root, parts, material, wool, gel };
 }
 
 export interface PoseInput {
@@ -191,6 +201,9 @@ export interface PoseInput {
   sheared?: boolean;
   onGround?: boolean;
   armsForward?: boolean;
+  /** A slime's size (1, 2 or 4) and its stretch or squash. */
+  size?: number;
+  squish?: number;
 }
 
 const WOOL_TINTS = WOOL_COLORS.map((c) => ({
@@ -204,8 +217,9 @@ export function pose(m: ModelInstance, kind: string, p: PoseInput): void {
   r.position.set(p.x, p.y, p.z);
   r.rotation.set(0, p.yaw, 0);
   const scale = m.parts.get("__scale")!;
-  const s = (p.baby ? 0.5 : 1) * (1 + (p.swell ?? 0) * 0.25);
-  scale.scale.set(s * (1 + (p.swell ?? 0) * 0.1), s, s * (1 + (p.swell ?? 0) * 0.1));
+  const s = (p.baby ? 0.5 : 1) * (1 + (p.swell ?? 0) * 0.25) * (p.size ?? 1);
+  const stretch = 1 + (p.squish ?? 0) * 0.5;
+  scale.scale.set(s * (1 + (p.swell ?? 0) * 0.1) / stretch, s * stretch, s * (1 + (p.swell ?? 0) * 0.1) / stretch);
   if (p.death > 0) r.rotation.z = Math.min(1, p.death / 20) * (Math.PI / 2);
   else r.rotation.z = 0;
 
@@ -213,6 +227,7 @@ export function pose(m: ModelInstance, kind: string, p: PoseInput): void {
   const hurtTint = p.hurt || p.death > 0;
   m.material.color.setRGB(l, hurtTint ? l * 0.45 : l, hurtTint ? l * 0.45 : l);
   if (p.flash) m.material.color.setRGB(1.6, 1.6, 1.6);
+  if (m.gel) m.gel.color.copy(m.material.color);
   if (m.wool) {
     const c = col(WOOL_TINTS[p.woolColor ?? 0] ?? "#f0f0f0");
     m.wool.color.setRGB(c.r * l, c.g * l * (hurtTint ? 0.45 : 1), c.b * l * (hurtTint ? 0.45 : 1));

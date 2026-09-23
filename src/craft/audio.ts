@@ -256,6 +256,8 @@ export class GameAudio {
       case "skeleton": for (let i = 0; i < 4; i++) this.noiseBurst(out, t + i * 0.05, 0.03, "bandpass", 2500, 4, 0.5); break;
       case "creeper": this.noiseBurst(out, t, 0.4, "highpass", 2000, 0.8, 0.4); break;
       case "spider": this.noiseBurst(out, t, 0.3, "bandpass", 1600, 3, 0.4, 0.6); this.tone(out, t, "square", 200, 150, 0.2, 0.1); break;
+      // A wet slap: a low thump under a short band of noise, pitched by the slime's size.
+      case "slime": this.tone(out, t, "sine", 180 * p * low, 90 * p * low, 0.15, 0.4); this.noiseBurst(out, t, 0.12, "bandpass", 700 * p, 2, 0.35, 0.8); break;
     }
   }
 

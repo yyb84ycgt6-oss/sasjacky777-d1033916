@@ -77,7 +77,7 @@ function quickMove(game: Game, from: Section, index: number, stack: ItemStack): 
   if (from === "inv") {
     if (kind === "chest") {
       const chest = chestOf(game);
-      if (chest) return mergeInto(stack, chest.items, range(0, 27));
+      if (chest) return mergeInto(stack, chest.items, range(0, chest.items.length));
     }
     if (kind === "furnace") {
       const f = furnaceOf(game);

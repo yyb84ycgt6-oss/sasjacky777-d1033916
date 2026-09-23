@@ -260,6 +260,7 @@ export class WorldRenderer {
     v.lit?.dispose();
     v.model?.material.dispose();
     v.model?.wool?.dispose();
+    v.model?.gel?.dispose();
     this.views.delete(id);
   }
 
@@ -286,6 +287,7 @@ export class WorldRenderer {
           flash: e.kind === "creeper" && e.fuse > 0 && Math.floor(this.time * 8) % 2 === 0,
           woolColor: e.woolColor, sheared: e.sheared, onGround: e.body.onGround,
           armsForward: e.kind === "zombie" || (e.kind === "skeleton" && e.targetId !== null),
+          size: e.size, squish: e.squish,
         });
         v.object.position.set(0, 0, 0);
         continue;

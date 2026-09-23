@@ -23,8 +23,9 @@ export interface FurnaceEntity {
   xp: number;
 }
 
-export function newChest(): ChestEntity {
-  return { kind: "chest", items: new Array(27).fill(null) };
+/** A chest-like inventory: 27 for a chest, 5 for a hopper, 9 for a dispenser or dropper. */
+export function newChest(size = 27): ChestEntity {
+  return { kind: "chest", items: new Array(size).fill(null) };
 }
 
 export function newFurnace(): FurnaceEntity {
