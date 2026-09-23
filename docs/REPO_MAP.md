@@ -15,10 +15,11 @@ written — ended up invisible to the app whose whole problem it solves.
 | `context-condenser/` | Anchored dehydration and real rehydration — a condensate never exists without a reference to the lossless bytes it came from. | TypeScript (node:test) |
 | `command_station/` | Model-library tooling: manifests, checksums, sync batches, the integrity dashboard, the vault diff tool. | Python + batch |
 | `Jackie/` | The doctrine and the cluster/constellation modules. | Markdown + Python |
+| `harness/` | Configs that let Hermes Agent and DeepSeek Harness drive the app over MCP, and the end-to-end run that proves they do. See [HARNESSES.md](HARNESSES.md). | YAML + Node + bash |
 
 ## Working here with an agent
 
-[CLAUDE.md](../CLAUDE.md) is the brief: the commands, the eight rules that are
+[CLAUDE.md](../CLAUDE.md) is the brief: the commands, the nine rules that are
 load-bearing, and where everything lives. [AGENTS.md](../AGENTS.md) carries the
 same hard rules for tools that read that file instead.
 

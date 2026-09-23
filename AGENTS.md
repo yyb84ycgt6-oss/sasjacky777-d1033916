@@ -45,6 +45,10 @@ Do not report a change as working on the strength of a typecheck alone.
    task, an error inside a 200 — say which thing failed, in words the person
    can act on. This is the single most repeated bug in this repository's
    history.
+9. **Everything an agent may do to the app is an action in
+   `src/lib/appActions.ts`.** The MCP tools (Hermes Agent, DeepSeek Harness)
+   and the in-app operators both call it; add a capability there first, then
+   expose it in both. See `docs/HARNESSES.md`.
 
 ## Style
 
@@ -55,4 +59,4 @@ prose that explains the reasoning, not bullet fragments; read `git log`.
 ## Secrets
 
 Never commit one. `LOVABLE_API_KEY`, `JACKY_API_BASE`, `BIONIC_BASE_URL`,
-`OLLAMA_BASE_URL` and friends live in Cloud → Secrets.
+`OLLAMA_BASE_URL`, `DEEPSEEK_API_KEY` and friends live in Cloud → Secrets.

@@ -14,9 +14,13 @@ Not one program. Four trees that ship together:
 | Path | What it is | Language |
 | --- | --- | --- |
 | `src/` | The web app — Jackie's chat, memory, vault, pods, game, Eru. 1,000+ files. | TypeScript + React + Tailwind + shadcn/ui |
-| `supabase/functions/` | 39 edge functions and their shared modules. | TypeScript (Deno) |
+| `supabase/functions/` | 40 edge functions and their shared modules. | TypeScript (Deno) |
 | `jackierouter/`, `Jackie/`, `command_station/` | The rig-side engine: predictive routing, the agent runtime, model-library tooling. | Python |
 | `context-condenser/` | Anchored dehydration and real rehydration. Its own package. | TypeScript (node:test) |
+
+Agents drive the app too: Hermes Agent and DeepSeek Harness through the MCP
+server, DeepSeek and Hermes operators from inside the Agent Lab. `harness/` holds
+their configs and an end-to-end run; `docs/HARNESSES.md` explains both.
 
 `docs/REPO_MAP.md` is the longer version. `docs/CHAT_PIPELINE.md` explains the
 chat, which is the part most work touches. `docs/ENVIRONMENT.md` lists every
@@ -41,6 +45,7 @@ cd context-condenser && npm test         # 44, node:test
 
 npm run dev                  # vite on :8080
 npm run smoke                # route smoke check
+bash harness/e2e/run.sh      # Hermes + DeepSeek Harness → MCP → app (see the script's header)
 ```
 
 **Before you claim a change works, run the suite that covers it plus
@@ -142,6 +147,16 @@ the person reading the screen can act on.
 
 ---
 
+### 9. What an agent may do lives in `src/lib/appActions.ts`. Only there.
+
+The MCP tools (for external harnesses) and the in-app operators (`appAgent.ts`)
+are thin adapters over the same functions. A new capability is an action there
+first, then a tool in `src/lib/mcp/tools/` and an entry in `AGENT_TOOLS` — or
+the two kinds of agent start obeying different rules, and an action that works
+from Hermes fails in the app for a reason nobody can see. Validate against the
+database's CHECK constraints in the action, pin every query to the caller's
+`user_id`, and return a verdict (`ActionResult`), never throw.
+
 ## Conventions
 
 **Comments explain why, not what.** This codebase's comments carry the reason a
@@ -176,6 +191,9 @@ src/lib/jackie-engines.ts     the engine registry and the chain's order
 src/lib/jackie-stream.ts      SSE parsing, success/failure decisions
 src/lib/edgeFunction.ts       headers the gateway will accept
 src/lib/jackie-*.ts           memory, tasks, tags, files, attachments, archive
+src/lib/appActions.ts         everything an agent may do to the app (rule 9)
+src/lib/appAgent.ts           the in-app act→observe loop; localModels.ts reaches LM Studio/Ollama
+src/lib/mcp/                  the MCP server's tools (generates supabase/functions/mcp)
 src/components/ui/            shadcn primitives
 src/test/                     vitest
 
@@ -187,6 +205,8 @@ supabase/migrations/          35 migrations; RLS lives here, not in function cod
 jackierouter/                 predictive, hardware-aware routing (152 tests)
 Jackie/core/engine/           the agent runtime — registry, pods, orchestrator, graph
 tests/                        pytest
+
+harness/                      Hermes Agent + DeepSeek Harness configs, and harness/e2e
 ```
 
 ---
