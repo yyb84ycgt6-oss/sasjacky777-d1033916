@@ -81,7 +81,52 @@ const PIGLIN: PartSpec[] = [
   { name: "leftLeg", size: [4, 12, 4], uv: [0, 16], pivot: [2, 12, 0], offset: [0, -6, 0] },
 ];
 
+/** Elytra, folded flat against a player's back and spread while gliding (hidden otherwise). */
+const WINGS: PartSpec[] = [
+  { name: "wingR", size: [10, 20, 1], uv: [0, 32], pivot: [-1, 23, 2.5], offset: [-5, -10, 0] },
+  { name: "wingL", size: [10, 20, 1], uv: [0, 32], pivot: [1, 23, 2.5], offset: [5, -10, 0] },
+];
+
+/**
+ * The Ender Dragon, modelled at a quarter of its size and drawn four times
+ * over (see modelScale): a long body, a three-part neck to a head with a jaw
+ * that opens, wings in two joints, and a tail of six segments.
+ */
+const DRAGON: PartSpec[] = [
+  { name: "body", size: [6, 6, 16], uv: [0, 0], pivot: [0, 6, 0] },
+  { name: "neck0", size: [3, 3, 3], uv: [44, 16], pivot: [0, 6.5, -9.5] },
+  { name: "neck1", size: [3, 3, 3], uv: [44, 16], pivot: [0, 7, -12.5] },
+  { name: "neck2", size: [3, 3, 3], uv: [44, 16], pivot: [0, 7.5, -15.5] },
+  { name: "head", size: [4, 4, 5], uv: [44, 0], pivot: [0, 8, -19.5],
+    children: [{ name: "jaw", size: [4, 1, 5], uv: [44, 9], pivot: [0, -2.5, 2.5], offset: [0, 0, -2.5] }] },
+  { name: "wingR", size: [14, 1, 10], uv: [0, 22], pivot: [-3, 8, -3], offset: [-7, 0, 0],
+    children: [{ name: "tipR", size: [12, 1, 8], uv: [0, 34], pivot: [-7, 0, 0], offset: [-6, 0, 0] }] },
+  { name: "wingL", size: [14, 1, 10], uv: [0, 22], pivot: [3, 8, -3], offset: [7, 0, 0],
+    children: [{ name: "tipL", size: [12, 1, 8], uv: [0, 34], pivot: [7, 0, 0], offset: [6, 0, 0] }] },
+  ...[0, 1, 2, 3, 4, 5].map((i): PartSpec => ({ name: `tail${i}`, size: [2, 2, 2], uv: [56, 16], pivot: [0, 6, 9 + i * 2] })),
+  ...legs4([2, 4, 2], [48, 22], 2, 3.5, 5),
+];
+
 const MODELS: Record<string, PartSpec[]> = {
+  // Long-limbed and black; its head tips back to scream (see pose), arms forward when carrying.
+  enderman: [
+    { name: "rightLeg", size: [2, 30, 2], uv: [56, 32], pivot: [-2, 30, 0], offset: [0, -15, 0] },
+    { name: "leftLeg", size: [2, 30, 2], uv: [56, 32], pivot: [2, 30, 0], offset: [0, -15, 0] },
+    { name: "body", size: [8, 12, 4], uv: [32, 16], pivot: [0, 36, 0] },
+    { name: "head", size: [8, 8, 8], uv: [0, 0], pivot: [0, 42, 0], offset: [0, 4, 0] },
+    { name: "rightArm", size: [2, 30, 2], uv: [56, 0], pivot: [-5, 41, 0], offset: [0, -14, 0] },
+    { name: "leftArm", size: [2, 30, 2], uv: [56, 0], pivot: [5, 41, 0], offset: [0, -14, 0] },
+  ],
+  // Segments that narrow to a tail, wriggling side to side.
+  silverfish: [
+    { name: "seg0", size: [3, 2, 2], uv: [0, 0], pivot: [0, 1, -4.5] },
+    { name: "seg1", size: [4, 3, 3], uv: [0, 5], pivot: [0, 1.5, -2] },
+    { name: "seg2", size: [5, 4, 3], uv: [0, 12], pivot: [0, 2, 1] },
+    { name: "seg3", size: [3, 3, 3], uv: [0, 20], pivot: [0, 1.5, 4] },
+    { name: "seg4", size: [2, 2, 3], uv: [0, 27], pivot: [0, 1, 7] },
+    { name: "seg5", size: [1, 1, 2], uv: [0, 33], pivot: [0, 0.5, 9.5] },
+  ],
+  ender_dragon: DRAGON,
   piglin: PIGLIN,
   zombified_piglin: PIGLIN,
   // A skeleton half again as tall (drawn scaled up in pose()), in soot-black bone.
@@ -160,7 +205,7 @@ const MODELS: Record<string, PartSpec[]> = {
     { name: "armR", size: [4, 30, 6], uv: [32, 23], pivot: [-11, 36, 0], offset: [0, -13, 0] },
     { name: "armL", size: [4, 30, 6], uv: [32, 23], pivot: [11, 36, 0], offset: [0, -13, 0] },
   ],
-  player: HUMANOID(false),
+  player: [...HUMANOID(false), ...WINGS],
   zombie: HUMANOID(false),
   skeleton: HUMANOID(true),
   pig: [
@@ -299,6 +344,13 @@ export interface PoseInput {
   rock?: number;
   /** A rider: legs forward, as seated in a boat or a cart. */
   sitting?: boolean;
+  /** On elytra: lying along the flight, wings spread. */
+  gliding?: boolean;
+  /** An enderman screaming (head back, jaw wide) or carrying a block (arms out). */
+  screaming?: boolean;
+  carrying?: boolean;
+  /** The dragon: its climb or dive (radians), and whether it is perched. */
+  bank?: number;
 }
 
 const WOOL_TINTS = WOOL_COLORS.map((c) => ({
@@ -315,8 +367,13 @@ export function pose(m: ModelInstance, kind: string, p: PoseInput): void {
   const s = (p.baby ? 0.5 : 1) * (1 + (p.swell ?? 0) * 0.25) * (p.size ?? 1);
   const stretch = 1 + (p.squish ?? 0) * 0.5;
   scale.scale.set(s * (1 + (p.swell ?? 0) * 0.1) / stretch, s * stretch, s * (1 + (p.swell ?? 0) * 0.1) / stretch);
-  if (p.death > 0) r.rotation.z = Math.min(1, p.death / 20) * (Math.PI / 2);
+  r.rotation.order = "YXZ";
+  // The dragon rises in its death throes rather than keeling over.
+  if (p.death > 0 && kind !== "ender_dragon") r.rotation.z = Math.min(1, p.death / 20) * (Math.PI / 2);
   else r.rotation.z = p.rock ?? 0;
+  // A glider lies face down along its flight, tipped up as it climbs; the dragon noses into a dive.
+  if (p.gliding) { r.rotation.x = -Math.PI / 2 + p.pitch * 0.8; r.position.y += 0.3; }
+  if (kind === "ender_dragon") r.rotation.x = p.bank ?? 0;
 
   const l = Math.max(0.12, p.light);
   const hurtTint = p.hurt || p.death > 0;
@@ -339,7 +396,39 @@ export function pose(m: ModelInstance, kind: string, p: PoseInput): void {
   // Pitch is positive looking up; a positive x rotation tips the -z face upward.
   if (head) head.rotation.set(p.pitch, 0, 0);
 
+  const wingR = m.parts.get("wingR"), wingL = m.parts.get("wingL");
+  if (kind === "player" && wingR && wingL) {
+    wingR.visible = wingL.visible = !!p.gliding;
+    // Spread in a shallow V behind the shoulders.
+    wingR.rotation.set(0.15, 0, 0.35); wingL.rotation.set(0.15, 0, -0.35);
+  }
+
   switch (kind) {
+    case "enderman": {
+      if (head) head.rotation.set(p.screaming ? 0.35 : p.pitch, 0, 0);
+      if (p.carrying) {
+        set("rightArm", -0.9, 0, 0.05); set("leftArm", -0.9, 0, -0.05);
+      } else {
+        const attack = p.swing > 0 ? -Math.sin(p.swing * Math.PI) * 1.2 : 0;
+        set("rightArm", -swing * 0.6 + attack, 0, 0.05); set("leftArm", swing * 0.6, 0, -0.05);
+      }
+      set("rightLeg", swing * 0.6); set("leftLeg", -swing * 0.6);
+      break;
+    }
+    case "silverfish":
+      for (let i = 0; i < 6; i++) set(`seg${i}`, 0, Math.sin(p.time * 9 + i * 0.9) * 0.18 * (0.3 + Math.min(1, p.speed * 10)), 0);
+      break;
+    case "ender_dragon": {
+      // Wings beat slowly (held still perched); the jaw works; the tail swings.
+      const beat = p.onGround ? 0.15 : Math.sin(p.time * 3) * 0.7;
+      set("wingR", 0, 0, -beat); set("wingL", 0, 0, beat);
+      set("tipR", 0, 0, -beat * 0.6 - 0.1); set("tipL", 0, 0, beat * 0.6 + 0.1);
+      set("jaw", Math.max(0, Math.sin(p.time * 1.4)) * (p.onGround ? 0.6 : 0.25), 0, 0);
+      if (head) head.rotation.set(0, 0, 0);
+      for (let i = 0; i < 6; i++) set(`tail${i}`, 0, Math.sin(p.time * 1.5 + i * 0.6) * 0.12 * (i + 1), 0);
+      for (let i = 0; i < 3; i++) set(`neck${i}`, Math.sin(p.time * 1.2 + i) * 0.05, 0, 0);
+      break;
+    }
     case "player": case "zombie": case "skeleton": case "piglin": case "zombified_piglin": case "wither_skeleton": {
       const sneak = p.sneaking ? 0.5 : 0;
       const body = m.parts.get("body");

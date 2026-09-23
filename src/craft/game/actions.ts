@@ -12,12 +12,12 @@
 import * as THREE from "three";
 import {
   B, block, CLOCKWISE_FACING, collisionBoxes, Face, FACE_OF_FACING, FACING_DIRS, isButton, isCrop, isDoor, isFluid, isLeaves, isPillar,
-  isRedstoneTorch, isSlab, isStairs, isTrapdoor, OPPOSITE_FACE, OPPOSITE_FACING,
+  isRedstoneTorch, isSlab, isStairs, isTrapdoor, OPPOSITE_FACE, OPPOSITE_FACING, FRAME_EYE,
   type BlockDef,
 } from "../engine/blocks";
 import { cropDrops, supported } from "../engine/blockRules";
 import { applyFortune, damageBonus, efficiencyBonus, levelOf, wears } from "../engine/enchanting";
-import { PrimedTnt, Projectile, type ProjectileKind } from "../engine/entities";
+import { EndCrystal, PrimedTnt, Projectile, type ProjectileKind } from "../engine/entities";
 import { itemDef, itemId, resolveDrops, type ItemDef, type ItemStack } from "../engine/items";
 import { isArthropod, isUndead, Mob } from "../engine/mobs";
 import { potionOfItem } from "../engine/potions";
@@ -104,6 +104,7 @@ export class Actions {
   private equipTarget: number | null = null;
   private useCooldown = 0;
   private attackPrev = false;
+  private pearlCooldown = 0;
   private usePrev = false;
   private creativeCooldown = 0;
   private eating: { ticks: number; slot: number; id: number } | null = null;
@@ -202,10 +203,10 @@ export class Actions {
     const hit = p.gameMode === "spectator" ? null : raycastBlocks(g.world, ox, oy, oz, d.x, d.y, d.z, reach);
     let best: Entity | null = null, bestT = Math.min(entityReach, hit ? hit.distance : Infinity);
     for (const e of g.entities.values()) {
-      if (!(e instanceof Mob || e instanceof Vehicle) || (e instanceof Mob && e.dying)) continue;
+      if (!(e instanceof Mob || e instanceof Vehicle || e instanceof EndCrystal) || (e instanceof Mob && e.dying)) continue;
       // The vehicle you sit in is not in your way.
       if (e instanceof Vehicle && e.id === p.riding) continue;
-      if (Math.abs(e.x - ox) > 6 || Math.abs(e.z - oz) > 6) continue;
+      if (Math.abs(e.x - ox) > 6 + e.body.width / 2 || Math.abs(e.z - oz) > 6 + e.body.width / 2) continue;
       const box = e.box();
       const r = rayBox(ox, oy, oz, d.x, d.y, d.z, { ...box, minX: box.minX - 0.1, maxX: box.maxX + 0.1, minZ: box.minZ - 0.1, maxZ: box.maxZ + 0.1 }, bestT);
       if (r && r.t < bestT) { bestT = r.t; best = e; }
@@ -229,6 +230,7 @@ export class Actions {
     if (this.swingTick >= 0) { this.swingPrev = this.swingTick; this.swingTick++; if (this.swingTick > 6) { this.swingTick = -1; this.swingPrev = -1; } }
     else this.swingPrev = -1;
     if (this.useCooldown > 0) this.useCooldown--;
+    if (this.pearlCooldown > 0) this.pearlCooldown--;
     if (this.creativeCooldown > 0) this.creativeCooldown--;
 
     // The held item dips and rises when it changes.
@@ -342,6 +344,12 @@ export class Actions {
     if (!id) { this.mining = null; return; }
     const def = block(id);
     this.swing();
+    // Struck in survival, the dragon egg blinks away rather than breaking.
+    if (id === B.DRAGON_EGG && p.gameMode !== "creative") {
+      if (!this.attackPrev) g.teleportEgg(x, y, z);
+      this.mining = null;
+      return;
+    }
     if (p.gameMode === "creative") {
       const held = p.inventory.held ? itemDef(p.inventory.held.id) : undefined;
       // Swords cannot break blocks in creative, as in the original.
@@ -467,7 +475,7 @@ export class Actions {
       const e = t.entity;
       if (crit) g.particles("crit", e.x, e.y + e.body.height * 0.7, e.z, 10);
       if (g.role === "guest") g.net?.attack(e.id, damage, b.x, b.z, knockback, fire, looting);
-      else if (e instanceof Vehicle) e.hurt(g.ctx, damage, "player", b.x, b.z, p.id);
+      else if (e instanceof Vehicle || e instanceof EndCrystal) e.hurt(g.ctx, damage, "player", b.x, b.z, p.id);
       else if (e instanceof Mob) {
         e.looting = looting;
         if (e.hurt(g.ctx, damage, "player", b.x, b.z, p.id, knockback)) {
@@ -572,6 +580,40 @@ export class Actions {
     }
     if (def.use === "bow") {
       if (!p.survivalLike || p.inventory.count(itemId("arrow")) > 0) this.bow = { ticks: 0 };
+      return;
+    }
+    if (def.use === "pearl") {
+      // A second's wait between pearls, as in the original.
+      if (this.pearlCooldown > 0) return;
+      this.pearlCooldown = 20;
+      this.throwProjectile("ender_pearl", 1.5);
+      if (p.survivalLike) this.consumeHeld();
+      g.sound("throw", p.body.x, p.body.y + 1.5, p.body.z, 0.5, 0.4);
+      this.swing();
+      return;
+    }
+    if (def.use === "ender_eye") {
+      // Eyes only find strongholds in the overworld, and a flat world has none.
+      if (g.dimension !== "overworld" || g.meta.type === "flat") {
+        g.showActionbar(g.meta.type === "flat" ? "A flat world has no strongholds for the eye to find" : "The eye finds strongholds only in the overworld");
+        return;
+      }
+      const b = p.body;
+      const x = b.x, y = b.y + b.eyeHeight - 0.1, z = b.z;
+      if (g.role === "guest") g.net?.throwItem("eye_of_ender", x, y, z, 0, 0, 0);
+      else g.throwEye(x, y, z, p.id);
+      if (p.survivalLike) this.consumeHeld();
+      this.swing();
+      return;
+    }
+    if (def.use === "rocket") {
+      // A rocket only pushes someone already gliding.
+      if (!p.gliding) { g.showActionbar("Fire a rocket while gliding on elytra"); return; }
+      p.boostTicks = 22 + Math.floor(Math.random() * 12);
+      g.sound("firework_launch", p.body.x, p.body.y, p.body.z, 0.8);
+      g.particles("crit", p.body.x, p.body.y, p.body.z, 6);
+      if (p.survivalLike) this.consumeHeld();
+      this.swing();
       return;
     }
     if (def.use === "throw") {
@@ -786,8 +828,30 @@ export class Actions {
     if ((!p.sneaking || !def) && fresh && bdef.interact) {
       if (this.interactBlock(x, y, z, id, meta, def)) return true;
     }
+    if (fresh && id === B.DRAGON_EGG && !p.sneaking) {
+      g.teleportEgg(x, y, z);
+      this.swing();
+      return true;
+    }
     if (!def) return false;
     if (p.gameMode === "adventure") return false;
+    if (fresh && def.use === "ender_eye" && id === B.END_PORTAL_FRAME && (meta & FRAME_EYE) === 0) {
+      // Set in the frame; whoever simulates sees the change and lights the ring when it is the twelfth.
+      w.setBlock(x, y, z, id, meta | FRAME_EYE, "player");
+      g.sound("end_portal_frame_fill", x + 0.5, y + 0.8, z + 0.5, 1);
+      g.particles("portal", x + 0.5, y + 1, z + 0.5, 12);
+      if (p.survivalLike) this.consumeHeld();
+      this.swing();
+      return true;
+    }
+    if (fresh && def.use === "end_crystal") {
+      if ((id !== B.OBSIDIAN && id !== B.BEDROCK) || hit.face !== Face.Up || w.blockAt(x, y + 1, z) !== B.AIR || w.blockAt(x, y + 2, z) !== B.AIR) return false;
+      if (g.role === "guest") g.net?.placeCrystal?.(x, y, z);
+      else g.placeCrystal(x, y, z);
+      if (p.survivalLike) this.consumeHeld();
+      this.swing();
+      return true;
+    }
 
     // Tools used on blocks.
     if (fresh) {
@@ -1141,6 +1205,8 @@ export class Actions {
       if (hit.face === Face.Down || (hit.face !== Face.Up && fracY > 0.5)) meta |= 8;
     }
     if (isLeaves(id)) meta = 1; // placed leaves never decay
+    // An end rod points out of the face it was set against.
+    if (id === B.END_ROD) meta = hit.face;
 
     // Crops go on farmland; lily pads on water.
     if (item.use === "plant" && (isCrop(id))) {

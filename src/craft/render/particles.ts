@@ -51,6 +51,9 @@ const KINDS: Record<string, Kind> = {
   crimson_spores: { layer: "particle_spark", gravity: 0.08, life: [3, 6], size: [0.04, 0.06], drag: 0.99, collide: false, fullTexture: true, tint: 0xd03a2a, speed: 0.15 },
   warped_spores: { layer: "particle_spark", gravity: -0.08, life: [3, 6], size: [0.04, 0.06], drag: 0.99, collide: false, fullTexture: true, tint: 0x3ce6b8, speed: 0.15 },
   soul: { layer: "particle_spark", gravity: -0.35, life: [1, 2], size: [0.08, 0.12], drag: 0.96, collide: false, fullTexture: true, tint: 0x6ae8ff, speed: 0.3 },
+  // The End: the dragon's breath, and the white motes an end rod gives off.
+  dragon_breath: { layer: "particle_spark", gravity: -0.15, life: [0.8, 1.6], size: [0.08, 0.14], drag: 0.94, collide: false, fullTexture: true, tint: 0xd060ff, speed: 0.4 },
+  end_rod: { layer: "particle_spark", gravity: -0.05, life: [1, 2], size: [0.05, 0.08], drag: 0.97, collide: false, fullTexture: true, tint: 0xf4f0ff, speed: 0.2 },
   lava_spark: { layer: "particle_flame", gravity: 6, life: [0.5, 1.2], size: [0.06, 0.1], drag: 0.99, collide: true, fullTexture: true, speed: 2 },
 };
 

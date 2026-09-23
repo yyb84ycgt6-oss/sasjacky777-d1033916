@@ -323,6 +323,53 @@ export function travel(world: BlockReader, b: Body, input: MoveInput): MoveResul
   return result;
 }
 
+/**
+ * A tick of elytra flight, the original's formula: gravity eased by how level
+ * the glider is held, a dive turned into speed, a climb paid for with it, and
+ * the heading swung toward the look. `boost` is a firework rocket pushing.
+ * Returns the move, plus how hard a wall was hit (damage, 0 for none).
+ * Pitch here is positive looking up — the original's is the other way round.
+ */
+export function glide(world: BlockReader, b: Body, yaw: number, pitch: number, boost: boolean): MoveResult & { wallHit: number } {
+  senseEnvironment(world, b);
+  const lx = -Math.sin(yaw) * Math.cos(pitch), ly = Math.sin(pitch), lz = -Math.cos(yaw) * Math.cos(pitch);
+  if (boost) {
+    b.vx += lx * 0.1 + (lx * 1.5 - b.vx) * 0.5;
+    b.vy += ly * 0.1 + (ly * 1.5 - b.vy) * 0.5;
+    b.vz += lz * 0.1 + (lz * 1.5 - b.vz) * 0.5;
+  }
+  const down = -pitch;
+  const horiz = Math.hypot(lx, lz);
+  const speedH = Math.hypot(b.vx, b.vz);
+  let lift = Math.cos(down);
+  lift = lift * lift * Math.min(1, Math.hypot(lx, ly, lz) / 0.4);
+  b.vy += 0.08 * (-1 + lift * 0.75);
+  if (b.vy < 0 && horiz > 0) {
+    const d = b.vy * -0.1 * lift;
+    b.vx += (lx * d) / horiz; b.vy += d; b.vz += (lz * d) / horiz;
+  }
+  if (down < 0 && horiz > 0) {
+    const d = speedH * -Math.sin(down) * 0.04;
+    b.vx -= (lx * d) / horiz; b.vy += d * 3.2; b.vz -= (lz * d) / horiz;
+  }
+  if (horiz > 0) {
+    b.vx += ((lx / horiz) * speedH - b.vx) * 0.1;
+    b.vz += ((lz / horiz) * speedH - b.vz) * 0.1;
+  }
+  b.vx *= 0.99; b.vy *= 0.98; b.vz *= 0.99;
+  const before = Math.hypot(b.vx, b.vz);
+  const startX = b.x, startZ = b.z;
+  const wasGround = b.onGround;
+  moveBody(world, b, b.vx, b.vy, b.vz);
+  const result = { landedFrom: 0, jumped: false, moved: Math.hypot(b.x - startX, b.z - startZ), wallHit: 0 };
+  if (b.collidedH) result.wallHit = Math.max(0, (before - Math.hypot(b.vx, b.vz)) * 10 - 3);
+  // Fall distance only counts while dropping fast: a steady glide lands softly.
+  if (b.vy > -0.5) b.fallDistance = Math.min(b.fallDistance, 1);
+  else b.fallDistance -= b.vy;
+  if (b.onGround && !wasGround) { result.landedFrom = b.fallDistance; b.fallDistance = 0; }
+  return result;
+}
+
 function checkBlocked(world: BlockReader, b: Body, dx: number, dy: number, dz: number): boolean {
   const box = bodyBox(b);
   shift(box, dx, dy, dz);

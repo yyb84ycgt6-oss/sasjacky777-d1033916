@@ -63,7 +63,8 @@ function changed(game: Game): void {
 }
 
 function accepts(section: Section, index: number, game?: Game): (s: ItemStack) => boolean {
-  if (section === "armor") return (s) => itemDef(s.id)?.armor?.slot === index;
+  // A carved pumpkin can be worn as a helmet: it hides the wearer from endermen's stares.
+  if (section === "armor") return (s) => itemDef(s.id)?.armor?.slot === index || (index === 0 && s.id === B.CARVED_PUMPKIN);
   if (section === "furnace" && index === 1) return (s) => fuelTicks(s.id) > 0;
   if (section === "furnace" && index === 2) return () => false;
   if (section === "brewing") return index < 3 ? isBottle : index === 3 ? isBrewingIngredient : isBrewingFuel;

@@ -11,7 +11,7 @@ import { B, block } from "./blocks";
 import { levelOf, protectionFactor, wears } from "./enchanting";
 import { Inventory } from "./inventory";
 import { itemDef, type FoodInfo, type ItemStack, type StatusEffect } from "./items";
-import { newBody, senseEnvironment, travel, type Body, type BlockReader } from "./physics";
+import { glide, newBody, senseEnvironment, travel, type Body, type BlockReader } from "./physics";
 import type { DamageSource } from "./entities";
 
 export type GameMode = "survival" | "creative" | "adventure" | "spectator";
@@ -50,6 +50,8 @@ export const PLAYER_HEIGHT = 1.8;
 export const EYE_HEIGHT = 1.62;
 export const SNEAK_HEIGHT = 1.5;
 export const SNEAK_EYE = 1.27;
+export const GLIDE_HEIGHT = 0.6;
+export const GLIDE_EYE = 0.4;
 
 /** Points needed to go from `level` to the next. */
 export function xpToNext(level: number): number {
@@ -60,8 +62,14 @@ const DEATH_MESSAGES: Record<DamageSource, string> = {
   mob: "was slain", arrow: "was shot", explosion: "blew up", fall: "hit the ground too hard", fire: "burned to death",
   lava: "tried to swim in lava", drown: "drowned", starve: "starved to death", void: "fell out of the world",
   cactus: "was pricked to death", player: "was slain", magic: "died", suffocation: "suffocated in a wall",
-  wither: "withered away", fireball: "was fireballed",
+  wither: "withered away", fireball: "was fireballed", fly_into_wall: "experienced kinetic energy",
 };
+
+/** Elytra: flight wears it a point a second, and at one point from breaking it will no longer open. */
+export function elytraUsable(stack: ItemStack | null): boolean {
+  if (!stack || itemDef(stack.id)?.armor?.material !== "elytra") return false;
+  return (stack.damage ?? 0) < (itemDef(stack.id)?.durability ?? 0) - 1;
+}
 
 export class Player {
   body: Body;
@@ -110,6 +118,12 @@ export class Player {
   sleeping: { x: number; y: number; z: number } | null = null;
   sleepTicks = 0;
   events: PlayerEvent[] = [];
+  /** Flying on elytra. */
+  gliding = false;
+  /** Ticks of firework thrust left. */
+  boostTicks = 0;
+  private jumpHeld = false;
+  private glideTicks = 0;
 
   constructor(public readonly id: string, public name: string, x = 0, y = 80, z = 0) {
     this.body = newBody(x, y, z, PLAYER_WIDTH, PLAYER_HEIGHT, EYE_HEIGHT);
@@ -245,7 +259,8 @@ export class Player {
       dealt *= 1 - reduced / 25;
       const wear = Math.max(1, Math.floor(amount / 4));
       this.inventory.armor = this.inventory.armor.map((a) => {
-        if (!a || !wears(a, this.rng, true)) return a;
+        // Elytra are not armour: blows do not wear them, only flight does.
+        if (!a || itemDef(a.id)?.armor?.material === "elytra" || !wears(a, this.rng, true)) return a;
         const max = itemDef(a.id)?.durability ?? 0;
         const damage = (a.damage ?? 0) + wear;
         return max && damage >= max ? null : { ...a, damage };
@@ -296,6 +311,7 @@ export class Player {
     this.air = 300;
     this.fireTicks = 0;
     this.effects = [];
+    this.gliding = false;
     this.body.x = x; this.body.y = y; this.body.z = z;
     this.body.vx = this.body.vy = this.body.vz = 0;
     this.body.fallDistance = 0;
@@ -319,6 +335,7 @@ export class Player {
     this.attackTicks++;
     this.sneaking = false;
     this.sprinting = false;
+    this.gliding = false;
     const b = this.body;
     b.height = PLAYER_HEIGHT;
     b.eyeHeight = EYE_HEIGHT;
@@ -344,13 +361,24 @@ export class Player {
 
     // Sneaking shrinks the hitbox; standing back up needs headroom.
     const b = this.body;
-    this.sneaking = input.sneak && !this.flying && !b.inWater;
-    const wantHeight = this.sneaking ? SNEAK_HEIGHT : PLAYER_HEIGHT;
+    // A fresh press of jump in mid-fall opens the elytra; land, swim, fly or break it and it folds.
+    const jumpPressed = input.jump && !this.jumpHeld;
+    this.jumpHeld = input.jump;
+    const elytra = elytraUsable(this.inventory.armor[1]);
+    if (this.gliding && (b.onGround || b.inWater || b.inLava || this.flying || !elytra || b.onLadder)) this.gliding = false;
+    else if (!this.gliding && jumpPressed && elytra && !b.onGround && !b.inWater && !b.inLava && !this.flying && !b.onLadder) {
+      this.gliding = true;
+      this.glideTicks = 0;
+    }
+    if (!this.gliding) this.boostTicks = 0;
+    this.sneaking = input.sneak && !this.flying && !b.inWater && !this.gliding;
+    // Gliding, the body lies flat and only 0.6 tall: it fits through a one-block gap.
+    const wantHeight = this.gliding ? GLIDE_HEIGHT : this.sneaking ? SNEAK_HEIGHT : PLAYER_HEIGHT;
     if (wantHeight > b.height) {
       const hx = Math.floor(b.x), hy = Math.floor(b.y + PLAYER_HEIGHT - 0.01), hz = Math.floor(b.z);
       if (!block(Math.max(0, world.getBlock(hx, hy, hz))).solid) b.height = wantHeight;
     } else b.height = wantHeight;
-    b.eyeHeight = b.height === PLAYER_HEIGHT ? EYE_HEIGHT : SNEAK_EYE;
+    b.eyeHeight = b.height === PLAYER_HEIGHT ? EYE_HEIGHT : b.height === GLIDE_HEIGHT ? GLIDE_EYE : SNEAK_EYE;
 
     const canSprint = !this.survivalLike || this.food > 6;
     if (input.sprint && input.forward > 0.5 && canSprint && !this.sneaking) this.sprinting = true;
@@ -359,10 +387,23 @@ export class Player {
     const wasInWater = b.inWater;
     const swift = this.effectLevel("speed"), slow = this.effectLevel("slowness");
     const speedBoost = Math.max(0, (1 + (swift >= 0 ? 0.2 * (swift + 1) : 0)) * (1 - (slow >= 0 ? 0.15 * (slow + 1) : 0)));
-    const res = travel(world, b, {
-      forward: input.forward, strafe: input.strafe, yaw: this.yaw, jump: input.jump, sneak: input.sneak,
-      sprint: this.sprinting, flying: this.flying, speed: 0.1 * speedBoost,
-    });
+    let res;
+    if (this.gliding) {
+      const g = glide(world, b, this.yaw, this.pitch, this.boostTicks > 0);
+      if (this.boostTicks > 0) this.boostTicks--;
+      if (g.wallHit > 0 && this.survivalLike) this.hurt(g.wallHit, "fly_into_wall");
+      // A point of wear a second in the air, spared by Unbreaking.
+      if (++this.glideTicks % 20 === 0 && this.survivalLike) {
+        const e = this.inventory.armor[1];
+        if (e && wears(e, this.rng, false)) this.inventory.armor[1] = { ...e, damage: (e.damage ?? 0) + 1 };
+      }
+      res = g;
+    } else {
+      res = travel(world, b, {
+        forward: input.forward, strafe: input.strafe, yaw: this.yaw, jump: input.jump, sneak: input.sneak,
+        sprint: this.sprinting, flying: this.flying, speed: 0.1 * speedBoost,
+      });
+    }
     if (!wasInWater && b.inWater && b.vy < -0.3) this.events.push({ type: "splash" });
     this.walkDist += res.moved;
     if (res.jumped) {

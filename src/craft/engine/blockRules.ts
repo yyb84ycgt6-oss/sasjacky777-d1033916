@@ -8,7 +8,7 @@
  * it is saved and sent to guests on the same path.
  */
 import {
-  B, block, CROP_MAX_AGE, FACE_DIRS, FACING_DIRS, isButton, isCrop, isDoor, isFire, isFluid, isLeaves, isLog, isNylium, isRedstoneTorch, isSapling,
+  B, block, chorusJoins, CROP_MAX_AGE, FACE_DIRS, FACING_DIRS, isButton, isCrop, isDoor, isFire, isFluid, isLeaves, isLog, isNylium, isRedstoneTorch, isSapling,
   isSlab, OPPOSITE_FACING,
 } from "./blocks";
 import { findPortalFrame, portalHolds, type PortalAxis } from "./portal";
@@ -129,6 +129,28 @@ export function supported(world: World, x: number, y: number, z: number, id: num
       return below === B.TWISTING_VINES || belowDef.solid;
     case B.SOUL_FIRE:
       return below === B.SOUL_SAND || below === B.SOUL_SOIL;
+    case B.CHORUS_PLANT: {
+      // Rooted below, or held by a sideways branch that is itself rooted below.
+      if (below === B.CHORUS_PLANT || below === B.END_STONE) return true;
+      for (const [dx, dz] of FACING_DIRS) {
+        if (world.getBlock(x + dx, y, z + dz) !== B.CHORUS_PLANT) continue;
+        const under = world.getBlock(x + dx, y - 1, z + dz);
+        if (under < 0 || under === B.CHORUS_PLANT || under === B.END_STONE) return true;
+      }
+      return false;
+    }
+    case B.CHORUS_FLOWER: {
+      if (below === B.CHORUS_PLANT || below === B.END_STONE) return true;
+      if (below !== B.AIR) return false;
+      // A flower at a branch's tip: exactly one plant beside it and air beneath.
+      let plants = 0;
+      for (const [dx, dz] of FACING_DIRS) {
+        const n = world.getBlock(x + dx, y, z + dz);
+        if (n === B.CHORUS_PLANT) plants++;
+        else if (n < 0) return true;
+      }
+      return plants === 1;
+    }
     case B.FIRE: {
       // On anything solid, or clinging to something that burns.
       if (belowDef.solid && !isFire(below)) return true;
@@ -207,6 +229,12 @@ export class BlockRules {
       if (!portalHolds((a, b, c) => world.getBlock(a, b, c), x, y, z, (world.getMeta(x, y, z) & 1) as PortalAxis)) {
         world.setBlock(x, y, z, B.AIR, 0, "world");
       }
+      return;
+    }
+    if (id === B.CHORUS_PLANT) {
+      // Its arms follow its neighbours: a branch cut off is drawn without the stub.
+      const joins = chorusJoins((a, b, c) => world.blockAt(a, b, c), x, y, z);
+      if (joins !== world.getMeta(x, y, z)) world.setMeta(x, y, z, joins);
       return;
     }
     if (id === B.FARMLAND && block(world.blockAt(x, y + 1, z)).opaque) world.setBlock(x, y, z, B.DIRT);
@@ -479,6 +507,54 @@ export class BlockRules {
     }
   }
 
+  /**
+   * A chorus flower grows as the original's does: straight up while the stalk
+   * under it is short, otherwise out into up to four side branches each tipped
+   * with a flower a stage older; a flower with nowhere to go dies (stage 5).
+   */
+  private growChorus(x: number, y: number, z: number): void {
+    const world = this.world;
+    const rand = this.ctx.random;
+    const age = world.getMeta(x, y, z) & 7;
+    if (age >= 5 || y + 1 >= WORLD_HEIGHT - 1 || world.blockAt(x, y + 1, z) !== B.AIR) return;
+    /** Air on all four sides, bar the one it came from. */
+    const clear = (cx: number, cy: number, cz: number, except: number) =>
+      FACING_DIRS.every(([dx, dz], f) => f === except || world.blockAt(cx + dx, cy, cz + dz) === B.AIR);
+    const below = world.blockAt(x, y - 1, z);
+    let up = false;
+    let rooted = false;
+    if (below === B.END_STONE) up = true;
+    else if (below === B.CHORUS_PLANT) {
+      let stalk = 1;
+      for (let k = 2; k <= 4; k++) {
+        const b = world.blockAt(x, y - k, z);
+        if (b === B.CHORUS_PLANT) stalk++;
+        else { rooted = b === B.END_STONE; break; }
+      }
+      if (stalk < 2 || stalk <= Math.floor(rand() * (rooted ? 5 : 4))) up = true;
+    } else if (below === B.AIR) up = true;
+    if (up && clear(x, y + 1, z, -1) && world.blockAt(x, y + 2, z) === B.AIR) {
+      world.setBlock(x, y, z, B.CHORUS_PLANT, 0, "world");
+      world.setBlock(x, y + 1, z, B.CHORUS_FLOWER, age, "world");
+      return;
+    }
+    if (age < 4) {
+      let placed = false;
+      const tries = Math.floor(rand() * 4) + (rooted ? 1 : 0);
+      for (let i = 0; i < tries; i++) {
+        const f = Math.floor(rand() * 4);
+        const [dx, dz] = FACING_DIRS[f];
+        const tx = x + dx, tz = z + dz;
+        if (world.blockAt(tx, y, tz) === B.AIR && world.blockAt(tx, y - 1, tz) === B.AIR && clear(tx, y, tz, OPPOSITE_FACING[f])) {
+          world.setBlock(tx, y, tz, B.CHORUS_FLOWER, age + 1, "world");
+          placed = true;
+        }
+      }
+      if (placed) { world.setBlock(x, y, z, B.CHORUS_PLANT, 0, "world"); return; }
+    }
+    world.setMeta(x, y, z, 5);
+  }
+
   private light(x: number, y: number, z: number): number {
     const l = this.world.getLight(x, y, z);
     return l < 0 ? 0 : Math.max(l >> 4, l & 15);
@@ -507,6 +583,7 @@ export class BlockRules {
     }
     // Nylium with nothing but air above creeps onto bare netherrack beside it.
     if (isNylium(id) && block(world.blockAt(x, y + 1, z)).opaque) { world.setBlock(x, y, z, B.NETHERRACK); return; }
+    if (id === B.CHORUS_FLOWER) { this.growChorus(x, y, z); return; }
     switch (id) {
       case B.GRASS: {
         const above = world.blockAt(x, y + 1, z);

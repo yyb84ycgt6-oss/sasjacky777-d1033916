@@ -17,6 +17,7 @@ import type { World } from "./world";
 
 export type EntityKind =
   | "item" | "xp" | "arrow" | "snowball" | "egg" | "potion" | "xp_bottle" | "fireball" | "small_fireball" | "falling_block" | "tnt"
+  | "ender_pearl" | "eye_of_ender" | "dragon_fireball" | "end_crystal" | "area_cloud" | "enderman" | "silverfish" | "ender_dragon"
   | "pig" | "cow" | "sheep" | "chicken" | "zombie" | "skeleton" | "creeper" | "spider" | "slime" | "villager" | "iron_golem"
   | "zombified_piglin" | "ghast" | "magma_cube" | "blaze" | "wither_skeleton" | "piglin" | "hoglin"
   | "boat" | "minecart" | "tnt_minecart";
@@ -35,11 +36,18 @@ export interface PlayerRef {
   invisible?: boolean;
   /** Wearing a piece of gold armour, which piglins respect. */
   goldArmor?: boolean;
+  /** Where they are looking (radians), so an enderman knows when it is stared at. */
+  yaw?: number;
+  pitch?: number;
+  /** A carved pumpkin on the head: endermen cannot tell they are being looked at. */
+  pumpkin?: boolean;
 }
 
 export type DamageSource = "mob" | "arrow" | "explosion" | "fall" | "fire" | "lava" | "drown" | "starve" | "void" | "cactus" | "player" | "magic" | "suffocation"
   /** The wither effect; and a blaze's or ghast's fireball, which also sets its target alight. */
-  | "wither" | "fireball";
+  | "wither" | "fireball"
+  /** Gliding into a wall too fast. */
+  | "fly_into_wall";
 
 export interface EntityContext {
   world: World;
@@ -69,6 +77,16 @@ export interface EntityContext {
   creditKill?(playerId: string, hostile: boolean): void;
   /** A thrown potion burst here; `direct` is what it struck, which takes the full dose. */
   splashPotion?(itemId: number, x: number, y: number, z: number, direct: Entity | PlayerRef | null, owner: string | null): void;
+  /** An ender pearl landed: carry its thrower here (or, if it struck a gateway, through it). */
+  pearlLanded?(playerId: string, x: number, y: number, z: number, gateway: [number, number, number] | null): void;
+  /** An end crystal was destroyed (the dragon, if it was drawing on it, is hurt). */
+  crystalDestroyed?(crystal: Entity, attacker: string | undefined): void;
+  /** The dragon's death throes are over: open the portal home, lay the egg, open a gateway. */
+  dragonDefeated?(dragon: Entity): void;
+  /** Whether mobs may change blocks (endermen, the dragon's path): the mobGriefing rule. */
+  readonly mobGriefing?: boolean;
+  /** Rain is falling (overworld only), which endermen flee. */
+  readonly raining?: boolean;
 }
 
 let nextEntityId = 1;
@@ -282,10 +300,12 @@ export function xpOrbValues(total: number): number[] {
 
 // ---- projectiles -----------------------------------------------------------------------
 
-export type ProjectileKind = "arrow" | "snowball" | "egg" | "potion" | "xp_bottle" | "fireball" | "small_fireball";
+export type ProjectileKind = "arrow" | "snowball" | "egg" | "potion" | "xp_bottle" | "fireball" | "small_fireball"
+  | "ender_pearl" | "eye_of_ender" | "dragon_fireball";
 export const isProjectileKind = (k: unknown): k is ProjectileKind =>
-  k === "arrow" || k === "snowball" || k === "egg" || k === "potion" || k === "xp_bottle" || k === "fireball" || k === "small_fireball";
-const isFireball = (k: ProjectileKind) => k === "fireball" || k === "small_fireball";
+  k === "arrow" || k === "snowball" || k === "egg" || k === "potion" || k === "xp_bottle" || k === "fireball" || k === "small_fireball"
+  || k === "ender_pearl" || k === "eye_of_ender" || k === "dragon_fireball";
+const isFireball = (k: ProjectileKind) => k === "fireball" || k === "small_fireball" || k === "dragon_fireball";
 
 export class Projectile extends Entity {
   inGround = false;
@@ -301,9 +321,12 @@ export class Projectile extends Entity {
   fire = false;
   /** The potion a thrown bottle holds (item id). */
   item = 0;
+  /** An eye of ender: the point it flies toward, and whether it drops back down when spent (four in five do). */
+  target: { x: number; y: number; z: number } | null = null;
+  survives = true;
 
   constructor(public readonly kind: ProjectileKind, x: number, y: number, z: number, vx: number, vy: number, vz: number, owner: string | null, id?: number) {
-    const size = kind === "fireball" ? 1 : kind === "small_fireball" ? 0.3125 : 0.25;
+    const size = kind === "fireball" || kind === "dragon_fireball" ? 1 : kind === "small_fireball" ? 0.3125 : 0.25;
     super(x, y, z, size, size, id);
     this.body.vx = vx; this.body.vy = vy; this.body.vz = vz;
     this.owner = owner;
@@ -333,8 +356,45 @@ export class Projectile extends Entity {
     this.pitch = Math.atan2(b.vy, Math.hypot(b.vx, b.vz));
   }
 
+  /**
+   * Sends an eye of ender toward a stronghold as the original does: at most
+   * twelve blocks along the way and eight up, or straight to it when closer.
+   */
+  signalTo(tx: number, ty: number, tz: number, random: () => number): void {
+    const b = this.body;
+    const dx = tx - b.x, dz = tz - b.z, d = Math.hypot(dx, dz);
+    this.target = d > 12 ? { x: b.x + (dx / d) * 12, y: b.y + 8, z: b.z + (dz / d) * 12 } : { x: tx, y: ty, z: tz };
+    this.survives = random() >= 0.2;
+    b.vx = b.vy = b.vz = 0;
+  }
+
+  /** The eye's flight: speeding up toward its target, bobbing toward its height, and after four seconds dropping or shattering. */
+  private eyeTick(ctx: EntityContext): void {
+    const b = this.body;
+    b.x += b.vx; b.y += b.vy; b.z += b.vz;
+    const t = this.target;
+    if (t) {
+      const dx = t.x - b.x, dz = t.z - b.z, d = Math.hypot(dx, dz);
+      const angle = Math.atan2(dz, dx);
+      let speed = Math.hypot(b.vx, b.vz) + (d - Math.hypot(b.vx, b.vz)) * 0.0025;
+      let vy = b.vy;
+      if (d < 1) { speed *= 0.8; vy *= 0.8; }
+      const up = b.y < t.y ? 1 : -1;
+      b.vx = Math.cos(angle) * speed; b.vz = Math.sin(angle) * speed;
+      b.vy = vy + (up - vy) * 0.015;
+    }
+    if (this.age % 2 === 0) ctx.particles("portal", b.x, b.y, b.z, 2);
+    if (this.age > 80) {
+      this.removed = true;
+      ctx.sound("eye_of_ender_death", b.x, b.y, b.z, 1);
+      if (this.survives) ctx.dropItem(b.x, b.y, b.z, { id: this.item, count: 1 }, 0, 0.1, 0);
+      else ctx.particles("portal", b.x, b.y, b.z, 24);
+    }
+  }
+
   tick(ctx: EntityContext): void {
     const b = this.body;
+    if (this.kind === "eye_of_ender") { this.eyeTick(ctx); return; }
     if (this.inGround) {
       this.groundTicks++;
       if (this.groundTicks > 1200) this.removed = true;
@@ -368,13 +428,26 @@ export class Projectile extends Entity {
       const r = rayBox(b.x, b.y, b.z, b.vx, b.vy, b.vz, grow(box, 0.3), 1);
       if (r && r.t < best) { best = r.t; hitPlayer = p; hitEntity = null; }
     }
-    const blockHit = raycastBlocks(ctx.world, b.x, b.y, b.z, b.vx, b.vy, b.vz, speed);
+    let blockHit = raycastBlocks(ctx.world, b.x, b.y, b.z, b.vx, b.vy, b.vz, speed);
+    // A pearl that meets a gateway goes through it, carrying its thrower.
+    if (blockHit && this.kind === "ender_pearl" && ctx.world.blockAt(blockHit.x, blockHit.y, blockHit.z) === B.END_GATEWAY) {
+      this.removed = true;
+      if (this.owner && !this.owner.startsWith("mob:")) ctx.pearlLanded?.(this.owner, b.x, b.y, b.z, [blockHit.x, blockHit.y, blockHit.z]);
+      return;
+    }
+    if (blockHit && this.kind === "dragon_fireball" && !block(ctx.world.blockAt(blockHit.x, blockHit.y, blockHit.z)).solid) blockHit = null;
     const blockT = blockHit ? blockHit.distance / Math.max(speed, 1e-6) : 2;
     if ((hitEntity || hitPlayer) && best < blockT) {
       // Snowballs sting blazes, and only blazes.
       const dmg = this.kind === "arrow" ? Math.ceil(speed * this.damage) : isFireball(this.kind) ? this.damage
-        : this.kind === "snowball" && hitEntity?.kind === "blaze" ? 3 : 0;
+        : this.kind === "snowball" && hitEntity?.kind === "blaze" ? 3 : this.kind === "ender_pearl" ? 0.001 : 0;
       const nx = b.vx / (speed || 1), nz = b.vz / (speed || 1);
+      if (this.kind === "dragon_fireball") {
+        // It bursts into a cloud of breath rather than striking; the dragon does not burst its own.
+        if (hitEntity && `mob:${hitEntity.id}` === this.owner) { b.x += b.vx; b.y += b.vy; b.z += b.vz; return; }
+        this.impact(ctx, hitEntity ?? hitPlayer);
+        return;
+      }
       if (isFireball(this.kind)) {
         if (hitEntity) {
           hitEntity.hurt(ctx, dmg, "fireball", b.x - nx, b.z - nz, this.owner ?? undefined);
@@ -412,8 +485,8 @@ export class Projectile extends Entity {
     b.x += b.vx; b.y += b.vy; b.z += b.vz;
     senseEnvironment(ctx.world, b);
     if (isFireball(this.kind)) {
-      // Fireballs fly straight, trailing smoke, and burn out after half a minute.
-      if (this.age % 2 === 0) ctx.particles("smoke", b.x, b.y + b.height / 2, b.z, 1);
+      // Fireballs fly straight, trailing smoke (the dragon's, its breath), and burn out after half a minute.
+      if (this.age % 2 === 0) ctx.particles(this.kind === "dragon_fireball" ? "dragon_breath" : "smoke", b.x, b.y + b.height / 2, b.z, this.kind === "dragon_fireball" ? 3 : 1);
       if (this.age > 600 || b.y < -64) this.removed = true;
       return;
     }
@@ -427,6 +500,14 @@ export class Projectile extends Entity {
     this.removed = true;
     const b = this.body;
     if (this.kind === "fireball") ctx.explode(b.x, b.y + b.height / 2, b.z, 1, null, true);
+    if (this.kind === "dragon_fireball") {
+      ctx.spawn(new AreaCloud(b.x, b.y, b.z, 3, 600, this.owner));
+      ctx.sound("dragon_fireball_explode", b.x, b.y, b.z, 1);
+    }
+    if (this.kind === "ender_pearl") {
+      ctx.particles("portal", b.x, b.y, b.z, 24);
+      if (this.owner && !this.owner.startsWith("mob:")) ctx.pearlLanded?.(this.owner, b.x, b.y, b.z, null);
+    }
     if (this.kind === "small_fireball") {
       const x = Math.floor(b.x), y = Math.floor(b.y), z = Math.floor(b.z);
       if (!struck && ctx.world.blockAt(x, y, z) === B.AIR) ctx.placeBlock(x, y, z, B.FIRE, 0);
@@ -531,5 +612,91 @@ export class PrimedTnt extends Entity {
   applySnapshot(s: EntitySnapshot): void {
     super.applySnapshot(s);
     if (typeof s.data?.fuse === "number") this.fuse = s.data.fuse;
+  }
+}
+
+// ---- the End's entities --------------------------------------------------------------------------
+
+/**
+ * A lingering cloud of the dragon's breath: a disc that spreads from three
+ * blocks across to seven over half a minute, harming whatever stands in it
+ * once a second.
+ */
+export class AreaCloud extends Entity {
+  readonly kind = "area_cloud" as const;
+  private lastHit = new Map<string, number>();
+
+  constructor(x: number, y: number, z: number, public radius: number, public duration: number, public owner: string | null, id?: number) {
+    super(x, y, z, radius * 2, 0.5, id);
+  }
+
+  tick(ctx: EntityContext): void {
+    const b = this.body;
+    this.radius += 4 / 600;
+    if (this.age >= this.duration) { this.removed = true; return; }
+    if (this.age % 3 === 0) {
+      const a = ctx.random() * Math.PI * 2, r = Math.sqrt(ctx.random()) * this.radius;
+      ctx.particles("dragon_breath", b.x + Math.cos(a) * r, b.y + 0.2, b.z + Math.sin(a) * r, 2);
+    }
+    if (this.age % 5 !== 0) return;
+    const inside = (x: number, y: number, z: number) => Math.hypot(x - b.x, z - b.z) <= this.radius && y > b.y - 1.5 && y < b.y + 1.5;
+    for (const p of ctx.players()) {
+      if (!p.targetable || !inside(p.x, p.y, p.z)) continue;
+      // Once a second for each victim, as the original's reapplication delay.
+      if (ctx.tick - (this.lastHit.get(p.id) ?? -100) < 20) continue;
+      this.lastHit.set(p.id, ctx.tick);
+      ctx.effectPlayer?.(p.id, "instant_damage", 0, 0);
+    }
+    for (const e of ctx.entitiesNear(b.x, b.y, b.z, this.radius + 1)) {
+      if (e === this || e.kind === "ender_dragon" || e.kind === "item" || e.kind === "xp" || e instanceof Projectile || e instanceof AreaCloud) continue;
+      if (!inside(e.x, e.y, e.z) || ctx.tick - (this.lastHit.get(`e${e.id}`) ?? -100) < 20) continue;
+      this.lastHit.set(`e${e.id}`, ctx.tick);
+      e.hurt(ctx, 6, "magic", b.x, b.z, this.owner ?? undefined);
+    }
+  }
+
+  snapshot(): EntitySnapshot {
+    return { ...super.snapshot(), data: { r: round(this.radius), d: this.duration } };
+  }
+  applySnapshot(s: EntitySnapshot): void {
+    super.applySnapshot(s);
+    if (typeof s.data?.r === "number") this.radius = s.data.r;
+  }
+}
+
+/**
+ * An end crystal: it heals the dragon from its spike, and any blow — a sword,
+ * an arrow, a blast — sets it off in an explosion of its own.
+ */
+export class EndCrystal extends Entity {
+  readonly kind = "end_crystal" as const;
+  /** Where its beam points (the dragon it heals), for drawing; null for none. */
+  beam: { x: number; y: number; z: number } | null = null;
+
+  constructor(x: number, y: number, z: number, public showBase = true, id?: number) {
+    super(x, y, z, 2, 2, id);
+  }
+
+  tick(): void {
+    // It hangs where it was put; the dragon's side of the beam is set by the dragon each tick.
+  }
+
+  hurt(ctx: EntityContext, _amount: number, _source: DamageSource, _fromX: number, _fromZ: number, attacker?: string): boolean {
+    if (this.removed) return false;
+    this.removed = true;
+    ctx.explode(this.body.x, this.body.y, this.body.z, 6, this);
+    ctx.crystalDestroyed?.(this, attacker);
+    return true;
+  }
+
+  snapshot(): EntitySnapshot {
+    const bm = this.beam ? [round(this.beam.x), round(this.beam.y), round(this.beam.z)] : undefined;
+    return { ...super.snapshot(), data: { b: this.showBase ? 1 : 0, bm } };
+  }
+  applySnapshot(s: EntitySnapshot): void {
+    super.applySnapshot(s);
+    this.showBase = s.data?.b !== 0;
+    const bm = s.data?.bm;
+    this.beam = Array.isArray(bm) && bm.length === 3 && bm.every((v) => typeof v === "number") ? { x: bm[0], y: bm[1], z: bm[2] } : null;
   }
 }

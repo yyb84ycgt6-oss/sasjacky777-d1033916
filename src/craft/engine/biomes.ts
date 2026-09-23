@@ -138,11 +138,11 @@ export const BIOMES: BiomeDef[] = [
     spawns: [["enderman", 10]] }),
   biome(BiomeId.BasaltDeltas, "Basalt Deltas", { top: B.BASALT, filler: B.BLACKSTONE, grass: 0, passive: [], fog: 0x685f70, airborne: "ash",
     spawns: [["magma_cube", 30], ["ghast", 8]] }),
-  biome(BiomeId.TheEnd, "The End", { top: B.AIR, filler: B.AIR, grass: 0, passive: [], fog: 0x0a0810, spawns: [["enderman", 10]] }),
-  biome(BiomeId.EndHighlands, "End Highlands", { top: B.AIR, filler: B.AIR, grass: 0, passive: [], fog: 0x0a0810, spawns: [["enderman", 10]] }),
-  biome(BiomeId.EndMidlands, "End Midlands", { top: B.AIR, filler: B.AIR, grass: 0, passive: [], fog: 0x0a0810, spawns: [["enderman", 10]] }),
-  biome(BiomeId.EndBarrens, "End Barrens", { top: B.AIR, filler: B.AIR, grass: 0, passive: [], fog: 0x0a0810, spawns: [["enderman", 10]] }),
-  biome(BiomeId.SmallEndIslands, "Small End Islands", { top: B.AIR, filler: B.AIR, grass: 0, passive: [], fog: 0x0a0810, spawns: [["enderman", 10]] }),
+  biome(BiomeId.TheEnd, "The End", { top: B.AIR, filler: B.AIR, grass: 0, passive: [], fog: 0x1a1224, spawns: [["enderman", 10]] }),
+  biome(BiomeId.EndHighlands, "End Highlands", { top: B.AIR, filler: B.AIR, grass: 0, passive: [], fog: 0x1a1224, spawns: [["enderman", 10]] }),
+  biome(BiomeId.EndMidlands, "End Midlands", { top: B.AIR, filler: B.AIR, grass: 0, passive: [], fog: 0x1a1224, spawns: [["enderman", 10]] }),
+  biome(BiomeId.EndBarrens, "End Barrens", { top: B.AIR, filler: B.AIR, grass: 0, passive: [], fog: 0x1a1224, spawns: [["enderman", 10]] }),
+  biome(BiomeId.SmallEndIslands, "Small End Islands", { top: B.AIR, filler: B.AIR, grass: 0, passive: [], fog: 0x1a1224, spawns: [["enderman", 10]] }),
 ];
 
 export function biomeDef(id: number): BiomeDef {

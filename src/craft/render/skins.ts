@@ -329,6 +329,42 @@ export function skin(kind: string, variant = 0): HTMLCanvasElement {
       p.box(0, 34, 3, 5, 3, (_f, _x, y) => (y >= 4 ? hex("#3a2a20") : hide));
       break;
     }
+    case "enderman": {
+      // Near-black, faintly speckled; purple eyes (a wider, brighter stare while it screams).
+      const black = hex("#161616"), speck = hex("#232323");
+      const skinOf = (_f: Face, x: number, y: number): RGB => ((x * 7 + y * 5) % 11 === 0 ? speck : black);
+      const head = p.box(0, 0, 8, 8, 8, skinOf, 0.04);
+      const eye = hex("#e070ff"), glow = hex("#ff9cff");
+      for (const ex of [0, 5]) p.fill({ x: head.front.x + ex, y: head.front.y + 4, w: 3, h: 1 }, variant & 1 ? glow : eye, 0);
+      if (variant & 1) p.fill({ x: head.front.x + 2, y: head.front.y + 6, w: 4, h: 2 }, hex("#050505"), 0);
+      p.box(32, 16, 8, 12, 4, skinOf, 0.04);
+      p.box(56, 0, 2, 30, 2, skinOf, 0.04);
+      p.box(56, 32, 2, 30, 2, skinOf, 0.04);
+      break;
+    }
+    case "silverfish": {
+      const grey = hex("#8c8f93"), dark = hex("#63666a");
+      const seg = (_f: Face, x: number, y: number): RGB => ((x + y) % 3 === 0 ? dark : grey);
+      p.box(0, 0, 3, 2, 2, seg); p.box(0, 5, 4, 3, 3, seg); p.box(0, 12, 5, 4, 3, seg);
+      p.box(0, 20, 3, 3, 3, seg); p.box(0, 27, 2, 2, 3, seg); p.box(0, 33, 1, 1, 2, seg);
+      break;
+    }
+    case "ender_dragon": {
+      // Drawn at a quarter of its size: black scales, grey belly, violet eyes, dark wing membranes on paler bones.
+      const scale = hex("#161618"), ridge = hex("#2a2a30"), belly = hex("#3a3a40");
+      const scales = (f: Face, x: number, y: number): RGB => (f === "bottom" ? belly : (x * 3 + y * 5) % 7 === 0 ? ridge : scale);
+      p.box(0, 0, 6, 6, 16, scales, 0.05);
+      const head = p.box(44, 0, 4, 4, 5, scales, 0.05);
+      p.px(head.front.x, head.front.y + 1, hex("#e070ff"), 0); p.px(head.front.x + 3, head.front.y + 1, hex("#e070ff"), 0);
+      p.box(44, 9, 4, 1, 5, (f) => (f === "top" ? hex("#5a1a1a") : scale), 0.05);
+      p.box(44, 16, 3, 3, 3, scales, 0.05);
+      p.box(56, 16, 2, 2, 2, scales, 0.05);
+      const membrane = hex("#26262c"), bone = hex("#4a4a52");
+      p.box(0, 22, 14, 1, 10, (_f, x, y) => (y === 0 || x % 5 === 0 ? bone : membrane), 0.05);
+      p.box(0, 34, 12, 1, 8, (_f, x, y) => (y === 0 || x % 4 === 0 ? bone : membrane), 0.05);
+      p.box(48, 22, 2, 4, 2, scales, 0.05);
+      break;
+    }
     case "boat": {
       // Drawn at half size (the model doubles it): planks with dark seams, per wood.
       const woods = ["#9c7a45", "#6b5030", "#c8b77a", "#a0724a", "#b0603a"];
@@ -358,6 +394,8 @@ export function skin(kind: string, variant = 0): HTMLCanvasElement {
       const skins = ["#c89a78", "#a8744e", "#e8c09a", "#7a5236"];
       const hairs = ["#3a2412", "#1a1a1a", "#a8742a", "#5a3a1a"];
       humanoid(p, hex(skins[(variant >> 3) % skins.length]), hex(hairs[(variant >> 2) % hairs.length]), hex(shirt), hex(pants), hex("#3a3a3a"), [40, 60, 160]);
+      // Elytra, shown only in flight: grey membrane ribbed with pale veins.
+      p.box(0, 32, 10, 20, 1, (_f, x, y) => ((x + y) % 5 === 0 ? hex("#b8b8c8") : hex("#8a8aa0")), 0.06);
       break;
     }
   }

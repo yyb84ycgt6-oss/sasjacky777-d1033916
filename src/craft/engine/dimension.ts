@@ -27,12 +27,20 @@ export interface DimensionInfo {
   lavaFast: boolean;
   /** Overworld blocks per block here, horizontally: a step in the Nether is eight outside. */
   scale: number;
+  /**
+   * How bright open sky makes a block here, 0..1. The End is open to the void
+   * but has no sun: its islands take a fixed half-light rather than following
+   * the overworld's clock.
+   */
+  skyLight: number;
+  /** Open to the distance (the End's void), so fog sits far off rather than close in like a cavern's. */
+  open: boolean;
 }
 
 export const DIMENSION_INFO: Record<Dimension, DimensionInfo> = {
-  overworld: { title: "the Overworld", hasSky: true, ambient: 0, bedsWork: true, waterEvaporates: false, lavaFast: false, scale: 1 },
-  nether: { title: "the Nether", hasSky: false, ambient: 0.38, bedsWork: false, waterEvaporates: true, lavaFast: true, scale: 8 },
-  end: { title: "the End", hasSky: false, ambient: 0.3, bedsWork: false, waterEvaporates: false, lavaFast: false, scale: 1 },
+  overworld: { title: "the Overworld", hasSky: true, ambient: 0, bedsWork: true, waterEvaporates: false, lavaFast: false, scale: 1, skyLight: 1, open: true },
+  nether: { title: "the Nether", hasSky: false, ambient: 0.38, bedsWork: false, waterEvaporates: true, lavaFast: true, scale: 8, skyLight: 1, open: false },
+  end: { title: "the End", hasSky: false, ambient: 0.32, bedsWork: false, waterEvaporates: false, lavaFast: false, scale: 1, skyLight: 0.6, open: true },
 };
 
 export const isDimension = (v: unknown): v is Dimension => v === "overworld" || v === "nether" || v === "end";

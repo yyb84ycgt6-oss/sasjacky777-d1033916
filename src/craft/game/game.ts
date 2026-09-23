@@ -20,7 +20,7 @@ import { DAY_TICKS, SEA_LEVEL, TICK_MS, WORLD_HEIGHT } from "../engine/constants
 import { BlockRules, tickDelay } from "../engine/blockRules";
 import { COOK_TICKS, fuelTicks, smeltResult } from "../engine/crafting";
 import {
-  bumpEntityIds, FallingBlock, ItemEntity, PrimedTnt, Projectile, XpOrb, xpOrbValues,
+  AreaCloud, bumpEntityIds, EndCrystal, FallingBlock, ItemEntity, PrimedTnt, Projectile, XpOrb, xpOrbValues,
   type DamageSource, type Entity, type EntityContext, type EntitySnapshot, type PlayerRef, type ProjectileKind,
 } from "../engine/entities";
 import { blastImpact, explosionBlocks, exposure } from "../engine/explosion";
@@ -45,6 +45,10 @@ import { Boat, Minecart, Vehicle, vehicleFromSnapshot } from "../engine/vehicles
 import { golemParts, villageLoot } from "../engine/villages";
 import { fortressesTouching, fortressLoot, inFortress, NETHER_LAVA_LEVEL, SPAWNER_MOBS } from "../engine/nether";
 import { planPortal, type PortalAxis } from "../engine/portal";
+import { findEndPortal, inStronghold, nearestStronghold, strongholdLoot } from "../engine/stronghold";
+import { buildGateway, cityLoot, END_SPAWN, EndGenerator, endCitiesTouching, GATEWAY_COUNT, gatewayPosition } from "../engine/end";
+import { EndFight } from "./endFight";
+import { FRAME_EYE } from "../engine/blocks";
 import { hash4 } from "../engine/rng";
 import { Actions } from "./actions";
 import type { ThrowExtra } from "../net/session";
@@ -97,6 +101,10 @@ export interface NetLink {
   dimensionChanged?(dim: Dimension, x: number, y: number, z: number): void;
   /** Host: where it actually landed there (by the portal it came out of), for guests to land beside. */
   partyLanded?(x: number, y: number, z: number): void;
+  /** Host → guest: carry this player somewhere (their pearl landed, or went through a gateway). */
+  teleportRemote?(id: string, to: Arrival): void;
+  /** Guest → host: set an end crystal on the block at x, y, z. */
+  placeCrystal?(x: number, y: number, z: number): void;
   /** Guest: settles once the host has said which chunks of the new dimension it changed. */
   readonly keysReady?: Promise<void> | null;
   /** Guest: the host's connection id. */
@@ -111,7 +119,11 @@ export type Arrival =
   /** Respawning: at the world spawn or a bed, on the ground. */
   | { kind: "spawn"; x: number; y: number; z: number }
   /** Exactly here (a guest following the host); `wait` until the host has said where it landed. */
-  | { kind: "exact"; x: number; y: number; z: number; wait?: number };
+  | { kind: "exact"; x: number; y: number; z: number; wait?: number }
+  /** Into the End: onto the obsidian platform, built fresh (and cleared) each time, as in the original. */
+  | { kind: "platform"; x: number; y: number; z: number }
+  /** Through a gateway: on top of gateway `index`'s cage by the main island (`inner`), or on the ground under its far end. */
+  | { kind: "gateway"; x: number; y: number; z: number; index: number; inner: boolean };
 
 export interface RemotePlayer {
   id: string;
@@ -134,6 +146,10 @@ export interface RemotePlayer {
   riding: boolean;
   /** Wearing gold, which piglins respect. */
   goldArmor: boolean;
+  /** On elytra, drawn lying along the flight. */
+  gliding: boolean;
+  /** A carved pumpkin on the head, which hides them from endermen's stares. */
+  pumpkin: boolean;
   lastSeen: number;
   receivedAt: number;
 }
@@ -226,6 +242,7 @@ export class Game {
   /** Called when the world can no longer continue (lost host, fatal error), with words for the screen. */
   onFatal: ((message: string) => void) | null = null;
   readonly ctx: EntityContext;
+  readonly endFight = new EndFight(this);
 
   constructor(opts: GameOptions) {
     this.meta = opts.meta;
@@ -455,7 +472,8 @@ export class Game {
   /** Mobs, items and vehicles worth keeping when their dimension goes out of memory. */
   private persistentEntities(): EntitySnapshot[] {
     return [...this.entities.values()]
-      .filter((e) => (e instanceof Mob && e.persistent && !e.dying) || e instanceof ItemEntity || e instanceof Vehicle)
+      // A dragon keeps even its death throes: reloading mid-fall finishes the fall rather than losing the reward.
+      .filter((e) => (e instanceof Mob && e.persistent && (!e.dying || e.kind === "ender_dragon")) || e instanceof ItemEntity || e instanceof Vehicle || e instanceof EndCrystal)
       .slice(0, 600)
       .map((e) => e.snapshot());
   }
@@ -538,16 +556,36 @@ export class Game {
       : { kind: "portal", x: Math.floor(tx), y: Math.floor(y), z: Math.floor(tz), axis, known: false });
   }
 
-  /** Counts time stood in a portal; four seconds (at once in creative) takes the player through. */
+  /**
+   * Portals: a Nether portal takes four seconds stood in it (at once in
+   * creative); an End portal takes the player the moment they drop into it,
+   * as in the original. Gateways are checked here too.
+   */
   private tickPortal(): void {
     const p = this.player, b = p.body;
-    const inside = [0.2, 1.2].some((dy) => this.world.blockAt(Math.floor(b.x), Math.floor(b.y + dy), Math.floor(b.z)) === B.NETHER_PORTAL);
+    const fx = Math.floor(b.x), fz = Math.floor(b.z);
+    const at = (dy: number) => this.world.blockAt(fx, Math.floor(b.y + dy), fz);
+    const endPortal = at(0.05) === B.END_PORTAL || at(0.6) === B.END_PORTAL;
+    const netherPortal = at(0.2) === B.NETHER_PORTAL || at(1.2) === B.NETHER_PORTAL;
+    const inside = endPortal || netherPortal;
     if (!inside || p.dead || p.riding !== null) {
       this.portalLock = this.portalLock && inside;
       this.portalTimer = 0;
+      this.tickGateway();
       return;
     }
     if (this.portalLock) return;
+    if (endPortal) {
+      this.portalLock = true;
+      if (this.role === "guest") {
+        this.showActionbar("Online, portals take the party when the host steps through");
+        return;
+      }
+      this.sound("portal_travel", null, 0, 0, 0.6);
+      if (this.dimension === "end") this.leaveEnd();
+      else this.changeDimension("end", { kind: "platform", ...END_SPAWN });
+      return;
+    }
     if (this.portalTimer === 0) this.sound("portal_trigger", b.x, b.y + 1, b.z, 0.6);
     this.portalTimer++;
     if (this.portalTimer < (p.gameMode === "creative" ? 1 : 80)) return;
@@ -559,6 +597,161 @@ export class Game {
     }
     this.sound("portal_travel", null, 0, 0, 0.6);
     this.portalTravel();
+  }
+
+  /** Out of the End through its exit portal: home to the player's bed, or the world spawn. */
+  private leaveEnd(): void {
+    const bed = this.player.spawn;
+    const target = bed ? { x: bed.x + 0.5, y: bed.y + 0.6, z: bed.z + 0.5 } : this.worldSpawn();
+    this.changeDimension("overworld", bed ? { kind: "exact", ...target } : { kind: "spawn", ...target });
+  }
+
+  private gatewayCooldown = 0;
+
+  /** Touching a gateway (it is caged top and bottom, so this means reaching in from the side) flings the player through. */
+  private tickGateway(): void {
+    if (this.dimension !== "end") return;
+    if (this.gatewayCooldown > 0) { this.gatewayCooldown--; return; }
+    const p = this.player, b = p.body;
+    if (p.dead || p.riding !== null || this.arrival) return;
+    const reach = b.width / 2 + 0.3;
+    for (let y = Math.floor(b.y - 0.3); y <= Math.floor(b.y + b.height + 0.3); y++) {
+      for (let z = Math.floor(b.z - reach); z <= Math.floor(b.z + reach); z++) {
+        for (let x = Math.floor(b.x - reach); x <= Math.floor(b.x + reach); x++) {
+          if (this.world.blockAt(x, y, z) !== B.END_GATEWAY) continue;
+          const exit = this.gatewayExit(x, z);
+          if (!exit) return;
+          this.gatewayCooldown = 60;
+          this.sound("portal_travel", null, 0, 0, 0.5);
+          this.arriveAt(exit);
+          this.advance({ kind: "gateway" });
+          return;
+        }
+      }
+    }
+  }
+
+  /**
+   * Where a gateway at x, z leads: from one by the main island, to the ground
+   * under its far end out on the islands; from a far end, onto the top of its
+   * partner by the main island.
+   */
+  gatewayExit(x: number, z: number): Arrival | null {
+    const g = this.generator;
+    if (!(g instanceof EndGenerator)) return null;
+    let best = 0, bestD = Infinity;
+    const inner = Math.hypot(x, z) < 400;
+    for (let i = 0; i < GATEWAY_COUNT; i++) {
+      const [px, , pz] = inner ? gatewayPosition(i) : g.gatewayExit(i).gateway;
+      const d = Math.hypot(px - x, pz - z);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    if (inner) {
+      const [lx, ly, lz] = g.gatewayExit(best).land;
+      return { kind: "gateway", x: lx + 0.5, y: ly, z: lz + 0.5, index: best, inner: false };
+    }
+    const [px, py, pz] = gatewayPosition(best);
+    return { kind: "gateway", x: px + 0.5, y: py + 3, z: pz + 0.5, index: best, inner: true };
+  }
+
+  /** Sends this player somewhere that may not be loaded yet: they hold there until it is, then land. */
+  arriveAt(a: Arrival): void {
+    const p = this.player, b = p.body;
+    b.x = a.x; b.y = a.y; b.z = a.z;
+    b.vx = b.vy = b.vz = 0;
+    b.fallDistance = 0;
+    p.prevX = b.x; p.prevY = b.y; p.prevZ = b.z;
+    p.gliding = false;
+    this.arrival = a;
+    this.spawnPlaced = false;
+  }
+
+  /** Moves this player at once, to a spot already loaded (a pearl's landing, a chorus fruit's jump), lifted clear of any wall. */
+  teleportLocal(x: number, y: number, z: number): void {
+    const p = this.player, b = p.body, w = this.world;
+    let ty = y;
+    for (let i = 0; i < 3 && (block(w.blockAt(Math.floor(x), Math.floor(ty), Math.floor(z))).solid || block(w.blockAt(Math.floor(x), Math.floor(ty + 1), Math.floor(z))).solid); i++) ty = Math.floor(ty) + 1;
+    b.x = x; b.y = ty; b.z = z;
+    b.vx = b.vy = b.vz = 0;
+    b.fallDistance = 0;
+    p.prevX = b.x; p.prevY = b.y; p.prevZ = b.z;
+  }
+
+  /** An ender pearl came down: its thrower goes there (taking five points of fall), or, if it struck a gateway, through it. */
+  private pearlLanded(id: string, x: number, y: number, z: number, gateway: [number, number, number] | null): void {
+    const exit = gateway ? this.gatewayExit(gateway[0], gateway[2]) : null;
+    if (id === this.player.id) {
+      if (this.player.dead) return;
+      if (exit) { this.arriveAt(exit); this.advance({ kind: "gateway" }); }
+      else { this.teleportLocal(x, y, z); this.hurtLocal(5, "fall"); }
+    } else {
+      if (!this.remote.has(id)) return;
+      this.net?.teleportRemote?.(id, exit ?? { kind: "exact", x, y, z });
+      if (!exit) this.net?.hurtRemote(id, 5, "fall", x, z, 0);
+      else this.net?.advanceRemote?.(id, { kind: "gateway" });
+    }
+    this.sound("enderman_teleport", x, y, z, 0.8);
+  }
+
+  /** A chorus fruit eaten: up to sixteen tries at a spot within eight blocks with a floor and room to stand. */
+  private chorusTeleport(): void {
+    const p = this.player, b = p.body, w = this.world;
+    for (let i = 0; i < 16; i++) {
+      const x = Math.floor(b.x + (Math.random() - 0.5) * 16), z = Math.floor(b.z + (Math.random() - 0.5) * 16);
+      let y = Math.max(2, Math.min(WORLD_HEIGHT - 3, Math.floor(b.y + (Math.random() - 0.5) * 16)));
+      if (!w.isLoaded(x, z)) continue;
+      while (y > 1 && !block(w.blockAt(x, y - 1, z)).solid) y--;
+      const floor = w.blockAt(x, y - 1, z);
+      if (!block(floor).solid || floor === B.LAVA || block(w.blockAt(x, y, z)).solid || block(w.blockAt(x, y + 1, z)).solid || isFluid(w.blockAt(x, y, z))) continue;
+      this.particles("portal", b.x, b.y + 1, b.z, 16);
+      this.teleportLocal(x + 0.5, y, z + 0.5);
+      this.sound("chorus_fruit_teleport", x + 0.5, y, z + 0.5, 0.8);
+      return;
+    }
+  }
+
+  /** Frames that just took an eye: the one that completes a ring of twelve fills it with portal. */
+  private lightEndPortals(): void {
+    const w = this.world;
+    for (const [x, y, z] of this.endPortalChecks.splice(0)) {
+      const cells = findEndPortal((a, b2, c) => w.blockAt(a, b2, c), (a, b2, c) => w.getMeta(a, b2, c), x, y, z);
+      if (!cells) continue;
+      for (const [cx, cy, cz] of cells) w.setBlock(cx, cy, cz, B.END_PORTAL, 0, "world");
+      this.sound("end_portal_spawn", x + 0.5, y + 0.5, z + 0.5, 3);
+    }
+  }
+
+  /** Throws an eye of ender from here toward the nearest stronghold (the host's, or a guest's thrown for them). */
+  throwEye(x: number, y: number, z: number, owner: string): void {
+    const eye = new Projectile("eye_of_ender", x, y, z, 0, 0, 0, owner);
+    eye.item = itemId("eye_of_ender");
+    const s = nearestStronghold(this.meta.seed, x, z);
+    eye.signalTo(s.x + 0.5, s.y, s.z + 0.5, Math.random);
+    this.spawn(eye);
+    this.sound("eye_of_ender_launch", x, y, z, 1);
+  }
+
+  /** Sets an end crystal on the block top at x, y, z; four on the exit portal's rim summon the dragon again. */
+  placeCrystal(x: number, y: number, z: number): void {
+    if (!this.simulates) return;
+    const cx = x + 0.5, cy = y + 1, cz = z + 0.5;
+    if ([...this.entities.values()].some((e) => e instanceof EndCrystal && Math.abs(e.x - cx) < 1 && Math.abs(e.y - cy) < 1 && Math.abs(e.z - cz) < 1)) return;
+    this.spawn(new EndCrystal(cx, cy, cz));
+    if (this.dimension === "end") this.endFight.crystalPlaced();
+  }
+
+  /** The dragon egg flees a touch: it blinks to a free spot up to eight blocks away. */
+  teleportEgg(x: number, y: number, z: number): void {
+    const w = this.world;
+    for (let i = 0; i < 200; i++) {
+      const tx = x + Math.floor(Math.random() * 17) - 8, ty = y + Math.floor(Math.random() * 9) - 4, tz = z + Math.floor(Math.random() * 17) - 8;
+      if (ty < 1 || ty >= WORLD_HEIGHT - 1 || w.getBlock(tx, ty, tz) !== B.AIR) continue;
+      w.setBlock(x, y, z, B.AIR, 0, "player");
+      w.setBlock(tx, ty, tz, B.DRAGON_EGG, 0, "player");
+      this.particles("portal", x + 0.5, y + 0.5, z + 0.5, 16);
+      this.particles("portal", tx + 0.5, ty + 0.5, tz + 0.5, 16);
+      return;
+    }
   }
 
   /** Lands the player once the destination has loaded. Returns false while still waiting. */
@@ -585,6 +778,29 @@ export class Game {
       b.x = spot.x + (spot.axis === 0 ? 1 : 0.5);
       b.z = spot.z + (spot.axis === 0 ? 0.5 : 1);
       b.y = spot.y;
+    } else if (a.kind === "platform") {
+      // A five-by-five obsidian floor over the void, with room cleared above it: built fresh every arrival.
+      const px = Math.floor(a.x), py = Math.floor(a.y), pz = Math.floor(a.z);
+      if (this.simulates) {
+        for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) {
+          w.setBlock(px + dx, py - 1, pz + dz, B.OBSIDIAN, 0, "world");
+          for (let dy = 0; dy <= 2; dy++) w.setBlock(px + dx, py + dy, pz + dz, B.AIR, 0, "world");
+        }
+      }
+      b.x = px + 0.5; b.y = py; b.z = pz + 0.5;
+      // Facing the island.
+      this.player.yaw = Math.PI / 2;
+    } else if (a.kind === "gateway") {
+      if (a.inner) {
+        // Onto the top of the gateway's cage; if this pair's near end never opened, it opens now.
+        const [gx, gy, gz] = gatewayPosition(a.index);
+        if (w.blockAt(gx, gy + 2, gz) !== B.BEDROCK && this.simulates) buildGateway((px, py, pz, id, m = 0) => { w.setBlock(px, py, pz, id, m, "world"); }, gx, gy, gz);
+        if (w.blockAt(gx, gy + 2, gz) === B.BEDROCK) { b.x = gx + 0.5; b.y = gy + 3; b.z = gz + 0.5; }
+        else { const ground = this.groundNear(x, z); if (ground) { b.x = ground.x; b.y = ground.y; b.z = ground.z; } }
+      } else {
+        const ground = this.groundNear(x, z);
+        if (ground) { b.x = ground.x; b.y = ground.y; b.z = ground.z; }
+      }
     } else if (a.kind === "exact") {
       // A guest waits (a while) to hear where the host landed, rather than guessing and falling.
       if (a.wait !== undefined && performance.now() < a.wait) return false;
@@ -691,6 +907,8 @@ export class Game {
       if (st) e = new ItemEntity(s.x, s.y, s.z, st, 0, s.id);
     } else if (s.kind === "xp") {
       e = new XpOrb(s.x, s.y, s.z, Number(s.data?.value ?? 1), s.id);
+    } else if (s.kind === "end_crystal") {
+      e = new EndCrystal(s.x, s.y, s.z, s.data?.b !== 0, s.id);
     } else {
       e = vehicleFromSnapshot(s);
       // Nobody is riding anything when a world opens.
@@ -885,6 +1103,11 @@ export class Game {
         if (id === this.player.id) this.advance({ kind: "kill", hostile });
         else this.net?.advanceRemote?.(id, { kind: "kill", hostile });
       },
+      pearlLanded: (id, x, y, z, gateway) => this.pearlLanded(id, x, y, z, gateway),
+      crystalDestroyed: (crystal, attacker) => { if (crystal instanceof EndCrystal) this.endFight.crystalDestroyed(crystal, attacker); },
+      dragonDefeated: () => this.endFight.defeated(),
+      get mobGriefing() { return game.meta.rules.mobGriefing; },
+      get raining() { return DIMENSION_INFO[game.dimension].hasSky && game.rain > 0.5; },
     };
   }
 
@@ -896,6 +1119,7 @@ export class Game {
         id: p.id, name: p.name, x: p.body.x, y: p.body.y, z: p.body.z, width: p.body.width, height: p.body.height,
         targetable: p.survivalLike, heldItem: p.inventory.held?.id ?? -1, sneaking: p.sneaking, invisible: p.hasEffect("invisibility"),
         goldArmor: p.inventory.armor.some((a) => !!a && itemDef(a.id)?.armor?.material === "golden"),
+        yaw: p.yaw, pitch: p.pitch, pumpkin: p.inventory.armor[0]?.id === B.CARVED_PUMPKIN,
       });
     }
     for (const r of this.remote.values()) {
@@ -903,7 +1127,7 @@ export class Game {
       refs.push({
         id: r.id, name: r.name, x: r.x, y: r.y, z: r.z, width: 0.6, height: r.sneaking ? 1.5 : 1.8,
         targetable: r.gameMode === "survival" || r.gameMode === "adventure", heldItem: r.held ?? -1, sneaking: r.sneaking, invisible: r.invisible,
-        goldArmor: r.goldArmor,
+        goldArmor: r.goldArmor, yaw: r.yaw, pitch: r.pitch, pumpkin: r.pumpkin,
       });
     }
     return refs;
@@ -969,7 +1193,9 @@ export class Game {
       const d = Math.hypot(cx - x, cy - y, cz - z);
       const hit = blastImpact(power, d, exposure(this.world, x, y, z, box));
       if (hit.damage <= 0) continue;
-      if (e instanceof Mob || e instanceof Vehicle) e.hurt(this.ctx, hit.damage, "explosion", x, z);
+      // A crystal's blast never touches the dragon it serves; another crystal it sets off.
+      if (e instanceof Mob && e.kind === "ender_dragon" && cause instanceof EndCrystal) continue;
+      if (e instanceof Mob || e instanceof Vehicle || e instanceof EndCrystal) e.hurt(this.ctx, hit.damage, "explosion", x, z);
       else if (e instanceof ItemEntity || e instanceof XpOrb) { if (hit.damage > 4) e.removed = true; }
       const n = d || 1;
       e.body.vx += ((cx - x) / n) * hit.push; e.body.vy += ((cy - y) / n) * hit.push; e.body.vz += ((cz - z) / n) * hit.push;
@@ -991,9 +1217,12 @@ export class Game {
     if (this.simulates && isLog(c.prevId) && c.id !== c.prevId) this.rules.logRemoved(c.x, c.y, c.z);
     // A pumpkin set on a T of iron blocks may wake a golem; checked after the change settles.
     if (this.simulates && (c.id === B.CARVED_PUMPKIN || c.id === B.JACK_O_LANTERN)) this.golemChecks.push([c.x, c.y, c.z]);
+    // An eye set in a frame, here or by a guest: the twelfth lights the portal.
+    if (this.simulates && c.id === B.END_PORTAL_FRAME && (c.meta & FRAME_EYE) !== 0 && (c.prevMeta & FRAME_EYE) === 0) this.endPortalChecks.push([c.x, c.y, c.z]);
   }
 
   private golemChecks: [number, number, number][] = [];
+  private endPortalChecks: [number, number, number][] = [];
 
   /** Iron blocks in a T with a pumpkin for a head come alive as an iron golem, as in the original. */
   private buildGolems(): void {
@@ -1014,19 +1243,35 @@ export class Game {
 
   /** A freshly generated chunk's structures come alive: villages here, fortresses in the Nether. */
   private settleStructures(cx: number, cz: number): void {
-    if (this.dimension === "overworld") this.settleVillages(cx, cz);
+    if (this.dimension === "overworld") {
+      this.settleVillages(cx, cz);
+      if (this.generator instanceof Generator) {
+        for (const s of this.generator.strongholdsAt(cx, cz)) this.fillChests(cx, cz, s.chests.map(([x, y, z, room]) => [x, y, z, (items) => strongholdLoot(items, hash4(this.meta.seed ^ 0x57, x, y, z), room)]));
+      }
+    }
     else if (this.dimension === "nether") {
       const w = this.world;
       for (const f of fortressesTouching(this.meta.seed, cx, cz)) {
-        for (const [x, y, z] of f.chests) {
-          if (x >> 4 !== cx || z >> 4 !== cz || w.blockAt(x, y, z) !== B.CHEST || w.getEntity(x, y, z)) continue;
-          const chest = newChest(27);
-          fortressLoot(chest.items, hash4(this.meta.seed ^ 0x4e, x, y, z));
-          w.setEntity(x, y, z, chest);
-        }
+        this.fillChests(cx, cz, f.chests.map(([x, y, z]) => [x, y, z, (items) => fortressLoot(items, hash4(this.meta.seed ^ 0x4e, x, y, z))]));
+      }
+    }
+    if (this.dimension === "end" && this.generator instanceof EndGenerator) {
+      for (const c of endCitiesTouching(this.generator, cx, cz)) {
+        this.fillChests(cx, cz, c.chests.map(([x, y, z, kind]) => [x, y, z, (items) => cityLoot(items, hash4(this.meta.seed ^ 0xe7, x, y, z), kind === "ship")]));
       }
     }
     this.findSpawners(cx, cz);
+  }
+
+  /** Puts loot in a structure's chests that stand in chunk (cx, cz) and are still empty chests there. */
+  private fillChests(cx: number, cz: number, chests: [number, number, number, (items: (ItemStack | null)[]) => void][]): void {
+    const w = this.world;
+    for (const [x, y, z, fill] of chests) {
+      if (x >> 4 !== cx || z >> 4 !== cz || w.blockAt(x, y, z) !== B.CHEST || w.getEntity(x, y, z)) continue;
+      const chest = newChest(27);
+      fill(chest.items);
+      w.setEntity(x, y, z, chest);
+    }
   }
 
   /**
@@ -1317,6 +1562,8 @@ export class Game {
   }
 
   daylight(): number {
+    // No sun where there is no sky: the Nether and the End sit in one unchanging dusk.
+    if (!DIMENSION_INFO[this.dimension].hasSky) return 0.12;
     const angle = ((this.time % DAY_TICKS) / DAY_TICKS) * Math.PI * 2;
     let d = Math.max(0, Math.min(1, Math.sin(angle) * 2.2 + 0.45));
     d *= 1 - this.rain * 0.25 - this.thunder * 0.25;
@@ -1393,7 +1640,11 @@ export class Game {
   }
 
   worldSpawn(): { x: number; y: number; z: number } {
-    if (!this.meta.spawn) this.meta.spawn = this.generator.findSpawn();
+    if (!this.meta.spawn) {
+      // Asked from another dimension before the overworld ever settled one: the middle of the map, landed on its ground.
+      if (this.dimension !== "overworld") return { x: 0.5, y: SEA_LEVEL + 2, z: 0.5 };
+      this.meta.spawn = this.generator.findSpawn();
+    }
     return { ...this.meta.spawn };
   }
 
@@ -1402,9 +1653,11 @@ export class Game {
     if (this.spawnPlaced) return true;
     if (this.arrival) {
       if (!this.settleArrival(this.arrival)) return false;
+      // A gateway moves only whoever stepped in it; the party follows only a change of dimension.
+      const alone = this.arrival.kind === "gateway";
       this.arrival = null;
       this.spawnPlaced = true;
-      if (this.net?.role === "host") {
+      if (this.net?.role === "host" && !alone) {
         const b = this.player.body;
         this.net.partyLanded?.(b.x, b.y, b.z);
       }
@@ -1539,7 +1792,7 @@ export class Game {
     const local: RemotePlayerView = {
       id: p.id, name: p.name, x: ix, y: iy, z: iz, yaw: p.yaw, pitch: p.pitch, walk, speed, swing: this.actions.swingProgress(alpha),
       sneaking: p.sneaking, heldItem: heldId, variant: this.settings.skin, hurt: p.hurtTime > 0, dead: p.dead,
-      sitting: p.riding !== null,
+      sitting: p.riding !== null, gliding: p.gliding,
     };
     const remote: RemotePlayerView[] = [];
     for (const r of this.remote.values()) {
@@ -1548,7 +1801,7 @@ export class Game {
         id: r.id, name: r.name, x: r.px + (r.x - r.px) * t, y: r.py + (r.y - r.py) * t, z: r.pz + (r.z - r.pz) * t,
         yaw: r.pyaw + angleDiff(r.pyaw, r.yaw) * t, pitch: r.pitch, walk: r.walk, speed: r.speed, swing: r.swing,
         sneaking: r.sneaking, heldItem: r.held, variant: r.variant, hurt: r.hurt, dead: r.dead || r.gameMode === "spectator",
-        invisible: r.invisible, sitting: r.riding,
+        invisible: r.invisible, sitting: r.riding, gliding: r.gliding,
       });
     }
 
@@ -1591,7 +1844,7 @@ export class Game {
       showHand: !this.hudHidden && !p.dead && p.gameMode !== "spectator",
       clouds: this.settings.clouds,
       wave: this.settings.graphics === "fancy",
-      dimension: info.hasSky ? undefined : { fog: biome.fog ?? 0x330808, ambient: info.ambient },
+      dimension: info.hasSky ? undefined : { fog: biome.fog ?? 0x330808, ambient: info.ambient, sky: info.skyLight, open: info.open },
     });
     this.lightning = 0;
     this.audio.setListener(ix, eye, iz, p.yaw);
@@ -1656,6 +1909,9 @@ export class Game {
     }
     if (this.tickCount % 20 === 0) this.audio.tickMusic(1, !this.isNight());
     if (this.tickCount % 10 === 0) this.advance();
+    // Eye Spy: standing in a stronghold's halls.
+    if (this.tickCount % 20 === 5 && this.dimension === "overworld" && !this.player.advancements.has("stronghold") && this.meta.type !== "flat"
+      && inStronghold(this.meta.seed, this.player.body.x, this.player.body.y, this.player.body.z)) this.advance({ kind: "stronghold" });
   }
 
   private handlePlayerEvents(events: PlayerEvent[]): void {
@@ -1689,6 +1945,7 @@ export class Game {
         case "eat":
           this.sound("burp", null, 0, 0, 0.4, 0.9 + Math.random() * 0.2);
           this.advance({ kind: "eat" });
+          if (itemDef(ev.item)?.name === "chorus_fruit") this.chorusTeleport();
           break;
       }
     }
@@ -1729,8 +1986,10 @@ export class Game {
     this.tickFurnaces();
 
     const ctx = this.ctx;
+    if (this.dimension === "end") this.endFight.tick();
     for (const e of this.entities.values()) {
-      if (!world.isLoaded(Math.floor(e.x), Math.floor(e.z))) continue;
+      // The dragon flies over chunks nobody has loaded; everything else waits for its ground.
+      if (!world.isLoaded(Math.floor(e.x), Math.floor(e.z)) && e.kind !== "ender_dragon") continue;
       // A guest drives the vehicle they ride and reports where it went.
       if (e instanceof Vehicle && e.rider && e.rider !== this.player.id && this.remote.has(e.rider)) continue;
       e.tick(ctx);
@@ -1742,6 +2001,7 @@ export class Game {
     for (const [id, e] of this.entities) if (e.removed) this.entities.delete(id);
 
     if (this.golemChecks.length) this.buildGolems();
+    if (this.endPortalChecks.length) this.lightEndPortals();
     if (this.tickCount % 20 === 0) this.spawnMobs();
     if (this.spawners.size) this.tickSpawners(this.playerRefs());
     this.sleepTick();
@@ -1864,7 +2124,7 @@ export class Game {
     let hostile = 0, passive = 0;
     for (const e of this.entities.values()) {
       // Villagers and golems belong to their village: they neither count against animals nor despawn.
-      if (!(e instanceof Mob) || e.kind === "villager" || e.kind === "iron_golem") continue;
+      if (!(e instanceof Mob) || e.kind === "villager" || e.kind === "iron_golem" || e.kind === "ender_dragon") continue;
       if (e.spec.hostile) {
         hostile++;
         // Despawn monsters nobody is near; peaceful removes them all.
@@ -1916,8 +2176,10 @@ export class Game {
       // Swamps add slimes to the night's surface spawns.
       const swamp = biome.id === BiomeId.Swamp && y > SEA_LEVEL - 4;
       const kinds: MobKind[] = swamp ? ["zombie", "skeleton", "creeper", "spider", "slime", "slime"] : ["zombie", "skeleton", "creeper", "spider"];
-      const kind = kinds[Math.floor(Math.random() * kinds.length)];
-      const group = 1 + Math.floor(Math.random() * 3);
+      // One spawn in twelve is an enderman, alone or in a pair: rarer than the rest, as in the original.
+      const kind = Math.random() < 1 / 12 ? "enderman" : kinds[Math.floor(Math.random() * kinds.length)];
+      if (kind === "enderman" && (block(this.world.blockAt(x, y + 2, z)).solid)) return;
+      const group = kind === "enderman" ? 1 + Math.floor(Math.random() * 2) : 1 + Math.floor(Math.random() * 3);
       for (let i = 0; i < group; i++) this.spawn(new Mob(kind, x + 0.5 + (i % 2), y, z + 0.5 + Math.floor(i / 2)));
     } else {
       if (below !== B.GRASS || (l >> 4) < 9 || !biome.passive.length) return;
@@ -1966,6 +2228,8 @@ export class Game {
     for (let i = 0; i < group; i++) {
       const gx = x + (i % 2), gz = z + Math.floor(i / 2);
       if (block(w.blockAt(gx, y, gz)).solid || block(w.blockAt(gx, y + 1, gz)).solid) continue;
+      // An enderman stands three blocks tall.
+      if (kind === "enderman" && block(w.blockAt(gx, y + 2, gz)).solid) continue;
       this.spawn(new Mob(kind, gx + 0.5, y, gz + 0.5));
     }
   }
@@ -2089,6 +2353,7 @@ export class Game {
       underwater: p.body.eyesInWater,
       perspective: this.perspective,
       toasts: this.toasts.filter((t) => performance.now() - t.at < 5000),
+      boss: this.endFight.bossBar(),
     };
   }
 

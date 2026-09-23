@@ -24,7 +24,7 @@ import type { GeneratedChunk, Tints } from "./worldgen";
 export const NETHER_LAVA_LEVEL = 31;
 
 /** Mobs a spawner can hold, by the index kept in its meta. */
-export const SPAWNER_MOBS = ["blaze", "zombie", "skeleton", "spider"] as const;
+export const SPAWNER_MOBS = ["blaze", "zombie", "skeleton", "spider", "silverfish"] as const;
 
 const STEP_XZ = 4;
 const STEP_Y = 8;

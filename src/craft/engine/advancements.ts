@@ -23,7 +23,9 @@ export type Trigger =
   | { kind: "eat" }
   | { kind: "enchant" }
   | { kind: "brew" }
-  | { kind: "dimension"; dimension: Dimension };
+  | { kind: "dimension"; dimension: Dimension }
+  /** Something that happened once, named: the dragon slain, a stronghold found, a gateway taken. */
+  | { kind: "event"; event: "dragon" | "stronghold" | "gateway" };
 
 export interface Advancement {
   id: string;
@@ -67,6 +69,12 @@ export const ADVANCEMENTS: readonly Advancement[] = [
   { id: "blaze", title: "Into the Fire", description: "Take a blaze rod from a blaze", icon: "blaze_rod", trigger: has("blaze_rod") },
   { id: "debris", title: "Buried Treasure", description: "Dig out ancient debris", icon: "ancient_debris", trigger: has("ancient_debris") },
   { id: "netherite", title: "Forged in Fire", description: "Make a netherite ingot", icon: "netherite_ingot", trigger: has("netherite_ingot") },
+  { id: "stronghold", title: "Eye Spy", description: "Follow the eyes of ender into a stronghold", icon: "eye_of_ender", trigger: { kind: "event", event: "stronghold" } },
+  { id: "end", title: "The End?", description: "Drop through the portal into the End", icon: "end_stone", trigger: { kind: "dimension", dimension: "end" } },
+  { id: "dragon", title: "Free the End", description: "Slay the Ender Dragon", icon: "dragon_egg", trigger: { kind: "event", event: "dragon" } },
+  { id: "egg", title: "The Next Generation", description: "Hold the dragon's egg", icon: "dragon_egg", trigger: has("dragon_egg") },
+  { id: "gateway", title: "Remote Getaway", description: "Escape the island through a gateway", icon: "ender_pearl", trigger: { kind: "event", event: "gateway" } },
+  { id: "elytra", title: "Sky's the Limit", description: "Find a pair of elytra", icon: "elytra", trigger: has("elytra") },
 ];
 
 export function advancement(id: string): Advancement | undefined {
@@ -94,7 +102,7 @@ export interface PlayerState {
 
 export type AdvancementEvent =
   | { kind: "kill"; hostile: boolean } | { kind: "sleep" } | { kind: "eat" } | { kind: "enchant" } | { kind: "brew" }
-  | { kind: "dimension"; dimension: Dimension };
+  | { kind: "dimension"; dimension: Dimension } | { kind: "dragon" } | { kind: "stronghold" } | { kind: "gateway" };
 
 /**
  * Which not-yet-earned advancements the player has now earned: from their
@@ -126,6 +134,7 @@ export function newlyEarned(done: ReadonlySet<string>, state: PlayerState, event
       case "enchant": earned = event?.kind === "enchant"; break;
       case "brew": earned = event?.kind === "brew"; break;
       case "dimension": earned = event?.kind === "dimension" && event.dimension === t.dimension; break;
+      case "event": earned = event?.kind === t.event; break;
     }
     if (earned) out.push(a);
   }

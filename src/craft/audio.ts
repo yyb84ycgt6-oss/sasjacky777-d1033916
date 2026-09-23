@@ -172,7 +172,9 @@ export class GameAudio {
 
   play(name: string, x: number | null = null, y = 0, z = 0, volume = 1, pitch = 1): void {
     if (!this.ready()) return;
-    const out = this.placed(x, y, z, volume, name === "explode" || name === "thunder" ? 64 : 16);
+    // The dragon and the End's portals carry across the island; most sounds only a few blocks.
+    const far = name === "explode" || name === "thunder" || name.startsWith("ender_dragon") || name === "end_portal_spawn" || name === "end_gateway_spawn";
+    const out = this.placed(x, y, z, volume, far ? 96 : 16);
     if (!out) return;
     const t = this.ctx!.currentTime;
     const p = pitch;
@@ -248,6 +250,22 @@ export class GameAudio {
         break;
       case "portal_travel": this.noiseBurst(out, t, 1.6, "bandpass", 600, 0.5, 0.7, 0.8); this.tone(out, t, "sawtooth", 80, 400, 1.4, 0.12, 0.3); break;
       case "fire_charge": this.noiseBurst(out, t, 0.35, "bandpass", 1500, 0.8, 0.6, 0.6); break;
+      case "throw": this.noiseBurst(out, t, 0.15, "highpass", 2200 * p, 0.8, 0.3, 0.5); break;
+      // The End: an eye set in a frame clicks and chimes; the last one opens the portal with a deep swell.
+      case "end_portal_frame_fill": this.tone(out, t, "square", 700, 650, 0.05, 0.12); this.tone(out, t + 0.03, "sine", 1320, 1320, 0.5, 0.12); break;
+      case "end_portal_spawn":
+        this.tone(out, t, "sine", 55, 110, 3, 0.35, 0.5);
+        [262, 330, 392, 523].forEach((f, i) => this.tone(out, t + 0.4 + i * 0.25, "triangle", f, f, 1.5, 0.12));
+        break;
+      case "end_gateway_spawn": this.noiseBurst(out, t, 1.2, "bandpass", 500, 0.6, 0.7, 0.3); this.tone(out, t, "sine", 70, 40, 1.4, 0.4); break;
+      case "eye_of_ender_launch": this.tone(out, t, "sine", 500, 1100, 0.4, 0.15); break;
+      case "eye_of_ender_death": this.noiseBurst(out, t, 0.2, "highpass", 3000, 1, 0.3); this.tone(out, t, "triangle", 900, 500, 0.3, 0.15); break;
+      case "chorus_fruit_teleport": case "enderman_teleport":
+        this.tone(out, t, "sawtooth", 200 * p, 1200 * p, 0.25, 0.12);
+        this.tone(out, t + 0.05, "sine", 900 * p, 300 * p, 0.3, 0.12);
+        break;
+      case "firework_launch": this.noiseBurst(out, t, 0.6, "highpass", 1800, 0.6, 0.5, 1.5); break;
+      case "dragon_fireball_explode": this.noiseBurst(out, t, 1, "lowpass", 700, 0.8, 0.8, 0.3); this.tone(out, t, "sine", 120, 50, 0.8, 0.4); break;
       default:
         this.mob(name, out, t, p);
     }
@@ -255,7 +273,7 @@ export class GameAudio {
 
   private mob(name: string, out: AudioNode, t: number, p: number): void {
     // "iron_golem_hurt" is the golem's, not an "iron" mob's: two-word kinds are matched whole.
-    const long = ["iron_golem", "zombified_piglin", "magma_cube", "wither_skeleton"].find((k) => name.startsWith(`${k}_`) || name === k);
+    const long = ["iron_golem", "zombified_piglin", "magma_cube", "wither_skeleton", "ender_dragon"].find((k) => name.startsWith(`${k}_`) || name === k);
     const [kind, what] = long ? [long, name.slice(long.length + 1)] : name.split("_");
     const death = what === "death";
     const low = death ? 0.75 : 1;
@@ -321,6 +339,21 @@ export class GameAudio {
       case "magma": case "magma_cube":
         this.tone(out, t, "sine", 120 * p * low, 60 * p * low, 0.2, 0.45);
         this.noiseBurst(out, t, 0.15, "lowpass", 500 * p, 2, 0.4, 0.8);
+        break;
+      // Endermen: warbling, backwards-sounding murmurs; a shriek when stared at.
+      case "enderman":
+        if (what === "scream" || what === "stare") { this.tone(out, t, "sawtooth", 600 * p, 1500 * p, 0.7, 0.25, 0.05); this.tone(out, t, "square", 310 * p, 760 * p, 0.7, 0.1, 0.05); }
+        else { this.tone(out, t, "triangle", 260 * p * low, 380 * p * low, 0.35, 0.2); this.tone(out, t + 0.15, "triangle", 420 * p * low, 220 * p * low, 0.4, 0.15); }
+        break;
+      case "silverfish": for (let i = 0; i < 3; i++) this.noiseBurst(out, t + i * 0.05, 0.04, "bandpass", 3200, 5, 0.3); break;
+      // The dragon: a low roar with a rasp over it; a gurgle before it spits.
+      case "ender_dragon":
+        if (what === "shoot") { this.noiseBurst(out, t, 0.6, "bandpass", 900, 0.8, 0.6, 0.5); this.tone(out, t, "sawtooth", 180, 90, 0.5, 0.3); }
+        else if (what === "hurt") this.tone(out, t, "sawtooth", 240 * p, 120 * p, 0.5, 0.4, 0.05);
+        else {
+          this.tone(out, t, "sawtooth", 70 * p * low, 45 * p * low, death ? 4 : 1.8, 0.4, 0.3);
+          this.noiseBurst(out, t, death ? 4 : 1.6, "lowpass", 500, 0.7, 0.5, 0.5);
+        }
         break;
       // Clanking iron: a hollow knock under metallic ringing.
       case "iron_golem":

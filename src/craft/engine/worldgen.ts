@@ -15,6 +15,7 @@
  *   rivers          → a thin band of low noise carved down to the sea
  * Climate (temperature, humidity) is separate noise and picks the biome.
  */
+import { stampStronghold, strongholdsTouching, type Stronghold } from "./stronghold";
 import { B } from "./blocks";
 import { BiomeId, biomeDef, foliageColor, grassColor, waterColor, type BiomeDef, type TreeKind } from "./biomes";
 import { blockIndex, CHUNK_SIZE, CHUNK_VOLUME, DEEPSLATE_LEVEL, SEA_LEVEL, WORLD_HEIGHT } from "./constants";
@@ -282,6 +283,7 @@ export class Generator implements ChunkGenerator {
     this.placeOres(blocks, cx, cz, biomes);
     this.decorate(blocks, cx, cz, heights, biomes);
     this.placeFeatures(blocks, meta, cx, cz);
+    for (const s of strongholdsTouching(this.seed, cx, cz)) stampStronghold(s, blocks, meta, cx, cz);
     this.placeVillages(blocks, meta, cx, cz);
     this.freeze(blocks, biomes);
     return { blocks, meta, biomes };
@@ -299,6 +301,12 @@ export class Generator implements ChunkGenerator {
         meta[i] = m;
       });
     }
+  }
+
+  /** The strongholds reaching into a chunk, for the game to fill their chests. None in a flat world. */
+  strongholdsAt(cx: number, cz: number): Stronghold[] {
+    if (this.type === "flat") return [];
+    return strongholdsTouching(this.seed, cx, cz);
   }
 
   /** The villages overlapping a chunk, for the game to populate. */

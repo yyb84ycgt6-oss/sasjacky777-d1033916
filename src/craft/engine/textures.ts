@@ -1040,6 +1040,90 @@ def("spawner", (p, r) => {
   }
 });
 
+// ---- the End ------------------------------------------------------------------------------------
+
+const END_STONE = [hex("#cfd197"), hex("#d9dba3"), hex("#e2e4ad"), hex("#eaebb9")];
+function endStone(p: Pixels, rng: Rng): void {
+  palette(p, rng, END_STONE, 4, 0.8);
+  // The pitting that gives end stone its pumice look.
+  speckle(p, rng, [hex("#b8b87e"), hex("#a9a870")], 0.09);
+}
+def("end_stone", endStone);
+def("end_stone_bricks", (p, r) => { bricksPattern(p, r, hex("#dcdca6"), hex("#a8a674"), 8, 16); speckle(p, r, [hex("#c4c490")], 0.05); });
+const PURPUR = hex("#a77ba7");
+// Purpur: four rounded tiles to a block, each bevelled.
+def("purpur_block", (p, r) => {
+  noisy(p, r, PURPUR, 0.1, 4);
+  for (let i = 0; i < TEX; i++) {
+    for (const k of [0, 8]) { p.set(i, k, shade(PURPUR, 1.18)); p.set(k, i, shade(PURPUR, 1.18)); p.set(i, k + 7, shade(PURPUR, 0.78)); p.set(k + 7, i, shade(PURPUR, 0.78)); }
+  }
+});
+def("purpur_pillar", (p, r) => {
+  noisy(p, r, PURPUR, 0.08, 4);
+  for (let y = 0; y < TEX; y++) for (const x of [0, 5, 10, 15]) p.set(x, y, shade(PURPUR, x === 0 ? 1.15 : 0.8));
+});
+def("purpur_pillar_top", (p, r) => {
+  noisy(p, r, PURPUR, 0.08, 4);
+  frame(p, shade(PURPUR, 0.8));
+  frame16(p, 4, 4, 11, 11, shade(PURPUR, 0.8));
+  frame16(p, 5, 5, 10, 10, shade(PURPUR, 1.15));
+});
+def("end_rod", (p) => {
+  p.clear();
+  for (let y = 0; y < TEX; y++) { p.set(7, y, hex("#f6f2ee")); p.set(8, y, hex("#d9d2cf")); }
+});
+def("end_rod_base", (p) => {
+  p.clear();
+  rect(p, 6, 6, 9, 9, (x, y) => (x === 6 || y === 6 ? hex("#e8dfd8") : hex("#b6a8a0")));
+  rect(p, 6, 0, 9, 15, (x, y) => (y === 0 ? hex("#e8dfd8") : hex("#c6b9b1")));
+});
+const CHORUS = [hex("#4e2f4f"), hex("#5d3a5e"), hex("#6d476d"), hex("#7c567c")];
+def("chorus_plant", (p, r) => { palette(p, r, CHORUS, 4, 0.9); speckle(p, r, [hex("#9a7a9a"), hex("#3a2140")], 0.08); });
+def("chorus_flower", (p, r) => {
+  palette(p, r, [hex("#8e6c8e"), hex("#9f7d9f"), hex("#b08eb0")], 4, 0.7);
+  frame(p, hex("#6d4a6d"));
+  rect(p, 5, 5, 10, 10, (x, y) => ((x + y) % 2 ? hex("#e6c8e6") : hex("#d4aad4")));
+});
+def("chorus_flower_dead", (p, r) => {
+  palette(p, r, [hex("#6a5a66"), hex("#76666f"), hex("#82727b")], 4, 0.7);
+  frame(p, hex("#4f424b"));
+  rect(p, 5, 5, 10, 10, hex("#5c4f58"));
+});
+const FRAME_GREEN = hex("#3d6e5a");
+def("end_portal_frame_top", (p, r) => {
+  noisy(p, r, FRAME_GREEN, 0.12, 4);
+  frame(p, hex("#c7c99a"));
+  frame16(p, 1, 1, 14, 14, hex("#a8aa7a"));
+  // The socket the eye sits in.
+  rect(p, 4, 4, 11, 11, (x, y) => (x === 4 || y === 4 ? hex("#1d3a30") : hex("#274a3d")));
+});
+def("end_portal_frame_side", (p, r) => {
+  endStone(p, r);
+  rect(p, 0, 0, 15, 3, (x) => shade(FRAME_GREEN, 0.85 + (x % 3) * 0.08));
+  for (let x = 0; x < TEX; x++) p.set(x, 4, hex("#8d8f5e"));
+});
+def("end_portal_frame_eye", (p, r) => {
+  noisy(p, r, hex("#1f5a46"), 0.15, 4);
+  rect(p, 6, 6, 9, 9, hex("#8fe0c0"));
+  rect(p, 7, 7, 8, 8, hex("#0b1f18"));
+});
+def("dragon_egg", (p, r) => {
+  palette(p, r, [hex("#0c0a10"), hex("#130f1a"), hex("#1b1524")], 4, 0.6);
+  speckle(p, r, [hex("#5a2a7a"), hex("#7a3aa0")], 0.08);
+});
+def("end_rod_item", (p) => {
+  p.clear();
+  // Drawn on the slant, the way a rod lies in a hand.
+  for (let i = 1; i < 13; i++) { p.set(i + 1, 14 - i, hex("#f6f2ee")); p.set(i + 2, 14 - i, hex("#d9d2cf")); }
+  rect(p, 1, 13, 3, 14, hex("#b6a8a0"));
+});
+def("iron_bars", (p) => {
+  p.clear();
+  const bar = hex("#9a9aa0"), lit = hex("#c8c8ce"), dark = hex("#6a6a70");
+  for (let y = 0; y < TEX; y++) for (const x of [1, 6, 11]) { p.set(x, y, lit); p.set(x + 1, y, bar); p.set(x + 2, y, dark); }
+  for (let x = 0; x < TEX; x++) for (const y of [0, 15]) p.set(x, y, bar);
+});
+
 // Water and lava are animated: ANIM_FRAMES consecutive layers, painted from a
 // looping path through 3D noise so the last frame flows into the first.
 const WATER_NOISE = new Simplex(4242);
@@ -1064,7 +1148,7 @@ function fluidFrame(p: Pixels, frame: number, lava: boolean): void {
 }
 
 /** Textures with ANIM_FRAMES layers each, laid out first in the atlas; the shader steps through them. */
-export const ANIMATED_TEXTURES = ["water_still", "lava_still", "nether_portal", "fire", "soul_fire"] as const;
+export const ANIMATED_TEXTURES = ["water_still", "lava_still", "nether_portal", "fire", "soul_fire", "end_portal"] as const;
 
 // The portal: a purple swirl turning in place, from the same looping noise path.
 const PORTAL_NOISE = new Simplex(6161);
@@ -1076,6 +1160,22 @@ function portalFrame(p: Pixels, frame: number): void {
       const v = PORTAL_NOISE.noise3(Math.cos(ax) + Math.cos(t) * 0.8, Math.sin(ax) + Math.cos(ay), Math.sin(ay) + Math.sin(t) * 0.8);
       const f = (v + 1) / 2;
       p.set(x, y, mix(hex("#3a0a8a"), hex("#c070ff"), Math.pow(f, 1.3)), 170 + Math.round(f * 60));
+    }
+  }
+}
+
+// The End portal: a black void with stars in three depths drifting past, the nearest fastest.
+function endPortalFrame(p: Pixels, frame: number): void {
+  p.fill(hex("#050a0c"));
+  const t = frame / ANIM_FRAMES;
+  const layers: [number, C, number][] = [[1, hex("#1e4d52"), 22], [2, hex("#3f8f86"), 12], [3, hex("#b8f0dc"), 6]];
+  for (const [speed, c, count] of layers) {
+    const rng = new Rng(9000 + speed);
+    for (let i = 0; i < count; i++) {
+      const x = rng.int(16), y0 = rng.int(16);
+      // Whole pixels per frame, wrapping at the edge, so frame sixteen meets frame one.
+      const y = (y0 + Math.round(t * 16 * speed)) % 16;
+      p.set(x, y, c);
     }
   }
 }
@@ -2055,6 +2155,53 @@ const ITEM_TEMPLATES: Record<string, string[]> = {
     "....abbddbba....",
     ".....aaaaaa.....",
   ],
+  // An end crystal: a pale cube in a glass cage, on its bedrock foot.
+  crystal: [
+    "................",
+    "......gggg......",
+    ".....gw..wg.....",
+    "....g.abba.g....",
+    "...g.abccba.g...",
+    "...g.bcffcb.g...",
+    "...g.bcffcb.g...",
+    "...g.abccba.g...",
+    "....g.abba.g....",
+    ".....gw..wg.....",
+    "......gggg......",
+    "....kkkkkkkk....",
+    "....kdkkdkkk....",
+  ],
+  elytra: [
+    "................",
+    "..aaaa....aaaa..",
+    ".abbbba..abbbba.",
+    ".abcbbbaabbbcba.",
+    ".abccbbbbbbccba.",
+    ".abbcbbbbbbcbba.",
+    "..abbbbaabbbba..",
+    "..abbbda..dbbba.",
+    "...abbda..dbba..",
+    "...abdda..ddba..",
+    "....add....dda..",
+    "....ad......da..",
+    ".....a......a...",
+  ],
+  rocket: [
+    "................",
+    "........r.......",
+    ".......rrr......",
+    "......rrwrr.....",
+    "......rwwwr.....",
+    "......paaap.....",
+    "......paaap.....",
+    "......pbbbp.....",
+    "......paaap.....",
+    "......pbbbp.....",
+    "......paaap.....",
+    ".......kkk......",
+    "........k.......",
+    ".......k.k......",
+  ],
   melon_slice: [
     "................", "................", "................", "................", "................",
     "..a..........a..",
@@ -2305,6 +2452,12 @@ art("netherite_scrap", "raw", paletteOf("#6a5048"));
 art("netherite_ingot", "ingot", paletteOf("#4d4549", { c: hex("#7a6a70") }));
 art("fire_charge", "ball", paletteOf("#3a2a22", { c: hex("#ff9a2a") }));
 art("ender_pearl", "ball", paletteOf("#10584c", { c: hex("#46d8b8") }));
+art("eye_of_ender", "eye", paletteOf("#2a7a5a", { w: hex("#0b1f18"), d: hex("#8fe0c0") }));
+art("end_crystal", "crystal", { ...paletteOf("#d8b0e0", { f: hex("#ff7ad8") }), g: hex("#e8f0f8"), w: hex("#ffffff"), k: hex("#3a3a3e"), d: hex("#1e1e22") });
+art("chorus_fruit", "ball", paletteOf("#7a4e7a", { c: hex("#b88ab8") }));
+art("popped_chorus_fruit", "ball", paletteOf("#b894b8", { c: hex("#e6cce6"), d: hex("#8a6a8a") }));
+art("elytra", "elytra", paletteOf("#8a8aa0", { c: hex("#c8c8dc"), d: hex("#5e5e72") }));
+art("firework_rocket", "rocket", { a: hex("#c8342a"), b: hex("#f2f0e6"), p: hex("#8a2020"), r: hex("#e04a3a"), w: hex("#ffd0c0"), k: hex("#6b4a26") });
 art("fermented_spider_eye", "eye", paletteOf("#8a4a2a", { w: hex("#e08a70") }));
 art("glistering_melon_slice", "melon_slice", { a: hex("#8a6a10"), b: hex("#e0402f"), w: hex("#ffe060"), g: hex("#f0c030") });
 art("golden_carrot", "carrot", paletteOf("#f0c020", { g: hex("#d8b020") }));
@@ -2333,6 +2486,7 @@ export function paintTexture(name: string, frame = 0): Pixels | null {
   if (name === "water_still") { fluidFrame(p, frame, false); return p; }
   if (name === "lava_still") { fluidFrame(p, frame, true); return p; }
   if (name === "nether_portal") { portalFrame(p, frame); return p; }
+  if (name === "end_portal") { endPortalFrame(p, frame); return p; }
   if (name === "fire" || name === "soul_fire") { fireFrame(p, frame, name === "soul_fire"); return p; }
   const destroy = /^destroy_stage_(\d)$/.exec(name);
   if (destroy) { destroyStage(p, Number(destroy[1])); return p; }

@@ -217,12 +217,15 @@ export function doorBoxes(meta: number): Box[] {
 /** Ladder meta: the facing of the wall it hangs on (panel sits against that wall). */
 const ladderBoxes = (meta: number): Box[] => [panelBox(meta & 3, 1)];
 
-/** Torch meta: 0 standing, 1..4 on a wall (1 + facing of the wall). */
+/**
+ * Torch meta: 0 standing, 1..4 on a wall (1 + the facing pointing from the
+ * wall out to the torch). The stick sits against that wall, at -facing.
+ */
 export function torchBoxes(meta: number): Box[] {
   if (meta === 0) return [[7, 0, 7, 9, 10, 9]];
   const f = (meta - 1) & 3;
   const [dx, dz] = FACING_DIRS[f];
-  const ox = 7 + dx * 6, oz = 7 + dz * 6;
+  const ox = 7 - dx * 6, oz = 7 - dz * 6;
   return [[ox, 3, oz, ox + 2, 13, oz + 2]];
 }
 
@@ -999,6 +1002,85 @@ add(231, "spawner", "Monster Spawner", {
   layer: "cutout", opaque: false, hardness: 5, tool: P, harvestTier: 0, material: "metal", drops: [], xp: [15, 43], hidden: true,
 });
 
+// ---- the End (232+) ----------------------------------------------------------------------
+
+add(232, "end_stone", "End Stone", { hardness: 3, tool: P, harvestTier: 0 });
+add(233, "end_stone_bricks", "End Stone Bricks", { hardness: 3, tool: P, harvestTier: 0 });
+add(234, "purpur_block", "Purpur Block", { hardness: 1.5, tool: P, harvestTier: 0 });
+add(235, "purpur_pillar", "Purpur Pillar", { textures: tex("purpur_pillar_top", "purpur_pillar"), hardness: 1.5, tool: P, harvestTier: 0 });
+add(236, "purpur_stairs", "Purpur Stairs", {
+  shape: "boxes", layer: "opaque", opaque: false, boxes: stairBoxes, textures: tex("purpur_block"),
+  hardness: 1.5, tool: P, harvestTier: 0, facing: "away",
+});
+// Meta: the Face the rod points out of, away from what holds it.
+export function endRodBoxes(meta: number): Box[] {
+  const f = meta & 7;
+  return [facingBox([6, 0, 6, 10, 1, 10], f), facingBox([7, 1, 7, 9, 16, 9], f)];
+}
+add(237, "end_rod", "End Rod", {
+  shape: "boxes", layer: "cutout", opaque: false, boxes: endRodBoxes, emission: 14, hardness: 0, material: "glass",
+  textures: tex("end_rod"), boxTexture: (_m, box) => (box === 0 ? "end_rod_base" : undefined),
+});
+/**
+ * Chorus plant: a knot with an arm out toward each chorus or end stone it
+ * joins, the six joins kept in meta as bits by Face (updated as neighbours
+ * come and go). Unsupported, it snaps, and so does everything above it.
+ */
+export function chorusBoxes(meta: number): Box[] {
+  const boxes: Box[] = [[4, 4, 4, 12, 12, 12]];
+  const ARMS: Box[] = [[12, 4, 4, 16, 12, 12], [0, 4, 4, 4, 12, 12], [4, 12, 4, 12, 16, 12], [4, 0, 4, 12, 4, 12], [4, 4, 12, 12, 12, 16], [4, 4, 0, 12, 12, 4]];
+  for (let f = 0; f < 6; f++) if (meta & (1 << f)) boxes.push(ARMS[f]);
+  return boxes;
+}
+/** The joins a chorus plant at x,y,z makes: a bit by Face for each chorus, flower or (below) end stone next to it. */
+export function chorusJoins(get: (x: number, y: number, z: number) => number, x: number, y: number, z: number): number {
+  let m = 0;
+  for (let f = 0; f < 6; f++) {
+    const [dx, dy, dz] = FACE_DIRS[f];
+    const n = get(x + dx, y + dy, z + dz);
+    if (n === 238 || n === 239 || (f === Face.Down && n === 232)) m |= 1 << f;
+  }
+  return m;
+}
+add(238, "chorus_plant", "Chorus Plant", {
+  shape: "boxes", layer: "cutout", opaque: false, boxes: chorusBoxes, hardness: 0.4, tool: A, material: "plant",
+  needsSupport: true, drops: [{ item: "chorus_fruit", min: 0, max: 1 }],
+});
+// Meta: age 0-5; at 5 the flower is spent and will not grow again.
+add(239, "chorus_flower", "Chorus Flower", {
+  shape: "boxes", layer: "cutout", opaque: false, boxes: () => [[1, 1, 1, 15, 15, 15], [4, 0, 4, 12, 1, 12]],
+  hardness: 0.4, tool: A, material: "plant", needsSupport: true,
+  boxTexture: (m) => ((m & 7) >= 5 ? "chorus_flower_dead" : undefined),
+});
+// Meta: bits 0-1 the way the frame faces (into the ring), bit 2 an eye of ender set in it.
+export const FRAME_EYE = 4;
+add(240, "end_portal_frame", "End Portal Frame", {
+  shape: "boxes", layer: "cutout", opaque: false, facing: "player", hardness: -1, material: "stone", drops: [],
+  boxes: (m) => ((m & FRAME_EYE) !== 0 ? [[0, 0, 0, 16, 13, 16], [4, 13, 4, 12, 16, 12]] : [[0, 0, 0, 16, 13, 16]]),
+  textures: tex("end_portal_frame_top", "end_portal_frame_side", "end_stone"),
+  boxTexture: (_m, box) => (box === 1 ? "end_portal_frame_eye" : undefined),
+  emission: 1,
+});
+// The portal's floor: a sheet at knee height the player drops through. Never mined.
+add(241, "end_portal", "End Portal", {
+  shape: "boxes", layer: "translucent", solid: false, opaque: false, emission: 15, hardness: -1, material: "glass",
+  boxes: () => [[0, 11, 0, 16, 12, 16]], collision: () => [], textures: tex("end_portal"), hidden: true, drops: [], animated: true,
+});
+// A gateway: a cube of the portal's starfield inside a bedrock cage, touched to be carried out to the far islands.
+add(242, "end_gateway", "End Gateway", {
+  layer: "translucent", solid: false, opaque: false, emission: 15, hardness: -1, material: "glass",
+  collision: () => [], textures: tex("end_portal"), hidden: true, drops: [], animated: true,
+});
+// The dragon's egg: it falls like sand, and flees whoever touches it.
+add(243, "dragon_egg", "Dragon Egg", {
+  shape: "boxes", layer: "cutout", opaque: false, gravity: true, emission: 1, hardness: 3, material: "stone",
+  boxes: () => [[6, 15, 6, 10, 16, 10], [5, 14, 5, 11, 15, 11], [4, 13, 4, 12, 14, 12], [3, 11, 3, 13, 13, 13], [2, 8, 2, 14, 11, 14], [1, 3, 1, 15, 8, 15], [2, 1, 2, 14, 3, 14], [3, 0, 3, 13, 1, 13]],
+});
+add(244, "iron_bars", "Iron Bars", {
+  shape: "boxes", layer: "cutout", opaque: false, boxes: () => [[7, 0, 0, 9, 16, 16], [0, 0, 7, 16, 16, 9]],
+  textures: tex("iron_bars"), hardness: 5, tool: P, harvestTier: 0, material: "metal",
+});
+
 export const BLOCK_COUNT = BLOCKS.length;
 
 const AIR_DEF = BLOCKS[0];
@@ -1039,7 +1121,7 @@ export const B = {
   STONE_BRICK_STAIRS: 132, LANTERN: 133, HAY: 134, LILY_PAD: 135, SMOOTH_STONE: 136,
   SEA_LANTERN: 137, PACKED_ICE: 138, PODZOL: 139, COARSE_DIRT: 140, MUD: 141, MOSS: 142,
   AMETHYST: 143, COBWEB: 144, OAK_FENCE: 145, GLASS_PANE: 146, NOTE_BLOCK: 147, CALCITE: 148,
-  TUFF: 149,
+  TUFF: 149, CHISELED_STONE_BRICKS: 153, CRACKED_STONE_BRICKS: 154,
   REDSTONE_WIRE: 155, REDSTONE_TORCH: 156, REDSTONE_TORCH_OFF: 157, LEVER: 158, STONE_BUTTON: 159,
   OAK_BUTTON: 160, STONE_PLATE: 161, OAK_PLATE: 162, REDSTONE_LAMP: 163, REDSTONE_LAMP_ON: 164,
   REPEATER: 165, COMPARATOR: 166, PISTON: 167, STICKY_PISTON: 168, PISTON_HEAD: 169, OBSERVER: 170,
@@ -1056,11 +1138,14 @@ export const B = {
   CRIMSON_FUNGUS: 219, WARPED_FUNGUS: 220, CRIMSON_ROOTS: 221, WARPED_ROOTS: 222, WEEPING_VINES: 223,
   TWISTING_VINES: 224, NETHER_PORTAL: 225, FIRE: 226, SOUL_FIRE: 227, BONE_BLOCK: 228, ANCIENT_DEBRIS: 229,
   QUARTZ_BLOCK: 230, SPAWNER: 231,
+  END_STONE: 232, END_STONE_BRICKS: 233, PURPUR_BLOCK: 234, PURPUR_PILLAR: 235, PURPUR_STAIRS: 236, END_ROD: 237,
+  CHORUS_PLANT: 238, CHORUS_FLOWER: 239, END_PORTAL_FRAME: 240, END_PORTAL: 241, END_GATEWAY: 242, DRAGON_EGG: 243,
+  IRON_BARS: 244,
 } as const;
 
 /** Blocks that stand on an axis kept in meta like a log's (0 up, 1 along x, 2 along z). */
 export const isPillar = (id: number): boolean =>
-  isLog(id) || id === B.CRIMSON_STEM || id === B.WARPED_STEM || id === B.BASALT || id === B.BONE_BLOCK;
+  isLog(id) || id === B.CRIMSON_STEM || id === B.WARPED_STEM || id === B.BASALT || id === B.BONE_BLOCK || id === B.PURPUR_PILLAR;
 export const isFire = (id: number): boolean => id === B.FIRE || id === B.SOUL_FIRE;
 export const isNylium = (id: number): boolean => id === B.CRIMSON_NYLIUM || id === B.WARPED_NYLIUM;
 
@@ -1072,7 +1157,8 @@ export const isLeaves = (id: number): boolean =>
 export const isCrop = (id: number): boolean => id === B.WHEAT || id === B.CARROTS || id === B.POTATOES;
 export const isSapling = (id: number): boolean => id >= B.OAK_SAPLING && id <= B.ACACIA_SAPLING;
 export const isSlab = (id: number): boolean => id >= B.OAK_SLAB && id <= B.STONE_BRICK_SLAB;
-export const isStairs = (id: number): boolean => (id >= B.OAK_STAIRS && id <= B.STONE_BRICK_STAIRS) || id === B.NETHER_BRICK_STAIRS;
+export const isStairs = (id: number): boolean =>
+  (id >= B.OAK_STAIRS && id <= B.STONE_BRICK_STAIRS) || id === B.NETHER_BRICK_STAIRS || id === B.PURPUR_STAIRS;
 export const isDoor = (id: number): boolean => id === B.OAK_DOOR || id === B.IRON_DOOR;
 export const isTrapdoor = (id: number): boolean => id === B.OAK_TRAPDOOR || id === B.IRON_TRAPDOOR;
 export const isButton = (id: number): boolean => id === B.STONE_BUTTON || id === B.OAK_BUTTON;

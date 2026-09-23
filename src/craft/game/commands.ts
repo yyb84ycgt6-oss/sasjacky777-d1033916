@@ -7,6 +7,8 @@
  * mode, as in the original. An online guest can only run the ones that affect
  * nobody else — the host owns the world.
  */
+import { cityInRegion, CITY_REGION, END_SPAWN, EndGenerator } from "../engine/end";
+import { nearestStronghold } from "../engine/stronghold";
 import { blockByName } from "../engine/blocks";
 import { DAY_TICKS, WORLD_HEIGHT } from "../engine/constants";
 import { allItems, itemByName, itemDef, type StatusEffect } from "../engine/items";
@@ -43,7 +45,7 @@ const HELP = [
   "/effect <speed|strength|fire_resistance|...> [seconds] [level] | /effect clear",
   "/enchant <enchantment> [level]   (the held item, e.g. /enchant sharpness 5)",
   "/xp add <amount>, /clear, /kill, /seed, /spawnpoint",
-  "/locate village|fortress, /dimension overworld|nether",
+  "/locate village|fortress|stronghold|end_city, /dimension overworld|nether|end",
   "/difficulty peaceful|easy|normal|hard, /gamerule <rule> <true|false>",
 ];
 
@@ -261,14 +263,41 @@ export function runCommand(game: Game, line: string): Line[] {
         return hit ? [{ text: `The nearest fortress is at ${hit.x}, ${hit.y}, ${hit.z} (${Math.round(Math.hypot(hit.x - b.x, hit.z - b.z))} blocks away)` }]
           : [{ text: "No fortress within 4000 blocks.", color: ERR }];
       }
-      return [{ text: "Usage: /locate village|fortress", color: ERR }];
+      if (what === "stronghold") {
+        if (game.dimension !== "overworld" || game.meta.type === "flat") return [{ text: "Strongholds are in the overworld (and not in a flat world).", color: ERR }];
+        const hit = nearestStronghold(game.meta.seed, b.x, b.z);
+        return [{ text: `The nearest stronghold's portal room is at ${hit.x}, ${hit.y}, ${hit.z} (${Math.round(Math.hypot(hit.x - b.x, hit.z - b.z))} blocks away)` }];
+      }
+      if (what === "end_city") {
+        if (game.dimension !== "end" || !(game.generator instanceof EndGenerator)) return [{ text: "End cities are in the End, out past the void.", color: ERR }];
+        const gen = game.generator;
+        const size = CITY_REGION * 16;
+        const hit = nearestInRegions(b.x, b.z, size, (rx, rz) => {
+          const c = cityInRegion(gen, rx, rz);
+          return c ? { x: c.x, y: c.y, z: c.z } : null;
+        });
+        return hit ? [{ text: `The nearest End city is at ${hit.x}, ${hit.y}, ${hit.z} (${Math.round(Math.hypot(hit.x - b.x, hit.z - b.z))} blocks away)` }]
+          : [{ text: "No End city within 4000 blocks.", color: ERR }];
+      }
+      return [{ text: "Usage: /locate village|fortress|stronghold|end_city", color: ERR }];
     }
     case "dimension": {
       const denied = needCheats() ?? needHost();
       if (denied) return denied;
       const to = (args[0] ?? "").toLowerCase();
-      if (!isDimension(to) || to === "end") return [{ text: "Usage: /dimension overworld|nether", color: ERR }];
+      if (!isDimension(to)) return [{ text: "Usage: /dimension overworld|nether|end", color: ERR }];
       if (to === game.dimension) return [{ text: `Already in ${DIMENSION_INFO[to].title}.` }];
+      if (to === "end") {
+        game.changeDimension("end", { kind: "platform", ...END_SPAWN });
+        return [{ text: "Taking you to the End" }];
+      }
+      if (game.dimension === "end") {
+        // Out of the End the way its exit portal goes: home.
+        const s = game.worldSpawn();
+        game.changeDimension("overworld", { kind: "spawn", ...s });
+        if (to === "overworld") return [{ text: "Taking you home" }];
+        return [{ text: "Taking you home first; from there, /dimension nether" }];
+      }
       // As if through a portal: at the matching spot, stepping out of a new one.
       const b = p.body;
       const scale = DIMENSION_INFO[game.dimension].scale / DIMENSION_INFO[to].scale;

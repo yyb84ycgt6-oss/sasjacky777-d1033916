@@ -12,7 +12,7 @@ import { B, block, modelBoxes } from "../engine/blocks";
 import { buildAtlas, layerOf } from "../engine/atlas";
 import type { ChunkMesh } from "../engine/mesher";
 import type { Entity } from "../engine/entities";
-import { ItemEntity, PrimedTnt, FallingBlock, Projectile, XpOrb } from "../engine/entities";
+import { EndCrystal, ItemEntity, PrimedTnt, FallingBlock, Projectile, XpOrb } from "../engine/entities";
 import { Mob } from "../engine/mobs";
 import { Boat, Vehicle } from "../engine/vehicles";
 import { PROFESSIONS } from "../engine/villages";
@@ -42,6 +42,7 @@ export interface RemotePlayerView {
   /** Under invisibility: only the held item shows, as in the original. */
   invisible?: boolean;
   sitting?: boolean;
+  gliding?: boolean;
 }
 
 export interface FrameState {
@@ -74,7 +75,8 @@ export interface FrameState {
    * Outside the overworld: no sun, moon or clouds, a fog of this colour
    * (0xRRGGBB) closing in far sooner, and light never below `ambient`.
    */
-  dimension?: { fog: number; ambient: number };
+  /** Outside the overworld: the fog colour, the light floor, how much open sky lights, and whether it is open void (the End) or a cavern. */
+  dimension?: { fog: number; ambient: number; sky?: number; open?: boolean };
 }
 
 const WATER_FOG = col("#1f4f9a");
@@ -89,6 +91,8 @@ interface EntityView {
   nameTag?: THREE.Sprite;
   /** The skin a mob's model was built with, so a change (a villager's new trade) rebuilds it. */
   variant?: number;
+  /** An end crystal's spinning cage and its beam to the dragon. */
+  crystal?: { cage: THREE.Object3D; core: THREE.Object3D; beam: THREE.Mesh };
 }
 
 export class WorldRenderer {
@@ -250,7 +254,26 @@ export class WorldRenderer {
     if (e instanceof Mob) {
       v.variant = skinVariant(e);
       v.model = buildModel(e.kind, v.variant);
+      if (e.kind === "enderman" && e.carried) {
+        // The block it carries, held out between its hands.
+        v.lit = createLitBlockMaterial(this.shared);
+        const held = new THREE.Mesh(blockGeometry(e.carried, 0), v.lit);
+        held.scale.setScalar(0.5);
+        held.position.set(-0.25, 1.55, -0.75);
+        v.model.parts.get("__scale")!.add(held);
+      }
       object.add(v.model.root);
+    } else if (e instanceof EndCrystal) {
+      v.crystal = crystalView();
+      object.add(v.crystal.cage, v.crystal.core);
+      this.scene.add(v.crystal.beam);
+      if (e.showBase) {
+        v.lit = createLitBlockMaterial(this.shared);
+        const base = new THREE.Mesh(blockGeometry(B.BEDROCK, 0), v.lit);
+        base.scale.set(0.75, 0.25, 0.75);
+        base.position.set(-0.375, 0, -0.375);
+        object.add(base);
+      }
     } else if (e instanceof Vehicle) {
       v.model = buildModel(e instanceof Boat ? "boat" : "minecart", e instanceof Boat ? e.wood : 0);
       if (e.kind === "tnt_minecart") {
@@ -280,9 +303,9 @@ export class WorldRenderer {
         const g = new THREE.Group();
         g.add(shaft, tip, fl);
         object.add(g);
-      } else if (e.kind === "fireball" || e.kind === "small_fireball") {
-        // A ball of fire: the fire charge's picture, facing the camera, big for a ghast's.
-        v.item = new ItemView(this.shared, itemId("fire_charge"), 1, e.kind === "fireball" ? 3 : 1);
+      } else if (e.kind === "fireball" || e.kind === "small_fireball" || e.kind === "dragon_fireball") {
+        // A ball of fire: the fire charge's picture, facing the camera, big for a ghast's; the dragon's, bigger.
+        v.item = new ItemView(this.shared, itemId(e.kind === "dragon_fireball" ? "chorus_fruit" : "fire_charge"), 1, e.kind === "fireball" ? 3 : e.kind === "dragon_fireball" ? 3.5 : 1);
         object.add(v.item.root);
       } else {
         // A thrown bottle shows the potion it holds.
@@ -313,6 +336,7 @@ export class WorldRenderer {
     v.model?.material.dispose();
     v.model?.wool?.dispose();
     v.model?.gel?.dispose();
+    if (v.crystal) this.scene.remove(v.crystal.beam);
     this.views.delete(id);
   }
 
@@ -345,7 +369,19 @@ export class WorldRenderer {
           armsForward: e.kind === "zombie" || (e.kind === "skeleton" && e.targetId !== null) || (e.kind === "piglin" && e.admiring > 0),
           size: modelScale(e), squish: e.squish,
           swing: e.kind === "iron_golem" ? Math.max(0, e.attackCooldown - 12) / 8 : 0,
+          screaming: e.kind === "enderman" && e.scream > 0, carrying: e.kind === "enderman" && e.carried > 0,
+          // The dragon noses down in a dive and up in a climb, and folds its wings on its perch.
+          bank: e.kind === "ender_dragon" ? Math.max(-0.6, Math.min(0.6, -Math.atan2(e.y - e.prevY, Math.hypot(e.x - e.prevX, e.z - e.prevZ) + 0.05))) : 0,
         });
+        if (e.kind === "ender_dragon") {
+          // It is perched when its phase says so; the flag doubles as "wings folded".
+          if (e.dragon?.phase === "perch") pose(v.model, e.kind, { x, y, z, yaw, pitch: 0, walk, speed, light: bright, hurt: e.hurtTime > 0, death: 0, time: this.time, swing: 0, size: 4, onGround: true });
+          if (e.dying && Math.random() < 0.3) this.particles.emit("end_rod", x + (Math.random() - 0.5) * 6, y + 1.5 + (Math.random() - 0.5) * 3, z + (Math.random() - 0.5) * 6, 2, 0, 0.6);
+        }
+        if (v.lit && e.kind === "enderman") {
+          const [s, b] = this.lightAt(x, y + 2, z);
+          v.lit.uniforms.uSky.value = s; v.lit.uniforms.uBlock.value = b;
+        }
         v.model.root.visible = !e.hasEffect("invisibility");
         v.object.position.set(0, 0, 0);
         continue;
@@ -365,6 +401,28 @@ export class WorldRenderer {
         continue;
       }
       v.object.position.set(x, y, z);
+      if (v.crystal && e instanceof EndCrystal) {
+        // It turns and bobs; its beam stretches from its heart to whatever it heals.
+        const t = this.time + e.id;
+        const bob = 0.75 + Math.sin(t * 2) * 0.2;
+        v.crystal.cage.position.y = bob; v.crystal.core.position.y = bob;
+        v.crystal.cage.rotation.set(t * 1.3, t * 1.7, 0.6);
+        v.crystal.core.rotation.set(0.6, -t * 2.1, t * 1.1);
+        const beam = v.crystal.beam;
+        if (e.beam) {
+          const from = new THREE.Vector3(x, y + bob, z), to = new THREE.Vector3(e.beam.x, e.beam.y, e.beam.z);
+          const len = from.distanceTo(to);
+          beam.visible = len > 0.5;
+          beam.position.copy(from).add(to).multiplyScalar(0.5);
+          beam.scale.set(1, len, 1);
+          beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), to.sub(from).normalize());
+        } else beam.visible = false;
+        if (v.lit) {
+          const [s, b] = this.lightAt(x, y + 0.2, z);
+          v.lit.uniforms.uSky.value = s; v.lit.uniforms.uBlock.value = b;
+        }
+        continue;
+      }
       if (v.item && e instanceof ItemEntity) {
         const [s, b] = this.lightAt(x, y + 0.2, z);
         v.item.setLight(s, b);
@@ -441,7 +499,7 @@ export class WorldRenderer {
       pose(v.model!, "player", {
         x: p.x, y: p.y, z: p.z, yaw: p.yaw, pitch: p.pitch, walk: p.walk, speed: p.speed,
         light: this.brightness(p.x, p.y + 1.6, p.z), hurt: p.hurt, death: 0, swing: p.swing, time: this.time, sneaking: p.sneaking,
-        sitting: p.sitting,
+        sitting: p.sitting, gliding: p.gliding,
       });
       const [s, b] = this.lightAt(p.x, p.y + 1, p.z);
       this.attachHeld(p.id, v.model!, p.heldItem, s, b);
@@ -466,7 +524,7 @@ export class WorldRenderer {
       pose(this.localModel, "player", {
         x: lp.x, y: lp.y, z: lp.z, yaw: lp.yaw, pitch: lp.pitch, walk: lp.walk, speed: lp.speed,
         light: this.brightness(lp.x, lp.y + 1.6, lp.z), hurt: lp.hurt, death: 0, swing: lp.swing, time: this.time, sneaking: lp.sneaking,
-        sitting: lp.sitting,
+        sitting: lp.sitting, gliding: lp.gliding,
       });
       const [s, b] = this.lightAt(lp.x, lp.y + 1, lp.z);
       this.attachHeld("__local", this.localModel, lp.heldItem, s, b);
@@ -486,7 +544,7 @@ export class WorldRenderer {
     const dim = frame.dimension;
     u.uTime.value = this.time;
     // Without a sky there is no sky light to scale; full "daylight" also keeps the moonlight tint off.
-    u.uDaylight.value = dim ? 1 : Math.min(1, sky.daylight + this.flash * 0.8);
+    u.uDaylight.value = dim ? dim.sky ?? 1 : Math.min(1, sky.daylight + this.flash * 0.8);
     u.uAmbient.value = dim ? dim.ambient : 0;
     u.uNightVision.value = frame.nightVision ? 0.9 : 0;
     u.uWave.value = frame.wave ? 1 : 0;
@@ -526,7 +584,8 @@ export class WorldRenderer {
 
     // Fog and sky colour.
     let fogColor = dim ? new THREE.Color(((dim.fog >> 16) & 255) / 255, ((dim.fog >> 8) & 255) / 255, (dim.fog & 255) / 255) : sky.horizon.clone();
-    let near = dim ? Math.min(renderFar * 0.3, 40) : renderFar * 0.72, far = dim ? Math.min(renderFar * 0.95, 110) : renderFar * 0.98;
+    const closeFog = dim && !dim.open;
+    let near = closeFog ? Math.min(renderFar * 0.3, 40) : renderFar * 0.72, far = closeFog ? Math.min(renderFar * 0.95, 110) : renderFar * 0.98;
     if (frame.underwater) { fogColor = WATER_FOG.clone().multiplyScalar(0.3 + sky.daylight * 0.7); near = 2; far = 24; }
     if (frame.inLava) { fogColor = LAVA_FOG.clone(); near = 0.2; far = 2.5; }
     if (frame.rain > 0 && !frame.underwater) { near *= 1 - frame.rain * 0.4; }
@@ -547,7 +606,7 @@ export class WorldRenderer {
 
     this.updateEntities(frame);
     this.updatePlayers(frame);
-    this.particles.update(frame.dt, dim ? 0 : sky.daylight, dim?.ambient ?? 0);
+    this.particles.update(frame.dt, dim ? dim.sky ?? 0 : sky.daylight, dim?.ambient ?? 0);
     const bright = this.brightness(c.x, c.y, c.z);
     this.weather.update(frame.dt, cam.position, frame.rain, frame.snowing, this.time, bright);
 
@@ -597,6 +656,8 @@ function skinVariant(e: Mob): number {
   if (e.kind === "villager") return e.profession === "none" ? 0 : PROFESSIONS.indexOf(e.profession) + 1;
   // A ghast about to spit opens its eyes and mouth.
   if (e.kind === "ghast") return e.fuse > 10 ? 1 : 0;
+  // An enderman's stare, and the block in its arms (drawn with the model, so a new one rebuilds it).
+  if (e.kind === "enderman") return (e.scream > 0 ? 1 : 0) | (e.carried << 1);
   return 0;
 }
 
@@ -604,6 +665,7 @@ function skinVariant(e: Mob): number {
 function modelScale(e: Mob): number {
   switch (e.kind) {
     case "ghast": return 4;
+    case "ender_dragon": return 4;
     case "hoglin": return 2;
     case "wither_skeleton": return 1.2;
     default: return e.size;
@@ -619,4 +681,21 @@ function setBodyVisible(model: ModelInstance, on: boolean): void {
 
 function itemIdFor(kind: string): number {
   return itemId(kind);
+}
+
+/** An end crystal: a pink heart in two turning cages, and a beam for when it heals the dragon. */
+function crystalView(): { cage: THREE.Object3D; core: THREE.Object3D; beam: THREE.Mesh } {
+  const cage = new THREE.Group();
+  for (const size of [0.9, 0.7]) {
+    const edges = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(size, size, size)), new THREE.LineBasicMaterial({ color: col("#e8f4ff") }));
+    edges.rotation.set(size, size * 2, 0);
+    cage.add(edges);
+  }
+  const core = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.4), new THREE.MeshBasicMaterial({ color: col("#ff5ad8") }));
+  const beam = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.06, 0.06, 1, 6, 1, true),
+    new THREE.MeshBasicMaterial({ color: col("#ff9ae8"), transparent: true, opacity: 0.75, depthWrite: false }),
+  );
+  beam.visible = false;
+  return { cage, core, beam };
 }

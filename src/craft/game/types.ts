@@ -104,4 +104,6 @@ export interface Hud {
   effects: { kind: string; amp: number; seconds: number }[];
   /** Advancements earned in the last few seconds, newest last. */
   toasts: { id: string; title: string; icon: string; at: number }[];
+  /** A boss in range (the dragon): its name and health, 0..1. */
+  boss: { name: string; health: number } | null;
 }

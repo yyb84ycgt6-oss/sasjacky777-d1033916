@@ -19,19 +19,19 @@
 import type { BlockEntity } from "../engine/chunk";
 import { chunkKey } from "../engine/constants";
 import {
-  Entity, FallingBlock, isProjectileKind, ItemEntity, PrimedTnt, Projectile, XpOrb,
+  AreaCloud, EndCrystal, Entity, FallingBlock, isProjectileKind, ItemEntity, PrimedTnt, Projectile, XpOrb,
   type DamageSource, type EntitySnapshot, type ProjectileKind,
 } from "../engine/entities";
 import { itemDef, type ItemStack, type StatusEffect } from "../engine/items";
 import { sanitizeStack } from "../engine/inventory";
 import { Mob, isMobKind } from "../engine/mobs";
 import { isVehicleKind, Vehicle, vehicleFromSnapshot } from "../engine/vehicles";
-import { block } from "../engine/blocks";
+import { B, block } from "../engine/blocks";
 import type { PlayerSave } from "../engine/player";
 import type { AdvancementEvent } from "../engine/advancements";
 import { isDimension, type Dimension } from "../engine/dimension";
 import type { BlockChange } from "../engine/world";
-import type { Game, NetLink, RemotePlayer } from "../game/game";
+import type { Arrival, Game, NetLink, RemotePlayer } from "../game/game";
 import { packChunk, toBase64, fromBase64, unpackChunk, type ChunkData, type GameRules } from "../game/save";
 import { clientId, connectionId, DeviceTransport, MAX_PART, OnlineTransport, type NetMessage, type Transport } from "./transport";
 
@@ -294,7 +294,8 @@ export class NetSession implements NetLink {
     this.stateOp = ["st", r2(b.x), r2(b.y), r2(b.z), r2(p.yaw), r2(p.pitch), r2(p.walkDist), r2(Math.hypot(b.x - p.prevX, b.z - p.prevZ)),
       r2(g.actions.swingProgress(1)), p.sneaking ? 1 : 0, p.inventory.held?.id ?? -1, g.settings.skin, p.name, p.hurtTime > 0 ? 1 : 0,
       p.dead ? 1 : 0, p.gameMode, p.sleeping ? 1 : 0, p.hasEffect("invisibility") ? 1 : 0, p.riding !== null ? 1 : 0,
-      p.inventory.armor.some((a) => !!a && itemDef(a.id)?.armor?.material === "golden") ? 1 : 0];
+      p.inventory.armor.some((a) => !!a && itemDef(a.id)?.armor?.material === "golden") ? 1 : 0,
+      p.gliding ? 1 : 0, p.inventory.armor[0]?.id === B.CARVED_PUMPKIN ? 1 : 0];
     if (this.role === "host") {
       if (this.ticks % ENTITY_TICKS === 0 && g.remote.size) this.push(["en", this.entitySnapshots()]);
       if (this.ticks % ENV_TICKS === 0) this.push(["env", g.time, r2(g.rain), r2(g.thunder), g.meta.difficulty]);
@@ -367,6 +368,8 @@ export class NetSession implements NetLink {
   giveRemote(id: string, stack: ItemStack): void { this.push(["gv", id, stack]); }
   advanceRemote(id: string, event: AdvancementEvent): void { this.push(["av", id, event]); }
   pushRemote(id: string, dx: number, dy: number, dz: number): void { this.push(["pu", id, dx, dy, dz]); }
+  teleportRemote(id: string, to: Arrival): void { this.push(["tp", id, to]); }
+  placeCrystal(x: number, y: number, z: number): void { this.push(["ec", x, y, z]); }
   mount(entityId: number, on: boolean): void { if (this.role === "guest") this.push(["mo", entityId, on ? 1 : 0]); }
   trade(entityId: number, offer: number): void { this.push(["tr", entityId, offer]); }
   vehiclePose(v: Vehicle): void {
@@ -533,7 +536,7 @@ export class NetSession implements NetLink {
       r = {
         id, name: this.names.get(id) ?? "Player", x: 0, y: 0, z: 0, yaw: 0, pitch: 0, px: 0, py: 0, pz: 0, pyaw: 0, walk: 0, speed: 0,
         swing: 0, sneaking: false, held: null, variant: 0, hurt: false, dead: false, gameMode: "survival", sleeping: false,
-        invisible: false, riding: false, goldArmor: false, lastSeen: now, receivedAt: 0, ...init,
+        invisible: false, riding: false, goldArmor: false, gliding: false, pumpkin: false, lastSeen: now, receivedAt: 0, ...init,
       };
       r.px = r.x; r.py = r.y; r.pz = r.z;
       g.remote.set(id, r);
@@ -610,7 +613,7 @@ export class NetSession implements NetLink {
           break;
         case "av": {
           const ev = op[2] as AdvancementEvent | null;
-          if (op[1] === this.myId && fromHost && ev && (ev.kind === "kill" || ev.kind === "sleep" || ev.kind === "eat")) g.advance(ev);
+          if (op[1] === this.myId && fromHost && ev && (ev.kind === "kill" || ev.kind === "sleep" || ev.kind === "eat" || ev.kind === "dragon")) g.advance(ev);
           break;
         }
         case "be": this.onBlockEntity(from, op); break;
@@ -622,6 +625,14 @@ export class NetSession implements NetLink {
         case "tr": if (this.role === "host") this.onTrade(from, op); break;
         case "vp": if (this.role === "host") this.onVehiclePose(from, op); break;
         case "pv": if (this.role === "host") this.onPlaceVehicle(from, op); break;
+        case "tp": if (op[1] === this.myId && fromHost) this.onTeleport(op[2]); break;
+        case "ec":
+          // A guest's end crystal, set on a block near them.
+          if (this.role === "host" && finite(op[1], op[2], op[3])) {
+            const r = g.remote.get(from);
+            if (!r || Math.hypot(r.x - (op[1] as number), r.y - (op[2] as number), r.z - (op[3] as number)) <= 8) g.placeCrystal(op[1] as number, op[2] as number, op[3] as number);
+          }
+          break;
         case "tn": if (this.role === "host" && finite(op[1], op[2], op[3])) g.spawn(new PrimedTnt((op[1] as number) + 0.5, op[2] as number, (op[3] as number) + 0.5, 80)); break;
         case "sl": if (this.role === "host") { const r = g.remote.get(from); if (r) r.sleeping = op[1] === 1; } break;
         case "ps":
@@ -664,6 +675,8 @@ export class NetSession implements NetLink {
     r.invisible = op[17] === 1;
     r.riding = op[18] === 1;
     r.goldArmor = op[19] === 1;
+    r.gliding = op[20] === 1;
+    r.pumpkin = op[21] === 1;
     r.receivedAt = now;
   }
 
@@ -781,7 +794,7 @@ export class NetSession implements NetLink {
     const [, id, dmg, fx, fz, kb, fire, looting] = op;
     if (!finite(id, dmg, fx, fz)) return;
     const e = g.entities.get(id as number);
-    if (e instanceof Vehicle) { e.hurt(g.ctx, Math.min(40, dmg as number), "player", fx as number, fz as number, from); return; }
+    if (e instanceof Vehicle || e instanceof EndCrystal) { e.hurt(g.ctx, Math.min(40, dmg as number), "player", fx as number, fz as number, from); return; }
     if (e instanceof Mob) {
       e.looting = int(looting) ? Math.max(0, Math.min(3, looting as number)) : 0;
       const took = e.hurt(g.ctx, Math.min(40, dmg as number), "player", fx as number, fz as number, from, Math.min(2, Math.max(0, Number(kb) || 0)));
@@ -853,11 +866,23 @@ export class NetSession implements NetLink {
     g.placeVehicle(kind, x as number, y as number, z as number, yaw as number, int(wood) ? (wood as number) : 0);
   }
 
+  /** The host moved this player: a pearl landed (at once), or a gateway flung them (land once it loads). */
+  private onTeleport(data: unknown): void {
+    const g = this.game!;
+    const a = data as { kind?: unknown; x?: unknown; y?: unknown; z?: unknown; index?: unknown; inner?: unknown } | null;
+    if (!a || !finite(a.x, a.y, a.z)) return;
+    const [x, y, z] = [a.x as number, a.y as number, a.z as number];
+    if (a.kind === "gateway" && int(a.index)) g.arriveAt({ kind: "gateway", x, y, z, index: a.index as number, inner: a.inner === true });
+    else g.teleportLocal(x, y, z);
+  }
+
   private onThrow(from: string, op: Op): void {
     const g = this.game!;
     const [, kind, x, y, z, vx, vy, vz, item, damage, knockback, fire] = op;
-    // Fireballs are the Nether's to throw, never a guest's.
-    if (!isProjectileKind(kind) || kind === "fireball" || kind === "small_fireball" || !finite(x, y, z, vx, vy, vz)) return;
+    // Fireballs are the Nether's and the dragon's to throw, never a guest's.
+    if (!isProjectileKind(kind) || kind === "fireball" || kind === "small_fireball" || kind === "dragon_fireball" || !finite(x, y, z, vx, vy, vz)) return;
+    // An eye of ender needs the host's plan of the strongholds to know where to fly.
+    if (kind === "eye_of_ender") { g.throwEye(x as number, y as number, z as number, from); return; }
     const p = new Projectile(kind, x as number, y as number, z as number, vx as number, vy as number, vz as number, from);
     if (kind === "potion") {
       if (!int(item) || !itemDef(item as number)) return;
@@ -886,6 +911,8 @@ export function entityFromSnapshot(s: EntitySnapshot): Entity | null {
   else if (isVehicleKind(s.kind)) e = vehicleFromSnapshot(s);
   else if (s.kind === "falling_block") e = new FallingBlock(s.x, s.y, s.z, Number(s.data?.b ?? 12), Number(s.data?.m ?? 0), s.id);
   else if (s.kind === "tnt") e = new PrimedTnt(s.x, s.y, s.z, Number(s.data?.fuse ?? 80), s.id);
+  else if (s.kind === "end_crystal") e = new EndCrystal(s.x, s.y, s.z, s.data?.b !== 0, s.id);
+  else if (s.kind === "area_cloud") e = new AreaCloud(s.x, s.y, s.z, Number(s.data?.r ?? 3), Number(s.data?.d ?? 600), null, s.id);
   if (e) {
     e.applySnapshot(s);
     e.prevX = e.x; e.prevY = e.y; e.prevZ = e.z;

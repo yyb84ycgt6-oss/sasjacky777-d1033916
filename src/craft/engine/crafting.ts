@@ -183,6 +183,17 @@ shapeless("fermented_spider_eye", ["spider_eye", "brown_mushroom", "sugar"], "fe
 shaped("glistering_melon_slice", ["NNN", "NMN", "NNN"], { N: "gold_nugget", M: "melon_slice" }, "glistering_melon_slice");
 shaped("golden_carrot", ["NNN", "NCN", "NNN"], { N: "gold_nugget", C: "carrot" }, "golden_carrot");
 
+// The End
+shapeless("eye_of_ender", ["ender_pearl", "blaze_powder"], "eye_of_ender");
+shaped("end_crystal", ["GGG", "GEG", "GTG"], { G: "glass", E: "eye_of_ender", T: "ghast_tear" }, "end_crystal");
+shaped("end_stone_bricks", ["##", "##"], { "#": "end_stone" }, "end_stone_bricks", 4);
+shaped("purpur_block", ["##", "##"], { "#": "popped_chorus_fruit" }, "purpur_block", 4);
+shaped("purpur_pillar", ["#", "#"], { "#": "purpur_block" }, "purpur_pillar", 2);
+shaped("purpur_stairs", ["#  ", "## ", "###"], { "#": "purpur_block" }, "purpur_stairs", 4);
+shaped("end_rod", ["B", "P"], { B: "blaze_rod", P: "popped_chorus_fruit" }, "end_rod", 4);
+shaped("iron_bars", ["III", "III"], { I: "iron_ingot" }, "iron_bars", 16);
+shapeless("firework_rocket", ["paper", "gunpowder"], "firework_rocket", 3);
+
 // Village work stations
 shaped("composter", ["S S", "S S", "SSS"], { S: "oak_slab" }, "composter");
 shaped("lectern", ["SSS", " B ", " S "], { S: "oak_slab", B: "bookshelf" }, "lectern");
@@ -420,6 +431,7 @@ const SMELTING: Smelt[] = [
   { input: "nether_quartz_ore", output: "quartz", xp: 0.2 },
   { input: "nether_gold_ore", output: "gold_ingot", xp: 1 },
   { input: "ancient_debris", output: "netherite_scrap", xp: 2 },
+  { input: "chorus_fruit", output: "popped_chorus_fruit", xp: 0.1 },
 ].filter((s) => itemDefOrNull(s.output) && (s.input.startsWith("#") || itemDefOrNull(s.input)));
 
 export function smeltResult(id: number): Smelt | null {

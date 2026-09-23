@@ -45,7 +45,7 @@ export interface ArmorInfo {
   slot: 0 | 1 | 2 | 3;
   points: number;
   toughness: number;
-  material: "leather" | "iron" | "golden" | "diamond" | "netherite";
+  material: "leather" | "iron" | "golden" | "diamond" | "netherite" | "elytra";
 }
 
 export type ItemUse =
@@ -54,7 +54,11 @@ export type ItemUse =
   /** Drunk like milk (potions); thrown to burst (splash potions, bottles o' enchanting); filled at water (glass bottles). */
   | "drink" | "splash" | "xp_bottle" | "bottle"
   /** Put down on water or rails to ride. */
-  | "boat" | "minecart";
+  | "boat" | "minecart"
+  /** Thrown: an ender pearl carries its thrower; an eye of ender flies toward the stronghold (or fills a frame). */
+  | "pearl" | "ender_eye"
+  /** Set on obsidian or bedrock (end crystals); fired while gliding for a burst of speed (rockets). */
+  | "end_crystal" | "rocket";
 
 export type Category = "building" | "colored" | "natural" | "functional" | "redstone" | "tools" | "combat" | "food" | "ingredients";
 
@@ -112,6 +116,7 @@ const FLAT_BLOCK_ICONS: Record<string, string> = {
   repeater: "repeater", comparator: "comparator", hopper: "hopper_item", daylight_detector: "daylight_detector_item",
   brewing_stand: "brewing_stand_item", cauldron: "cauldron_item",
   rail: "rail", powered_rail: "powered_rail", detector_rail: "detector_rail", activator_rail: "activator_rail",
+  end_rod: "end_rod_item", iron_bars: "iron_bars",
 };
 const REDSTONE = new Set([
   "redstone_torch", "lever", "stone_button", "oak_button", "stone_pressure_plate", "oak_pressure_plate", "redstone_lamp",
@@ -129,12 +134,14 @@ const NATURAL = new Set([
   "amethyst_block",
   "netherrack", "soul_sand", "soul_soil", "basalt", "blackstone", "magma_block", "crimson_nylium", "warped_nylium",
   "crimson_stem", "warped_stem", "nether_wart_block", "warped_wart_block", "shroomlight", "bone_block", "ancient_debris",
+  "end_stone", "chorus_plant", "chorus_flower", "dragon_egg",
 ]);
 const FUNCTIONAL = new Set([
   "crafting_table", "furnace", "chest", "torch", "lantern", "ladder", "tnt", "bookshelf", "glowstone",
   "sea_lantern", "jack_o_lantern", "carved_pumpkin", "note_block", "hay_block", "oak_fence", "glass_pane",
   "enchanting_table", "anvil", "chipped_anvil", "damaged_anvil", "brewing_stand", "cauldron",
   "composter", "lectern", "smoker", "barrel", "fletching_table", "loom", "stonecutter", "smithing_table", "bell",
+  "end_rod", "end_portal_frame", "iron_bars",
 ]);
 
 for (const def of allBlocks()) {
@@ -374,7 +381,19 @@ item("netherite_scrap", "Netherite Scrap", { fireproof: true });
 item("netherite_ingot", "Netherite Ingot", { fireproof: true });
 item("fire_charge", "Fire Charge", { use: "flint_and_steel" });
 // Bartered from piglins and dropped by endermen; thrown, it carries its thrower.
-item("ender_pearl", "Ender Pearl", { maxStack: 16 });
+item("ender_pearl", "Ender Pearl", { maxStack: 16, use: "pearl" });
+
+// The End.
+item("eye_of_ender", "Eye of Ender", { use: "ender_eye" });
+item("end_crystal", "End Crystal", { use: "end_crystal", category: "combat" });
+// Eaten, it throws the eater somewhere nearby; so it is edible even on a full stomach.
+food("chorus_fruit", "Chorus Fruit", 4, 2.4, { alwaysEdible: true });
+item("popped_chorus_fruit", "Popped Chorus Fruit");
+// Worn in the chest slot: no armour at all, but a jump from high up opens it into a glide.
+item("elytra", "Elytra", {
+  maxStack: 1, durability: 432, category: "tools", armor: { slot: 1, points: 0, toughness: 0, material: "elytra" },
+});
+item("firework_rocket", "Firework Rocket", { use: "rocket", category: "tools" });
 
 // ---- lookups -----------------------------------------------------------------------
 

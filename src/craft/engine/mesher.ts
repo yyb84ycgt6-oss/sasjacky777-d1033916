@@ -220,7 +220,8 @@ export class Mesher {
             case "birch": tr = 128; tg = 167; tb = 85; break;
             case "spruce": tr = 97; tg = 153; tb = 97; break;
           }
-          const flags = def.waves && def.shape === "cube" ? FLAG_WAVE : 0;
+          // A gateway is a cube of moving starfield: the only animated cube.
+          const flags = def.animated ? FLAG_ANIMATED : def.waves && def.shape === "cube" ? FLAG_WAVE : 0;
 
           if (def.shape === "cube") {
             const snowy = id === B.GRASS && (blocks[padIndex(x, y + 1, z)] === B.SNOW || blocks[padIndex(x, y + 1, z)] === B.SNOW_BLOCK);

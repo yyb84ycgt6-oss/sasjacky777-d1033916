@@ -12,6 +12,7 @@
  * world will be lost when the tab closes. Pretending to save would be worse
  * than not saving.
  */
+import type { EndState } from "./endFight";
 import type { BlockEntity } from "../engine/chunk";
 import type { EntitySnapshot } from "../engine/entities";
 import type { GameMode, PlayerSave } from "../engine/player";
@@ -71,6 +72,8 @@ export interface WorldMeta {
   otherEntities?: Partial<Record<Dimension, EntitySnapshot[]>>;
   /** Every lit portal, by dimension (its bottom-left inner block and axis), so a trip links to the one it came through. */
   portals?: Partial<Record<Dimension, [number, number, number, number][]>>;
+  /** The dragon fight: begun, won (ever), gateways opened. */
+  end?: EndState;
   thumbnail?: string;
   version: 1;
 }

@@ -20,10 +20,12 @@ import { raycastBlocks } from "./raycast";
 import { hashFloat, Rng } from "./rng";
 import { levelForXp, offersForLevel, sanitizeOffer, type Offer } from "./trading";
 import { JOB_BLOCKS, professionForBlock, PROFESSIONS, type Profession } from "./villages";
+import { DRAGON_PHASES, dragonHurt, dragonTick, newDragonState, type DragonState } from "./dragon";
 
 export type MobKind =
   | "pig" | "cow" | "sheep" | "chicken" | "zombie" | "skeleton" | "creeper" | "spider" | "slime" | "villager" | "iron_golem"
-  | "zombified_piglin" | "ghast" | "magma_cube" | "blaze" | "wither_skeleton" | "piglin" | "hoglin";
+  | "zombified_piglin" | "ghast" | "magma_cube" | "blaze" | "wither_skeleton" | "piglin" | "hoglin"
+  | "enderman" | "silverfish" | "ender_dragon";
 
 interface MobSpec {
   health: number;
@@ -66,6 +68,11 @@ export const MOB_SPECS: Record<MobKind, MobSpec> = {
   wither_skeleton: { health: 20, width: 0.7, height: 2.4, speed: 0.0625, hostile: true, attack: 5, tempt: [], burnsInDay: false, followRange: 16, xp: [5, 5], fireImmune: true },
   piglin: { health: 16, width: 0.6, height: 1.95, speed: 0.07, hostile: true, attack: 5, tempt: [], burnsInDay: false, followRange: 16, xp: [5, 5] },
   hoglin: { health: 40, width: 1.4, height: 1.4, speed: 0.06, hostile: true, attack: 6, tempt: [], burnsInDay: false, followRange: 16, xp: [5, 5] },
+  // The End. Endermen are neutral until looked in the eye or struck.
+  enderman: { health: 40, width: 0.6, height: 2.9, speed: 0.075, hostile: true, attack: 7, tempt: [], burnsInDay: false, followRange: 64, xp: [5, 5] },
+  silverfish: { health: 8, width: 0.4, height: 0.3, speed: 0.07, hostile: true, attack: 1, tempt: [], burnsInDay: false, followRange: 16, xp: [5, 5] },
+  // One box for the body; the head, neck and wings reach well past it (dragon.ts).
+  ender_dragon: { health: 200, width: 6, height: 3, speed: 0, hostile: true, attack: 10, tempt: [], burnsInDay: false, followRange: 150, xp: [0, 0], fireImmune: true, flies: true },
 };
 
 export const MOB_KINDS = Object.keys(MOB_SPECS) as MobKind[];
@@ -73,7 +80,7 @@ export const MOB_KINDS = Object.keys(MOB_SPECS) as MobKind[];
 /** Undead take Smite's extra damage, are hurt by healing and healed by harming, and shrug off poison. */
 const UNDEAD = new Set<string>(["zombie", "skeleton", "zombified_piglin", "wither_skeleton"]);
 /** Arthropods take Bane of Arthropods' extra damage. */
-const ARTHROPODS = new Set<string>(["spider"]);
+const ARTHROPODS = new Set<string>(["spider", "silverfish"]);
 export const isUndead = (kind: string): boolean => UNDEAD.has(kind);
 export const isArthropod = (kind: string): boolean => ARTHROPODS.has(kind);
 
@@ -173,6 +180,12 @@ export class Mob extends Entity {
   private flyTo: { x: number; y: number; z: number } | null = null;
   /** Blazes: shots left in the current burst. */
   private burst = 0;
+  /** Endermen: the block carried in its arms (0 for none). */
+  carried = 0;
+  /** Endermen: ticks left screaming after being stared at, drawn with the jaw open. */
+  scream = 0;
+  /** The dragon's fight: its phase, where it is flying, the crystal it draws on. */
+  dragon: DragonState | null = null;
 
   constructor(kind: MobKind, x: number, y: number, z: number, id?: number) {
     const spec = MOB_SPECS[kind];
@@ -186,6 +199,11 @@ export class Mob extends Entity {
     if (kind === "sheep") this.woolColor = naturalWool(Math.random());
     if (kind === "chicken") this.eggTimer = 6000 + Math.floor(Math.random() * 6000);
     if (isCubeMob(kind)) this.setSize(1 << Math.floor(Math.random() * 3));
+    if (kind === "ender_dragon") {
+      this.dragon = newDragonState();
+      this.persistent = true;
+      this.body.noClip = true;
+    }
   }
 
   /** Slimes come in sizes 1, 2 and 4: the box, the health and the bite all scale with it. */
@@ -295,6 +313,18 @@ export class Mob extends Entity {
   hurt(ctx: EntityContext, amount: number, source: DamageSource, fromX: number, fromZ: number, attacker?: string, knockback = 0): boolean {
     if (this.dying || this.removed) return false;
     if (this.invulnerable > 0 && source !== "void") return false;
+    if (this.kind === "ender_dragon") {
+      const dealt = dragonHurt(this, amount, source);
+      if (dealt <= 0) return false;
+      amount = dealt;
+      knockback = -1;
+    }
+    // Endermen slip every arrow and fireball: they vanish before it lands.
+    if (this.kind === "enderman" && (source === "arrow" || source === "fireball")) {
+      for (let i = 0; i < 16 && !this.teleportRandomly(ctx); i++);
+      return false;
+    }
+    if (this.kind === "enderman" && attacker && !attacker.startsWith("mob:")) { this.targetId = attacker; this.anger = 600; }
     if ((source === "fire" || source === "lava") && (this.hasEffect("fire_resistance") || this.spec.fireImmune)) return false;
     // Fireballs are fire: they bounce off the Nether's own, except a ghast's blast sent back at a ghast.
     if (source === "fireball" && this.spec.fireImmune && this.kind !== "ghast") return false;
@@ -316,7 +346,7 @@ export class Mob extends Entity {
     // Knockback away from the source.
     const dx = this.body.x - fromX, dz = this.body.z - fromZ;
     const d = Math.hypot(dx, dz) || 1;
-    if (source !== "fire" && source !== "drown" && source !== "fall" && source !== "starve" && source !== "magic" && this.kind !== "iron_golem") {
+    if (knockback >= 0 && source !== "fire" && source !== "drown" && source !== "fall" && source !== "starve" && source !== "magic" && this.kind !== "iron_golem") {
       this.body.vx = this.body.vx / 2 + (dx / d) * (0.4 + knockback);
       this.body.vz = this.body.vz / 2 + (dz / d) * (0.4 + knockback);
       if (this.body.onGround) this.body.vy = Math.min(0.4, this.body.vy / 2 + 0.4);
@@ -332,6 +362,12 @@ export class Mob extends Entity {
 
   tick(ctx: EntityContext): void {
     const b = this.body;
+    if (this.kind === "ender_dragon") {
+      if (this.hurtTime > 0) this.hurtTime--;
+      if (this.invulnerable > 0) this.invulnerable--;
+      dragonTick(this, ctx);
+      return;
+    }
     if (this.dying) {
       this.deathTime++;
       if (this.deathTime >= 20) this.die(ctx);
@@ -360,6 +396,7 @@ export class Mob extends Entity {
     else if (this.kind === "iron_golem") this.golemAi(ctx, move);
     else if (this.kind === "ghast") this.ghastAi(ctx, move);
     else if (this.kind === "blaze") this.blazeAi(ctx, move);
+    else if (this.kind === "enderman") this.endermanAi(ctx, move);
     else if (this.spec.hostile) this.hostileAi(ctx, move);
     else this.passiveAi(ctx, move);
 
@@ -415,8 +452,15 @@ export class Mob extends Entity {
       if (feet === B.FIRE || feet === B.SOUL_FIRE) { this.fireTicks = Math.max(this.fireTicks, 160); this.hurt(ctx, 1, "fire", b.x, b.z); }
     }
     if (b.inWater) this.fireTicks = 0;
-    // Water hurts a blaze.
+    // Water hurts a blaze; water and rain hurt an enderman, which flees them.
     if (this.kind === "blaze" && b.inWater && this.age % 10 === 0) this.hurt(ctx, 1, "drown", b.x, b.z);
+    if (this.kind === "enderman" && this.age % 10 === 0) {
+      const wet = b.inWater || (ctx.raining && ctx.world.seesSky(Math.floor(b.x), Math.floor(b.y + b.height), Math.floor(b.z)));
+      if (wet) {
+        this.hurt(ctx, 1, "drown", b.x, b.z);
+        for (let i = 0; i < 8 && !this.teleportRandomly(ctx); i++);
+      }
+    }
     if (this.spec.burnsInDay && ctx.daylight > 0.55 && !b.inWater && this.age % 20 === 0) {
       const hx = Math.floor(b.x), hy = Math.floor(b.y + b.height), hz = Math.floor(b.z);
       if (ctx.world.seesSky(hx, hy, hz) && ctx.random() < 0.8) this.fireTicks = Math.max(this.fireTicks, 160);
@@ -811,6 +855,123 @@ export class Mob extends Entity {
     }
   }
 
+  /**
+   * Endermen: they wander, now and then picking up a block or setting one
+   * down, until someone looks one in the eye — then it screams and comes for
+   * them, blinking closer whenever they get away. Struck, the same.
+   */
+  private endermanAi(ctx: EntityContext, move: { forward: number; jump: boolean; yaw: number; speedMul: number }): void {
+    const b = this.body;
+    if (this.anger > 0) this.anger--;
+    if (this.scream > 0) this.scream--;
+    // Being looked at: checked for every player in range, as the original does.
+    for (const p of ctx.players()) {
+      if (!p.targetable || p.pumpkin || p.yaw === undefined || p.pitch === undefined) continue;
+      if (this.targetId === p.id && this.anger > 0) continue;
+      if (this.staredAtBy(ctx, p)) {
+        this.targetId = p.id;
+        this.anger = 600;
+        this.scream = 40;
+        ctx.sound("enderman_scream", b.x, b.y + 2.5, b.z, 1.2);
+        break;
+      }
+    }
+    const target = this.anger > 0 && this.targetId ? ctx.players().find((p) => p.id === this.targetId && p.targetable) ?? null : null;
+    if (!target) {
+      this.targetId = null;
+      this.wanderAi(ctx, move, 1 / 120);
+      if (ctx.mobGriefing !== false) this.handleBlock(ctx);
+      // In daylight, out in the open, they blink away somewhere shadier.
+      if (ctx.daylight > 0.55 && ctx.random() < 1 / 60 && ctx.world.seesSky(Math.floor(b.x), Math.floor(b.y + b.height), Math.floor(b.z))) this.teleportRandomly(ctx);
+      if (ctx.random() < 1 / 300) ctx.sound("enderman_idle", b.x, b.y + 2.5, b.z, 0.7);
+      return;
+    }
+    const dx = target.x - b.x, dz = target.z - b.z, dist = Math.hypot(dx, dz);
+    // Too far to walk, or stuck: blink to within a few blocks of the target.
+    if ((dist > 16 && ctx.random() < 1 / 20) || (b.collidedH && ctx.random() < 1 / 10)) {
+      this.teleportToward(ctx, target.x, target.y, target.z);
+      return;
+    }
+    this.steer(ctx, move, target.x, target.z, false);
+    move.speedMul = 1.6;
+    const reach = (b.width + target.width) / 2 + 0.9;
+    if (dist < reach && Math.abs(target.y - b.y) < 2.5 && this.attackCooldown <= 0) {
+      this.attackCooldown = 20;
+      this.bite(ctx, target, this.spec.attack);
+    }
+  }
+
+  /** Whether a player is looking this enderman in the eye (within the original's cone), with a clear line between. */
+  private staredAtBy(ctx: EntityContext, p: PlayerRef): boolean {
+    const b = this.body;
+    const ex = b.x, ey = b.y + 2.55, ez = b.z;
+    const px = p.x, py = p.y + (p.height > 1.6 ? 1.62 : 1.27), pz = p.z;
+    const tx = ex - px, ty = ey - py, tz = ez - pz;
+    const d = Math.hypot(tx, ty, tz);
+    if (d > 64 || d < 0.5) return false;
+    const yaw = p.yaw!, pitch = p.pitch!;
+    const lx = -Math.sin(yaw) * Math.cos(pitch), ly = Math.sin(pitch), lz = -Math.cos(yaw) * Math.cos(pitch);
+    const dot = (lx * tx + ly * ty + lz * tz) / d;
+    if (dot <= 1 - 0.025 / d) return false;
+    const hit = raycastBlocks(ctx.world, px, py, pz, tx, ty, tz, d);
+    return !hit || !block(ctx.world.blockAt(hit.x, hit.y, hit.z)).opaque;
+  }
+
+  /** Picks up a block within reach (one in twenty ticks tries), or puts the carried one down (one in two thousand). */
+  private handleBlock(ctx: EntityContext): void {
+    const b = this.body, w = ctx.world;
+    if (!this.carried) {
+      if (ctx.random() >= 1 / 20) return;
+      const x = Math.floor(b.x - 2 + ctx.random() * 4), y = Math.floor(b.y + ctx.random() * 3), z = Math.floor(b.z - 2 + ctx.random() * 4);
+      const id = w.blockAt(x, y, z);
+      if (!ENDERMAN_HOLDABLE.has(id) || w.getEntity(x, y, z)) return;
+      const hit = raycastBlocks(w, b.x, b.y + 2.55, b.z, x + 0.5 - b.x, y + 0.5 - b.y - 2.55, z + 0.5 - b.z, 5);
+      if (hit && (hit.x !== x || hit.y !== y || hit.z !== z)) return;
+      w.setBlock(x, y, z, B.AIR, 0, "world");
+      this.carried = id;
+      return;
+    }
+    if (ctx.random() >= 1 / 2000) return;
+    const x = Math.floor(b.x - 1 + ctx.random() * 2), y = Math.floor(b.y + ctx.random() * 2), z = Math.floor(b.z - 1 + ctx.random() * 2);
+    if (w.blockAt(x, y, z) !== B.AIR || !block(w.blockAt(x, y - 1, z)).opaque) return;
+    if (ctx.placeBlock(x, y, z, this.carried, 0)) this.carried = 0;
+  }
+
+  /** Blinks to a random spot within 32 blocks with a floor under it and room to stand. Returns whether it went. */
+  teleportRandomly(ctx: EntityContext): boolean {
+    const b = this.body;
+    return this.teleportTo(ctx, b.x + (ctx.random() - 0.5) * 64, b.y + Math.floor((ctx.random() - 0.5) * 64), b.z + (ctx.random() - 0.5) * 64);
+  }
+
+  private teleportToward(ctx: EntityContext, x: number, y: number, z: number): boolean {
+    const b = this.body;
+    const dx = b.x - x, dy = b.y - y, dz = b.z - z, d = Math.hypot(dx, dy, dz) || 1;
+    // To about eight blocks short of it, from its side, jittered.
+    return this.teleportTo(ctx, b.x + (ctx.random() - 0.5) * 8 - (dx / d) * 16, b.y + Math.floor((ctx.random() - 0.5) * 16) - (dy / d) * 16, b.z + (ctx.random() - 0.5) * 8 - (dz / d) * 16);
+  }
+
+  private teleportTo(ctx: EntityContext, tx: number, ty: number, tz: number): boolean {
+    const b = this.body, w = ctx.world;
+    const x = Math.floor(tx), z = Math.floor(tz);
+    let y = Math.max(1, Math.min(126, Math.floor(ty)));
+    if (!w.isLoaded(x, z)) return false;
+    while (y > 1 && !block(w.blockAt(x, y - 1, z)).solid) y--;
+    const below = w.blockAt(x, y - 1, z);
+    if (!block(below).solid || below === B.LAVA || below === B.MAGMA_BLOCK) return false;
+    for (let dy = 0; dy < 3; dy++) {
+      const id = w.blockAt(x, y + dy, z);
+      if (block(id).solid || id === B.WATER || id === B.LAVA) return false;
+    }
+    ctx.particles("portal", b.x, b.y + 1.5, b.z, 16);
+    ctx.sound("enderman_teleport", b.x, b.y + 1.5, b.z, 0.8);
+    b.x = x + 0.5; b.y = y; b.z = z + 0.5;
+    b.vx = b.vy = b.vz = 0;
+    this.prevX = b.x; this.prevY = b.y; this.prevZ = b.z;
+    ctx.particles("portal", b.x, b.y + 1.5, b.z, 16);
+    ctx.sound("enderman_teleport", b.x, b.y + 1.5, b.z, 0.8);
+    return true;
+  }
+
   /** Melee damage scaled by difficulty the way the original does it. */
   private bite(ctx: EntityContext, target: PlayerRef, base: number): void {
     const diff = ctx.difficulty;
@@ -1083,6 +1244,10 @@ export class Mob extends Entity {
       case "wither_skeleton": return [...(ctx.random() < 0.33 ? it("coal", 1) : []), ...it("bone", r(0, 2))];
       case "piglin": return ctx.random() < 0.085 ? it("golden_sword", 1) : [];
       case "hoglin": return [...it(burnt ? "cooked_porkchop" : "porkchop", r(2, 4)), ...it("leather", r(0, 1))];
+      // An enderman drops whatever it was carrying, and sometimes a pearl.
+      case "enderman": return [...it("ender_pearl", r(0, 1)), ...(this.carried ? [{ id: this.carried, count: 1 }] : [])];
+      case "silverfish": return [];
+      case "ender_dragon": return [];
     }
   }
 
@@ -1100,6 +1265,10 @@ export class Mob extends Entity {
         // A guest draws the golem's swing from this; it has no attack of its own to time it.
         ac: this.kind === "iron_golem" && this.attackCooldown > 0 ? this.attackCooldown : undefined,
         ad: this.kind === "piglin" && this.admiring > 0 ? this.admiring : undefined,
+        // An enderman's block and scream, for drawing; the dragon's phase and crystal.
+        cb: this.kind === "enderman" && this.carried ? this.carried : undefined,
+        sc: this.kind === "enderman" && (this.scream > 0 || this.anger > 0) ? 1 : undefined,
+        dg: this.dragon ? { p: this.dragon.phase, t: this.dragon.timer, py: this.dragon.podiumY, cr: this.dragon.crystal ?? undefined } : undefined,
       },
     };
   }
@@ -1136,6 +1305,17 @@ export class Mob extends Entity {
       this.job = Array.isArray(d.vj) && d.vj.length === 3 ? (d.vj as [number, number, number]) : null;
     }
     if (this.kind === "iron_golem") this.attackCooldown = typeof d.ac === "number" ? d.ac : 0;
+    if (this.kind === "enderman") {
+      this.carried = typeof d.cb === "number" && d.cb > 0 && d.cb < 256 ? d.cb : 0;
+      this.scream = d.sc === 1 ? 20 : 0;
+    }
+    if (this.dragon && d.dg && typeof d.dg === "object") {
+      const g = d.dg as { p?: unknown; t?: unknown; py?: unknown; cr?: unknown };
+      if (typeof g.p === "string" && DRAGON_PHASES.includes(g.p as DragonState["phase"])) this.dragon.phase = g.p as DragonState["phase"];
+      if (typeof g.t === "number") this.dragon.timer = g.t;
+      if (typeof g.py === "number") this.dragon.podiumY = g.py;
+      this.dragon.crystal = typeof g.cr === "number" ? g.cr : null;
+    }
     const h = d.vh as { x?: unknown; z?: unknown } | undefined;
     this.home = h && typeof h.x === "number" && typeof h.z === "number" ? { x: h.x, z: h.z } : null;
   }
@@ -1157,6 +1337,14 @@ export function createEntityFromSnapshot(s: EntitySnapshot): Entity | null {
 }
 
 export type { EntityKind };
+
+/** What an enderman will pick up: the soft ground and the plants on it, as in the original. */
+const ENDERMAN_HOLDABLE = new Set<number>([
+  B.GRASS, B.DIRT, B.COARSE_DIRT, B.PODZOL, B.SAND, B.RED_SAND, B.GRAVEL, B.CLAY, B.MUD, B.MOSS, B.DANDELION, B.POPPY,
+  B.BLUE_ORCHID, B.ALLIUM, B.CORNFLOWER, B.OXEYE_DAISY, B.RED_TULIP, B.LILY_OF_THE_VALLEY, B.BROWN_MUSHROOM, B.RED_MUSHROOM,
+  B.TNT, B.CACTUS, B.PUMPKIN, B.CARVED_PUMPKIN, B.MELON, B.NETHERRACK, B.CRIMSON_NYLIUM, B.WARPED_NYLIUM, B.CRIMSON_FUNGUS,
+  B.WARPED_FUNGUS, B.CRIMSON_ROOTS, B.WARPED_ROOTS, B.SOUL_SAND, B.SOUL_SOIL,
+]);
 
 let goldId = -1;
 const goldIngot = () => (goldId < 0 ? (goldId = itemByName("gold_ingot").id) : goldId);

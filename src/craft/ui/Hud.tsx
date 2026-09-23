@@ -51,6 +51,16 @@ export function Hud({ hud, mobile, crosshair }: { hud: HudState; mobile: boolean
         </div>
       )}
 
+      {hud.boss && !hud.screen && (
+        // The boss bar: the dragon's name over its health, purple as the original's.
+        <div className="absolute left-1/2 flex flex-col items-center" style={{ top: "calc(var(--u) * 3)", transform: "translateX(-50%)" }}>
+          <div style={{ fontSize: "calc(var(--u) * 6)", marginBottom: "calc(var(--u) * 1)" }}>{hud.boss.name}</div>
+          <div style={{ width: "calc(var(--u) * 182)", height: "calc(var(--u) * 5)", background: "#3a1446", border: "calc(var(--u) * 1) solid #14051a" }}>
+            <div data-testid="boss-health" style={{ width: `${hud.boss.health * 100}%`, height: "100%", background: "linear-gradient(#f07cff, #b02ad0)" }} />
+          </div>
+        </div>
+      )}
+
       {hud.title && (
         <div className="absolute left-0 right-0 text-center" style={{ top: "30%", animation: "bc-fadeout 4s forwards" }}>
           <div style={{ fontSize: "calc(var(--u) * 20)" }}>{hud.title.text}</div>
