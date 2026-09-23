@@ -213,6 +213,22 @@ describe("meshing", () => {
     expect(m.cutout.quads).toBe(4); // two crossed quads, both sides
   });
 
+  it("darkens the corners of a north face under an overhang, as it does every other face", () => {
+    // A block with another jutting out above its north face. The two top
+    // corners of that face sit in the overhang's shadow; the bottom two do not.
+    const c = emptyChunk(0, 0, (x, y, z) => ((x === 8 && y === 10 && z === 8) || (x === 8 && y === 11 && z === 7) ? B.STONE : B.AIR));
+    const m = mesh([c]).opaque;
+    const shades: { y: number; shade: number }[] = [];
+    for (let q = 0; q < m.quads; q++) {
+      const v = [0, 1, 2, 3].map((i) => ({ x: m.positions[(q * 4 + i) * 3], y: m.positions[(q * 4 + i) * 3 + 1], z: m.positions[(q * 4 + i) * 3 + 2], shade: m.light[(q * 4 + i) * 4 + 2] }));
+      if (v.every((p) => p.z === 8 * 16 && p.y <= 11 * 16)) shades.push(...v);
+    }
+    expect(shades).toHaveLength(4);
+    const top = shades.filter((s) => s.y === 11 * 16).map((s) => s.shade);
+    const bottom = shades.filter((s) => s.y === 10 * 16).map((s) => s.shade);
+    expect(Math.max(...top)).toBeLessThan(Math.min(...bottom));
+  });
+
   it("walls off a missing neighbour rather than leaving the chunk edge open to the void", () => {
     const c = emptyChunk(0, 0, (x, y) => (y < 3 ? B.STONE : B.AIR));
     const m = mesh([c]);

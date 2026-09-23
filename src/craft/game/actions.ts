@@ -378,8 +378,9 @@ export class Actions {
     // Ice over something turns to water, as it melts in your hands.
     const replacement = id === B.ICE && drops && block(g.world.blockAt(x, y - 1, z)).solid ? B.WATER : B.AIR;
     g.world.setBlock(x, y, z, replacement, 0, "player");
-    g.blockSound(def.material, "break", x + 0.5, y + 0.5, z + 0.5);
-    g.particles("block", x + 0.5, y + 0.5, z + 0.5, 16, id);
+    // Not broadcast: everyone else plays these from the block change itself, and would hear it twice.
+    g.blockSound(def.material, "break", x + 0.5, y + 0.5, z + 0.5, false);
+    g.particles("block", x + 0.5, y + 0.5, z + 0.5, 16, id, false);
 
     for (const s of stacks) g.dropItem(x + 0.5, y + 0.3, z + 0.5, s);
     if (drops && harvest && def.xp) {
@@ -878,7 +879,7 @@ export class Actions {
 
   private afterPlace(x: number, y: number, z: number, def: BlockDef, _item: ItemDef): boolean {
     const g = this.game;
-    g.blockSound(def.material, "place", x + 0.5, y + 0.5, z + 0.5);
+    g.blockSound(def.material, "place", x + 0.5, y + 0.5, z + 0.5, false);
     this.swing();
     this.consumeHeld();
     return true;

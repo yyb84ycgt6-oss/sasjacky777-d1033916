@@ -1,0 +1,243 @@
+/**
+ * One running world: the canvas, the HUD over it, whichever screen is open,
+ * and the touch controls on a phone or tablet.
+ *
+ * The Game object owns everything that runs per frame; React only draws
+ * what the Game's store says, ten times a second for the HUD and whenever a
+ * screen's contents change. Leaving the view always stops the game and saves
+ * it — including when the tab is hidden or closed, which on a phone is how
+ * most sessions end.
+ */
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { Game, type Role } from "../game/game";
+import { DesktopInput } from "../game/input";
+import type { SaveStore, WorldMeta } from "../game/save";
+import { effectiveControls, type Settings } from "../game/settings";
+import type { Hud as HudState } from "../game/types";
+import { NetSession } from "../net/session";
+import { clientId, newRoomCode } from "../net/transport";
+import { Button } from "./common";
+import { Hud } from "./Hud";
+import { ChatInput, DeathScreen, MenuFrame, OptionsScreen, PauseMenu, ShareScreen } from "./Menus";
+import { ChestScreen, CraftingScreen, FurnaceScreen, InventoryScreen } from "./Screens";
+import { TouchControls } from "./TouchControls";
+
+export interface GameViewProps {
+  meta: WorldMeta;
+  role: Role;
+  /** A guest's already-joined session; null for a local world (which may be opened to others later). */
+  session: NetSession | null;
+  saves: SaveStore;
+  settings: Settings;
+  onSettings: (s: Settings) => void;
+  /** Back to the title screen, optionally with a message explaining why. */
+  onQuit: (message?: string) => void;
+  onExitApp: () => void;
+  /** Handed the final save once the world stops, so the world list can wait for it. */
+  onStopped?: (saved: Promise<void>) => void;
+}
+
+function webglProblem(err: unknown): string {
+  const text = err instanceof Error ? err.message : String(err);
+  if (/webgl|context/i.test(text)) {
+    return "BlockCraft needs WebGL 2, and this browser would not create a WebGL 2 canvas. Turn on hardware acceleration in the browser's settings, or try another browser.";
+  }
+  return `The world could not start: ${text}`;
+}
+
+export function GameView(props: GameViewProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [running, setRunning] = useState<{ game: Game; input: DesktopInput } | null>(null);
+  const [startError, setStartError] = useState<string | null>(null);
+  // Props at mount: a running world is never rebuilt for a settings change (applySettings handles those).
+  const initial = useRef(props);
+
+  useEffect(() => {
+    const { meta, role, session, saves, settings, onStopped } = initial.current;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    let g: Game;
+    try {
+      g = new Game({
+        meta, canvas, settings, saves, role,
+        // A guest must answer to the id the host knows its connection by.
+        playerId: session?.myId ?? clientId(),
+        playerName: settings.playerName.trim() || "Player",
+      });
+    } catch (err) {
+      console.error("[blockcraft] could not start", err);
+      session?.close();
+      setStartError(webglProblem(err));
+      return;
+    }
+    session?.attach(g);
+    const input = new DesktopInput(g, canvas);
+    g.start();
+    setRunning({ game: g, input });
+
+    const save = () => {
+      if (g.role === "guest") return;
+      void g.saveNow().catch((e: Error) => g.message(`Could not save the world: ${e.message}`, "#ff6666"));
+    };
+    const onVisibility = () => { if (document.visibilityState === "hidden") save(); };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pagehide", save);
+    const ro = new ResizeObserver(() => g.resize());
+    ro.observe(canvas);
+
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pagehide", save);
+      ro.disconnect();
+      input.dispose();
+      onStopped?.(g.thumbnail().finally(() => g.stop(true)));
+    };
+  }, []);
+
+  if (startError) {
+    return (
+      <MenuFrame title="BlockCraft could not start">
+        <div style={{ fontSize: "calc(var(--u) * 7)", lineHeight: 1.5, textAlign: "center" }}>{startError}</div>
+        <Button wide onClick={() => props.onQuit()}>Back to title</Button>
+      </MenuFrame>
+    );
+  }
+
+  return (
+    <>
+      <canvas ref={canvasRef} className="bc-canvas" tabIndex={-1} />
+      {running && <Overlay game={running.game} input={running.input} {...props} />}
+    </>
+  );
+}
+
+function Overlay({ game, input, settings, onSettings, onQuit, onExitApp }: GameViewProps & { game: Game; input: DesktopInput }) {
+  const hud = useSyncExternalStore(game.store.subscribe, game.store.get);
+  const mobile = effectiveControls(settings) === "mobile";
+  const [locked, setLocked] = useState(false);
+  const [fatal, setFatal] = useState<string | null>(null);
+  const [share, setShare] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
+  const leaving = useRef(false);
+
+  useEffect(() => {
+    game.onFatal = (message) => setFatal(message);
+    return () => { game.onFatal = null; };
+  }, [game]);
+
+  useEffect(() => {
+    const onLock = () => setLocked(document.pointerLockElement === game.renderer.canvas);
+    document.addEventListener("pointerlockchange", onLock);
+    return () => document.removeEventListener("pointerlockchange", onLock);
+  }, [game]);
+
+  // Closing a screen with the keyboard or a button hands the mouse straight back to the game.
+  const lastScreen = useRef<HudState["screen"]>(null);
+  useEffect(() => {
+    const was = lastScreen.current;
+    lastScreen.current = hud.screen;
+    // Refused without a recent click (Chrome just after Escape): the "Click to play" prompt covers that.
+    if (was && !hud.screen && !mobile && !input.locked) input.requestLock();
+  }, [hud.screen, mobile, input]);
+
+  const quit = (message?: string) => {
+    if (leaving.current) return;
+    leaving.current = true;
+    onQuit(message);
+  };
+
+  const changeSettings = (s: Settings) => {
+    onSettings(s);
+    game.applySettings(s);
+  };
+
+  const openToOthers = async (kind: "online" | "device") => {
+    setShare({ busy: true, error: null });
+    try {
+      await NetSession.host(game, kind, newRoomCode());
+      setShare({ busy: false, error: null });
+    } catch (err) {
+      setShare({ busy: false, error: (err as Error).message });
+    }
+  };
+
+  const screen = hud.screen;
+  const net = hud.net;
+  const guest = game.role === "guest";
+
+  if (fatal) {
+    return (
+      <MenuFrame title={guest ? "Disconnected" : "The world stopped"}>
+        <div style={{ fontSize: "calc(var(--u) * 7)", lineHeight: 1.5, textAlign: "center" }}>{fatal}</div>
+        <Button wide onClick={() => quit()}>Back to title</Button>
+      </MenuFrame>
+    );
+  }
+
+  return (
+    <>
+      <Hud hud={hud} mobile={mobile} crosshair={!mobile || settings.touchMode === "buttons"} />
+
+      {!mobile && !screen && !locked && !hud.loading && !hud.dead && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none bc-shadow">
+          <div style={{ background: "rgba(0,0,0,0.5)", padding: "calc(var(--u) * 6) calc(var(--u) * 10)", textAlign: "center", fontSize: "calc(var(--u) * 7)", lineHeight: 1.6 }}>
+            <div style={{ fontSize: "calc(var(--u) * 10)" }}>Click to play</div>
+            <div className="bc-sub">WASD move · Space jump · Shift sneak · Ctrl sprint · E inventory · T chat · Esc menu</div>
+          </div>
+        </div>
+      )}
+
+      {mobile && !screen && !hud.dead && !hud.loading && (
+        <TouchControls
+          game={game}
+          onPause={() => game.setScreen({ kind: "pause" })}
+          onChat={() => game.controls.actions.push({ type: "chat" })}
+          onInventory={() => game.controls.actions.push({ type: "inventory" })}
+        />
+      )}
+
+      {screen?.kind === "pause" && (
+        <PauseMenu
+          onResume={() => game.setScreen(null)}
+          onOptions={() => game.setScreen({ kind: "options" })}
+          onShare={() => game.setScreen({ kind: "share" })}
+          onQuit={() => quit()}
+          onExitApp={() => { leaving.current = true; onExitApp(); }}
+          canShare={!guest}
+          shareLabel={guest ? "Joined a friend" : net ? "Playing together…" : "Open to friends"}
+          quitLabel={guest ? "Disconnect" : "Save and quit to title"}
+        />
+      )}
+      {screen?.kind === "options" && (
+        <OptionsScreen settings={settings} onChange={changeSettings} onDone={() => game.setScreen({ kind: "pause" })} inGame />
+      )}
+      {screen?.kind === "share" && (
+        <ShareScreen
+          busy={share.busy}
+          error={share.error}
+          room={net?.role === "host" ? net.room : null}
+          kind={net?.kind ?? null}
+          onOpen={(kind) => void openToOthers(kind)}
+          onStop={() => { game.net?.close(); game.message("The world is closed to others again.", "#ffff55"); }}
+          onBack={() => game.setScreen({ kind: "pause" })}
+        />
+      )}
+      {screen?.kind === "chat" && (
+        <ChatInput initial={screen.text} onSubmit={(t) => game.submitChat(t)} onClose={() => game.setScreen(null)} />
+      )}
+      {screen?.kind === "death" && (
+        <DeathScreen
+          message={hud.deathMessage || "You died"}
+          score={game.player.score}
+          hardcore={hud.hardcore}
+          onRespawn={() => game.respawn()}
+          onTitle={() => quit()}
+        />
+      )}
+      {screen?.kind === "inventory" && <InventoryScreen game={game} mobile={mobile} />}
+      {screen?.kind === "crafting" && <CraftingScreen game={game} mobile={mobile} />}
+      {screen?.kind === "furnace" && <FurnaceScreen game={game} mobile={mobile} />}
+      {screen?.kind === "chest" && <ChestScreen game={game} mobile={mobile} />}
+    </>
+  );
+}
+

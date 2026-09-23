@@ -7,7 +7,7 @@
  * render distance. Work in flight is capped so a fast flyer never queues
  * hundreds of stale jobs that finish after they stopped mattering.
  */
-import { Chunk, chunkId, type BlockEntity } from "../engine/chunk";
+import { Chunk, chunkId } from "../engine/chunk";
 import { buildPadded } from "../engine/mesher";
 import type { GenResult, MeshResult } from "../engine/jobs";
 import type { WorkerPool } from "../engine/workerPool";
@@ -57,7 +57,8 @@ export class Streamer {
     private source: ChunkSource,
     private sink: MeshSink,
     radius: number,
-    private entitiesFor: (cx: number, cz: number, entities: [number, BlockEntity][]) => void,
+    /** Told after each chunk joins the world (online guests replay edits that arrived while it loaded). */
+    private onLoaded: (chunk: Chunk, fromSave: boolean) => void,
   ) {
     this.radius = radius;
     this.offsets = ring(radius + 1);
@@ -149,10 +150,10 @@ export class Streamer {
         if (saved) {
           chunk.modified = true;
           for (const [i, e] of saved.entities) chunk.entities.set(i, e);
-          this.entitiesFor(cx, cz, saved.entities);
         }
         this.world.addChunk(chunk);
         this.loadedEver++;
+        this.onLoaded(chunk, !!saved);
       })
       .catch((err: Error) => {
         this.loading.delete(id);

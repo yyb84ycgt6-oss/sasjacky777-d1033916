@@ -79,7 +79,8 @@ export class Sky {
   private moonMesh: THREE.Mesh;
   private stars: THREE.Points;
   private starMat: THREE.PointsMaterial;
-  private clouds: THREE.Mesh;
+  /** Lives in the world scene, not the backdrop: clouds are at a real height and hills must hide them. */
+  readonly clouds: THREE.Mesh;
   private cloudMat: THREE.ShaderMaterial;
   cloudsVisible = true;
 
@@ -210,7 +211,6 @@ export class Sky {
     this.clouds = new THREE.Mesh(plane, this.cloudMat);
     this.clouds.renderOrder = 3;
     this.clouds.frustumCulled = false;
-    this.group.add(this.clouds);
   }
 
   update(camera: THREE.Camera, state: SkyState, time: number, fadeDistance: number): void {

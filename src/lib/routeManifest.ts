@@ -31,6 +31,8 @@ export const CORE_ROUTES: RouteEntry[] = [
   { path: "/repair", label: "Repair Bay", group: "core" },
   { path: "/bridge", label: "Local Bridge (terminal + model vault)", group: "core" },
   { path: "/play", label: "Play", group: "core" },
+  { path: "/craft", label: "BlockCraft (Minecraft-style block building and survival)", group: "core" },
+  { path: "/minecraft", label: "BlockCraft (alias)", group: "core", alias: true },
   { path: "/hub", label: "Telegram Hub", group: "core" },
   { path: "/vault", label: "Vault", group: "core" },
   { path: "/sandbox", label: "Sandbox", group: "core" },

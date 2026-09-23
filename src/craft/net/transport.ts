@@ -27,6 +27,8 @@ export interface Transport {
   readonly kind: "online" | "device";
   send(msg: NetMessage): void;
   onMessage(cb: (msg: NetMessage) => void): void;
+  /** Told when the link drops or comes back after it was first up. */
+  onStatus?(cb: (live: boolean) => void): void;
   close(): void;
 }
 
@@ -70,6 +72,9 @@ export class OnlineTransport implements Transport {
   private handlers: ((msg: NetMessage) => void)[] = [];
   private queue: NetMessage[] = [];
   private live = false;
+  private wasLive = false;
+  private closing = false;
+  private statusHandlers: ((live: boolean) => void)[] = [];
   readonly ready: Promise<void>;
 
   constructor(room: string) {
@@ -83,10 +88,14 @@ export class OnlineTransport implements Transport {
         if (status === "SUBSCRIBED") {
           clearTimeout(timer);
           this.live = true;
+          // The client rejoins by itself after a network drop; say so, and send what waited.
+          if (this.wasLive) for (const h of this.statusHandlers) h(true);
+          this.wasLive = true;
           for (const m of this.queue.splice(0)) this.send(m);
           resolve();
         } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
           clearTimeout(timer);
+          if (this.live && !this.closing) for (const h of this.statusHandlers) h(false);
           this.live = false;
           reject(new Error(status === "TIMED_OUT"
             ? "The online server did not answer in time. Try again in a moment."
@@ -99,13 +108,22 @@ export class OnlineTransport implements Transport {
   }
 
   send(msg: NetMessage): void {
-    if (!this.live) { this.queue.push(msg); return; }
+    if (!this.live) {
+      // Held while reconnecting; a long outage keeps only the newest, since positions go stale anyway.
+      this.queue.push(msg);
+      if (this.queue.length > 400) this.queue.splice(0, this.queue.length - 400);
+      return;
+    }
     void this.channel.send({ type: "broadcast", event: "m", payload: msg });
   }
   onMessage(cb: (msg: NetMessage) => void): void {
     this.handlers.push(cb);
   }
+  onStatus(cb: (live: boolean) => void): void {
+    this.statusHandlers.push(cb);
+  }
   close(): void {
+    this.closing = true;
     this.live = false;
     void supabase.removeChannel(this.channel);
   }
@@ -114,7 +132,16 @@ export class OnlineTransport implements Transport {
 /** Largest single broadcast we send; chunk data above this is split. */
 export const MAX_PART = 48 * 1024;
 
-/** A stable id for this browser, so a host can give a returning guest their inventory back. */
+/**
+ * A fresh identity for one connection. Separate from clientId() because two
+ * tabs of the same browser share localStorage: with one id, each would drop
+ * the other's messages as its own echo.
+ */
+export function connectionId(): string {
+  return `n${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-4)}`;
+}
+
+/** This browser's stable player id — what a host files a guest's inventory and position under. */
 export function clientId(): string {
   const key = "blockcraft.client.v1";
   try {

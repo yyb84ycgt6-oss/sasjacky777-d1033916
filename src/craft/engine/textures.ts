@@ -386,7 +386,6 @@ type Painter = (p: Pixels, rng: Rng) => void;
 const PAINTERS: Record<string, Painter> = {};
 const def = (name: string, painter: Painter) => { PAINTERS[name] = painter; };
 
-const STONE = hex("#7f7f7f");
 const DIRT = [hex("#5d3f28"), hex("#6f4b31"), hex("#79553a"), hex("#866043"), hex("#946b4b")];
 const OAK = hex("#a2824e"), BIRCH = hex("#c8b77a"), SPRUCE = hex("#735531"), JUNGLE = hex("#a0734d"), ACACIA = hex("#ad5d32");
 

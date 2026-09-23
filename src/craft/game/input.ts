@@ -60,14 +60,22 @@ export class DesktopInput {
     }
   }
 
+  /** Releases the mouse on purpose (a screen is opening), so the release is not read as "pause". */
   exitLock(): void {
-    if (document.pointerLockElement === this.canvas) document.exitPointerLock();
+    if (document.pointerLockElement !== this.canvas) return;
+    this.releasing = true;
+    document.exitPointerLock();
   }
+  private releasing = false;
 
   private lockChanged(): void {
     const was = this.locked;
     this.locked = document.pointerLockElement === this.canvas;
-    if (was && !this.locked && !this.game.screen && !this.game.isMobile) {
+    // The screen that asked for the release opens a frame later than this
+    // event arrives; pausing here would close the inventory E just opened.
+    const deliberate = this.releasing;
+    this.releasing = false;
+    if (was && !this.locked && !deliberate && !this.game.screen && !this.game.isMobile) {
       this.releaseAll();
       this.game.controls.actions.push({ type: "pause" });
     }

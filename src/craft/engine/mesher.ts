@@ -183,7 +183,7 @@ export class Mesher {
   }
 
   mesh(input: MeshInput): ChunkMesh {
-    const { blocks, meta, light, tints } = input;
+    const { blocks, meta, tints } = input;
     const out = { opaque: new Builder(2048), cutout: new Builder(512), translucent: new Builder(256) };
     const opaque = this.opaque;
     const defs = this.defs;
@@ -273,10 +273,12 @@ export class Mesher {
         continue;
       }
       // The two tangent directions toward this corner, in the layer in front of the face.
-      let ax = 0, ay = 0, az = 0, bx = 0, by = 0, bz = 0;
+      // a is x or y, b is y or z: never the face's own axis.
+      let ax = 0, ay = 0, by = 0, bz = 0;
+      const az = 0, bx = 0;
       if (n[0] !== 0) { ay = c[1] ? 1 : -1; bz = c[2] ? 1 : -1; }
       else if (n[1] !== 0) { ax = c[0] ? 1 : -1; bz = c[2] ? 1 : -1; }
-      else { ax = c[0] ? 1 : -1; ay = c[1] ? 1 : -1; }
+      else { ax = c[0] ? 1 : -1; by = c[1] ? 1 : -1; }
       const i1 = padIndex(fx + ax, fy + ay, fz + az);
       const i2 = padIndex(fx + bx, fy + by, fz + bz);
       const i3 = padIndex(fx + ax + bx, fy + ay + by, fz + az + bz);

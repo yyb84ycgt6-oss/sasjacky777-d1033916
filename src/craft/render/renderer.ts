@@ -82,6 +82,7 @@ interface EntityView {
 export class WorldRenderer {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene = new THREE.Scene();
+  private readonly backdrop = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(70, 1, 0.05, 1000);
   readonly shared: SharedUniforms;
   readonly chunks: ChunkMeshes;
@@ -102,6 +103,8 @@ export class WorldRenderer {
   private height = 1;
   private lastTarget = "";
   contextLost = false;
+  private lastFrameState: FrameState | null = null;
+  private cameraPull = 4;
 
   constructor(readonly canvas: HTMLCanvasElement, private world: World, pixelRatio: number) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: "high-performance", preserveDrawingBuffer: false, alpha: false });
@@ -124,7 +127,12 @@ export class WorldRenderer {
     this.weather = new Weather(world);
     this.hand = new Hand(this.shared);
 
-    this.scene.add(this.sky.group, this.chunks.group, this.particles.points, this.weather.group);
+    // The sky is its own pass, drawn first: three.js draws transparent objects (sun, moon, stars)
+    // after all opaque ones whatever their renderOrder, which put the stars over the terrain.
+    this.backdrop.add(this.sky.group);
+    this.scene.add(this.sky.clouds, this.chunks.group, this.particles.points, this.weather.group);
+    // Counted across every pass of a frame, for the debug screen.
+    this.renderer.info.autoReset = false;
 
     const edges = new THREE.BufferGeometry();
     edges.setAttribute("position", new THREE.Float32BufferAttribute(new Float32Array(24 * 3 * 4), 3));
@@ -369,7 +377,8 @@ export class WorldRenderer {
     }
     // The local player's own body, for third person.
     const lp = frame.localPlayer;
-    if (frame.perspective !== 0 && !lp.dead) {
+    // Backed against a wall the camera sits inside your own head: show the view, not the skull.
+    if (frame.perspective !== 0 && !lp.dead && this.cameraPull >= 1.2) {
       if (!this.localModel || this.localVariant !== lp.variant) {
         if (this.localModel) this.scene.remove(this.localModel.root);
         this.localModel = buildModel("player", lp.variant);
@@ -391,6 +400,7 @@ export class WorldRenderer {
 
   render(frame: FrameState): void {
     if (this.contextLost) return;
+    this.lastFrameState = frame;
     this.time += frame.dt;
     const sky = skyState(frame.time, frame.rain, frame.thunder);
     if (frame.lightning > 0) this.flash = 1;
@@ -428,6 +438,7 @@ export class WorldRenderer {
         if (id && block(id).opaque) { dist = Math.max(0.5, t - 0.3); break; }
       }
       cx += dx * dist; cy += dy * dist; cz += dz * dist;
+      this.cameraPull = dist;
       cam.rotation.set(pitch, yaw, 0);
     }
     cam.position.set(cx, cy, cz);
@@ -459,7 +470,9 @@ export class WorldRenderer {
     const bright = this.brightness(c.x, c.y, c.z);
     this.weather.update(frame.dt, cam.position, frame.rain, frame.snowing, this.time, bright);
 
+    this.renderer.info.reset();
     this.renderer.clear();
+    this.renderer.render(this.backdrop, cam);
     this.renderer.render(this.scene, cam);
     if (frame.showHand && frame.perspective === 0) {
       this.hand.update(frame.hand);
@@ -473,8 +486,14 @@ export class WorldRenderer {
     return { chunks: this.chunks.count, quads: this.chunks.quads, calls: info.calls, triangles: info.triangles };
   }
 
-  screenshot(): string {
-    return this.canvas.toDataURL("image/png");
+  /**
+   * The drawing buffer is not preserved (that costs every frame), so it is
+   * already blank by the time a key handler runs: draw the last frame again
+   * and read it in the same task.
+   */
+  screenshot(type = "image/png", quality?: number): string {
+    if (this.lastFrameState) this.render({ ...this.lastFrameState, dt: 0 });
+    return this.canvas.toDataURL(type, quality);
   }
 
   dispose(): void {

@@ -335,7 +335,8 @@ export function newWorldMeta(opts: {
     created: now,
     lastPlayed: now,
     playTime: 0,
-    time: 0,
+    // Early morning, as "/time set day" means: tick 0 is the moment of sunrise, still half dark.
+    time: 1000,
     day: 0,
     weather: { rain: 0, thunder: 0, rainTimer: 12000 + Math.floor(Math.random() * 168000), thunderTimer: 12000 + Math.floor(Math.random() * 168000) },
     spawn: null,

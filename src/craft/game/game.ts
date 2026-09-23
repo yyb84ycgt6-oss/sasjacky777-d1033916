@@ -13,7 +13,7 @@
  * and asks the host for everything else, so there is exactly one answer to
  * where the water went.
  */
-import { B, block, isFluid, isLog, type Material } from "../engine/blocks";
+import { B, block, isFluid, isLeaves, isLog, type Material } from "../engine/blocks";
 import { chunkId, newChest, newFurnace, type BlockEntity, type Chunk, type FurnaceEntity } from "../engine/chunk";
 import { DAY_TICKS, SEA_LEVEL, TICK_MS, WORLD_HEIGHT } from "../engine/constants";
 import { BlockRules, tickDelay } from "../engine/blockRules";
@@ -25,7 +25,7 @@ import {
 import { blastImpact, explosionBlocks, exposure } from "../engine/explosion";
 import { itemDef, itemId, maxStack, resolveDrops, type ItemStack } from "../engine/items";
 import { Mob, MOB_KINDS, type MobKind } from "../engine/mobs";
-import { bodyBox, groundBlock } from "../engine/physics";
+import { groundBlock } from "../engine/physics";
 import { Player, type PlayerEvent } from "../engine/player";
 import { Generator } from "../engine/worldgen";
 import { buildAtlas } from "../engine/atlas";
@@ -63,6 +63,7 @@ export interface NetLink {
   primeTnt(x: number, y: number, z: number, fuse: number): void;
   blockEntity(x: number, y: number, z: number, e: BlockEntity | null): void;
   sleeping(on: boolean): void;
+  chunkLoaded?(cx: number, cz: number, fromSave: boolean): void;
   // host → guests
   hurtRemote(id: string, amount: number, source: DamageSource, fx: number, fz: number, kb: number): void;
   giveRemote(id: string, stack: ItemStack): void;
@@ -100,8 +101,6 @@ export interface GameOptions {
   role: Role;
 }
 
-const REACH_SURVIVAL = 4.5;
-const REACH_CREATIVE = 5;
 const AUTOSAVE_TICKS = 600;
 const MAX_HOSTILE = 14;
 const MAX_PASSIVE = 10;
@@ -211,7 +210,7 @@ export class Game {
       { load: (cx, cz) => this.loadChunk(cx, cz), unload: (c) => this.unloadChunk(c) },
       { setChunk: (id, cx, cz, mesh) => this.renderer.setChunk(id, cx, cz, mesh), removeChunk: (id) => this.renderer.removeChunk(id) },
       opts.settings.renderDistance,
-      () => {},
+      (chunk, fromSave) => this.net?.chunkLoaded?.(chunk.cx, chunk.cz, fromSave),
     );
     this.applySettings(opts.settings);
 
@@ -371,6 +370,8 @@ export class Game {
   }
 
   private makeContext(): EntityContext {
+    // The getters below run with `this` bound to the object literal, so they need the game by name.
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
     const game = this;
     return {
       world: this.world,
@@ -435,7 +436,8 @@ export class Game {
 
   sound(name: string, x: number | null, y = 0, z = 0, volume = 1, pitch = 1): void {
     this.audio.play(name, x, y, z, volume, pitch);
-    if (this.role === "host" && x !== null) this.net?.effect("sound", [name, round2(x), round2(y), round2(z), volume, pitch]);
+    // A local world opened to others mid-game is hosting too: the link, not the role it started with, decides.
+    if (x !== null) this.net?.effect("sound", [name, round2(x), round2(y), round2(z), volume, pitch]);
   }
 
   blockSound(material: Material, kind: "dig" | "break" | "place" | "step", x: number, y: number, z: number, broadcast = true): void {
@@ -445,7 +447,7 @@ export class Game {
 
   particles(kind: string, x: number, y: number, z: number, count = 1, data = 0, broadcast = true): void {
     this.renderer.particles.emit(kind, x, y, z, count, data);
-    if (broadcast && this.role === "host") this.net?.effect("particles", [kind, round2(x), round2(y), round2(z), count, data]);
+    if (broadcast) this.net?.effect("particles", [kind, round2(x), round2(y), round2(z), count, data]);
   }
 
   explode(x: number, y: number, z: number, power: number, cause: Entity | null): void {
@@ -702,18 +704,43 @@ export class Game {
     const x = Math.floor(b.x), z = Math.floor(b.z);
     if (!this.world.isLoaded(x, z)) return false;
     // A fresh world, or a respawn at world spawn, stands the player on the
-    // highest solid ground once that column exists — the generator's height
-    // estimate does not know about trees or cave openings.
+    // ground once the area exists — the generator's height estimate does not
+    // know about trees, and a new player dropped on a forest canopy is stuck
+    // in the leaves before they have punched anything.
     if (this.needsSurface || b.y < 1) {
-      let y = this.world.topSolid(x, z);
-      if (y < 0) y = SEA_LEVEL;
-      const top = this.world.blockAt(x, y, z);
-      b.y = y + 1 + (isFluid(top) ? 0.2 : 0);
-      this.player.prevY = b.y;
+      for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) if (!this.world.isLoaded(x + dx * 16, z + dz * 16)) return false;
+      const ground = this.groundNear(x, z);
+      if (ground) {
+        b.x = ground.x; b.z = ground.z; b.y = ground.y;
+        if (this.needsSurface) this.meta.spawn = { ...ground };
+      } else {
+        const y = this.world.topSolid(x, z);
+        b.y = (y < 0 ? SEA_LEVEL : y) + 1;
+      }
+      this.player.prevX = b.x; this.player.prevY = b.y; this.player.prevZ = b.z;
       this.needsSurface = false;
     }
     this.spawnPlaced = true;
     return true;
+  }
+
+  /** The nearest column, spiralling out, whose top is ground to stand on: not leaves, a trunk or water. */
+  private groundNear(x: number, z: number): { x: number; y: number; z: number } | null {
+    for (let r = 0; r <= 16; r++) {
+      for (let dz = -r; dz <= r; dz++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+          const cx = x + dx, cz = z + dz;
+          if (!this.world.isLoaded(cx, cz)) continue;
+          const y = this.world.topSolid(cx, cz);
+          if (y < 0 || y >= WORLD_HEIGHT - 2) continue;
+          const top = this.world.blockAt(cx, y, cz);
+          if (isLeaves(top) || isLog(top) || isFluid(top) || !block(top).solid) continue;
+          return { x: cx + 0.5, y: y + 1, z: cz + 0.5 };
+        }
+      }
+    }
+    return null;
   }
   private needsSurface = false;
 
@@ -741,7 +768,7 @@ export class Game {
 
     const p = this.player;
     const b = p.body;
-    this.streamer.update([{ x: b.x, z: b.z }, ...[...this.remote.values()].filter(() => this.role === "host").map((r) => ({ x: r.x, z: r.z }))], now);
+    this.streamer.update([{ x: b.x, z: b.z }, ...[...this.remote.values()].filter(() => this.net?.role === "host").map((r) => ({ x: r.x, z: r.z }))], now);
 
     this.actions.updateTarget();
     this.hurtTilt = Math.max(0, this.hurtTilt - dt * 3);
@@ -787,7 +814,8 @@ export class Game {
       underwater: eyeBlock === B.WATER,
       inLava: eyeBlock === B.LAVA,
       nightVision: p.hasEffect("night_vision"),
-      entities: this.entities.values(),
+      // Re-iterable, so a screenshot can draw the same frame again.
+      entities: { [Symbol.iterator]: () => this.entities.values() },
       localPlayer: local,
       remotePlayers: remote,
       target: target ? { x: target.x, y: target.y, z: target.z } : null,
@@ -1077,7 +1105,7 @@ export class Game {
 
   async thumbnail(): Promise<void> {
     try {
-      const src = this.renderer.screenshot();
+      const src = this.renderer.screenshot("image/jpeg", 0.8);
       const img = new Image();
       await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = reject; img.src = src; });
       const c = document.createElement("canvas");
