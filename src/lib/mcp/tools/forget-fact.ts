@@ -5,19 +5,20 @@
 import { defineTool } from "@lovable.dev/mcp-js";
 import { z } from "zod";
 import { supabaseForUser } from "../supabase";
-import { listConversations } from "../../appActions";
+import { forgetFact } from "../../appActions";
 import { notAuthenticated, toToolResult } from "../result";
 
 export default defineTool({
-  name: "list_conversations",
-  title: "List conversations",
-  description: "List the signed-in user's Jackie chat conversations, most recently updated first.",
+  name: "forget_fact",
+  title: "Forget a fact",
+  description: "Delete one of Jackie's memory entries, by id or by key.",
   inputSchema: {
-    limit: z.number().int().min(1).max(100).optional().describe("Max rows to return (default 20)."),
+    id: z.string().trim().optional().describe("Memory entry id (uuid)."),
+    key: z.string().trim().optional().describe("Memory key, when the id is not known."),
   },
-  annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+  annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
   handler: async (args, ctx) => {
     if (!ctx.isAuthenticated()) return notAuthenticated;
-    return toToolResult(await listConversations(supabaseForUser(ctx), ctx.getUserId(), args), "conversations");
+    return toToolResult(await forgetFact(supabaseForUser(ctx), ctx.getUserId(), args), "result");
   },
 });

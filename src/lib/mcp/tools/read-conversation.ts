@@ -5,19 +5,20 @@
 import { defineTool } from "@lovable.dev/mcp-js";
 import { z } from "zod";
 import { supabaseForUser } from "../supabase";
-import { listConversations } from "../../appActions";
+import { readConversation } from "../../appActions";
 import { notAuthenticated, toToolResult } from "../result";
 
 export default defineTool({
-  name: "list_conversations",
-  title: "List conversations",
-  description: "List the signed-in user's Jackie chat conversations, most recently updated first.",
+  name: "read_conversation",
+  title: "Read conversation",
+  description: "Read the most recent messages of one conversation, oldest first.",
   inputSchema: {
-    limit: z.number().int().min(1).max(100).optional().describe("Max rows to return (default 20)."),
+    id: z.string().trim().min(1).describe("Conversation id (uuid), from list_conversations."),
+    limit: z.number().int().min(1).max(200).optional().describe("How many recent messages (default 40)."),
   },
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
   handler: async (args, ctx) => {
     if (!ctx.isAuthenticated()) return notAuthenticated;
-    return toToolResult(await listConversations(supabaseForUser(ctx), ctx.getUserId(), args), "conversations");
+    return toToolResult(await readConversation(supabaseForUser(ctx), ctx.getUserId(), args), "messages");
   },
 });

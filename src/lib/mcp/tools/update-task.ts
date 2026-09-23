@@ -5,21 +5,24 @@
 import { defineTool } from "@lovable.dev/mcp-js";
 import { z } from "zod";
 import { supabaseForUser } from "../supabase";
-import { rememberFact, MEMORY_CATEGORIES } from "../../appActions";
+import { updateTask, TASK_PRIORITIES, TASK_STATUSES } from "../../appActions";
 import { notAuthenticated, toToolResult } from "../result";
 
 export default defineTool({
-  name: "remember_fact",
-  title: "Remember a fact",
-  description: "Store or overwrite a fact in the signed-in user's Jackie long-term memory. Jackie sees it in every chat.",
+  name: "update_task",
+  title: "Update task",
+  description: "Change any of a task's status, priority, title, description or due date. Give only the fields to change.",
   inputSchema: {
-    key: z.string().trim().min(1).describe("Stable identifier for the fact."),
-    value: z.string().trim().min(1).describe("The fact to remember."),
-    category: z.enum(MEMORY_CATEGORIES).optional().describe("Category (default context)."),
+    id: z.string().trim().min(1).describe("Task id (uuid)."),
+    status: z.enum(TASK_STATUSES).optional(),
+    priority: z.enum(TASK_PRIORITIES).optional(),
+    title: z.string().optional(),
+    description: z.string().optional(),
+    due_date: z.string().optional().describe("ISO 8601 date, or empty string to clear it."),
   },
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   handler: async (args, ctx) => {
     if (!ctx.isAuthenticated()) return notAuthenticated;
-    return toToolResult(await rememberFact(supabaseForUser(ctx), ctx.getUserId(), args), "entry");
+    return toToolResult(await updateTask(supabaseForUser(ctx), ctx.getUserId(), args), "task");
   },
 });

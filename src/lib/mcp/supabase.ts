@@ -21,13 +21,13 @@ function configuredEnv(names: readonly string[]): string | undefined {
   return undefined;
 }
 
-function supabaseProjectUrl(): string {
+export function supabaseProjectUrl(): string {
   const url = configuredEnv(["SUPABASE_URL", "VITE_SUPABASE_URL"]);
   if (!url) throw new Error("SUPABASE_URL (or VITE_SUPABASE_URL) is required");
   return url;
 }
 
-function supabasePublishableKey(): string {
+export function supabasePublishableKey(): string {
   const direct = configuredEnv([
     "SUPABASE_PUBLISHABLE_KEY",
     "VITE_SUPABASE_PUBLISHABLE_KEY",

@@ -5,19 +5,17 @@
 import { defineTool } from "@lovable.dev/mcp-js";
 import { z } from "zod";
 import { supabaseForUser } from "../supabase";
-import { listConversations } from "../../appActions";
+import { createConversation } from "../../appActions";
 import { notAuthenticated, toToolResult } from "../result";
 
 export default defineTool({
-  name: "list_conversations",
-  title: "List conversations",
-  description: "List the signed-in user's Jackie chat conversations, most recently updated first.",
-  inputSchema: {
-    limit: z.number().int().min(1).max(100).optional().describe("Max rows to return (default 20)."),
-  },
-  annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+  name: "create_conversation",
+  title: "Create conversation",
+  description: "Start a new conversation in the app's chat sidebar. Use its id with ask_jackie.",
+  inputSchema: { title: z.string().optional().describe("Conversation title (default 'Agent session').") },
+  annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   handler: async (args, ctx) => {
     if (!ctx.isAuthenticated()) return notAuthenticated;
-    return toToolResult(await listConversations(supabaseForUser(ctx), ctx.getUserId(), args), "conversations");
+    return toToolResult(await createConversation(supabaseForUser(ctx), ctx.getUserId(), args), "conversation");
   },
 });

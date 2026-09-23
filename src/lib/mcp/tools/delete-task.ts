@@ -5,19 +5,17 @@
 import { defineTool } from "@lovable.dev/mcp-js";
 import { z } from "zod";
 import { supabaseForUser } from "../supabase";
-import { listConversations } from "../../appActions";
+import { deleteTask } from "../../appActions";
 import { notAuthenticated, toToolResult } from "../result";
 
 export default defineTool({
-  name: "list_conversations",
-  title: "List conversations",
-  description: "List the signed-in user's Jackie chat conversations, most recently updated first.",
-  inputSchema: {
-    limit: z.number().int().min(1).max(100).optional().describe("Max rows to return (default 20)."),
-  },
-  annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+  name: "delete_task",
+  title: "Delete task",
+  description: "Permanently delete one of the signed-in user's tasks. Prefer update_task with status done to finish a task.",
+  inputSchema: { id: z.string().trim().min(1).describe("Task id (uuid).") },
+  annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
   handler: async (args, ctx) => {
     if (!ctx.isAuthenticated()) return notAuthenticated;
-    return toToolResult(await listConversations(supabaseForUser(ctx), ctx.getUserId(), args), "conversations");
+    return toToolResult(await deleteTask(supabaseForUser(ctx), ctx.getUserId(), args), "result");
   },
 });

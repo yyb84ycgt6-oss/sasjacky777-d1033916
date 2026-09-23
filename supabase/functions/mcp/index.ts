@@ -58,29 +58,234 @@ function supabaseForUser(ctx) {
   });
 }
 
+// src/lib/appActions.ts
+var TASK_STATUSES = ["todo", "in_progress", "done", "blocked"];
+var TASK_PRIORITIES = ["low", "medium", "high", "critical"];
+var MEMORY_CATEGORIES = ["preference", "decision", "context", "pattern", "architecture", "style"];
+var ok = (data) => ({ ok: true, data });
+var fail = (error) => ({ ok: false, error });
+var TASK_COLUMNS = "id,title,description,status,priority,category,due_date,created_at,updated_at";
+var MEMORY_COLUMNS = "id,key,value,category,confidence,updated_at";
+function clampLimit(limit, fallback, max = 100) {
+  const n = typeof limit === "number" && Number.isFinite(limit) ? Math.floor(limit) : fallback;
+  return Math.min(Math.max(n, 1), max);
+}
+function isOneOf(list, value) {
+  return typeof value === "string" && list.includes(value);
+}
+function filterSafe(text) {
+  return text.replace(/[%,()*\\]/g, " ").trim();
+}
+async function listTasks(sb, userId, args) {
+  if (args.status !== void 0 && !isOneOf(TASK_STATUSES, args.status)) {
+    return fail(`status must be one of: ${TASK_STATUSES.join(", ")}`);
+  }
+  let q = sb.from("jackie_tasks").select(TASK_COLUMNS).eq("user_id", userId).order("created_at", { ascending: false }).limit(clampLimit(args.limit, 25));
+  if (args.status) q = q.eq("status", args.status);
+  const { data, error } = await q;
+  return error ? fail(error.message) : ok(data ?? []);
+}
+async function createTask(sb, userId, args) {
+  const title = typeof args.title === "string" ? args.title.trim() : "";
+  if (!title) return fail("title is required");
+  if (args.priority !== void 0 && !isOneOf(TASK_PRIORITIES, args.priority)) {
+    return fail(`priority must be one of: ${TASK_PRIORITIES.join(", ")}`);
+  }
+  const { data, error } = await sb.from("jackie_tasks").insert({
+    user_id: userId,
+    title: title.slice(0, 500),
+    description: typeof args.description === "string" ? args.description : null,
+    priority: args.priority ?? "medium",
+    category: typeof args.category === "string" ? args.category : null,
+    due_date: typeof args.due_date === "string" && args.due_date ? args.due_date : null
+  }).select(TASK_COLUMNS);
+  return error ? fail(error.message) : ok(data?.[0] ?? null);
+}
+async function updateTask(sb, userId, args) {
+  const id = typeof args.id === "string" ? args.id.trim() : "";
+  if (!id) return fail("id is required");
+  const patch = {};
+  if (args.status !== void 0) {
+    if (!isOneOf(TASK_STATUSES, args.status)) return fail(`status must be one of: ${TASK_STATUSES.join(", ")}`);
+    patch.status = args.status;
+  }
+  if (args.priority !== void 0) {
+    if (!isOneOf(TASK_PRIORITIES, args.priority)) return fail(`priority must be one of: ${TASK_PRIORITIES.join(", ")}`);
+    patch.priority = args.priority;
+  }
+  if (typeof args.title === "string" && args.title.trim()) patch.title = args.title.trim().slice(0, 500);
+  if (typeof args.description === "string") patch.description = args.description;
+  if (typeof args.due_date === "string") patch.due_date = args.due_date || null;
+  if (Object.keys(patch).length === 0) return fail("nothing to change: give status, priority, title, description or due_date");
+  const { data, error } = await sb.from("jackie_tasks").update(patch).eq("id", id).eq("user_id", userId).select(TASK_COLUMNS);
+  if (error) return fail(error.message);
+  return data?.length ? ok(data[0]) : fail(`No task found with id ${id}`);
+}
+async function deleteTask(sb, userId, args) {
+  const id = typeof args.id === "string" ? args.id.trim() : "";
+  if (!id) return fail("id is required");
+  const { data, error } = await sb.from("jackie_tasks").delete().eq("id", id).eq("user_id", userId).select("id,title");
+  if (error) return fail(error.message);
+  return data?.length ? ok({ deleted: data[0] }) : fail(`No task found with id ${id}`);
+}
+async function searchMemory(sb, userId, args) {
+  if (args.category !== void 0 && !isOneOf(MEMORY_CATEGORIES, args.category)) {
+    return fail(`category must be one of: ${MEMORY_CATEGORIES.join(", ")}`);
+  }
+  let q = sb.from("jackie_memory").select(MEMORY_COLUMNS).eq("user_id", userId).order("updated_at", { ascending: false }).limit(clampLimit(args.limit, 25));
+  if (args.category) q = q.eq("category", args.category);
+  const safe = typeof args.query === "string" ? filterSafe(args.query) : "";
+  if (safe) q = q.or(`key.ilike.%${safe}%,value.ilike.%${safe}%`);
+  const { data, error } = await q;
+  return error ? fail(error.message) : ok(data ?? []);
+}
+async function rememberFact(sb, userId, args) {
+  const key = typeof args.key === "string" ? args.key.trim() : "";
+  const value = typeof args.value === "string" ? args.value.trim() : "";
+  if (!key || !value) return fail("key and value are required");
+  if (args.category !== void 0 && !isOneOf(MEMORY_CATEGORIES, args.category)) {
+    return fail(`category must be one of: ${MEMORY_CATEGORIES.join(", ")}`);
+  }
+  const category = args.category ?? void 0;
+  const { data: existing, error: findError } = await sb.from("jackie_memory").select("id").eq("user_id", userId).eq("key", key).limit(1);
+  if (findError) return fail(findError.message);
+  const { data, error } = existing?.length ? await sb.from("jackie_memory").update({ value, ...category ? { category } : {} }).eq("id", existing[0].id).eq("user_id", userId).select(MEMORY_COLUMNS) : await sb.from("jackie_memory").insert({ user_id: userId, key, value, category: category ?? "context" }).select(MEMORY_COLUMNS);
+  return error ? fail(error.message) : ok(data?.[0] ?? null);
+}
+async function forgetFact(sb, userId, args) {
+  const id = typeof args.id === "string" ? args.id.trim() : "";
+  const key = typeof args.key === "string" ? args.key.trim() : "";
+  if (!id && !key) return fail("give the fact's id or key");
+  let q = sb.from("jackie_memory").delete().eq("user_id", userId);
+  q = id ? q.eq("id", id) : q.eq("key", key);
+  const { data, error } = await q.select("id,key");
+  if (error) return fail(error.message);
+  return data?.length ? ok({ forgotten: data }) : fail(`No memory found with ${id ? `id ${id}` : `key "${key}"`}`);
+}
+async function listConversations(sb, userId, args) {
+  const { data, error } = await sb.from("conversations").select("id,title,model,created_at,updated_at").eq("user_id", userId).order("updated_at", { ascending: false }).limit(clampLimit(args.limit, 20));
+  return error ? fail(error.message) : ok(data ?? []);
+}
+async function createConversation(sb, userId, args) {
+  const title = typeof args.title === "string" && args.title.trim() ? args.title.trim().slice(0, 200) : "Agent session";
+  const { data, error } = await sb.from("conversations").insert({ user_id: userId, title }).select("id,title,created_at");
+  return error ? fail(error.message) : ok(data?.[0] ?? null);
+}
+async function readConversation(sb, userId, args) {
+  const id = typeof args.id === "string" ? args.id.trim() : "";
+  if (!id) return fail("id is required");
+  const { data, error } = await sb.from("chat_messages").select("role,content,created_at").eq("user_id", userId).eq("conversation_id", id).order("created_at", { ascending: false }).limit(clampLimit(args.limit, 40, 200));
+  if (error) return fail(error.message);
+  return ok((data ?? []).reverse());
+}
+async function saveMessage(sb, userId, conversationId, role, content) {
+  const { error } = await sb.from("chat_messages").insert({ user_id: userId, conversation_id: conversationId, role, content });
+  if (error) return fail(error.message);
+  await sb.from("conversations").update({ updated_at: (/* @__PURE__ */ new Date()).toISOString() }).eq("id", conversationId).eq("user_id", userId);
+  return ok(null);
+}
+async function buildAgentContext(sb, userId) {
+  const [memories, tasks] = await Promise.all([
+    searchMemory(sb, userId, { limit: 60 }),
+    listTasks(sb, userId, { limit: 50 })
+  ]);
+  let context = "";
+  if (memories.ok && Array.isArray(memories.data) && memories.data.length) {
+    context += "\n## Jackie's Memory\n";
+    for (const m of memories.data) {
+      context += `- **${m.key}** (${m.category}): ${m.value}
+`;
+    }
+  }
+  if (tasks.ok && Array.isArray(tasks.data)) {
+    const active = tasks.data.filter((t) => t.status !== "done");
+    if (active.length) {
+      context += "\n## Active Tasks\n";
+      for (const t of active.slice(0, 15)) {
+        context += `- [${t.status}/${t.priority}] **${t.title}**${t.description ? ` \u2014 ${t.description.slice(0, 80)}` : ""}
+`;
+      }
+    }
+  }
+  return context;
+}
+async function readSseText(resp) {
+  if (!resp.body) return fail("The response had no body.");
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let text = "";
+  let finished = false;
+  const take = (line) => {
+    if (!line.startsWith("data:")) return null;
+    const payload = line.slice(5).trim();
+    if (payload === "[DONE]") {
+      finished = true;
+      return null;
+    }
+    let frame;
+    try {
+      frame = JSON.parse(payload);
+    } catch {
+      return null;
+    }
+    if (frame.error) return typeof frame.error === "string" ? frame.error : frame.error.message ?? "stream error";
+    const choice = frame.choices?.[0];
+    if (typeof choice?.delta?.content === "string") text += choice.delta.content;
+    if (typeof choice?.finish_reason === "string" && choice.finish_reason) {
+      if (choice.finish_reason === "content_filter") return "The model's content filter stopped the answer.";
+      finished = true;
+    }
+    return null;
+  };
+  for (; ; ) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let nl;
+    while ((nl = buffer.indexOf("\n")) !== -1) {
+      const err = take(buffer.slice(0, nl).replace(/\r$/, ""));
+      buffer = buffer.slice(nl + 1);
+      if (err) return fail(err);
+    }
+  }
+  if (buffer.trim()) {
+    const err = take(buffer.trim());
+    if (err) return fail(err);
+  }
+  if (!text.trim()) return fail("Jackie's model returned an empty answer.");
+  if (!finished) return fail("The answer was cut off before it finished.");
+  return ok(text);
+}
+
+// src/lib/mcp/result.ts
+function toToolResult(result, key) {
+  if (!result.ok) {
+    return { content: [{ type: "text", text: result.error }], isError: true };
+  }
+  return {
+    content: [{ type: "text", text: JSON.stringify(result.data) }],
+    structuredContent: { [key]: result.data }
+  };
+}
+var notAuthenticated = {
+  content: [{ type: "text", text: "Not authenticated" }],
+  isError: true
+};
+
 // src/lib/mcp/tools/list-tasks.ts
 var list_tasks_default = defineTool({
   name: "list_tasks",
   title: "List tasks",
   description: "List the signed-in user's Jackie tasks, newest first. Optionally filter by status.",
   inputSchema: {
-    status: z.string().optional().describe("Filter by task status, e.g. pending, in_progress, done."),
+    status: z.enum(TASK_STATUSES).optional().describe("Filter by task status."),
     limit: z.number().int().min(1).max(100).optional().describe("Max rows to return (default 25).")
   },
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
-  handler: async ({ status, limit }, ctx) => {
-    if (!ctx.isAuthenticated()) {
-      return { content: [{ type: "text", text: "Not authenticated" }], isError: true };
-    }
-    const supabase = supabaseForUser(ctx);
-    let query = supabase.from("jackie_tasks").select("id,title,description,status,priority,category,due_date,created_at").eq("user_id", ctx.getUserId()).order("created_at", { ascending: false }).limit(limit ?? 25);
-    if (status) query = query.eq("status", status);
-    const { data, error } = await query;
-    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
-    return {
-      content: [{ type: "text", text: JSON.stringify(data ?? []) }],
-      structuredContent: { tasks: data ?? [] }
-    };
+  handler: async (args, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    return toToolResult(await listTasks(supabaseForUser(ctx), ctx.getUserId(), args), "tasks");
   }
 });
 
@@ -90,149 +295,259 @@ import { z as z2 } from "npm:zod@3.25.76";
 var create_task_default = defineTool2({
   name: "create_task",
   title: "Create task",
-  description: "Create a new Jackie task for the signed-in user.",
+  description: "Create a new Jackie task for the signed-in user. It appears on the app's task board.",
   inputSchema: {
     title: z2.string().trim().min(1).describe("Short task title."),
     description: z2.string().optional().describe("Optional longer detail."),
-    priority: z2.string().optional().describe("Priority, e.g. low, medium, high."),
+    priority: z2.enum(TASK_PRIORITIES).optional().describe("Priority (default medium)."),
     category: z2.string().optional().describe("Optional grouping category."),
     due_date: z2.string().optional().describe("Optional ISO 8601 due date.")
   },
   annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
-  handler: async ({ title, description, priority, category, due_date }, ctx) => {
-    if (!ctx.isAuthenticated()) {
-      return { content: [{ type: "text", text: "Not authenticated" }], isError: true };
-    }
-    const supabase = supabaseForUser(ctx);
-    const { data, error } = await supabase.from("jackie_tasks").insert({
-      user_id: ctx.getUserId(),
-      title,
-      description: description ?? null,
-      priority: priority ?? "medium",
-      category: category ?? null,
-      due_date: due_date ?? null
-    }).select("id,title,status,priority,category,due_date,created_at");
-    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
-    return {
-      content: [{ type: "text", text: JSON.stringify(data?.[0] ?? null) }],
-      structuredContent: { task: data?.[0] ?? null }
-    };
+  handler: async (args, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    return toToolResult(await createTask(supabaseForUser(ctx), ctx.getUserId(), args), "task");
+  }
+});
+
+// src/lib/mcp/tools/update-task.ts
+import { defineTool as defineTool3 } from "npm:@lovable.dev/mcp-js@0.26.2";
+import { z as z3 } from "npm:zod@3.25.76";
+var update_task_default = defineTool3({
+  name: "update_task",
+  title: "Update task",
+  description: "Change any of a task's status, priority, title, description or due date. Give only the fields to change.",
+  inputSchema: {
+    id: z3.string().trim().min(1).describe("Task id (uuid)."),
+    status: z3.enum(TASK_STATUSES).optional(),
+    priority: z3.enum(TASK_PRIORITIES).optional(),
+    title: z3.string().optional(),
+    description: z3.string().optional(),
+    due_date: z3.string().optional().describe("ISO 8601 date, or empty string to clear it.")
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  handler: async (args, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    return toToolResult(await updateTask(supabaseForUser(ctx), ctx.getUserId(), args), "task");
   }
 });
 
 // src/lib/mcp/tools/update-task-status.ts
-import { defineTool as defineTool3 } from "npm:@lovable.dev/mcp-js@0.26.2";
-import { z as z3 } from "npm:zod@3.25.76";
-var update_task_status_default = defineTool3({
+import { defineTool as defineTool4 } from "npm:@lovable.dev/mcp-js@0.26.2";
+import { z as z4 } from "npm:zod@3.25.76";
+var update_task_status_default = defineTool4({
   name: "update_task_status",
   title: "Update task status",
   description: "Change the status of one of the signed-in user's Jackie tasks.",
   inputSchema: {
-    id: z3.string().trim().min(1).describe("Task id (uuid)."),
-    status: z3.string().trim().min(1).describe("New status, e.g. pending, in_progress, done.")
+    id: z4.string().trim().min(1).describe("Task id (uuid)."),
+    status: z4.enum(TASK_STATUSES).describe("New status.")
   },
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   handler: async ({ id, status }, ctx) => {
-    if (!ctx.isAuthenticated()) {
-      return { content: [{ type: "text", text: "Not authenticated" }], isError: true };
-    }
-    const supabase = supabaseForUser(ctx);
-    const { data, error } = await supabase.from("jackie_tasks").update({ status }).eq("id", id).eq("user_id", ctx.getUserId()).select("id,title,status,priority,updated_at");
-    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
-    if (!data?.length) {
-      return { content: [{ type: "text", text: `No task found with id ${id}` }], isError: true };
-    }
-    return {
-      content: [{ type: "text", text: JSON.stringify(data[0]) }],
-      structuredContent: { task: data[0] }
-    };
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    return toToolResult(await updateTask(supabaseForUser(ctx), ctx.getUserId(), { id, status }), "task");
+  }
+});
+
+// src/lib/mcp/tools/delete-task.ts
+import { defineTool as defineTool5 } from "npm:@lovable.dev/mcp-js@0.26.2";
+import { z as z5 } from "npm:zod@3.25.76";
+var delete_task_default = defineTool5({
+  name: "delete_task",
+  title: "Delete task",
+  description: "Permanently delete one of the signed-in user's tasks. Prefer update_task with status done to finish a task.",
+  inputSchema: { id: z5.string().trim().min(1).describe("Task id (uuid).") },
+  annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  handler: async (args, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    return toToolResult(await deleteTask(supabaseForUser(ctx), ctx.getUserId(), args), "result");
   }
 });
 
 // src/lib/mcp/tools/search-memory.ts
-import { defineTool as defineTool4 } from "npm:@lovable.dev/mcp-js@0.26.2";
-import { z as z4 } from "npm:zod@3.25.76";
-var search_memory_default = defineTool4({
+import { defineTool as defineTool6 } from "npm:@lovable.dev/mcp-js@0.26.2";
+import { z as z6 } from "npm:zod@3.25.76";
+var search_memory_default = defineTool6({
   name: "search_memory",
   title: "Search Jackie memory",
-  description: "Search the signed-in user's Jackie long-term memory entries by key or value text.",
+  description: "Search the signed-in user's Jackie long-term memory by key or value text. Omit query to list recent entries.",
   inputSchema: {
-    query: z4.string().trim().optional().describe("Text to match against memory key or value. Omit to list recent entries."),
-    category: z4.string().optional().describe("Optional category filter."),
-    limit: z4.number().int().min(1).max(100).optional().describe("Max rows to return (default 25).")
+    query: z6.string().trim().optional().describe("Text to match against memory key or value."),
+    category: z6.enum(MEMORY_CATEGORIES).optional().describe("Optional category filter."),
+    limit: z6.number().int().min(1).max(100).optional().describe("Max rows to return (default 25).")
   },
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
-  handler: async ({ query, category, limit }, ctx) => {
-    if (!ctx.isAuthenticated()) {
-      return { content: [{ type: "text", text: "Not authenticated" }], isError: true };
-    }
-    const supabase = supabaseForUser(ctx);
-    let q = supabase.from("jackie_memory").select("id,key,value,category,confidence,updated_at").eq("user_id", ctx.getUserId()).order("updated_at", { ascending: false }).limit(limit ?? 25);
-    if (category) q = q.eq("category", category);
-    if (query) {
-      const safe = query.replace(/[%,()]/g, " ").trim();
-      if (safe) q = q.or(`key.ilike.%${safe}%,value.ilike.%${safe}%`);
-    }
-    const { data, error } = await q;
-    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
-    return {
-      content: [{ type: "text", text: JSON.stringify(data ?? []) }],
-      structuredContent: { entries: data ?? [] }
-    };
+  handler: async (args, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    return toToolResult(await searchMemory(supabaseForUser(ctx), ctx.getUserId(), args), "entries");
   }
 });
 
 // src/lib/mcp/tools/remember-fact.ts
-import { defineTool as defineTool5 } from "npm:@lovable.dev/mcp-js@0.26.2";
-import { z as z5 } from "npm:zod@3.25.76";
-var remember_fact_default = defineTool5({
+import { defineTool as defineTool7 } from "npm:@lovable.dev/mcp-js@0.26.2";
+import { z as z7 } from "npm:zod@3.25.76";
+var remember_fact_default = defineTool7({
   name: "remember_fact",
   title: "Remember a fact",
-  description: "Store or overwrite a fact in the signed-in user's Jackie long-term memory.",
+  description: "Store or overwrite a fact in the signed-in user's Jackie long-term memory. Jackie sees it in every chat.",
   inputSchema: {
-    key: z5.string().trim().min(1).describe("Stable identifier for the fact."),
-    value: z5.string().trim().min(1).describe("The fact to remember."),
-    category: z5.string().optional().describe("Optional category, e.g. preference, project, constraint.")
+    key: z7.string().trim().min(1).describe("Stable identifier for the fact."),
+    value: z7.string().trim().min(1).describe("The fact to remember."),
+    category: z7.enum(MEMORY_CATEGORIES).optional().describe("Category (default context).")
   },
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  handler: async ({ key, value, category }, ctx) => {
-    if (!ctx.isAuthenticated()) {
-      return { content: [{ type: "text", text: "Not authenticated" }], isError: true };
-    }
-    const supabase = supabaseForUser(ctx);
-    const userId = ctx.getUserId();
-    const { data: existing, error: findError } = await supabase.from("jackie_memory").select("id").eq("user_id", userId).eq("key", key).limit(1);
-    if (findError) return { content: [{ type: "text", text: findError.message }], isError: true };
-    const { data, error } = existing?.length ? await supabase.from("jackie_memory").update({ value, ...category ? { category } : {} }).eq("id", existing[0].id).eq("user_id", userId).select("id,key,value,category,updated_at") : await supabase.from("jackie_memory").insert({ user_id: userId, key, value, category: category ?? "general" }).select("id,key,value,category,updated_at");
-    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
-    return {
-      content: [{ type: "text", text: JSON.stringify(data?.[0] ?? null) }],
-      structuredContent: { entry: data?.[0] ?? null }
-    };
+  handler: async (args, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    return toToolResult(await rememberFact(supabaseForUser(ctx), ctx.getUserId(), args), "entry");
+  }
+});
+
+// src/lib/mcp/tools/forget-fact.ts
+import { defineTool as defineTool8 } from "npm:@lovable.dev/mcp-js@0.26.2";
+import { z as z8 } from "npm:zod@3.25.76";
+var forget_fact_default = defineTool8({
+  name: "forget_fact",
+  title: "Forget a fact",
+  description: "Delete one of Jackie's memory entries, by id or by key.",
+  inputSchema: {
+    id: z8.string().trim().optional().describe("Memory entry id (uuid)."),
+    key: z8.string().trim().optional().describe("Memory key, when the id is not known.")
+  },
+  annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  handler: async (args, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    return toToolResult(await forgetFact(supabaseForUser(ctx), ctx.getUserId(), args), "result");
   }
 });
 
 // src/lib/mcp/tools/list-conversations.ts
-import { defineTool as defineTool6 } from "npm:@lovable.dev/mcp-js@0.26.2";
-import { z as z6 } from "npm:zod@3.25.76";
-var list_conversations_default = defineTool6({
+import { defineTool as defineTool9 } from "npm:@lovable.dev/mcp-js@0.26.2";
+import { z as z9 } from "npm:zod@3.25.76";
+var list_conversations_default = defineTool9({
   name: "list_conversations",
   title: "List conversations",
   description: "List the signed-in user's Jackie chat conversations, most recently updated first.",
   inputSchema: {
-    limit: z6.number().int().min(1).max(100).optional().describe("Max rows to return (default 20).")
+    limit: z9.number().int().min(1).max(100).optional().describe("Max rows to return (default 20).")
   },
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
-  handler: async ({ limit }, ctx) => {
-    if (!ctx.isAuthenticated()) {
-      return { content: [{ type: "text", text: "Not authenticated" }], isError: true };
+  handler: async (args, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    return toToolResult(await listConversations(supabaseForUser(ctx), ctx.getUserId(), args), "conversations");
+  }
+});
+
+// src/lib/mcp/tools/read-conversation.ts
+import { defineTool as defineTool10 } from "npm:@lovable.dev/mcp-js@0.26.2";
+import { z as z10 } from "npm:zod@3.25.76";
+var read_conversation_default = defineTool10({
+  name: "read_conversation",
+  title: "Read conversation",
+  description: "Read the most recent messages of one conversation, oldest first.",
+  inputSchema: {
+    id: z10.string().trim().min(1).describe("Conversation id (uuid), from list_conversations."),
+    limit: z10.number().int().min(1).max(200).optional().describe("How many recent messages (default 40).")
+  },
+  annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+  handler: async (args, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    return toToolResult(await readConversation(supabaseForUser(ctx), ctx.getUserId(), args), "messages");
+  }
+});
+
+// src/lib/mcp/tools/create-conversation.ts
+import { defineTool as defineTool11 } from "npm:@lovable.dev/mcp-js@0.26.2";
+import { z as z11 } from "npm:zod@3.25.76";
+var create_conversation_default = defineTool11({
+  name: "create_conversation",
+  title: "Create conversation",
+  description: "Start a new conversation in the app's chat sidebar. Use its id with ask_jackie.",
+  inputSchema: { title: z11.string().optional().describe("Conversation title (default 'Agent session').") },
+  annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  handler: async (args, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    return toToolResult(await createConversation(supabaseForUser(ctx), ctx.getUserId(), args), "conversation");
+  }
+});
+
+// src/lib/mcp/tools/ask-jackie.ts
+import { defineTool as defineTool12 } from "npm:@lovable.dev/mcp-js@0.26.2";
+import { z as z12 } from "npm:zod@3.25.76";
+var ASK_ENGINES = {
+  cloud: "jackie-chat",
+  deepseek: "jackie-deepseek",
+  bionic: "jackie-bionic",
+  ollama: "jackie-ollama"
+};
+var fail2 = (text) => ({ content: [{ type: "text", text }], isError: true });
+var ask_jackie_default = defineTool12({
+  name: "ask_jackie",
+  title: "Ask Jackie",
+  description: "Send a message to Jackie and get her answer. She sees the user's memory and active tasks. The exchange is saved to a conversation in the app (a new one unless conversation_id is given).",
+  inputSchema: {
+    message: z12.string().trim().min(1).max(2e4).describe("What to say to Jackie."),
+    conversation_id: z12.string().trim().optional().describe("Continue this conversation (its recent history is sent)."),
+    title: z12.string().optional().describe("Title for a new conversation."),
+    engine: z12.enum(["cloud", "deepseek", "bionic", "ollama"]).optional().describe("Which engine answers (default cloud). bionic and ollama answer the owner only."),
+    model: z12.string().optional().describe("Model id for that engine; omit for its default.")
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  handler: async ({ message, conversation_id, title, engine, model }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const token = ctx.getToken();
+    if (!token) return notAuthenticated;
+    const sb = supabaseForUser(ctx);
+    const userId = ctx.getUserId();
+    let conversationId = conversation_id;
+    let history = [];
+    if (conversationId) {
+      const past = await readConversation(sb, userId, { id: conversationId, limit: 20 });
+      if (!past.ok) return fail2(past.error);
+      history = past.data.filter((m) => m.role === "user" || m.role === "assistant").map((m) => ({ role: m.role, content: m.content }));
+    } else {
+      const created = await createConversation(sb, userId, { title: title ?? message.slice(0, 60) });
+      if (!created.ok) return fail2(created.error);
+      conversationId = created.data.id;
     }
-    const supabase = supabaseForUser(ctx);
-    const { data, error } = await supabase.from("conversations").select("id,title,model,created_at,updated_at").eq("user_id", ctx.getUserId()).order("updated_at", { ascending: false }).limit(limit ?? 20);
-    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+    const fn = ASK_ENGINES[engine ?? "cloud"];
+    const context = await buildAgentContext(sb, userId);
+    let resp;
+    try {
+      resp = await fetch(`${supabaseProjectUrl()}/functions/v1/${fn}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: supabasePublishableKey(),
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          messages: [...history, { role: "user", content: message }],
+          ...model ? { model } : {},
+          ...context ? { context } : {}
+        })
+      });
+    } catch (e) {
+      return fail2(`Could not reach ${fn}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    if (!resp.ok) {
+      const body = await resp.json().catch(() => null);
+      const why = [body?.error, body?.detail].filter(Boolean).join(" ") || `HTTP ${resp.status}`;
+      return fail2(`${fn} refused: ${why}`);
+    }
+    const answer = await readSseText(resp);
+    if (!answer.ok) return fail2(`${fn}: ${answer.error}`);
+    const savedQ = await saveMessage(sb, userId, conversationId, "user", message);
+    const savedA = savedQ.ok ? await saveMessage(sb, userId, conversationId, "assistant", answer.data) : savedQ;
+    const result = {
+      conversation_id: conversationId,
+      engine: engine ?? "cloud",
+      answer: answer.data,
+      ...savedA.ok ? {} : { warning: `Answered, but not saved to the conversation: ${savedA.error}` }
+    };
     return {
-      content: [{ type: "text", text: JSON.stringify(data ?? []) }],
-      structuredContent: { conversations: data ?? [] }
+      content: [{ type: "text", text: answer.data }],
+      structuredContent: result
     };
   }
 });
@@ -242,13 +557,28 @@ var projectRef = "iezgzdhhmwmbqshnxrie";
 var mcp_default = defineMcp({
   name: "sas-jacky",
   title: "SAS-JACKY",
-  version: "0.1.0",
-  instructions: "Tools for SAS-JACKY (Jackie). Read and manage the signed-in user's tasks, long-term memory facts, and chat conversations. All tools act as the authenticated user.",
+  version: "0.2.0",
+  // Read by harnesses (Hermes Agent, DeepSeek Harness) as the server's own
+  // guidance, so it says how the tools fit together, not just that they exist.
+  instructions: "Tools for SAS-JACKY (Jackie), acting as the signed-in user. ask_jackie talks to Jackie; she already sees the user's memory and active tasks, and the exchange is saved to a conversation in the app. Use list_tasks / create_task / update_task / delete_task for the task board (statuses: todo, in_progress, done, blocked), search_memory / remember_fact / forget_fact for long-term memory, and list_conversations / read_conversation / create_conversation for chat history. Prefer update_task with status done over delete_task. Every tool reports failure with isError and the reason.",
   auth: auth.oauth.issuer({
     issuer: `https://${projectRef}.supabase.co/auth/v1`,
     acceptedAudiences: "authenticated"
   }),
-  tools: [list_tasks_default, create_task_default, update_task_status_default, search_memory_default, remember_fact_default, list_conversations_default]
+  tools: [
+    ask_jackie_default,
+    list_tasks_default,
+    create_task_default,
+    update_task_default,
+    update_task_status_default,
+    delete_task_default,
+    search_memory_default,
+    remember_fact_default,
+    forget_fact_default,
+    list_conversations_default,
+    read_conversation_default,
+    create_conversation_default
+  ]
 });
 
 // lovable-mcp-supabase-entry.ts
