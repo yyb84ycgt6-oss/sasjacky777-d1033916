@@ -17,9 +17,12 @@ import {
 import { itemByName, type ItemStack, type StatusEffect } from "./items";
 import { travel } from "./physics";
 import { raycastBlocks } from "./raycast";
-import { hashFloat } from "./rng";
+import { hashFloat, Rng } from "./rng";
+import { levelForXp, offersForLevel, sanitizeOffer, type Offer } from "./trading";
+import { JOB_BLOCKS, professionForBlock, PROFESSIONS, type Profession } from "./villages";
 
-export type MobKind = "pig" | "cow" | "sheep" | "chicken" | "zombie" | "skeleton" | "creeper" | "spider" | "slime";
+export type MobKind =
+  | "pig" | "cow" | "sheep" | "chicken" | "zombie" | "skeleton" | "creeper" | "spider" | "slime" | "villager" | "iron_golem";
 
 interface MobSpec {
   health: number;
@@ -47,6 +50,8 @@ export const MOB_SPECS: Record<MobKind, MobSpec> = {
   spider: { health: 16, width: 1.4, height: 0.9, speed: 0.09, hostile: true, attack: 2, tempt: [], burnsInDay: false, followRange: 16, xp: [5, 5] },
   // Width, height and health are per unit of size; see Mob.setSize.
   slime: { health: 1, width: 0.52, height: 0.52, speed: 0.1, hostile: true, attack: 0, tempt: [], burnsInDay: false, followRange: 16, xp: [1, 1] },
+  villager: { health: 20, width: 0.6, height: 1.95, speed: 0.05, hostile: false, attack: 0, tempt: [], burnsInDay: false, followRange: 10, xp: [0, 0] },
+  iron_golem: { health: 100, width: 1.4, height: 2.7, speed: 0.06, hostile: false, attack: 0, tempt: [], burnsInDay: false, followRange: 16, xp: [0, 0] },
 };
 
 export const MOB_KINDS = Object.keys(MOB_SPECS) as MobKind[];
@@ -123,6 +128,15 @@ export class Mob extends Entity {
   effects: MobEffect[] = [];
   /** Looting on the weapon that last struck it, for its drops. */
   looting = 0;
+  // Villagers: a trade, the level it has reached, its offers, where it lives and works.
+  profession: Profession | "none" = "none";
+  villagerXp = 0;
+  offers: Offer[] = [];
+  home: { x: number; z: number } | null = null;
+  job: [number, number, number] | null = null;
+  /** A mob this one is fighting (zombies after villagers, golems after monsters), by entity id. */
+  targetMob: number | null = null;
+  private fleeFrom: { x: number; z: number } | null = null;
 
   constructor(kind: MobKind, x: number, y: number, z: number, id?: number) {
     const spec = MOB_SPECS[kind];
@@ -144,6 +158,36 @@ export class Mob extends Entity {
     this.body.width = this.spec.width * n;
     this.body.height = this.spec.height * n;
     if (heal) this.health = this.spec.health * n * n;
+  }
+
+  get villagerLevel(): number {
+    return levelForXp(this.villagerXp);
+  }
+
+  /** Takes up a trade: the first two offers of its first level. */
+  setProfession(p: Profession, random: () => number = Math.random): void {
+    this.profession = p;
+    this.villagerXp = 0;
+    this.offers = offersForLevel(p, 1, new Rng(Math.floor(random() * 0x7fffffff)));
+  }
+
+  /**
+   * Records a trade the player made: the offer's use, the villager's
+   * experience, and new offers when that experience reaches the next level.
+   * Returns whether the villager levelled up.
+   */
+  traded(index: number, random: () => number = Math.random): boolean {
+    const offer = this.offers[index];
+    if (!offer || this.profession === "none") return false;
+    const before = this.villagerLevel;
+    offer.uses++;
+    this.villagerXp += offer.xp;
+    const after = this.villagerLevel;
+    if (after > before) {
+      for (let l = before + 1; l <= after; l++) this.offers.push(...offersForLevel(this.profession, l, new Rng(Math.floor(random() * 0x7fffffff))));
+      return true;
+    }
+    return false;
   }
 
   /** Voices pitch up for babies and small slimes, down for big ones. */
@@ -226,7 +270,7 @@ export class Mob extends Entity {
     // Knockback away from the source.
     const dx = this.body.x - fromX, dz = this.body.z - fromZ;
     const d = Math.hypot(dx, dz) || 1;
-    if (source !== "fire" && source !== "drown" && source !== "fall" && source !== "starve" && source !== "magic") {
+    if (source !== "fire" && source !== "drown" && source !== "fall" && source !== "starve" && source !== "magic" && this.kind !== "iron_golem") {
       this.body.vx = this.body.vx / 2 + (dx / d) * (0.4 + knockback);
       this.body.vz = this.body.vz / 2 + (dz / d) * (0.4 + knockback);
       if (this.body.onGround) this.body.vy = Math.min(0.4, this.body.vy / 2 + 0.4);
@@ -266,6 +310,8 @@ export class Mob extends Entity {
     if (this.dying) return;
     const move = { forward: 0, jump: false, yaw: this.yaw, speedMul: 1 };
     if (this.kind === "slime") this.slimeAi(ctx, move);
+    else if (this.kind === "villager") this.villagerAi(ctx, move);
+    else if (this.kind === "iron_golem") this.golemAi(ctx, move);
     else if (this.spec.hostile) this.hostileAi(ctx, move);
     else this.passiveAi(ctx, move);
 
@@ -290,8 +336,8 @@ export class Mob extends Entity {
         if (this.size > 1) ctx.particles("slime", b.x, b.y + 0.1, b.z, this.size * 4);
       }
     }
-    // Chickens flutter and slimes bounce; neither is hurt by a fall.
-    if (res.landedFrom > 3 && this.kind !== "chicken" && this.kind !== "slime") this.hurt(ctx, Math.ceil(res.landedFrom - 3), "fall", b.x, b.z);
+    // Chickens flutter, slimes bounce and golems are iron; none is hurt by a fall.
+    if (res.landedFrom > 3 && this.kind !== "chicken" && this.kind !== "slime" && this.kind !== "iron_golem") this.hurt(ctx, Math.ceil(res.landedFrom - 3), "fall", b.x, b.z);
     this.environment(ctx);
     if (b.y < -64) this.removed = true;
   }
@@ -469,6 +515,7 @@ export class Mob extends Entity {
     }
     if (passiveNow && this.lastAttacker === null) this.targetId = null;
     const target = this.targetId ? ctx.players().find((p) => p.id === this.targetId) ?? null : null;
+    if ((!target || !target.targetable) && this.kind === "zombie" && this.huntVillager(ctx, move)) return;
     if (!target || !target.targetable) {
       this.targetId = null;
       if (this.kind === "creeper" && this.fuse > 0) this.fuse--;
@@ -525,6 +572,129 @@ export class Mob extends Entity {
       this.attackCooldown = 20;
       this.bite(ctx, target, this.spec.attack);
     }
+  }
+
+  /** The mob a fighter is after, if it is still there to fight. */
+  private mobTarget(ctx: EntityContext, range: number): Mob | null {
+    if (this.targetMob === null) return null;
+    const b = this.body;
+    const t = ctx.entitiesNear(b.x, b.y, b.z, range).find((e): e is Mob => e instanceof Mob && e.id === this.targetMob);
+    if (!t || t.dying || t.removed) { this.targetMob = null; return null; }
+    return t;
+  }
+
+  /** Walks up to another mob and strikes it. */
+  private fightMob(ctx: EntityContext, move: { forward: number; jump: boolean; yaw: number; speedMul: number }, t: Mob, damage: number, launch = 0): void {
+    const b = this.body;
+    this.steer(ctx, move, t.x, t.z, false);
+    const reach = (b.width + t.body.width) / 2 + 0.7;
+    if (Math.hypot(t.x - b.x, t.z - b.z) < reach && Math.abs(t.y - b.y) < 2 && this.attackCooldown <= 0) {
+      this.attackCooldown = 20;
+      if (t.hurt(ctx, damage, "mob", b.x, b.z, `mob:${this.id}`) && launch) t.body.vy += launch;
+    }
+  }
+
+  /** A zombie with no player to chase goes after the nearest villager, as in the original. */
+  private huntVillager(ctx: EntityContext, move: { forward: number; jump: boolean; yaw: number; speedMul: number }): boolean {
+    const b = this.body;
+    if (this.age % 20 === 0 && this.targetMob === null) {
+      const v = ctx.entitiesNear(b.x, b.y, b.z, 16).find((e): e is Mob => e instanceof Mob && e.kind === "villager" && !e.dying);
+      if (v) this.targetMob = v.id;
+    }
+    const t = this.mobTarget(ctx, 24);
+    if (!t) return false;
+    this.fightMob(ctx, move, t, 3);
+    return true;
+  }
+
+  /**
+   * Villagers keep near home, run from zombies and from harm, and take up a
+   * trade at any free work station nearby; offers restock twice a day.
+   */
+  private villagerAi(ctx: EntityContext, move: { forward: number; jump: boolean; yaw: number; speedMul: number }): void {
+    const b = this.body;
+    if (this.age % 10 === 0) {
+      const z = ctx.entitiesNear(b.x, b.y, b.z, 8).find((e) => e instanceof Mob && e.kind === "zombie" && !e.dying);
+      this.fleeFrom = z ? { x: z.x, z: z.z } : null;
+    }
+    if (this.fleeFrom) {
+      const dx = b.x - this.fleeFrom.x, dz = b.z - this.fleeFrom.z;
+      const d = Math.hypot(dx, dz) || 1;
+      this.steer(ctx, move, b.x + (dx / d) * 6, b.z + (dz / d) * 6, false);
+      move.speedMul = 1.8;
+      return;
+    }
+    if (this.age % 100 === 50) this.checkJob(ctx);
+    if (this.age % 12000 === 0) for (const o of this.offers) o.uses = 0;
+    if (this.panic > 0 || this.home === null) { this.passiveAi(ctx, move); return; }
+    // Wander, but keep to the village.
+    if (Math.hypot(b.x - this.home.x, b.z - this.home.z) > 20 && ctx.random() < 0.05) {
+      this.steer(ctx, move, this.home.x, this.home.z, true);
+      return;
+    }
+    this.passiveAi(ctx, move);
+  }
+
+  /** Claims a free work station within reach, or gives up a trade whose station is gone. */
+  private checkJob(ctx: EntityContext): void {
+    const b = this.body;
+    const w = ctx.world;
+    if (this.job) {
+      const [x, y, z] = this.job;
+      if (!w.isLoaded(x, z)) return;
+      if (this.profession !== "none" && w.blockAt(x, y, z) === JOB_BLOCKS[this.profession]) return;
+      this.job = null;
+      // Never traded with: its trade goes with the station, as in the original.
+      if (this.villagerXp === 0) { this.profession = "none"; this.offers = []; }
+    }
+    if (this.profession !== "none" && this.job) return;
+    const taken = new Set(ctx.entitiesNear(b.x, b.y, b.z, 32)
+      .filter((e): e is Mob => e instanceof Mob && e !== this && e.job !== null)
+      .map((e) => e.job!.join(",")));
+    const fx = Math.floor(b.x), fy = Math.floor(b.y), fz = Math.floor(b.z);
+    for (let dy = -2; dy <= 2; dy++) for (let dz = -8; dz <= 8; dz++) for (let dx = -8; dx <= 8; dx++) {
+      const x = fx + dx, y = fy + dy, z = fz + dz;
+      const p = professionForBlock(w.blockAt(x, y, z));
+      if (!p || taken.has(`${x},${y},${z}`)) continue;
+      // A villager with a trade only goes back to that trade's station.
+      if (this.profession !== "none" && p !== this.profession) continue;
+      this.job = [x, y, z];
+      if (this.profession === "none") {
+        this.setProfession(p, ctx.random);
+        ctx.particles("potion", b.x, b.y + 2, b.z, 8, 0x50e050);
+      }
+      return;
+    }
+  }
+
+  /** Iron golems guard their village: they fight monsters (never creepers) and whoever strikes them. */
+  private golemAi(ctx: EntityContext, move: { forward: number; jump: boolean; yaw: number; speedMul: number }): void {
+    const b = this.body;
+    if (this.age % 20 === 0 && this.targetMob === null) {
+      const m = ctx.entitiesNear(b.x, b.y, b.z, 16)
+        .find((e): e is Mob => e instanceof Mob && e.spec.hostile && e.kind !== "creeper" && !e.dying);
+      if (m) this.targetMob = m.id;
+    }
+    // The original's blow: 7 to 21, and it throws its victim into the air.
+    const damage = 7 + Math.floor(ctx.random() * 15);
+    const mob = this.mobTarget(ctx, 24);
+    if (mob) { this.fightMob(ctx, move, mob, damage, 0.4); move.speedMul = 1.4; return; }
+    const angry = this.lastAttacker && !this.lastAttacker.startsWith("mob:")
+      ? ctx.players().find((p) => p.id === this.lastAttacker && p.targetable) ?? null : null;
+    if (angry) {
+      this.steer(ctx, move, angry.x, angry.z, false);
+      const reach = (b.width + angry.width) / 2 + 0.7;
+      if (Math.hypot(angry.x - b.x, angry.z - b.z) < reach && this.attackCooldown <= 0) {
+        this.attackCooldown = 20;
+        const diff = ctx.difficulty;
+        const dmg = diff === 1 ? damage / 2 + 1 : diff === 3 ? damage * 1.5 : damage;
+        if (diff > 0) ctx.hurtPlayer(angry.id, dmg, "mob", b.x, b.z, 0.8, this.id);
+      }
+      return;
+    }
+    if (this.home && Math.hypot(b.x - this.home.x, b.z - this.home.z) > 16) this.steer(ctx, move, this.home.x, this.home.z, true);
+    else this.wanderAi(ctx, move, 1 / 200);
+    move.speedMul = 0.6;
   }
 
   /**
@@ -595,8 +765,14 @@ export class Mob extends Entity {
   }
 
   /** Right-click with an item. Returns what happened, so the caller can consume the item. */
-  interact(ctx: EntityContext, itemName: string | null, playerId: string): "fed" | "sheared" | "milked" | "dyed" | null {
+  interact(ctx: EntityContext, itemName: string | null, playerId: string): "fed" | "sheared" | "milked" | "dyed" | "trade" | "refuse" | null {
     if (this.dying) return null;
+    if (this.kind === "villager") {
+      if (this.profession !== "none" && this.offers.length) return "trade";
+      // An unemployed villager shakes its head.
+      ctx.sound("villager_no", this.x, this.y + 1.5, this.z, 0.8);
+      return "refuse";
+    }
     if (itemName && this.spec.tempt.includes(itemName) && !this.baby && this.loveCooldown <= 0 && this.love <= 0) {
       this.love = 600;
       this.lastAttacker = null;
@@ -666,6 +842,8 @@ export class Mob extends Entity {
       case "creeper": return it("gunpowder", r(0, 2));
       case "spider": return [...it("string", r(0, 2)), ...(ctx.random() < 0.33 ? it("spider_eye", 1) : [])];
       case "slime": return this.size === 1 ? it("slime_ball", r(0, 2)) : [];
+      case "villager": return [];
+      case "iron_golem": return [...it("iron_ingot", r(3, 5)), ...it("poppy", r(0, 2))];
     }
   }
 
@@ -678,6 +856,10 @@ export class Mob extends Entity {
         fu: this.fuse, fi: this.fireTicks > 0 ? 1 : 0, lv: this.love > 0 ? 1 : 0, p: this.persistent ? 1 : 0,
         sz: this.size, sq: Math.round(this.squish * 10),
         ef: this.effects.length ? this.effects.map((e) => [e.kind, e.ticks, e.amp]) : undefined,
+        ...(this.kind === "villager" ? { vp: this.profession, vx: this.villagerXp, vo: this.offers, vj: this.job ?? undefined } : {}),
+        vh: this.home ?? undefined,
+        // A guest draws the golem's swing from this; it has no attack of its own to time it.
+        ac: this.kind === "iron_golem" && this.attackCooldown > 0 ? this.attackCooldown : undefined,
       },
     };
   }
@@ -706,6 +888,15 @@ export class Mob extends Entity {
       this.effects = (d.ef as unknown[]).flatMap((e) => (Array.isArray(e) && typeof e[0] === "string" && typeof e[1] === "number" && typeof e[2] === "number"
         ? [{ kind: e[0] as StatusEffect, ticks: e[1], amp: e[2] }] : []));
     } else this.effects = [];
+    if (this.kind === "villager") {
+      this.profession = typeof d.vp === "string" && (PROFESSIONS as readonly string[]).includes(d.vp) ? (d.vp as Profession) : "none";
+      if (typeof d.vx === "number") this.villagerXp = d.vx;
+      if (Array.isArray(d.vo)) this.offers = (d.vo as unknown[]).map(sanitizeOffer).filter((o): o is Offer => o !== null);
+      this.job = Array.isArray(d.vj) && d.vj.length === 3 ? (d.vj as [number, number, number]) : null;
+    }
+    if (this.kind === "iron_golem") this.attackCooldown = typeof d.ac === "number" ? d.ac : 0;
+    const h = d.vh as { x?: unknown; z?: unknown } | undefined;
+    this.home = h && typeof h.x === "number" && typeof h.z === "number" ? { x: h.x, z: h.z } : null;
   }
 }
 

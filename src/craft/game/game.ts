@@ -40,6 +40,8 @@ import { bottleBits, tickBrewing } from "../engine/brewing";
 import { levelOf } from "../engine/enchanting";
 import { potionOfItem, splashSeconds } from "../engine/potions";
 import { Boat, Minecart, Vehicle, vehicleFromSnapshot } from "../engine/vehicles";
+import { golemParts, villageLoot } from "../engine/villages";
+import { hash4 } from "../engine/rng";
 import { Actions } from "./actions";
 import type { ThrowExtra } from "../net/session";
 import { runCommand } from "./commands";
@@ -83,6 +85,8 @@ export interface NetLink {
   pushRemote?(id: string, dx: number, dy: number, dz: number): void;
   /** Guest → host: climb into, or out of, a vehicle; where the vehicle a guest drives went; put one down. */
   mount?(entityId: number, on: boolean): void;
+  /** Guest → host: a trade was made with a villager (the host owns its experience and stock). */
+  trade?(entityId: number, offer: number): void;
   vehiclePose?(v: Vehicle): void;
   placeVehicle?(kind: string, x: number, y: number, z: number, yaw: number, wood: number): void;
   close(): void;
@@ -239,6 +243,7 @@ export class Game {
       (chunk, fromSave) => {
         this.net?.chunkLoaded?.(chunk.cx, chunk.cz, fromSave);
         if (this.simulates) this.redstone.onChunkLoaded(chunk);
+        if (this.simulates && !fromSave) this.settleVillages(chunk.cx, chunk.cz);
       },
     );
     this.applySettings(opts.settings);
@@ -667,6 +672,61 @@ export class Game {
     if (chunk) this.dirtySave.add(chunk.id);
     if (c.cause !== "remote") this.net?.blockChanged(c);
     if (this.simulates && isLog(c.prevId) && c.id !== c.prevId) this.rules.logRemoved(c.x, c.y, c.z);
+    // A pumpkin set on a T of iron blocks may wake a golem; checked after the change settles.
+    if (this.simulates && (c.id === B.CARVED_PUMPKIN || c.id === B.JACK_O_LANTERN)) this.golemChecks.push([c.x, c.y, c.z]);
+  }
+
+  private golemChecks: [number, number, number][] = [];
+
+  /** Iron blocks in a T with a pumpkin for a head come alive as an iron golem, as in the original. */
+  private buildGolems(): void {
+    const w = this.world;
+    for (const [x, y, z] of this.golemChecks.splice(0)) {
+      const parts = golemParts((a, b, c) => w.blockAt(a, b, c), x, y, z);
+      if (!parts) continue;
+      for (const [px, py, pz] of parts) {
+        w.setBlock(px, py, pz, B.AIR, 0, "world");
+        this.particles("block", px + 0.5, py + 0.5, pz + 0.5, 8, B.IRON_BLOCK);
+      }
+      const golem = new Mob("iron_golem", x + 0.5, y - 2, z + 0.5);
+      golem.home = { x: x + 0.5, z: z + 0.5 };
+      this.spawn(golem);
+      this.sound("anvil_use", x + 0.5, y - 1, z + 0.5, 0.8, 0.6);
+    }
+  }
+
+  /**
+   * A freshly generated chunk's share of any village: loot in its house chests,
+   * and — once per village, when its well's chunk first appears — its
+   * villagers at their stations and an iron golem by the well.
+   */
+  private settleVillages(cx: number, cz: number): void {
+    const w = this.world;
+    const done = (this.meta.villages ??= []);
+    for (const v of this.generator.villagesAt(cx, cz)) {
+      for (const h of v.houses) {
+        if (!h.chest) continue;
+        const [x, y, z] = h.chest;
+        if (x >> 4 !== cx || z >> 4 !== cz || w.blockAt(x, y, z) !== B.CHEST || w.getEntity(x, y, z)) continue;
+        const chest = newChest(27);
+        villageLoot(chest.items, hash4(this.meta.seed, x, y, z));
+        w.setEntity(x, y, z, chest);
+      }
+      if (v.x >> 4 !== cx || v.z >> 4 !== cz || done.includes(v.key)) continue;
+      done.push(v.key);
+      for (const h of v.houses) {
+        const [jx, jy, jz] = h.job;
+        // One step from the station toward the door: the station stands against the back wall.
+        const m = new Mob("villager", jx + 0.5 + (h.front === 3 ? 1 : h.front === 2 ? -1 : 0), jy, jz + 0.5 + (h.front === 1 ? 1 : h.front === 0 ? -1 : 0));
+        m.setProfession(h.profession);
+        m.job = h.job;
+        m.home = { x: v.x, z: v.z };
+        this.spawn(m);
+      }
+      const golem = new Mob("iron_golem", v.x + 3.5, v.y + 1, v.z + 3.5);
+      golem.home = { x: v.x, z: v.z };
+      this.spawn(golem);
+    }
   }
 
   /** Spills a container's contents when it is broken. */
@@ -1305,6 +1365,7 @@ export class Game {
     }
     for (const [id, e] of this.entities) if (e.removed) this.entities.delete(id);
 
+    if (this.golemChecks.length) this.buildGolems();
     if (this.tickCount % 20 === 0) this.spawnMobs();
     this.sleepTick();
   }
@@ -1424,7 +1485,8 @@ export class Game {
     if (!refs.length || !this.meta.rules.doMobSpawning) return;
     let hostile = 0, passive = 0;
     for (const e of this.entities.values()) {
-      if (!(e instanceof Mob)) continue;
+      // Villagers and golems belong to their village: they neither count against animals nor despawn.
+      if (!(e instanceof Mob) || e.kind === "villager" || e.kind === "iron_golem") continue;
       if (e.spec.hostile) {
         hostile++;
         // Despawn monsters nobody is near; peaceful removes them all.

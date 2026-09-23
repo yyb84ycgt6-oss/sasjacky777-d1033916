@@ -23,6 +23,7 @@ import { isArthropod, isUndead, Mob } from "../engine/mobs";
 import { potionOfItem } from "../engine/potions";
 import { isRail, neighboursToReshape, placedShape, railShape, RAIL_EXITS } from "../engine/rails";
 import { Vehicle } from "../engine/vehicles";
+import { compostChance } from "../engine/villages";
 import type { ThrowExtra } from "../net/session";
 import { aabbIntersects, bodyBox } from "../engine/physics";
 import { raycastBlocks, rayBox, type BlockHit } from "../engine/raycast";
@@ -143,7 +144,7 @@ export class Actions {
     if (a.type === "chat") { if (!g.screen) g.setScreen({ kind: "chat", text: a.text ?? "" }); return; }
     if (a.type === "inventory") {
       const k = g.screen?.kind;
-      if (k === "inventory" || k === "crafting" || k === "furnace" || k === "chest" || k === "brewing" || k === "enchanting" || k === "anvil") g.setScreen(null);
+      if (k === "inventory" || k === "crafting" || k === "furnace" || k === "chest" || k === "brewing" || k === "enchanting" || k === "anvil" || k === "trade") g.setScreen(null);
       else if (!g.screen && !p.dead && p.gameMode !== "spectator") g.setScreen({ kind: "inventory" });
       return;
     }
@@ -499,6 +500,15 @@ export class Actions {
       return;
     }
 
+    if (t?.entity instanceof Mob && t.entity.kind === "villager" && fresh && !p.sneaking) {
+      // Guests trade from the offers the host sent along with the villager; the host counts the trades.
+      const v = t.entity;
+      if (v.profession !== "none" && v.offers.length) g.setScreen({ kind: "trade", entityId: v.id });
+      else g.sound("villager_no", v.x, v.y + 1.5, v.z, 0.8);
+      this.swing();
+      return;
+    }
+
     if (t?.entity instanceof Mob && fresh) {
       const name = def?.name ?? null;
       if (g.role === "guest") {
@@ -641,6 +651,32 @@ export class Actions {
     if (!hit || g.world.blockAt(hit.x, hit.y, hit.z) !== B.WATER) return false;
     g.sound("bucket_fill", hit.x + 0.5, hit.y + 0.5, hit.z + 0.5, 0.6, 1.4);
     this.replaceHeld({ id: itemId("water_bottle"), count: 1 });
+    this.swing();
+    return true;
+  }
+
+  /**
+   * Composting: each plant or food has the original's chance to raise the
+   * level; at the top it turns to bone meal, taken out with an empty click.
+   */
+  private useComposter(x: number, y: number, z: number, meta: number, held: ItemDef | undefined): boolean {
+    const g = this.game;
+    const level = meta & 15;
+    if (level >= 8) {
+      g.world.setBlock(x, y, z, B.COMPOSTER, 0, "player");
+      g.dropItem(x + 0.5, y + 1.1, z + 0.5, { id: itemId("bone_meal"), count: 1 });
+      g.sound("compost", x + 0.5, y + 0.5, z + 0.5, 0.8, 1.3);
+      this.swing();
+      return true;
+    }
+    const chance = held ? compostChance(held.name) : undefined;
+    if (chance === undefined) return false;
+    this.consumeHeld();
+    if (Math.random() < chance) {
+      g.world.setBlock(x, y, z, B.COMPOSTER, level + 1 >= 7 ? 8 : level + 1, "player");
+      g.particles("crit", x + 0.5, y + 0.9, z + 0.5, 4);
+    }
+    g.sound("compost", x + 0.5, y + 0.5, z + 0.5, 0.6);
     this.swing();
     return true;
   }
@@ -870,6 +906,12 @@ export class Actions {
         return true;
       case "cauldron":
         return this.useCauldron(x, y, z, meta, held);
+      case "composter":
+        return this.useComposter(x, y, z, meta, held);
+      case "bell":
+        g.sound("bell", x + 0.5, y + 0.5, z + 0.5, 1);
+        this.swing();
+        return true;
       case "door": {
         if (isTrapdoor(id)) {
           const open = (meta & 4) === 0;

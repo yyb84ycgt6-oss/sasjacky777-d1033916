@@ -59,6 +59,8 @@ export interface WorldMeta {
   /** Online guests' saved state, by their stable client id. */
   players: Record<string, PlayerSave & { name: string }>;
   entities: EntitySnapshot[];
+  /** Villages already given their villagers and golem, by region key, so none is populated twice. */
+  villages?: string[];
   thumbnail?: string;
   version: 1;
 }

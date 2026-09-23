@@ -86,6 +86,28 @@ const MODELS: Record<string, PartSpec[]> = {
     { name: "core", size: [6, 6, 6], uv: [0, 16], pivot: [0, 4, 0] },
     { name: "gel", size: [8, 8, 8], uv: [0, 0], pivot: [0, 4, 0], material: "gel" },
   ],
+  villager: [
+    { name: "rightLeg", size: [4, 12, 4], uv: [0, 22], pivot: [-2, 12, 0], offset: [0, -6, 0] },
+    { name: "leftLeg", size: [4, 12, 4], uv: [0, 22], pivot: [2, 12, 0], offset: [0, -6, 0] },
+    { name: "body", size: [8, 12, 6], uv: [16, 20], pivot: [0, 18, 0] },
+    { name: "robe", size: [8, 18, 6], uv: [0, 38], pivot: [0, 15, 0], inflate: 0.5 },
+    { name: "head", size: [8, 10, 8], uv: [0, 0], pivot: [0, 24, 0], offset: [0, 5, 0],
+      children: [{ name: "nose", size: [2, 4, 2], uv: [24, 0], pivot: [0, -2, -5] }] },
+    // Arms folded across the chest, the villager's pose.
+    { name: "armR", size: [4, 8, 4], uv: [44, 22], pivot: [-6, 22, -1], offset: [0, -3, 0], rotation: [-0.75, 0, 0] },
+    { name: "armL", size: [4, 8, 4], uv: [44, 22], pivot: [6, 22, -1], offset: [0, -3, 0], rotation: [-0.75, 0, 0] },
+    { name: "armsX", size: [8, 4, 4], uv: [40, 38], pivot: [0, 18.5, -3.5], rotation: [-0.75, 0, 0] },
+  ],
+  iron_golem: [
+    { name: "legR", size: [6, 16, 5], uv: [0, 41], pivot: [-4, 16, 0], offset: [0, -8, 0] },
+    { name: "legL", size: [6, 16, 5], uv: [0, 41], pivot: [4, 16, 0], offset: [0, -8, 0] },
+    { name: "waist", size: [9, 9, 6], uv: [0, 0], pivot: [0, 20.5, 0] },
+    { name: "body", size: [18, 12, 11], uv: [0, 0], pivot: [0, 31, 0] },
+    { name: "head", size: [8, 10, 8], uv: [0, 23], pivot: [0, 35, -2], offset: [0, 5, 0],
+      children: [{ name: "nose", size: [2, 4, 2], uv: [24, 23], pivot: [0, -2, -5] }] },
+    { name: "armR", size: [4, 30, 6], uv: [32, 23], pivot: [-11, 36, 0], offset: [0, -13, 0] },
+    { name: "armL", size: [4, 30, 6], uv: [32, 23], pivot: [11, 36, 0], offset: [0, -13, 0] },
+  ],
   player: HUMANOID(false),
   zombie: HUMANOID(false),
   skeleton: HUMANOID(true),
@@ -280,6 +302,16 @@ export function pose(m: ModelInstance, kind: string, p: PoseInput): void {
       }
       if (p.sitting) { set("rightLeg", -1.4, 0.1); set("leftLeg", -1.4, -0.1); }
       else { set("rightLeg", swing); set("leftLeg", -swing); }
+      break;
+    }
+    case "villager":
+      set("rightLeg", swing * 0.8); set("leftLeg", -swing * 0.8);
+      break;
+    case "iron_golem": {
+      // Slow, heavy strides; both arms come up to strike.
+      set("legR", swing * 0.6); set("legL", -swing * 0.6);
+      const raise = p.swing > 0 ? -2 * p.swing : 0;
+      set("armR", raise - swing * 0.5); set("armL", raise + swing * 0.5);
       break;
     }
     case "boat": {

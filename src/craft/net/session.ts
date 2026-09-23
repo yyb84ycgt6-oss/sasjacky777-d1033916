@@ -301,6 +301,7 @@ export class NetSession implements NetLink {
   advanceRemote(id: string, event: AdvancementEvent): void { this.push(["av", id, event]); }
   pushRemote(id: string, dx: number, dy: number, dz: number): void { this.push(["pu", id, dx, dy, dz]); }
   mount(entityId: number, on: boolean): void { if (this.role === "guest") this.push(["mo", entityId, on ? 1 : 0]); }
+  trade(entityId: number, offer: number): void { this.push(["tr", entityId, offer]); }
   vehiclePose(v: Vehicle): void {
     const b = v.body;
     this.push(["vp", v.id, r3(b.x), r3(b.y), r3(b.z), r3(v.yaw), r3(b.vx), r3(b.vy), r3(b.vz)]);
@@ -547,6 +548,7 @@ export class NetSession implements NetLink {
         case "dr": if (this.role === "host") this.onDrops(op); break;
         case "th": if (this.role === "host") this.onThrow(from, op); break;
         case "mo": if (this.role === "host") this.onMount(from, op); break;
+        case "tr": if (this.role === "host") this.onTrade(from, op); break;
         case "vp": if (this.role === "host") this.onVehiclePose(from, op); break;
         case "pv": if (this.role === "host") this.onPlaceVehicle(from, op); break;
         case "tn": if (this.role === "host" && finite(op[1], op[2], op[3])) g.spawn(new PrimedTnt((op[1] as number) + 0.5, op[2] as number, (op[3] as number) + 0.5, 80)); break;
@@ -740,6 +742,19 @@ export class NetSession implements NetLink {
     // First come, first seated; a guest can only climb out of their own seat.
     if (on === 1 && (v.rider === null || v.rider === from)) v.rider = from;
     else if (on === 0 && v.rider === from) v.rider = null;
+  }
+
+  private onTrade(from: string, op: Op): void {
+    const g = this.game!;
+    const [, id, index] = op;
+    const v = g.entities.get(id as number);
+    const r = g.remote.get(from);
+    if (!(v instanceof Mob) || v.kind !== "villager" || !int(index)) return;
+    // A trade from a guest the host cannot place is refused, not waved through.
+    if (!r || Math.hypot(r.x - v.x, r.z - v.z) > 10) return;
+    const offer = v.offers[index as number];
+    if (!offer || offer.uses >= offer.maxUses) return;
+    if (v.traded(index as number)) g.particles("potion", v.x, v.y + 2.2, v.z, 12, 0x50e050);
   }
 
   private onVehiclePose(from: string, op: Op): void {

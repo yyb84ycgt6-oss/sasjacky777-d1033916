@@ -17,7 +17,7 @@ import type { World } from "./world";
 
 export type EntityKind =
   | "item" | "xp" | "arrow" | "snowball" | "egg" | "potion" | "xp_bottle" | "falling_block" | "tnt"
-  | "pig" | "cow" | "sheep" | "chicken" | "zombie" | "skeleton" | "creeper" | "spider" | "slime"
+  | "pig" | "cow" | "sheep" | "chicken" | "zombie" | "skeleton" | "creeper" | "spider" | "slime" | "villager" | "iron_golem"
   | "boat" | "minecart" | "tnt_minecart";
 
 export interface PlayerRef {

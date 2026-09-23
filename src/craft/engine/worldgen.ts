@@ -21,6 +21,7 @@ import { blockIndex, CHUNK_SIZE, CHUNK_VOLUME, DEEPSLATE_LEVEL, SEA_LEVEL, WORLD
 import { Simplex } from "./noise";
 import { hash4, Rng } from "./rng";
 import { buildTree, type Place } from "./trees";
+import { buildVillage, crowdsVillage, villagesTouching, type Terrain } from "./villages";
 
 export type WorldType = "default" | "amplified" | "flat" | "large_biomes";
 
@@ -194,6 +195,10 @@ export class Generator {
     return Math.floor(this.column(x, z).height);
   }
 
+  biomeAt(x: number, z: number): number {
+    return this.column(x, z).biome;
+  }
+
   // ---- caves ---------------------------------------------------------------------
 
   private caveSample(x: number, y: number, z: number): [number, number, number] {
@@ -265,8 +270,29 @@ export class Generator {
     this.placeOres(blocks, cx, cz, biomes);
     this.decorate(blocks, cx, cz, heights, biomes);
     this.placeFeatures(blocks, meta, cx, cz);
+    this.placeVillages(blocks, meta, cx, cz);
     this.freeze(blocks, biomes);
     return { blocks, meta, biomes };
+  }
+
+  /** The villages overlapping this chunk, built after trees so their roads and houses win. */
+  private placeVillages(blocks: Uint8Array, meta: Uint8Array, cx: number, cz: number): void {
+    const x0 = cx * 16, z0 = cz * 16;
+    for (const v of villagesTouching(this as Terrain, this.seed, cx, cz)) {
+      buildVillage(v, this, (x, y, z, id, m = 0) => {
+        const lx = x - x0, lz = z - z0;
+        if (lx < 0 || lx >= 16 || lz < 0 || lz >= 16 || y < 1 || y >= WORLD_HEIGHT) return;
+        const i = blockIndex(lx, y, lz);
+        blocks[i] = id;
+        meta[i] = m;
+      });
+    }
+  }
+
+  /** The villages overlapping a chunk, for the game to populate. */
+  villagesAt(cx: number, cz: number): ReturnType<typeof villagesTouching> {
+    if (this.type === "flat") return [];
+    return villagesTouching(this, this.seed, cx, cz);
   }
 
   private fillColumn(blocks: Uint8Array, x: number, z: number, wx: number, wz: number, col: Column): void {
@@ -500,6 +526,8 @@ export class Generator {
           if (y < SEA_LEVEL || y + 16 >= WORLD_HEIGHT) continue;
           if (b.top !== B.GRASS && b.top !== B.MOSS) continue;
           if (this.isCarved(x, y, z) || this.isCarved(x, y + 1, z)) continue;
+          // Village ground stays clear: a canopy left over a roof, or a trunk through a floor, looks broken.
+          if (villagesTouching(this as Terrain, this.seed, x >> 4, z >> 4, 4).some((v) => crowdsVillage(v, x, z))) continue;
           const kind = pickWeighted(b.treeKinds, kindRoll);
           buildTree(kind, place, x, y + 1, z, new Rng(treeSeed));
         }

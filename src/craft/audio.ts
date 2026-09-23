@@ -234,13 +234,21 @@ export class GameAudio {
         break;
       case "anvil_use": this.tone(out, t, "square", 1100 * p, 1050 * p, 0.25, 0.18); this.tone(out, t, "triangle", 2250 * p, 2200 * p, 0.35, 0.12); this.noiseBurst(out, t, 0.05, "highpass", 4000, 1, 0.3); break;
       case "anvil_break": this.noiseBurst(out, t, 0.5, "bandpass", 900, 0.8, 0.6); this.tone(out, t, "square", 400, 150, 0.4, 0.2); break;
+      // A struck bell: two inharmonic partials ringing out over two seconds.
+      case "bell":
+        this.tone(out, t, "sine", 880 * p, 878 * p, 2.2, 0.35);
+        this.tone(out, t, "sine", 2270 * p, 2265 * p, 1.2, 0.12);
+        this.tone(out, t, "triangle", 440 * p, 439 * p, 1.6, 0.1);
+        break;
+      case "compost": this.noiseBurst(out, t, 0.18, "lowpass", 900 * p, 1.2, 0.5, 0.7); break;
       default:
         this.mob(name, out, t, p);
     }
   }
 
   private mob(name: string, out: AudioNode, t: number, p: number): void {
-    const [kind, what] = name.split("_");
+    // "iron_golem_hurt" is the golem's, not an "iron" mob's.
+    const [kind, what] = name.startsWith("iron_golem") ? ["iron_golem", name.slice(11)] : name.split("_");
     const death = what === "death";
     const low = death ? 0.75 : 1;
     switch (kind) {
@@ -272,6 +280,19 @@ export class GameAudio {
       case "spider": this.noiseBurst(out, t, 0.3, "bandpass", 1600, 3, 0.4, 0.6); this.tone(out, t, "square", 200, 150, 0.2, 0.1); break;
       // A wet slap: a low thump under a short band of noise, pitched by the slime's size.
       case "slime": this.tone(out, t, "sine", 180 * p * low, 90 * p * low, 0.15, 0.4); this.noiseBurst(out, t, 0.12, "bandpass", 700 * p, 2, 0.35, 0.8); break;
+      // The villager's "hmm": a nasal hum that rises for yes, falls for no, and wobbles otherwise.
+      case "villager": {
+        const [from, to] = what === "yes" ? [190, 260] : what === "no" ? [230, 150] : [210 * low, 180 * low];
+        this.tone(out, t, "sawtooth", from * p, to * p, what === "death" ? 0.6 : 0.35, 0.18, 0.05);
+        this.tone(out, t, "square", from * 2 * p, to * 2 * p, 0.3, 0.05, 0.05);
+        break;
+      }
+      // Clanking iron: a hollow knock under metallic ringing.
+      case "iron_golem":
+        this.tone(out, t, "square", 90 * low, 60 * low, 0.3, 0.3);
+        this.noiseBurst(out, t, 0.25, "bandpass", 1800, 5, 0.4);
+        this.tone(out, t, "sine", 1250 * p, 1240 * p, 0.5, 0.08);
+        break;
     }
   }
 

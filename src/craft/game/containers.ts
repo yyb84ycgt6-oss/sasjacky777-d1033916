@@ -16,6 +16,8 @@ import { isBottle, isBrewingFuel, isBrewingIngredient } from "../engine/brewing"
 import {
   ANVIL_LIMIT, anvilResult, countBookshelves, isEnchantable, rollEnchantments, tableClue, tableLevels, type AnvilResult,
 } from "../engine/enchanting";
+import { Mob } from "../engine/mobs";
+import { canAfford } from "../engine/trading";
 import type { Game } from "./game";
 
 export type Section = "inv" | "armor" | "offhand" | "grid" | "result" | "chest" | "furnace" | "brewing" | "work" | "anvil_out";
@@ -466,4 +468,55 @@ export function furnaceView(game: Game): FurnaceEntity | null {
 
 export function chestView(game: Game): ChestEntity | null {
   return chestOf(game);
+}
+
+// ---- trading ---------------------------------------------------------------------------------
+
+/** The villager on the open trade screen, while it is alive and within reach. */
+export function tradingWith(game: Game): Mob | null {
+  const s = game.screen;
+  if (s?.kind !== "trade") return null;
+  const v = game.entities.get(s.entityId);
+  if (!(v instanceof Mob) || v.kind !== "villager" || v.dying || v.removed) return null;
+  const b = game.player.body;
+  if (Math.hypot(v.x - b.x, v.y - b.y, v.z - b.z) > 8) return null;
+  return v;
+}
+
+/**
+ * Makes a trade (or as many as the player can pay for, with `all`): takes
+ * the price from the inventory, hands over the goods, and credits the
+ * villager — here, or through the host when this is a guest, since the host
+ * owns every mob. Returns how many trades were made.
+ */
+export function makeTrade(game: Game, index: number, all: boolean): number {
+  const v = tradingWith(game);
+  if (!v) return 0;
+  const inv = game.player.inventory;
+  let made = 0;
+  for (let i = 0; i < (all ? 64 : 1); i++) {
+    const o = v.offers[index];
+    if (!o || !canAfford(o, (id) => inv.count(id))) break;
+    const goods = { ...o.sell, ench: o.sell.ench ? { ...o.sell.ench } : undefined };
+    if (!goods.ench) delete goods.ench;
+    // Only trade what fits; the goods are never dropped on the floor behind the player's back.
+    const probe = inv.slots.map((s) => (s ? { ...s } : null));
+    if (mergeInto(goods, probe, range(0, 36))) break;
+    inv.remove(o.buy.id, o.buy.count);
+    if (o.buyB) inv.remove(o.buyB.id, o.buyB.count);
+    mergeInto(goods, inv.slots, [...range(0, 9), ...range(9, 36)]);
+    if (game.role === "guest") {
+      o.uses++;
+      game.net?.trade?.(v.id, index);
+    } else if (v.traded(index)) {
+      game.particles("potion", v.x, v.y + 2.2, v.z, 12, 0x50e050);
+      game.sound("levelup", v.x, v.y + 1, v.z, 0.5, 1.4);
+    }
+    game.collectXp(3 + Math.floor(Math.random() * 4));
+    made++;
+  }
+  if (made) game.sound("villager_yes", v.x, v.y + 1.5, v.z, 0.8);
+  else game.sound("villager_no", v.x, v.y + 1.5, v.z, 0.8);
+  game.bumpInv();
+  return made;
 }

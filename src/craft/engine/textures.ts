@@ -1222,6 +1222,92 @@ def("rail_corner", (p, r) => {
   }
 });
 
+// ---- village job sites -------------------------------------------------------------------
+
+const JOB_OAK = hex("#9c7a45"), JOB_DARK = hex("#5e4526");
+def("composter_side", (p, r) => {
+  planks(p, r, JOB_OAK);
+  for (let y = 0; y < 16; y++) { p.set(0, y, JOB_DARK); p.set(15, y, JOB_DARK); }
+  for (const y of [0, 7, 15]) for (let x = 0; x < 16; x++) p.set(x, y, JOB_DARK);
+});
+def("composter_top", (p, r) => { planks(p, r, JOB_OAK); frame(p, JOB_DARK); rect(p, 2, 2, 13, 13, hex("#000000"), 0); });
+def("composter_bottom", (p, r) => planks(p, r, shade(JOB_OAK, 0.85)));
+def("compost", (p, r) => { noisy(p, r, hex("#5a4a2a"), 0.2, 2); speckle(p, r, [hex("#6a8a3a"), hex("#3a2a1a")], 0.15); });
+def("compost_ready", (p, r) => { noisy(p, r, hex("#6a5a3a"), 0.2, 2); speckle(p, r, [hex("#e8e6da"), hex("#d8d6c8")], 0.3); });
+
+def("lectern_top", (p, r) => {
+  planks(p, r, JOB_OAK);
+  // An open book resting on the desk.
+  rect(p, 3, 4, 12, 11, hex("#f2ecd8"));
+  for (let y = 4; y <= 11; y++) p.set(7, y, hex("#b8aa88"));
+  for (let y = 5; y <= 10; y += 2) for (let x = 4; x <= 11; x++) if (x !== 7 && r.next() < 0.7) p.set(x, y, hex("#6a6a6a"));
+});
+def("lectern_side", (p, r) => { planks(p, r, shade(JOB_OAK, 0.9)); frame(p, JOB_DARK); });
+
+const smokerStone = (p: Pixels, r: Rng) => { noisy(p, r, hex("#5a5a5a"), 0.1, 4); bevel(p, 1.2, 0.7); };
+def("smoker_side", (p, r) => { smokerStone(p, r); for (let x = 0; x < 16; x++) { p.set(x, 0, JOB_DARK); p.set(x, 15, JOB_DARK); } });
+def("smoker_bottom", smokerStone);
+def("smoker_top", (p, r) => { smokerStone(p, r); rect(p, 4, 4, 11, 11, hex("#222222")); frame16(p, 4, 4, 11, 11, JOB_DARK); });
+def("smoker_front", (p, r) => {
+  smokerStone(p, r);
+  for (let x = 0; x < 16; x++) { p.set(x, 0, JOB_DARK); p.set(x, 15, JOB_DARK); }
+  rect(p, 3, 7, 12, 12, hex("#1b1b1b"));
+  for (let x = 3; x <= 12; x += 2) p.set(x, 6, hex("#8a8a8a"));
+});
+
+def("barrel_side", (p, r) => {
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) p.set(x, y, shade(JOB_OAK, (x % 4 === 0 ? 0.75 : 0.95) + r.next() * 0.1));
+  for (const y of [2, 13]) for (let x = 0; x < 16; x++) p.set(x, y, hex("#4a4a4a"));
+});
+def("barrel_bottom", (p, r) => { planks(p, r, shade(JOB_OAK, 0.9)); frame(p, JOB_DARK); });
+def("barrel_top", (p, r) => { planks(p, r, shade(JOB_OAK, 0.9)); frame(p, JOB_DARK); rect(p, 6, 6, 9, 9, JOB_DARK); });
+
+def("fletching_table_top", (p, r) => { planks(p, r, hex("#c8b77a")); frame(p, JOB_DARK); });
+def("fletching_table_side", (p, r) => { planks(p, r, hex("#c8b77a")); for (let x = 0; x < 16; x++) p.set(x, 0, JOB_DARK); });
+def("fletching_table_front", (p, r) => {
+  planks(p, r, hex("#c8b77a"));
+  for (let x = 0; x < 16; x++) p.set(x, 0, JOB_DARK);
+  // A feathered arrow hung on the front.
+  for (let i = 2; i <= 13; i++) p.set(i, 15 - i, hex("#6b4a26"));
+  rect(p, 11, 2, 13, 4, hex("#8a8a8a"));
+  rect(p, 2, 11, 4, 13, hex("#f0f0f0"));
+});
+
+def("loom_top", (p, r) => { planks(p, r, shade(JOB_OAK, 1.05)); rect(p, 3, 3, 12, 12, hex("#e8e0c8")); });
+def("loom_bottom", (p, r) => planks(p, r, shade(JOB_OAK, 0.85)));
+def("loom_side", (p, r) => { planks(p, r, JOB_OAK); frame(p, JOB_DARK); });
+def("loom_front", (p, r) => {
+  planks(p, r, JOB_OAK);
+  // Threads strung across the frame.
+  for (let x = 3; x <= 12; x += 2) for (let y = 3; y <= 12; y++) p.set(x, y, hex("#e8e0c8"));
+  for (let x = 2; x <= 13; x++) { p.set(x, 2, JOB_DARK); p.set(x, 13, JOB_DARK); }
+});
+
+def("stonecutter_top", (p, r) => { stone(p, r, hex("#8a8a8a")); rect(p, 1, 7, 14, 8, hex("#3a3a3a")); });
+def("stonecutter_side", (p, r) => { stone(p, r, hex("#8a8a8a")); for (let x = 0; x < 16; x++) { p.set(x, 0, hex("#5a5a5a")); p.set(x, 8, hex("#5a5a5a")); } });
+def("stonecutter_bottom", (p, r) => stone(p, r, hex("#7a7a7a")));
+def("stonecutter_saw", (p) => {
+  p.clear();
+  // A round blade with teeth, see-through around it.
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+    const d = Math.hypot(x - 7.5, y - 7.5);
+    if (d < 6.5) p.set(x, y, d > 5.5 ? hex("#dcdcdc") : hex("#a8a8a8"));
+    else if (d < 7.5 && (x + y) % 2 === 0) p.set(x, y, hex("#f0f0f0"));
+  }
+});
+
+def("smithing_table_top", (p, r) => { noisy(p, r, hex("#3a3a44"), 0.1, 2); frame(p, hex("#1e1e24")); });
+def("smithing_table_bottom", (p, r) => planks(p, r, JOB_DARK));
+def("smithing_table_side", (p, r) => { planks(p, r, JOB_DARK); for (let y = 0; y < 3; y++) for (let x = 0; x < 16; x++) p.set(x, y, hex("#3a3a44")); });
+def("smithing_table_front", (p, r) => {
+  planks(p, r, JOB_DARK);
+  for (let y = 0; y < 3; y++) for (let x = 0; x < 16; x++) p.set(x, y, hex("#3a3a44"));
+  rect(p, 5, 6, 10, 8, hex("#9a9a9a")); rect(p, 7, 9, 8, 13, hex("#6b4a26"));
+});
+
+def("bell_side", (p, r) => { noisy(p, r, hex("#e8c040"), 0.12, 2); for (let x = 0; x < 16; x++) p.set(x, 0, hex("#b08a20")); });
+def("bell_top", (p, r) => { noisy(p, r, hex("#f0cc50"), 0.1, 2); frame(p, hex("#b08a20")); });
+
 // ---- items ------------------------------------------------------------------------------
 
 type ItemPalette = Record<string, C>;

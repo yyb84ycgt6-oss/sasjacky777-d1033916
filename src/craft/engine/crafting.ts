@@ -182,6 +182,16 @@ shapeless("fermented_spider_eye", ["spider_eye", "brown_mushroom", "sugar"], "fe
 shaped("glistering_melon_slice", ["NNN", "NMN", "NNN"], { N: "gold_nugget", M: "melon_slice" }, "glistering_melon_slice");
 shaped("golden_carrot", ["NNN", "NCN", "NNN"], { N: "gold_nugget", C: "carrot" }, "golden_carrot");
 
+// Village work stations
+shaped("composter", ["S S", "S S", "SSS"], { S: "oak_slab" }, "composter");
+shaped("lectern", ["SSS", " B ", " S "], { S: "oak_slab", B: "bookshelf" }, "lectern");
+shaped("smoker", [" L ", "LFL", " L "], { L: "#logs", F: "furnace" }, "smoker");
+shaped("barrel", ["PSP", "P P", "PSP"], { P: "#planks", S: "oak_slab" }, "barrel");
+shaped("fletching_table", ["FF", "PP", "PP"], { F: "flint", P: "#planks" }, "fletching_table");
+shaped("loom", ["SS", "PP"], { S: "string", P: "#planks" }, "loom");
+shaped("stonecutter", [" I ", "SSS"], { I: "iron_ingot", S: "stone" }, "stonecutter");
+shaped("smithing_table", ["II", "PP", "PP"], { I: "iron_ingot", P: "#planks" }, "smithing_table");
+
 // Rails and vehicles
 shaped("rail", ["I I", "ISI", "I I"], { I: "iron_ingot", S: "stick" }, "rail", 16);
 shaped("powered_rail", ["G G", "GSG", "GRG"], { G: "gold_ingot", S: "stick", R: "redstone" }, "powered_rail", 6);

@@ -12,6 +12,7 @@ import { DAY_TICKS, WORLD_HEIGHT } from "../engine/constants";
 import { allItems, itemByName, itemDef, type StatusEffect } from "../engine/items";
 import { canApply, compatible, enchantDef, enchantLabel, ENCHANTMENTS } from "../engine/enchanting";
 import { Mob, MOB_KINDS, type MobKind } from "../engine/mobs";
+import { PROFESSIONS, type Profession } from "../engine/villages";
 import type { GameMode } from "../engine/player";
 import type { Game } from "./game";
 import type { GameRules } from "./save";
@@ -35,7 +36,7 @@ const HELP = [
   "/tp <x> <y> <z>, /tp spawn",
   "/setblock <x> <y> <z> <block>, /fill <x1> <y1> <z1> <x2> <y2> <z2> <block>",
   "/weather clear|rain|thunder",
-  "/summon <mob> [size]  (pig, cow, sheep, chicken, zombie, skeleton, creeper, spider, slime)",
+  "/summon <mob> [size|profession]  (pig, cow, ..., slime 4, villager librarian, iron_golem)",
   "/effect <speed|strength|fire_resistance|...> [seconds] [level] | /effect clear",
   "/enchant <enchantment> [level]   (the held item, e.g. /enchant sharpness 5)",
   "/xp add <amount>, /clear, /kill, /seed, /spawnpoint",
@@ -222,6 +223,13 @@ export function runCommand(game: Game, line: string): Line[] {
         if (size !== 1 && size !== 2 && size !== 4) return [{ text: "A slime's size is 1, 2 or 4", color: ERR }];
         mob.setSize(size);
       }
+      if (kind === "villager" && args[1] !== undefined) {
+        const job = args[1].toLowerCase() as Profession;
+        if (!PROFESSIONS.includes(job)) return [{ text: `A villager's profession is one of ${PROFESSIONS.join(", ")}`, color: ERR }];
+        mob.setProfession(job);
+      }
+      // A summoned villager or golem keeps to where it was summoned, as one from a village keeps to its well.
+      if (kind === "villager" || kind === "iron_golem") mob.home = { x: mob.body.x, z: mob.body.z };
       game.spawn(mob);
       return [{ text: `Summoned new ${kind}` }];
     }

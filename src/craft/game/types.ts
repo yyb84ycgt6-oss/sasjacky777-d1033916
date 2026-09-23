@@ -46,6 +46,7 @@ export type Screen =
   | { kind: "brewing"; x: number; y: number; z: number }
   | { kind: "enchanting"; x: number; y: number; z: number }
   | { kind: "anvil"; x: number; y: number; z: number }
+  | { kind: "trade"; entityId: number }
   | { kind: "chat"; text: string }
   | { kind: "options" }
   | { kind: "share" }

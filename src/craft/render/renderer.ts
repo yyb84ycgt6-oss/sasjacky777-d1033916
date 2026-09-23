@@ -15,6 +15,7 @@ import type { Entity } from "../engine/entities";
 import { ItemEntity, PrimedTnt, FallingBlock, Projectile, XpOrb } from "../engine/entities";
 import { Mob } from "../engine/mobs";
 import { Boat, Vehicle } from "../engine/vehicles";
+import { PROFESSIONS } from "../engine/villages";
 import type { World } from "../engine/world";
 import { itemId } from "../engine/items";
 import { ChunkMeshes } from "./chunkMeshes";
@@ -81,6 +82,8 @@ interface EntityView {
   item?: ItemView;
   lit?: THREE.RawShaderMaterial;
   nameTag?: THREE.Sprite;
+  /** The skin a mob's model was built with, so a change (a villager's new trade) rebuilds it. */
+  variant?: number;
 }
 
 export class WorldRenderer {
@@ -213,12 +216,14 @@ export class WorldRenderer {
 
   private viewFor(e: Entity): EntityView {
     let v = this.views.get(e.id);
-    if (v && v.entity === e) return v;
+    // A villager who takes up a trade changes clothes: rebuild its model.
+    if (v && v.entity === e && (!(e instanceof Mob) || v.variant === skinVariant(e))) return v;
     if (v) this.dropView(e.id);
     const object = new THREE.Group();
     v = { entity: e, object };
     if (e instanceof Mob) {
-      v.model = buildModel(e.kind);
+      v.variant = skinVariant(e);
+      v.model = buildModel(e.kind, v.variant);
       object.add(v.model.root);
     } else if (e instanceof Vehicle) {
       v.model = buildModel(e instanceof Boat ? "boat" : "minecart", e instanceof Boat ? e.wood : 0);
@@ -300,11 +305,12 @@ export class WorldRenderer {
         if (e.kind === "creeper" && e.fuse > 0) yaw += 0;
         pose(v.model, e.kind, {
           x, y, z, yaw, pitch: 0, walk, speed, light: bright, hurt: e.hurtTime > 0, death: e.deathTime > 0 ? e.deathTime + a : 0,
-          swing: 0, time: this.time, baby: e.baby, swell: e.kind === "creeper" ? e.fuse / 30 : 0,
+          time: this.time, baby: e.baby, swell: e.kind === "creeper" ? e.fuse / 30 : 0,
           flash: e.kind === "creeper" && e.fuse > 0 && Math.floor(this.time * 8) % 2 === 0,
           woolColor: e.woolColor, sheared: e.sheared, onGround: e.body.onGround,
           armsForward: e.kind === "zombie" || (e.kind === "skeleton" && e.targetId !== null),
           size: e.size, squish: e.squish,
+          swing: e.kind === "iron_golem" ? Math.max(0, e.attackCooldown - 12) / 8 : 0,
         });
         v.model.root.visible = !e.hasEffect("invisibility");
         v.object.position.set(0, 0, 0);
@@ -548,6 +554,11 @@ function angleDelta(a: number, b: number): number {
 }
 
 /** Snowballs and eggs in flight look like the item that was thrown. */
+/** Which skin a mob wears: a villager's robe follows its trade. */
+function skinVariant(e: Mob): number {
+  return e.kind === "villager" ? (e.profession === "none" ? 0 : PROFESSIONS.indexOf(e.profession) + 1) : 0;
+}
+
 /** Hides a player model's own boxes but keeps whatever it holds in its hand. */
 function setBodyVisible(model: ModelInstance, on: boolean): void {
   model.root.traverse((o) => {

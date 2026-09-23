@@ -8,10 +8,11 @@ import type { Slot } from "../engine/inventory";
 import type { Game } from "../game/game";
 import {
   anvilView, brewingView, chestView, clickContainer, craftOutput, craftWidth, creativeTake, creativeTrash, dropCursor, enchantItem,
-  enchantOffers, fillRecipe, furnaceView, inventoryCounts, type Section,
+  enchantOffers, fillRecipe, furnaceView, inventoryCounts, makeTrade, tradingWith, type Section,
 } from "../game/containers";
+import { canAfford as canAffordOffer, LEVEL_NAMES, LEVEL_XP } from "../engine/trading";
 import { boxRegions, skin } from "../render/skins";
-import { Button, CursorStack, ItemIcon, SlotButton, useTooltip } from "./common";
+import { Button, CursorStack, ItemIcon, SlotButton, StackView, useTooltip } from "./common";
 
 function Grid({ slots, cols, section, game, offset = 0, onHover, quick }: {
   slots: Slot[]; cols: number; section: Section; game: Game; offset?: number; onHover: (s: Slot, x: number, y: number) => void; quick: boolean;
@@ -457,6 +458,66 @@ export function BrewingScreen({ game, mobile }: { game: Game; mobile: boolean })
             </div>
           </div>
         </div>
+        <div className="bc-label">Inventory</div>
+        <PlayerSlots game={game} onHover={onHover} quick={quick} />
+      </Frame>
+      {tip}
+    </>
+  );
+}
+
+/** An item in an offer: shown and explained on hover, but the whole row is what you click. */
+function OfferStack({ stack, onHover }: { stack: Slot; onHover: (s: Slot, x: number, y: number) => void }) {
+  return (
+    <span className="bc-slot" style={{ pointerEvents: "auto" }}
+      onMouseEnter={(e) => onHover(stack, e.clientX, e.clientY)} onMouseMove={(e) => onHover(stack, e.clientX, e.clientY)}
+      onMouseLeave={() => onHover(null, 0, 0)}>
+      <StackView stack={stack} />
+    </span>
+  );
+}
+
+/** Trading with a villager: its offers down the side, pay and take with a click (shift-click: as many as you can). */
+export function TradeScreen({ game, mobile }: { game: Game; mobile: boolean }) {
+  const { tip, onHover } = useTooltip();
+  const [quick, setQuick] = useState(false);
+  const v = tradingWith(game);
+  if (!v) {
+    // The villager died or was left behind: close rather than show a dead screen.
+    queueMicrotask(() => { if (game.screen?.kind === "trade") game.setScreen(null); });
+    return null;
+  }
+  const inv = game.player.inventory;
+  const level = v.villagerLevel;
+  const lo = LEVEL_XP[level - 1] ?? 0, hi = LEVEL_XP[level];
+  const progress = hi === undefined ? 1 : (v.villagerXp - lo) / (hi - lo);
+  const title = `${v.profession[0].toUpperCase()}${v.profession.slice(1)} — ${LEVEL_NAMES[level - 1]}`;
+  return (
+    <>
+      <Frame game={game} title={title} mobile={mobile} quick={quick} setQuick={setQuick}>
+        <div title={`${v.villagerXp} experience`} style={{ height: "calc(var(--u) * 3)", background: "#3a3a3a" }}>
+          <div style={{ width: `${Math.max(0, Math.min(1, progress)) * 100}%`, height: "100%", background: "#80ff20" }} />
+        </div>
+        <div className="bc-scroll" style={{ display: "flex", flexDirection: "column", gap: "calc(var(--u) * 1)", maxHeight: "calc(var(--slot) * 4)" }}>
+          {v.offers.map((o, i) => {
+            const out = o.uses >= o.maxUses;
+            const ok = canAffordOffer(o, (id) => inv.count(id));
+            return (
+              <button key={i} type="button" className="bc-offer" disabled={!ok}
+                style={{ width: "100%", justifyContent: "space-between" }}
+                onClick={(e) => makeTrade(game, i, e.shiftKey || quick)}
+                onContextMenu={(e) => { e.preventDefault(); makeTrade(game, i, true); }}>
+                <span style={{ display: "flex", alignItems: "center", gap: "calc(var(--u) * 2)" }}>
+                  <OfferStack stack={o.buy} onHover={onHover} />
+                  {o.buyB && <OfferStack stack={o.buyB} onHover={onHover} />}
+                </span>
+                <span style={{ color: out ? "#ff6060" : "#e8d8b0", fontSize: "calc(var(--u) * 7)" }}>{out ? "✕" : "➜"}</span>
+                <OfferStack stack={o.sell} onHover={onHover} />
+              </button>
+            );
+          })}
+        </div>
+        <div className="bc-label" style={{ fontSize: "calc(var(--u) * 5)" }}>{mobile ? "Tap to trade; Quick move trades all you can." : "Click to trade; shift-click trades all you can."}</div>
         <div className="bc-label">Inventory</div>
         <PlayerSlots game={game} onHover={onHover} quick={quick} />
       </Frame>

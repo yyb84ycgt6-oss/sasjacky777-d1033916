@@ -106,7 +106,7 @@ export interface BlockDef {
   facing?: "player" | "away" | "wall";
   /** Has an inventory or a screen. */
   interact?: "crafting" | "furnace" | "chest" | "bed" | "door" | "tnt" | "noteblock" | "redstone"
-    | "enchanting" | "anvil" | "brewing" | "cauldron";
+    | "enchanting" | "anvil" | "brewing" | "cauldron" | "composter" | "bell";
   flammable?: boolean;
   /** Hidden from the creative inventory (technical blocks). */
   hidden?: boolean;
@@ -855,6 +855,63 @@ rail(186, "powered_rail", "Powered Rail", (m) => ((m & 8) !== 0 ? "powered_rail_
 rail(187, "detector_rail", "Detector Rail", (m) => ((m & 8) !== 0 ? "detector_rail_on" : "detector_rail"), false);
 rail(188, "activator_rail", "Activator Rail", (m) => ((m & 8) !== 0 ? "activator_rail_on" : "activator_rail"), false);
 
+// ---- village job sites (189+) ------------------------------------------------------------
+
+/** A composter: a wooden tub whose compost (box 5) rises with the level in meta, 0-7, and 8 when ready. */
+export function composterBoxes(meta: number): Box[] {
+  const boxes: Box[] = [[2, 0, 2, 14, 2, 14], [0, 0, 0, 2, 16, 16], [14, 0, 0, 16, 16, 16], [2, 0, 0, 14, 16, 2], [2, 0, 14, 14, 16, 16]];
+  const level = Math.min(8, meta & 15);
+  if (level > 0) boxes.push([2.01, 2, 2.01, 13.99, level >= 8 ? 15 : 2 + level * 1.75, 13.99]);
+  return boxes;
+}
+add(189, "composter", "Composter", {
+  shape: "boxes", layer: "cutout", opaque: false, boxes: composterBoxes, collision: () => composterBoxes(0),
+  textures: tex("composter_top", "composter_side", "composter_bottom"), hardness: 0.6, tool: A, material: "wood",
+  interact: "composter", flammable: true,
+  boxTexture: (m, box, face) => (box === 5 ? ((m & 15) >= 8 ? "compost_ready" : "compost") : box === 0 && face === Face.Up ? "composter_bottom" : undefined),
+});
+add(190, "lectern", "Lectern", {
+  shape: "boxes", layer: "cutout", opaque: false, facing: "player",
+  boxes: (m) => ([[0, 0, 0, 16, 2, 16], [4, 2, 4, 12, 13, 12], [0, 13, 0, 16, 15, 16]] as Box[]).map((b) => hFacingBox(b, m & 3)),
+  textures: tex("lectern_top", "lectern_side", "oak_planks"), hardness: 2.5, tool: A, material: "wood", flammable: true,
+});
+add(191, "smoker", "Smoker", {
+  facing: "player", textures: { top: "smoker_top", bottom: "smoker_bottom", side: "smoker_side", front: "smoker_front" },
+  hardness: 3.5, tool: P, harvestTier: 0,
+});
+add(192, "barrel", "Barrel", {
+  facing6: true, textures: tex("barrel_side"), hardness: 2.5, tool: A, material: "wood", interact: "chest", flammable: true,
+  boxTexture: (m, _b, face) => (face === (m & 7) ? "barrel_top" : face === OPPOSITE_FACE[m & 7] ? "barrel_bottom" : "barrel_side"),
+  uvRotation: sixWayUV,
+});
+add(193, "fletching_table", "Fletching Table", {
+  facing: "player", textures: { top: "fletching_table_top", bottom: "oak_planks", side: "fletching_table_side", front: "fletching_table_front" },
+  hardness: 2.5, tool: A, material: "wood", flammable: true,
+});
+add(194, "loom", "Loom", {
+  facing: "player", textures: { top: "loom_top", bottom: "loom_bottom", side: "loom_side", front: "loom_front" },
+  hardness: 2.5, tool: A, material: "wood", flammable: true,
+});
+add(195, "stonecutter", "Stonecutter", {
+  shape: "boxes", layer: "cutout", opaque: false, facing: "player",
+  boxes: (m) => [[0, 0, 0, 16, 9, 16] as Box, hFacingBox([1, 9, 7.5, 15, 16, 8.5], m & 3)],
+  textures: tex("stonecutter_top", "stonecutter_side", "stonecutter_bottom"), hardness: 3.5, tool: P, harvestTier: 0,
+  boxTexture: (_m, box) => (box === 1 ? "stonecutter_saw" : undefined),
+});
+add(196, "smithing_table", "Smithing Table", {
+  facing: "player", textures: { top: "smithing_table_top", bottom: "smithing_table_bottom", side: "smithing_table_side", front: "smithing_table_front" },
+  hardness: 2.5, tool: A, material: "wood", flammable: true,
+});
+add(197, "bell", "Bell", {
+  shape: "boxes", layer: "cutout", opaque: false, facing: "player", interact: "bell",
+  // Two stone posts and a beam across, the bell hanging from it (posts along the player's view).
+  boxes: (m) => ([[0, 0, 6, 2, 16, 10], [14, 0, 6, 16, 16, 10], [2, 13, 7, 14, 15, 9], [5, 6, 5, 11, 13, 11], [4, 4, 4, 12, 6, 12]] as Box[])
+    .map((b) => hFacingBox(b, m & 3)),
+  collision: () => [[0, 0, 0, 16, 16, 16]],
+  textures: tex("bell_top", "bell_side"), hardness: 5, tool: P, harvestTier: 0, material: "metal",
+  boxTexture: (_m, box) => (box <= 2 ? "smooth_stone" : undefined),
+});
+
 add(184, "cauldron", "Cauldron", {
   shape: "boxes", layer: "cutout", opaque: false, boxes: cauldronBoxes, collision: () => cauldronBoxes(0),
   textures: tex("cauldron_top", "cauldron_side", "cauldron_bottom"), hardness: 2, tool: P, harvestTier: 0, material: "metal",
@@ -910,6 +967,8 @@ export const B = {
   IRON_TRAPDOOR: 177, SLIME_BLOCK: 178,
   ENCHANTING_TABLE: 179, ANVIL: 180, CHIPPED_ANVIL: 181, DAMAGED_ANVIL: 182, BREWING_STAND: 183, CAULDRON: 184,
   RAIL: 185, POWERED_RAIL: 186, DETECTOR_RAIL: 187, ACTIVATOR_RAIL: 188,
+  COMPOSTER: 189, LECTERN: 190, SMOKER: 191, BARREL: 192, FLETCHING_TABLE: 193, LOOM: 194, STONECUTTER: 195,
+  SMITHING_TABLE: 196, BELL: 197,
 } as const;
 
 export const isFluid = (id: number): boolean => id === B.WATER || id === B.LAVA;
@@ -929,7 +988,7 @@ export const isRedstoneTorch = (id: number): boolean => id === B.REDSTONE_TORCH 
 export const isPiston = (id: number): boolean => id === B.PISTON || id === B.STICKY_PISTON;
 /** Blocks that keep an inventory in a block entity, and how many slots. */
 export function containerSize(id: number): number {
-  return id === B.CHEST ? 27 : id === B.HOPPER ? 5 : id === B.DISPENSER || id === B.DROPPER ? 9 : 0;
+  return id === B.CHEST || id === B.BARREL ? 27 : id === B.HOPPER ? 5 : id === B.DISPENSER || id === B.DROPPER ? 9 : 0;
 }
 
 /** Maximum growth stage for crops (meta holds the age). */

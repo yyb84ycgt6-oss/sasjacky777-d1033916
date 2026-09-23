@@ -106,12 +106,42 @@ Right-click to get in; sneak to get out. Online, whoever rides a vehicle drives
 it on their own screen and reports where it went, so a guest's boat answers the
 keys at once instead of a round trip later.
 
+## Villages
+
+`engine/villages.ts` plans at most one village per 20×20-chunk region, in
+plains, desert, savanna, taiga and snowy plains, from the seed alone — so every
+chunk of a village is built the same way whichever order the chunks generate
+in. A village is a well and bell in a square, two to four roads out of it, and
+houses along them: small and large houses, libraries and fenced farms, in the
+biome's own wood or sandstone. Trees are kept off the houses and roads, and the
+roads bridge water with planks.
+
+The first time the well's chunk generates, the host settles it: a villager for
+each house at its work station and an iron golem at the well; chest loot goes in
+as each chunk arrives. `meta.villages` records which villages are settled, so
+reloading never doubles them.
+
+A villager takes up the trade of a free work station within eight blocks —
+composter (farmer), lectern (librarian), smoker (butcher), barrel (fisherman),
+fletching table, loom (shepherd), stonecutter (mason), smithing table
+(toolsmith), brewing stand (cleric) or cauldron (leatherworker). One never
+traded with loses its trade if its station is broken. Right-click to trade
+(`engine/trading.ts`): trades earn it experience and it gains two new offers at
+each of five levels; offers restock twice a day. Librarians sell enchanted books,
+Mending included.
+
+Zombies with no player to chase go after villagers, who run. Iron golems fight
+monsters (never creepers) and anyone who hits them; build one from four iron
+blocks in a T with a carved pumpkin on top. `/summon villager librarian` takes a
+trade; online, a guest's trades go to the host, which checks the offer is still
+open before it counts.
+
 ## Commands
 
 With cheats on (a world option) or in creative: `/time`, `/gamemode`, `/give`,
 `/tp`, `/weather`, `/summon`, `/effect`, `/xp`, `/setblock`, `/fill`, `/kill`,
 `/clear`, `/spawnpoint`, `/difficulty`, `/gamerule`, `/enchant`; `/summon slime 4`
-takes a size; `/seed` and `/help` for
+takes a size and `/summon villager mason` a trade; `/seed` and `/help` for
 everyone. An online guest cannot run the ones that change the shared world.
 
 ## Saving

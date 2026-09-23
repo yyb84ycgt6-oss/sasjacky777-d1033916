@@ -200,6 +200,48 @@ export function skin(kind: string, variant = 0): HTMLCanvasElement {
       p.px(core.front.x + 3, core.front.y + 4, dark, 0);
       break;
     }
+    case "villager": {
+      // Robe colours by profession, in the order of PROFESSIONS (0 is the unemployed).
+      const robes = ["#6a4a30", "#8a6a3a", "#e8e0d0", "#e6e6e6", "#3a7a8a", "#5a8a3a", "#8a6a4a", "#8a8a8a", "#2a2a2a", "#6a3a8a", "#7a4a2a"];
+      const trims = ["#4a3220", "#c8a040", "#b02e26", "#c83a3a", "#2a5a6a", "#3a6a2a", "#f0f0f0", "#5a5a5a", "#8a8a8a", "#e8c040", "#4a2a18"];
+      const robe = hex(robes[variant % robes.length]), trim = hex(trims[variant % trims.length]);
+      const skinC = hex("#b98d6a"), hair = hex("#4a3020");
+      const farmer = variant === 1;
+      const head = p.box(0, 0, 8, 10, 8, (face, _x, y) => {
+        if (face === "top") return farmer ? hex("#e0c050") : hair;
+        if (farmer && y < 2) return hex("#e0c050");
+        if (face === "back" && y < 4) return hair;
+        return skinC;
+      });
+      // A heavy brow and green eyes.
+      for (let x = 1; x <= 6; x++) p.px(head.front.x + x, head.front.y + 3, hair, 0);
+      p.px(head.front.x + 1, head.front.y + 4, [240, 240, 240], 0); p.px(head.front.x + 2, head.front.y + 4, [40, 140, 50], 0);
+      p.px(head.front.x + 5, head.front.y + 4, [40, 140, 50], 0); p.px(head.front.x + 6, head.front.y + 4, [240, 240, 240], 0);
+      p.box(24, 0, 2, 4, 2, [skinC[0] * 0.85, skinC[1] * 0.8, skinC[2] * 0.8] as RGB);
+      p.box(16, 20, 8, 12, 6, robe);
+      p.box(0, 22, 4, 12, 4, [robe[0] * 0.8, robe[1] * 0.8, robe[2] * 0.8] as RGB);
+      p.box(44, 22, 4, 8, 4, robe);
+      p.box(40, 38, 8, 4, 4, (_f, x) => (x >= 2 && x <= 5 ? skinC : robe));
+      p.box(0, 38, 8, 18, 6, (_f, x, y) => (y > 14 || x === 3 || x === 4 ? trim : robe));
+      break;
+    }
+    case "iron_golem": {
+      const iron = hex("#bab2a6"), dark = hex("#8e867c"), vine = hex("#4a7a2a");
+      // Rust-dark blotches a few pixels across, and here and there a strand of vine.
+      const metal = (_f: Face, x: number, y: number): RGB =>
+        ((x >> 1) * 7 + (y >> 1) * 3) % 13 === 0 ? dark : (x * 3 + y * 5) % 29 === 0 ? vine : iron;
+      // The waist shares the body's corner of the sheet, part of which no face of the body
+      // covers; left bare it samples as a black hole in the golem's middle.
+      p.fill({ x: 0, y: 0, w: 64, h: 64 }, (x, y) => metal("front", x, y));
+      p.box(0, 0, 18, 12, 11, metal);
+      const head = p.box(0, 23, 8, 10, 8, metal);
+      for (let x = 1; x <= 6; x++) p.px(head.front.x + x, head.front.y + 3, dark, 0);
+      p.px(head.front.x + 2, head.front.y + 4, hex("#8a2020"), 0); p.px(head.front.x + 5, head.front.y + 4, hex("#8a2020"), 0);
+      p.box(24, 23, 2, 4, 2, dark);
+      p.box(32, 23, 4, 30, 6, metal);
+      p.box(0, 41, 6, 16, 5, (_f, x, y) => (y > 13 ? dark : metal(_f, x, y)));
+      break;
+    }
     case "boat": {
       // Drawn at half size (the model doubles it): planks with dark seams, per wood.
       const woods = ["#9c7a45", "#6b5030", "#c8b77a", "#a0724a", "#b0603a"];
