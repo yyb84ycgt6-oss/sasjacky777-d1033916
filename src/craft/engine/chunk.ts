@@ -1,0 +1,73 @@
+import { blockIndex, CHUNK_VOLUME } from "./constants";
+import type { ItemStack } from "./items";
+
+/** Chests and furnaces keep inventories; they live beside the block, keyed by its index in the chunk. */
+export type BlockEntity = ChestEntity | FurnaceEntity;
+
+export interface ChestEntity {
+  kind: "chest";
+  items: (ItemStack | null)[];
+}
+
+export interface FurnaceEntity {
+  kind: "furnace";
+  input: ItemStack | null;
+  fuel: ItemStack | null;
+  output: ItemStack | null;
+  /** Ticks of burn left in the current fuel item, and how long that item burns in total. */
+  burn: number;
+  burnTotal: number;
+  /** Progress of the current item, 0..200 ticks. */
+  cook: number;
+  /** Experience banked by smelting, paid out when the output is taken. */
+  xp: number;
+}
+
+export function newChest(): ChestEntity {
+  return { kind: "chest", items: new Array(27).fill(null) };
+}
+
+export function newFurnace(): FurnaceEntity {
+  return { kind: "furnace", input: null, fuel: null, output: null, burn: 0, burnTotal: 0, cook: 0, xp: 0 };
+}
+
+/** Numeric key for chunk maps; valid for |cx|, |cz| < 32768 (half a million blocks either way). */
+export function chunkId(cx: number, cz: number): number {
+  return ((cx & 0xffff) << 16) | (cz & 0xffff);
+}
+
+export class Chunk {
+  readonly id: number;
+  /** Differs from what the generator would produce — must be saved. */
+  modified = false;
+  /** Needs a new mesh. */
+  dirty = true;
+  /** Bumped on every change; a mesh built from an older version is stale on arrival. */
+  version = 0;
+  /** Which neighbours light has already been exchanged with (bit per direction). */
+  seamMask = 0;
+  readonly entities = new Map<number, BlockEntity>();
+
+  constructor(
+    readonly cx: number,
+    readonly cz: number,
+    public blocks: Uint8Array,
+    public meta: Uint8Array,
+    public light: Uint8Array,
+    public biomes: Uint8Array,
+    public tints: Uint8Array,
+  ) {
+    this.id = chunkId(cx, cz);
+    if (blocks.length !== CHUNK_VOLUME) throw new Error(`chunk ${cx},${cz} has ${blocks.length} blocks, expected ${CHUNK_VOLUME}`);
+  }
+
+  get(x: number, y: number, z: number): number {
+    return this.blocks[blockIndex(x, y, z)];
+  }
+
+  /** Highest non-air block in a column, or -1. */
+  top(x: number, z: number): number {
+    for (let y = 127; y >= 0; y--) if (this.blocks[blockIndex(x, y, z)] !== 0) return y;
+    return -1;
+  }
+}
