@@ -60,6 +60,7 @@ const DEATH_MESSAGES: Record<DamageSource, string> = {
   mob: "was slain", arrow: "was shot", explosion: "blew up", fall: "hit the ground too hard", fire: "burned to death",
   lava: "tried to swim in lava", drown: "drowned", starve: "starved to death", void: "fell out of the world",
   cactus: "was pricked to death", player: "was slain", magic: "died", suffocation: "suffocated in a wall",
+  wither: "withered away", fireball: "was fireballed",
 };
 
 export class Player {
@@ -230,13 +231,13 @@ export class Player {
     if (this.dead || amount <= 0) return 0;
     if (!this.survivalLike && source !== "void") return 0;
     if (this.sleeping) this.sleeping = null;
-    if ((source === "fire" || source === "lava") && this.hasEffect("fire_resistance")) return 0;
+    if ((source === "fire" || source === "lava" || source === "fireball") && this.hasEffect("fire_resistance")) return 0;
     let dealt = amount;
     if (this.invulnerable > 10) {
       if (amount <= this.lastDamage) return 0;
       dealt = amount - this.lastDamage;
     }
-    const armored = source !== "fall" && source !== "drown" && source !== "starve" && source !== "void" && source !== "fire" && source !== "magic" && source !== "suffocation";
+    const armored = source !== "fall" && source !== "drown" && source !== "starve" && source !== "void" && source !== "fire" && source !== "magic" && source !== "suffocation" && source !== "wither";
     if (armored) {
       const armor = this.inventory.armorPoints();
       const tough = this.inventory.armorToughness();
@@ -387,9 +388,13 @@ export class Player {
     this.tickEffects();
   }
 
+  /** Ticks counted for damage that comes in beats (fire, magma). */
+  private envTicks = 0;
+
   private environment(world: BlockReader, rules: SurvivalRules): void {
     const b = this.body;
     if (!this.survivalLike) return;
+    this.envTicks++;
     if (b.eyesInWater && !this.hasEffect("water_breathing")) {
       // Respiration: each level is another chance the breath is not spent.
       const resp = levelOf(this.inventory.armor[0], "respiration");
@@ -406,12 +411,24 @@ export class Player {
       if (this.fireTicks % 20 === 0) this.hurt(1, "fire");
     }
     if (b.y < -40) this.hurt(4, "void");
-    // Cactus pricks on contact, sides included.
+    // Cactus pricks on contact, sides included; fire burns whoever stands in it.
     const x0 = Math.floor(b.x - 0.35), x1 = Math.floor(b.x + 0.35), z0 = Math.floor(b.z - 0.35), z1 = Math.floor(b.z + 0.35);
+    let burning = false;
     for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++) {
       if (world.getBlock(x, Math.floor(b.y + 0.2), z) === B.CACTUS || world.getBlock(x, Math.floor(b.y - 0.1), z) === B.CACTUS) {
         this.hurt(1, "cactus");
       }
+      const feet = world.getBlock(x, Math.floor(b.y + 0.1), z), knees = world.getBlock(x, Math.floor(b.y + 0.9), z);
+      if (feet === B.FIRE || feet === B.SOUL_FIRE || knees === B.FIRE || knees === B.SOUL_FIRE) burning = true;
+    }
+    if (burning) {
+      this.fireTicks = Math.max(this.fireTicks, 160);
+      if (this.envTicks % 10 === 0) this.hurt(1, "fire");
+    }
+    // A magma block burns the feet of anyone not sneaking across it.
+    if (b.onGround && !this.sneaking && world.getBlock(Math.floor(b.x), Math.floor(b.y - 0.05), Math.floor(b.z)) === B.MAGMA_BLOCK
+      && !this.hasEffect("fire_resistance") && this.envTicks % 10 === 0) {
+      this.hurt(1, "fire");
     }
     const head = world.getBlock(Math.floor(b.x), Math.floor(this.eyeY), Math.floor(b.z));
     if (head > 0 && block(head).opaque && !b.noClip) this.hurt(1, "suffocation");
@@ -468,6 +485,8 @@ export class Player {
       e.ticks--;
       if (e.kind === "regeneration" && e.ticks % Math.max(1, 50 >> e.amp) === 0) this.heal(1);
       if (e.kind === "poison" && e.ticks % Math.max(1, 25 >> e.amp) === 0 && this.health > 1) this.hurt(1, "magic");
+      // Wither, unlike poison, does not stop at half a heart.
+      if (e.kind === "wither" && e.ticks % Math.max(1, 40 >> e.amp) === 0) this.hurt(1, "wither");
       if (e.kind === "hunger") this.addExhaustion(0.005 * (e.amp + 1));
     }
     this.effects = this.effects.filter((e) => e.ticks > 0);

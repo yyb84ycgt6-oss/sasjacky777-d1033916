@@ -9,7 +9,7 @@
  */
 import * as THREE from "three";
 import { B, block, modelBoxes } from "../engine/blocks";
-import { layerOf } from "../engine/atlas";
+import { buildAtlas, layerOf } from "../engine/atlas";
 import type { ChunkMesh } from "../engine/mesher";
 import type { Entity } from "../engine/entities";
 import { ItemEntity, PrimedTnt, FallingBlock, Projectile, XpOrb } from "../engine/entities";
@@ -70,6 +70,11 @@ export interface FrameState {
   showHand: boolean;
   clouds: boolean;
   wave: boolean;
+  /**
+   * Outside the overworld: no sun, moon or clouds, a fog of this colour
+   * (0xRRGGBB) closing in far sooner, and light never below `ambient`.
+   */
+  dimension?: { fog: number; ambient: number };
 }
 
 const WATER_FOG = col("#1f4f9a");
@@ -118,6 +123,15 @@ export class WorldRenderer {
     this.renderer.setPixelRatio(pixelRatio);
     // Display space end to end — see materials.ts.
     this.renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
+    // Every texture is a layer of one array; a device that holds fewer layers than the
+    // atlas has would draw the world in the wrong textures, so it is refused in words instead.
+    const gl = this.renderer.getContext() as WebGL2RenderingContext;
+    const maxLayers = gl.getParameter(gl.MAX_ARRAY_TEXTURE_LAYERS) as number;
+    const needed = buildAtlas().count;
+    if (maxLayers && needed > maxLayers) {
+      this.renderer.dispose();
+      throw new Error(`This device's graphics hold ${maxLayers} texture layers and BlockCraft needs ${needed}.`);
+    }
     this.renderer.autoClear = false;
     this.renderer.sortObjects = true;
     canvas.addEventListener("webglcontextlost", (e) => { e.preventDefault(); this.contextLost = true; });
@@ -154,6 +168,16 @@ export class WorldRenderer {
     this.crack.visible = false;
     this.crack.renderOrder = 5;
     this.scene.add(this.crack);
+  }
+
+  /** Swaps in another dimension's world: every chunk mesh of the old one goes. */
+  setWorld(world: World): void {
+    this.world = world;
+    this.particles.world = world;
+    this.particles.clear();
+    this.weather.world = world;
+    this.chunks.clear();
+    for (const id of [...this.views.keys()]) this.dropView(id);
   }
 
   resize(width: number, height: number, pixelRatio: number): void {
@@ -210,8 +234,10 @@ export class WorldRenderer {
 
   private brightness(x: number, y: number, z: number): number {
     const [s, b] = this.lightAt(x, y, z);
-    const l = Math.max(s * this.shared.uDaylight.value, b, this.shared.uNightVision.value);
-    return Math.max(0.12, l / (4 - 3 * l)) * 1.05;
+    const l = Math.max(s * this.shared.uDaylight.value, b, this.shared.uNightVision.value, this.shared.uAmbient.value);
+    // The same curve and gamma lift the block shader applies, so a mob is as bright as the ground it stands on.
+    const lin = l / (4 - 3 * l);
+    return Math.max(0.12, lin + (Math.sqrt(lin) - lin) * this.shared.uGamma.value) * 1.05;
   }
 
   private viewFor(e: Entity): EntityView {
@@ -254,6 +280,10 @@ export class WorldRenderer {
         const g = new THREE.Group();
         g.add(shaft, tip, fl);
         object.add(g);
+      } else if (e.kind === "fireball" || e.kind === "small_fireball") {
+        // A ball of fire: the fire charge's picture, facing the camera, big for a ghast's.
+        v.item = new ItemView(this.shared, itemId("fire_charge"), 1, e.kind === "fireball" ? 3 : 1);
+        object.add(v.item.root);
       } else {
         // A thrown bottle shows the potion it holds.
         const id = e.kind === "potion" ? e.item || itemId("splash_water_bottle") : e.kind === "xp_bottle" ? itemId("experience_bottle") : itemIdFor(e.kind);
@@ -303,13 +333,17 @@ export class WorldRenderer {
         const speed = Math.hypot(e.x - e.prevX, e.z - e.prevZ);
         const walk = e.prevWalkDist + (e.walkDist - e.prevWalkDist) * a;
         if (e.kind === "creeper" && e.fuse > 0) yaw += 0;
+        // Blazes and magma cubes glow with their own heat.
+        const glowing = e.kind === "blaze" || e.kind === "magma_cube";
+        if (e.kind === "blaze" && Math.random() < 0.1) this.particles.emit(Math.random() < 0.5 ? "smoke" : "flame", x, y + 1, z, 1, 0, 0.4);
         pose(v.model, e.kind, {
-          x, y, z, yaw, pitch: 0, walk, speed, light: bright, hurt: e.hurtTime > 0, death: e.deathTime > 0 ? e.deathTime + a : 0,
+          x, y, z, yaw, pitch: 0, walk, speed, light: glowing ? Math.max(bright, 0.95) : bright, hurt: e.hurtTime > 0, death: e.deathTime > 0 ? e.deathTime + a : 0,
           time: this.time, baby: e.baby, swell: e.kind === "creeper" ? e.fuse / 30 : 0,
           flash: e.kind === "creeper" && e.fuse > 0 && Math.floor(this.time * 8) % 2 === 0,
           woolColor: e.woolColor, sheared: e.sheared, onGround: e.body.onGround,
-          armsForward: e.kind === "zombie" || (e.kind === "skeleton" && e.targetId !== null),
-          size: e.size, squish: e.squish,
+          // A piglin holds out the gold it is admiring.
+          armsForward: e.kind === "zombie" || (e.kind === "skeleton" && e.targetId !== null) || (e.kind === "piglin" && e.admiring > 0),
+          size: modelScale(e), squish: e.squish,
           swing: e.kind === "iron_golem" ? Math.max(0, e.attackCooldown - 12) / 8 : 0,
         });
         v.model.root.visible = !e.hasEffect("invisibility");
@@ -449,8 +483,11 @@ export class WorldRenderer {
     if (frame.lightning > 0) this.flash = 1;
     this.flash = Math.max(0, this.flash - frame.dt * 4);
     const u = this.shared;
+    const dim = frame.dimension;
     u.uTime.value = this.time;
-    u.uDaylight.value = Math.min(1, sky.daylight + this.flash * 0.8);
+    // Without a sky there is no sky light to scale; full "daylight" also keeps the moonlight tint off.
+    u.uDaylight.value = dim ? 1 : Math.min(1, sky.daylight + this.flash * 0.8);
+    u.uAmbient.value = dim ? dim.ambient : 0;
     u.uNightVision.value = frame.nightVision ? 0.9 : 0;
     u.uWave.value = frame.wave ? 1 : 0;
 
@@ -488,15 +525,16 @@ export class WorldRenderer {
     cam.updateMatrixWorld();
 
     // Fog and sky colour.
-    let fogColor = sky.horizon.clone();
-    let near = renderFar * 0.72, far = renderFar * 0.98;
+    let fogColor = dim ? new THREE.Color(((dim.fog >> 16) & 255) / 255, ((dim.fog >> 8) & 255) / 255, (dim.fog & 255) / 255) : sky.horizon.clone();
+    let near = dim ? Math.min(renderFar * 0.3, 40) : renderFar * 0.72, far = dim ? Math.min(renderFar * 0.95, 110) : renderFar * 0.98;
     if (frame.underwater) { fogColor = WATER_FOG.clone().multiplyScalar(0.3 + sky.daylight * 0.7); near = 2; far = 24; }
     if (frame.inLava) { fogColor = LAVA_FOG.clone(); near = 0.2; far = 2.5; }
     if (frame.rain > 0 && !frame.underwater) { near *= 1 - frame.rain * 0.4; }
     u.uFogColor.value.copy(fogColor);
     u.uFogNear.value = near;
     u.uFogFar.value = far;
-    this.sky.cloudsVisible = frame.clouds && !frame.underwater;
+    this.sky.cloudsVisible = frame.clouds && !frame.underwater && !dim;
+    this.sky.group.visible = !dim;
     this.sky.update(cam, sky, this.time * 20, renderFar);
     this.renderer.setClearColor(fogColor);
 
@@ -509,7 +547,7 @@ export class WorldRenderer {
 
     this.updateEntities(frame);
     this.updatePlayers(frame);
-    this.particles.update(frame.dt, sky.daylight);
+    this.particles.update(frame.dt, dim ? 0 : sky.daylight, dim?.ambient ?? 0);
     const bright = this.brightness(c.x, c.y, c.z);
     this.weather.update(frame.dt, cam.position, frame.rain, frame.snowing, this.time, bright);
 
@@ -556,7 +594,20 @@ function angleDelta(a: number, b: number): number {
 /** Snowballs and eggs in flight look like the item that was thrown. */
 /** Which skin a mob wears: a villager's robe follows its trade. */
 function skinVariant(e: Mob): number {
-  return e.kind === "villager" ? (e.profession === "none" ? 0 : PROFESSIONS.indexOf(e.profession) + 1) : 0;
+  if (e.kind === "villager") return e.profession === "none" ? 0 : PROFESSIONS.indexOf(e.profession) + 1;
+  // A ghast about to spit opens its eyes and mouth.
+  if (e.kind === "ghast") return e.fuse > 10 ? 1 : 0;
+  return 0;
+}
+
+/** How much bigger than its model a mob is drawn: a ghast is four blocks across, a hoglin is modelled at half size. */
+function modelScale(e: Mob): number {
+  switch (e.kind) {
+    case "ghast": return 4;
+    case "hoglin": return 2;
+    case "wither_skeleton": return 1.2;
+    default: return e.size;
+  }
 }
 
 /** Hides a player model's own boxes but keeps whatever it holds in its hand. */

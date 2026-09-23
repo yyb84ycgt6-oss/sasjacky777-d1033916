@@ -36,6 +36,16 @@ export enum BiomeId {
   SnowyPeaks,
   Meadow,
   MushroomFields,
+  NetherWastes,
+  SoulSandValley,
+  CrimsonForest,
+  WarpedForest,
+  BasaltDeltas,
+  TheEnd,
+  EndHighlands,
+  EndMidlands,
+  EndBarrens,
+  SmallEndIslands,
   Count,
 }
 
@@ -62,6 +72,12 @@ export interface BiomeDef {
   waterColor?: number;
   /** Hostile/passive spawning list used by the mob system. */
   passive: string[];
+  /** Outside the overworld: the fog and sky colour, 0xRRGGBB. */
+  fog?: number;
+  /** Specks drifting in the air (the Nether's ash and spores). */
+  airborne?: "ash" | "crimson_spores" | "warped_spores" | "soul";
+  /** Outside the overworld, what spawns here regardless of light, by weight. */
+  spawns?: [string, number][];
 }
 
 const PLAINS_FLOWERS = [B.DANDELION, B.POPPY, B.OXEYE_DAISY, B.CORNFLOWER, B.RED_TULIP];
@@ -112,6 +128,21 @@ export const BIOMES: BiomeDef[] = [
   biome(BiomeId.SnowyPeaks, "Snowy Peaks", { top: B.SNOW_BLOCK, filler: B.STONE, grass: 0, snowy: true, passive: [] }),
   biome(BiomeId.Meadow, "Meadow", { trees: 0.3, treeKinds: [["birch", 1], ["oak", 1]], grass: 50, flowers: [B.DANDELION, B.CORNFLOWER, B.ALLIUM, B.OXEYE_DAISY, B.POPPY], flowerDensity: 10, passive: ["sheep", "cow"] }),
   biome(BiomeId.MushroomFields, "Mushroom Fields", { top: B.MOSS, grass: 0, trees: 0, flowers: [B.RED_MUSHROOM, B.BROWN_MUSHROOM], flowerDensity: 4, passive: ["cow"] }),
+  biome(BiomeId.NetherWastes, "Nether Wastes", { top: B.NETHERRACK, filler: B.NETHERRACK, grass: 0, passive: [], fog: 0x330808,
+    spawns: [["zombified_piglin", 100], ["ghast", 25], ["magma_cube", 6], ["piglin", 20], ["enderman", 4]] }),
+  biome(BiomeId.SoulSandValley, "Soul Sand Valley", { top: B.SOUL_SAND, filler: B.SOUL_SOIL, grass: 0, passive: [], fog: 0x1b4745, airborne: "soul",
+    spawns: [["skeleton", 30], ["ghast", 20], ["enderman", 3]] }),
+  biome(BiomeId.CrimsonForest, "Crimson Forest", { top: B.CRIMSON_NYLIUM, filler: B.NETHERRACK, grass: 0, passive: [], fog: 0x330303, airborne: "crimson_spores",
+    spawns: [["zombified_piglin", 30], ["hoglin", 18], ["piglin", 12]] }),
+  biome(BiomeId.WarpedForest, "Warped Forest", { top: B.WARPED_NYLIUM, filler: B.NETHERRACK, grass: 0, passive: [], fog: 0x1a051a, airborne: "warped_spores",
+    spawns: [["enderman", 10]] }),
+  biome(BiomeId.BasaltDeltas, "Basalt Deltas", { top: B.BASALT, filler: B.BLACKSTONE, grass: 0, passive: [], fog: 0x685f70, airborne: "ash",
+    spawns: [["magma_cube", 30], ["ghast", 8]] }),
+  biome(BiomeId.TheEnd, "The End", { top: B.AIR, filler: B.AIR, grass: 0, passive: [], fog: 0x0a0810, spawns: [["enderman", 10]] }),
+  biome(BiomeId.EndHighlands, "End Highlands", { top: B.AIR, filler: B.AIR, grass: 0, passive: [], fog: 0x0a0810, spawns: [["enderman", 10]] }),
+  biome(BiomeId.EndMidlands, "End Midlands", { top: B.AIR, filler: B.AIR, grass: 0, passive: [], fog: 0x0a0810, spawns: [["enderman", 10]] }),
+  biome(BiomeId.EndBarrens, "End Barrens", { top: B.AIR, filler: B.AIR, grass: 0, passive: [], fog: 0x0a0810, spawns: [["enderman", 10]] }),
+  biome(BiomeId.SmallEndIslands, "Small End Islands", { top: B.AIR, filler: B.AIR, grass: 0, passive: [], fog: 0x0a0810, spawns: [["enderman", 10]] }),
 ];
 
 export function biomeDef(id: number): BiomeDef {

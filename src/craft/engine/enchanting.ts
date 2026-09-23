@@ -140,10 +140,10 @@ export function compatible(a: string, b: string): boolean {
 /** How readily an item takes enchantments: the original's per-material numbers. */
 export function enchantability(def: ItemDef): number {
   if (isBook(def)) return 1;
-  if (def.armor) return { leather: 15, iron: 9, golden: 25, diamond: 10 }[def.armor.material];
+  if (def.armor) return { leather: 15, iron: 9, golden: 25, diamond: 10, netherite: 15 }[def.armor.material];
   if (def.tool) {
     const tier = def.name.split("_")[0];
-    return ({ wooden: 15, stone: 5, iron: 14, golden: 22, diamond: 10 } as Record<string, number>)[tier] ?? 0;
+    return ({ wooden: 15, stone: 5, iron: 14, golden: 22, diamond: 10, netherite: 15 } as Record<string, number>)[tier] ?? 0;
   }
   if (def.use === "bow") return 1;
   return 0;
@@ -248,10 +248,10 @@ export function tableClue(seed: number, slot: number, level: number, def: ItemDe
 
 /** What repairs what at an anvil: a unit of material mends a quarter of the item. */
 function repairMaterial(def: ItemDef): string | null {
-  if (def.armor) return { leather: "leather", iron: "iron_ingot", golden: "gold_ingot", diamond: "diamond" }[def.armor.material];
+  if (def.armor) return { leather: "leather", iron: "iron_ingot", golden: "gold_ingot", diamond: "diamond", netherite: "netherite_ingot" }[def.armor.material];
   if (def.tool) {
     const tier = def.name.split("_")[0];
-    return ({ wooden: "oak_planks", stone: "cobblestone", iron: "iron_ingot", golden: "gold_ingot", diamond: "diamond" } as Record<string, string>)[tier] ?? null;
+    return ({ wooden: "oak_planks", stone: "cobblestone", iron: "iron_ingot", golden: "gold_ingot", diamond: "diamond", netherite: "netherite_ingot" } as Record<string, string>)[tier] ?? null;
   }
   return null;
 }

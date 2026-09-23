@@ -242,6 +242,93 @@ export function skin(kind: string, variant = 0): HTMLCanvasElement {
       p.box(0, 41, 6, 16, 5, (_f, x, y) => (y > 13 ? dark : metal(_f, x, y)));
       break;
     }
+    case "piglin": case "zombified_piglin": {
+      const zombie = kind === "zombified_piglin";
+      const flesh = hex(zombie ? "#d98f86" : "#e8a39a"), dark = hex(zombie ? "#b26c66" : "#c9837a");
+      const rot = hex("#6f8f4a"), bone = hex("#e6e0cc");
+      // Rotting: green patches and bare bone here and there on the zombified.
+      const skinAt = (x: number, y: number): RGB =>
+        zombie && (x * 7 + y * 5) % 17 === 0 ? rot : zombie && (x * 3 + y * 11) % 23 === 0 ? bone : (x * 5 + y * 3) % 13 === 0 ? dark : flesh;
+      const head = p.box(0, 0, 10, 8, 8, (_f, x, y) => skinAt(x, y));
+      // Eyes: a piglin's are small and dark; one of a zombified piglin's is a bare socket.
+      p.px(head.front.x + 2, head.front.y + 3, hex("#f4f4f4"), 0); p.px(head.front.x + 3, head.front.y + 3, hex("#202020"), 0);
+      p.px(head.front.x + 6, head.front.y + 3, zombie ? bone : hex("#202020"), 0); p.px(head.front.x + 7, head.front.y + 3, zombie ? hex("#101010") : hex("#f4f4f4"), 0);
+      const snout = p.box(36, 0, 4, 3, 1, hex(zombie ? "#e8a8a0" : "#f2b8ae"));
+      p.px(snout.front.x + 1, snout.front.y + 1, hex("#5a2a2a"), 0); p.px(snout.front.x + 2, snout.front.y + 1, hex("#5a2a2a"), 0);
+      p.box(46, 0, 1, 5, 4, dark);
+      p.box(56, 0, 1, 2, 1, hex("#f0e8d0"));
+      const leather = hex("#6b4a2a"), gold = hex("#f5d84a");
+      p.box(16, 16, 8, 12, 4, (face, x, y) => {
+        if (zombie) return y % 3 === 1 && x > 1 && x < 6 && face === "front" ? bone : skinAt(x, y);
+        if (y >= 8) return y === 8 ? (x === 3 || x === 4 ? gold : leather) : leather;
+        return skinAt(x, y);
+      });
+      p.box(40, 16, 4, 12, 4, (_f, x, y) => (!zombie && y >= 6 && y <= 7 ? leather : skinAt(x, y)));
+      p.box(0, 16, 4, 12, 4, (_f, x, y) => (zombie ? (y > 9 ? dark : skinAt(x, y)) : y > 9 ? hex("#3a2a1a") : leather));
+      // The golden sword: a brown grip at the hand, a gold blade.
+      p.box(56, 16, 1, 10, 1, (_f, _x, y) => (y >= 8 ? hex("#6b4a26") : y === 7 ? hex("#c8a030") : gold));
+      break;
+    }
+    case "wither_skeleton": {
+      const bone = hex("#2e2e2e"), dark = hex("#161616");
+      const head = p.box(0, 0, 8, 8, 8, (_f, x, y) => ((x * 3 + y * 5) % 11 === 0 ? hex("#3a3a3a") : bone));
+      p.fill({ x: head.front.x + 1, y: head.front.y + 3, w: 2, h: 2 }, hex("#050505"), 0);
+      p.fill({ x: head.front.x + 5, y: head.front.y + 3, w: 2, h: 2 }, hex("#050505"), 0);
+      p.fill({ x: head.front.x + 2, y: head.front.y + 6, w: 4, h: 1 }, dark, 0);
+      p.box(16, 16, 8, 12, 4, (_f, x, y) => (y % 3 === 0 || x === 3 || x === 4 ? bone : hex("#0e0e0e")));
+      p.box(40, 16, 2, 12, 2, bone);
+      p.box(0, 16, 2, 12, 2, bone);
+      break;
+    }
+    case "ghast": {
+      // Variant 1 is the moment before it spits: eyes and mouth open, rimmed red.
+      const white = hex("#f2f2f0"), shade = hex("#d8d8d4");
+      const body = p.box(0, 0, 16, 16, 16, (_f, x, y) => ((x * 5 + y * 3) % 9 === 0 ? shade : white), 0.04);
+      const f = body.front;
+      const ink = hex("#303030"), red = hex("#b01818");
+      if (variant === 1) {
+        for (const ex of [3, 10]) { p.fill({ x: f.x + ex, y: f.y + 4, w: 3, h: 3 }, ink, 0); p.px(f.x + ex + 1, f.y + 7, red, 0); }
+        p.fill({ x: f.x + 5, y: f.y + 9, w: 6, h: 4 }, ink, 0);
+        p.fill({ x: f.x + 6, y: f.y + 10, w: 4, h: 2 }, red, 0);
+      } else {
+        for (const ex of [3, 10]) p.fill({ x: f.x + ex, y: f.y + 6, w: 3, h: 1 }, ink, 0);
+        for (const ex of [4, 11]) p.px(f.x + ex, f.y + 7, hex("#8a8a8a"), 0);
+        p.fill({ x: f.x + 6, y: f.y + 11, w: 4, h: 1 }, ink, 0);
+      }
+      p.box(0, 32, 2, 9, 2, (_f, _x, y) => (y > 6 ? shade : white));
+      break;
+    }
+    case "blaze": {
+      const gold = hex("#f2b030"), deep = hex("#c06a10"), bright = hex("#ffe070");
+      const head = p.box(0, 0, 8, 8, 8, (_f, x, y) => ((x + y) % 4 === 0 ? deep : (x * 3 + y) % 5 === 0 ? bright : gold));
+      p.fill({ x: head.front.x + 1, y: head.front.y + 3, w: 2, h: 1 }, hex("#2a1a00"), 0);
+      p.fill({ x: head.front.x + 5, y: head.front.y + 3, w: 2, h: 1 }, hex("#2a1a00"), 0);
+      p.fill({ x: head.front.x + 2, y: head.front.y + 6, w: 4, h: 1 }, hex("#6a3a00"), 0);
+      p.box(0, 16, 2, 8, 2, (_f, _x, y) => (y % 3 === 0 ? deep : bright));
+      break;
+    }
+    case "magma_cube": {
+      // A dark crust split by glowing seams, and two burning eyes.
+      const crust = hex("#3a1206"), glow = hex("#ff8a1a"), hot = hex("#ffd35a");
+      const shell = p.box(0, 0, 8, 8, 8, (_f, x, y) => (y === 2 || y === 5 ? (x % 3 === 0 ? hot : glow) : (x * 5 + y * 3) % 7 === 0 ? hex("#5a2008") : crust), 0.08);
+      p.fill({ x: shell.front.x + 1, y: shell.front.y + 3, w: 2, h: 1 }, hot, 0);
+      p.fill({ x: shell.front.x + 5, y: shell.front.y + 3, w: 2, h: 1 }, hot, 0);
+      p.px(shell.front.x + 2, shell.front.y + 3, hex("#c01010"), 0); p.px(shell.front.x + 5, shell.front.y + 3, hex("#c01010"), 0);
+      break;
+    }
+    case "hoglin": {
+      // Drawn at half size (the model doubles it).
+      const hide = hex("#c27a5c"), dark = hex("#8e4c38"), bristle = hex("#dcc27a");
+      p.box(0, 0, 8, 7, 13, (_f, x, y) => ((x * 3 + y * 5) % 7 === 0 ? dark : hide));
+      p.box(44, 0, 1, 4, 9, (_f, x, y) => ((x + y) % 2 ? bristle : hex("#b89a58")));
+      const head = p.box(0, 20, 7, 5, 8, (face, x, y) => (face === "front" && y >= 3 ? hex("#d89a82") : (x + y) % 5 === 0 ? dark : hide));
+      p.px(head.front.x + 1, head.front.y + 1, hex("#1a1a1a"), 0); p.px(head.front.x + 5, head.front.y + 1, hex("#1a1a1a"), 0);
+      p.px(head.front.x + 2, head.front.y + 4, hex("#5a2a20"), 0); p.px(head.front.x + 4, head.front.y + 4, hex("#5a2a20"), 0);
+      p.box(30, 20, 1, 3, 1, hex("#f2ead6"));
+      p.box(34, 20, 3, 1, 2, dark);
+      p.box(0, 34, 3, 5, 3, (_f, _x, y) => (y >= 4 ? hex("#3a2a20") : hide));
+      break;
+    }
     case "boat": {
       // Drawn at half size (the model doubles it): planks with dark seams, per wood.
       const woods = ["#9c7a45", "#6b5030", "#c8b77a", "#a0724a", "#b0603a"];

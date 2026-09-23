@@ -4,10 +4,11 @@
  * own mip chain: a 2D atlas bleeds neighbouring tiles into each other at a
  * distance, which is the purple fringe on grass you see in cheap voxel demos.
  *
- * Water and lava come first and take ANIM_FRAMES consecutive layers each;
- * the shader animates them by adding the frame number to the layer.
+ * Animated textures (water, lava, the portal, fire) come first and take
+ * ANIM_FRAMES consecutive layers each; the shader animates them by adding the
+ * frame number to the layer.
  */
-import { ANIM_FRAMES, blockTextureNames, itemTextureNames, missingTexture, paintTexture, TEX } from "./textures";
+import { ANIM_FRAMES, ANIMATED_TEXTURES, blockTextureNames, itemTextureNames, missingTexture, paintTexture, TEX } from "./textures";
 
 export interface AtlasData {
   names: string[];
@@ -29,8 +30,8 @@ export function buildAtlas(): AtlasData {
     names.push(name);
     frames.push(data);
   };
-  for (const fluid of ["water_still", "lava_still"]) {
-    for (let f = 0; f < ANIM_FRAMES; f++) add(fluid, paintTexture(fluid, f)!.data);
+  for (const name of ANIMATED_TEXTURES) {
+    for (let f = 0; f < ANIM_FRAMES; f++) add(name, paintTexture(name, f)!.data);
   }
   add("__missing__", missingTexture().data);
   for (let s = 0; s < 10; s++) add(`destroy_stage_${s}`, paintTexture(`destroy_stage_${s}`)!.data);

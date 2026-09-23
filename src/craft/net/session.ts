@@ -29,6 +29,7 @@ import { isVehicleKind, Vehicle, vehicleFromSnapshot } from "../engine/vehicles"
 import { block } from "../engine/blocks";
 import type { PlayerSave } from "../engine/player";
 import type { AdvancementEvent } from "../engine/advancements";
+import { isDimension, type Dimension } from "../engine/dimension";
 import type { BlockChange } from "../engine/world";
 import type { Game, NetLink, RemotePlayer } from "../game/game";
 import { packChunk, toBase64, fromBase64, unpackChunk, type ChunkData, type GameRules } from "../game/save";
@@ -55,9 +56,12 @@ export interface Welcome {
   player: PlayerSave | null;
   hostId: string;
   hostName: string;
+  /** The dimension the host, and so the party, is in. */
+  dimension: Dimension;
 }
 
-const PROTOCOL = 1;
+// 2: dimensions (the "dm" and "mk" ops, and the welcome's dimension).
+const PROTOCOL = 2;
 const FLUSH_TICKS = 2;
 const ENTITY_TICKS = 4;
 const ENV_TICKS = 40;
@@ -111,7 +115,8 @@ export class NetSession implements NetLink {
     const t = makeTransport(kind, room);
     if (t instanceof OnlineTransport) await t.ready;
     const s = new NetSession("host", t, room, game.player.id);
-    const keys = await game.saves.savedChunkKeys(game.meta.id).catch(() => [] as string[]);
+    const keys = await game.saves.savedChunkKeys(game.meta.id, game.dimension).catch(() => [] as string[]);
+    for (const k of game.pendingChunkKeys(game.dimension)) s.modified.add(k);
     for (const k of keys) s.modified.add(k);
     for (const c of game.world.loadedChunks()) if (c.modified) s.modified.add(chunkKey(c.cx, c.cz));
     s.attach(game);
@@ -171,6 +176,67 @@ export class NetSession implements NetLink {
   }
   private early: { from: string; ops: Op[] }[] = [];
 
+  /** Guest: pending while the host reads which chunks of the dimension just entered it has changed. */
+  keysReady: Promise<void> | null = null;
+  private keysDone: (() => void) | null = null;
+  get hostConnection(): string | null {
+    return this.hostId;
+  }
+
+  /**
+   * Host: the party goes with it. Guests hear at once and wait before loading
+   * any chunk; the list of chunks changed there follows as soon as the save
+   * has been read.
+   */
+  dimensionChanged(dim: Dimension, x: number, y: number, z: number): void {
+    if (this.role !== "host" || !this.game) return;
+    const g = this.game;
+    this.modified.clear();
+    this.push(["dm", dim, r2(x), r2(y), r2(z)]);
+    this.flush();
+    void g.saves.savedChunkKeys(g.meta.id, dim).catch(() => [] as string[]).then((keys) => {
+      if (this.closed || g.dimension !== dim) return;
+      for (const k of keys) this.modified.add(k);
+      for (const k of g.pendingChunkKeys(dim)) this.modified.add(k);
+      this.push(["mk", dim, [...this.modified]]);
+      this.flush();
+    });
+  }
+
+  partyLanded(x: number, y: number, z: number): void {
+    if (this.role !== "host") return;
+    this.push(["dp", r2(x), r2(y), r2(z)]);
+    this.flush();
+  }
+
+  /** Guest: the host went to another dimension; follow it. */
+  private onDimension(op: Op): void {
+    const g = this.game!;
+    const dim = op[1];
+    if (!isDimension(dim) || !finite(op[2], op[3], op[4])) return;
+    this.modified.clear();
+    this.pendingOps.clear();
+    this.chunkSeq.clear();
+    // Chunks asked for in the old dimension are not wanted any more.
+    for (const [rid, req] of this.chunkRequests) { clearTimeout(req.timer); req.resolve(null); this.chunkRequests.delete(rid); }
+    this.keysReady = new Promise<void>((resolve) => {
+      this.keysDone = resolve;
+      // A host that never sends the list must not freeze the guest's world: load what it can after a while.
+      setTimeout(() => { if (this.keysDone === resolve) { this.keysDone = null; this.keysReady = null; resolve(); } }, 8000);
+    });
+    // Wait up to fifteen seconds for the host to say where it came out.
+    g.changeDimension(dim, { kind: "exact", x: op[2] as number, y: op[3] as number, z: op[4] as number, wait: performance.now() + 15000 });
+  }
+
+  private onModifiedKeys(op: Op): void {
+    if (!isDimension(op[1]) || op[1] !== this.game?.dimension || !Array.isArray(op[2])) return;
+    for (const k of op[2] as unknown[]) if (typeof k === "string") this.modified.add(k);
+    const done = this.keysDone;
+    this.keysDone = null;
+    this.keysReady = null;
+    done?.();
+  }
+
   close(): void {
     if (this.closed) return;
     // A guest's inventory lives on the host: hand over the latest before leaving.
@@ -227,7 +293,8 @@ export class NetSession implements NetLink {
     const b = p.body;
     this.stateOp = ["st", r2(b.x), r2(b.y), r2(b.z), r2(p.yaw), r2(p.pitch), r2(p.walkDist), r2(Math.hypot(b.x - p.prevX, b.z - p.prevZ)),
       r2(g.actions.swingProgress(1)), p.sneaking ? 1 : 0, p.inventory.held?.id ?? -1, g.settings.skin, p.name, p.hurtTime > 0 ? 1 : 0,
-      p.dead ? 1 : 0, p.gameMode, p.sleeping ? 1 : 0, p.hasEffect("invisibility") ? 1 : 0, p.riding !== null ? 1 : 0];
+      p.dead ? 1 : 0, p.gameMode, p.sleeping ? 1 : 0, p.hasEffect("invisibility") ? 1 : 0, p.riding !== null ? 1 : 0,
+      p.inventory.armor.some((a) => !!a && itemDef(a.id)?.armor?.material === "golden") ? 1 : 0];
     if (this.role === "host") {
       if (this.ticks % ENTITY_TICKS === 0 && g.remote.size) this.push(["en", this.entitySnapshots()]);
       if (this.ticks % ENV_TICKS === 0) this.push(["env", g.time, r2(g.rain), r2(g.thunder), g.meta.difficulty]);
@@ -379,7 +446,11 @@ export class NetSession implements NetLink {
       worldName: g.meta.name, seed: g.meta.seed, seedText: g.meta.seedText, type: g.meta.type, time: g.time,
       rain: g.rain, thunder: g.thunder, spawn: g.worldSpawn(), rules: g.meta.rules, difficulty: g.meta.difficulty,
       gameMode: g.meta.gameMode, hardcore: g.meta.hardcore, cheats: g.meta.cheats, modified: [...this.modified], seq: this.seq,
-      player: saved, hostId: this.myId, hostName: g.player.name,
+      // Saved in another dimension than the party is in now: the guest comes in beside the host instead.
+      player: saved && (saved.dimension ?? "overworld") !== g.dimension
+        ? { ...saved, x: g.player.body.x + 1, y: g.player.body.y, z: g.player.body.z }
+        : saved,
+      hostId: this.myId, hostName: g.player.name, dimension: g.dimension,
     };
     this.send({ t: "welcome", to: m.from, w });
     if (!g.remote.has(m.from)) {
@@ -462,7 +533,7 @@ export class NetSession implements NetLink {
       r = {
         id, name: this.names.get(id) ?? "Player", x: 0, y: 0, z: 0, yaw: 0, pitch: 0, px: 0, py: 0, pz: 0, pyaw: 0, walk: 0, speed: 0,
         swing: 0, sneaking: false, held: null, variant: 0, hurt: false, dead: false, gameMode: "survival", sleeping: false,
-        invisible: false, riding: false, lastSeen: now, receivedAt: 0, ...init,
+        invisible: false, riding: false, goldArmor: false, lastSeen: now, receivedAt: 0, ...init,
       };
       r.px = r.x; r.py = r.y; r.pz = r.z;
       g.remote.set(id, r);
@@ -555,9 +626,12 @@ export class NetSession implements NetLink {
         case "sl": if (this.role === "host") { const r = g.remote.get(from); if (r) r.sleeping = op[1] === 1; } break;
         case "ps":
           if (this.role === "host" && op[1] && typeof op[1] === "object") {
-            g.meta.players[this.playerIds.get(from) ?? from] = { ...(op[1] as PlayerSave), name: g.remote.get(from)?.name ?? "Player" };
+            g.meta.players[this.playerIds.get(from) ?? from] = { ...(op[1] as PlayerSave), name: g.remote.get(from)?.name ?? "Player", dimension: g.dimension };
           }
           break;
+        case "dm": if (this.role === "guest" && fromHost) this.onDimension(op); break;
+        case "mk": if (this.role === "guest" && fromHost) this.onModifiedKeys(op); break;
+        case "dp": if (this.role === "guest" && fromHost && finite(op[1], op[2], op[3])) g.partyPosition(op[1] as number, op[2] as number, op[3] as number); break;
       }
     }
   }
@@ -589,6 +663,7 @@ export class NetSession implements NetLink {
     r.sleeping = op[16] === 1;
     r.invisible = op[17] === 1;
     r.riding = op[18] === 1;
+    r.goldArmor = op[19] === 1;
     r.receivedAt = now;
   }
 
@@ -781,7 +856,8 @@ export class NetSession implements NetLink {
   private onThrow(from: string, op: Op): void {
     const g = this.game!;
     const [, kind, x, y, z, vx, vy, vz, item, damage, knockback, fire] = op;
-    if (!isProjectileKind(kind) || !finite(x, y, z, vx, vy, vz)) return;
+    // Fireballs are the Nether's to throw, never a guest's.
+    if (!isProjectileKind(kind) || kind === "fireball" || kind === "small_fireball" || !finite(x, y, z, vx, vy, vz)) return;
     const p = new Projectile(kind, x as number, y as number, z as number, vx as number, vy as number, vz as number, from);
     if (kind === "potion") {
       if (!int(item) || !itemDef(item as number)) return;

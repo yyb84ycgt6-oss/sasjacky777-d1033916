@@ -18,9 +18,10 @@ import {
 } from "../engine/enchanting";
 import { Mob } from "../engine/mobs";
 import { canAfford } from "../engine/trading";
+import { smithingResult } from "../engine/smithing";
 import type { Game } from "./game";
 
-export type Section = "inv" | "armor" | "offhand" | "grid" | "result" | "chest" | "furnace" | "brewing" | "work" | "anvil_out";
+export type Section = "inv" | "armor" | "offhand" | "grid" | "result" | "chest" | "furnace" | "brewing" | "work" | "anvil_out" | "smithing_out";
 
 function chestOf(game: Game): ChestEntity | null {
   const s = game.screen;
@@ -161,6 +162,8 @@ function quickMove(game: Game, from: Section, index: number, stack: ItemStack): 
       }
     }
     if (kind === "anvil") return mergeInto(stack, game.craftGrid, [0, 1]);
+    // Ingots to the ingot slot, a piece of gear to the other.
+    if (kind === "smithing") return mergeInto(stack, game.craftGrid, [itemDef(stack.id)?.name === "netherite_ingot" ? 1 : 0]);
     return mergeInto(stack, inv.slots, index < 9 ? range(9, 36) : range(0, 9));
   }
   // Everything else goes back into the player's inventory, hotbar last like the original.
@@ -186,6 +189,7 @@ export function clickContainer(game: Game, section: Section, index: number, butt
   }
 
   if (section === "anvil_out") { takeAnvilResult(game, shift); return; }
+  if (section === "smithing_out") { takeSmithingResult(game, shift); return; }
 
   if (section === "furnace") {
     const f = furnaceOf(game);
@@ -455,6 +459,29 @@ function takeAnvilResult(game: Game, shift: boolean): void {
     }
   }
   game.sound("anvil_use", s.x + 0.5, s.y + 0.5, s.z + 0.5, 0.8);
+  game.bumpInv();
+}
+
+/** What the smithing table would make from what is in it now. */
+export function smithingView(game: Game): ItemStack | null {
+  if (game.screen?.kind !== "smithing") return null;
+  return smithingResult(game.craftGrid[0], game.craftGrid[1]);
+}
+
+function takeSmithingResult(game: Game, shift: boolean): void {
+  const out = smithingView(game);
+  const s = game.screen;
+  if (!out || s?.kind !== "smithing") return;
+  if (shift) {
+    if (mergeInto(out, game.player.inventory.slots, [...range(9, 36), ...range(0, 9)])) return;
+  } else {
+    if (game.cursor) return;
+    game.cursor = out;
+  }
+  game.craftGrid[0] = null;
+  const ingot = game.craftGrid[1];
+  game.craftGrid[1] = ingot && ingot.count > 1 ? { ...ingot, count: ingot.count - 1 } : null;
+  game.sound("anvil_use", s.x + 0.5, s.y + 0.5, s.z + 0.5, 0.7, 0.8);
   game.bumpInv();
 }
 

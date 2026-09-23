@@ -136,12 +136,58 @@ blocks in a T with a carved pumpkin on top. `/summon villager librarian` takes a
 trade; online, a guest's trades go to the host, which checks the offer is still
 open before it counts.
 
+## Dimensions and the Nether
+
+A world is one seed and three dimensions (`engine/dimension.ts`). Only the
+dimension the player is in is loaded: going through a portal saves the one
+being left (its changed chunks and its entities, into `meta.otherEntities`),
+and `Game.changeDimension` builds the next — its world, generator, workers,
+block rules, redstone and streamer — while the renderer, audio, player and
+network link carry across. Chunks are stored per dimension (`n:` and `e:` key
+prefixes under the world's own key range, so deleting and exporting a world
+still takes everything). Dying outside the overworld respawns in it.
+
+`engine/nether.ts` generates the Nether: caverns from 3D noise on a coarse
+grid, bedrock above and below, a lava sea at y=31, and five biomes picked by
+the nearest point in two climate noises — nether wastes, soul sand valleys
+(soul fire, basalt pillars, fossils), crimson and warped forests (nylium, huge
+fungi, vines) and basalt deltas. Glowstone hangs from the ceilings; quartz and
+gold ore run through the netherrack and ancient debris hides deep where no air
+touches it. Fortresses — bridges on legs over the lava, corridors, blaze
+spawner platforms and nether wart gardens with a chest — are planned per
+12×12-chunk region like villages; `/locate fortress` finds the nearest.
+
+Portals (`engine/portal.ts`): fire lit inside an obsidian frame (2–21 wide,
+3–21 tall, corners optional) fills it on its first tick, whoever lit it; a
+broken frame lets the sheet go. Four seconds in a portal (at once in creative)
+crosses over, eight overworld blocks to one Nether block. Every lit portal is
+recorded in `meta.portals`, so a trip comes out of the nearest one within 128
+blocks (16 in the Nether) and only builds a new one — on the nearest standing
+room, or on an obsidian ledge cut into the rock — when there is none.
+
+The Nether's rules: water boils away, beds explode, lava runs three times as
+fast and twice as far, fire burns forever on netherrack, magma burns the feet,
+soul sand slows. Its mobs spawn by biome whatever the light: zombified piglins
+(neutral until one is struck — then all of them), ghasts (fireballs that can be
+batted back), magma cubes, piglins (hostile unless you wear gold; hand them a
+gold ingot to barter), hoglins, and in fortresses blazes and wither skeletons
+(whose blow withers). Netherite comes from smelting ancient debris into scrap,
+four scraps and four gold make an ingot, and a smithing table turns diamond
+gear into netherite, enchantments and all.
+
+Online, the party travels together: when the host goes through, every guest
+follows (`dm`), waits until the host has said which chunks of the new dimension
+it changed (`mk`) and where it came out (`dp`), and lands beside it. A guest
+stepping into a portal alone is told that the host leads the way.
+
 ## Commands
 
 With cheats on (a world option) or in creative: `/time`, `/gamemode`, `/give`,
 `/tp`, `/weather`, `/summon`, `/effect`, `/xp`, `/setblock`, `/fill`, `/kill`,
 `/clear`, `/spawnpoint`, `/difficulty`, `/gamerule`, `/enchant`; `/summon slime 4`
-takes a size and `/summon villager mason` a trade; `/seed` and `/help` for
+takes a size and `/summon villager mason` a trade; `/locate village|fortress`
+finds the nearest one, and `/dimension nether|overworld` crosses over as if
+through a portal; `/seed` and `/help` for
 everyone. An online guest cannot run the ones that change the shared world.
 
 ## Saving

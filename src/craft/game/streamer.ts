@@ -50,6 +50,12 @@ export class Streamer {
   /** Last error from a worker, for the debug screen; the chunk is retried after a pause. */
   lastError: string | null = null;
   loadedEver = 0;
+  /** Set when the player leaves this dimension: its jobs still in flight fail on purpose, not as errors. */
+  private closed = false;
+
+  close(): void {
+    this.closed = true;
+  }
 
   constructor(
     private world: World,
@@ -157,6 +163,7 @@ export class Streamer {
       })
       .catch((err: Error) => {
         this.loading.delete(id);
+        if (this.closed) return;
         this.lastError = `chunk ${cx},${cz}: ${err.message}`;
         this.failed.set(id, performance.now() + 2000);
         console.warn("[blockcraft]", this.lastError);
@@ -184,6 +191,7 @@ export class Streamer {
       .catch((err: Error) => {
         this.meshing.delete(c.id);
         c.dirty = true;
+        if (this.closed) return;
         this.lastError = `mesh ${c.cx},${c.cz}: ${err.message}`;
         console.warn("[blockcraft]", this.lastError);
       });

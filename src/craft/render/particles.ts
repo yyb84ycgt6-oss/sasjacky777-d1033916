@@ -23,6 +23,10 @@ interface Kind {
   collide: boolean;
   grow?: number;
   fullTexture?: boolean;
+  /** Coloured by the emit call's data (0xRRGGBB), or this default. */
+  tint?: number;
+  /** Starting speed; drifting kinds barely move. */
+  speed?: number;
 }
 
 const KINDS: Record<string, Kind> = {
@@ -41,6 +45,13 @@ const KINDS: Record<string, Kind> = {
   potion: { layer: "particle_smoke", gravity: -0.6, life: [0.5, 1.2], size: [0.06, 0.12], drag: 0.88, collide: false, fullTexture: true },
   note: { layer: "particle_note", gravity: -0.5, life: [0.8, 1.0], size: [0.2, 0.2], drag: 0.9, collide: false, fullTexture: true },
   block: { layer: "stone", gravity: 14, life: [0.4, 1.2], size: [0.07, 0.12], drag: 0.98, collide: true },
+  // The Nether: sparks off a portal, and what drifts in each biome's air.
+  portal: { layer: "particle_spark", gravity: -0.4, life: [0.8, 1.6], size: [0.06, 0.1], drag: 0.9, collide: false, fullTexture: true, tint: 0xb070ff, speed: 1.2 },
+  ash: { layer: "particle_smoke", gravity: 0.25, life: [3, 5], size: [0.04, 0.07], drag: 0.99, collide: true, fullTexture: true, tint: 0x8a8580, speed: 0.15 },
+  crimson_spores: { layer: "particle_spark", gravity: 0.08, life: [3, 6], size: [0.04, 0.06], drag: 0.99, collide: false, fullTexture: true, tint: 0xd03a2a, speed: 0.15 },
+  warped_spores: { layer: "particle_spark", gravity: -0.08, life: [3, 6], size: [0.04, 0.06], drag: 0.99, collide: false, fullTexture: true, tint: 0x3ce6b8, speed: 0.15 },
+  soul: { layer: "particle_spark", gravity: -0.35, life: [1, 2], size: [0.08, 0.12], drag: 0.96, collide: false, fullTexture: true, tint: 0x6ae8ff, speed: 0.3 },
+  lava_spark: { layer: "particle_flame", gravity: 6, life: [0.5, 1.2], size: [0.06, 0.1], drag: 0.99, collide: true, fullTexture: true, speed: 2 },
 };
 
 export class Particles {
@@ -64,7 +75,7 @@ export class Particles {
   private next = 0;
   budget = 1;
 
-  constructor(shared: SharedUniforms, private world: World) {
+  constructor(shared: SharedUniforms, public world: World) {
     const g = new THREE.BufferGeometry();
     this.attrPos = new THREE.BufferAttribute(this.pos, 3);
     this.attrData = new THREE.BufferAttribute(this.data, 4);
@@ -142,7 +153,7 @@ export class Particles {
       this.pos[p * 3] = x + (Math.random() - 0.5) * spread * 2;
       this.pos[p * 3 + 1] = y + (Math.random() - 0.5) * spread * 2;
       this.pos[p * 3 + 2] = z + (Math.random() - 0.5) * spread * 2;
-      const speed = kind === "explosion" ? 4 : kind === "block" || kind === "splash" || kind === "crit" || kind === "potion" ? 3 : 0.6;
+      const speed = k.speed ?? (kind === "explosion" ? 4 : kind === "block" || kind === "splash" || kind === "crit" || kind === "potion" ? 3 : 0.6);
       this.vel[p * 3] = (Math.random() - 0.5) * speed;
       this.vel[p * 3 + 1] = (Math.random() * 0.8 + (kind === "block" || kind === "splash" ? 0.6 : 0.1)) * speed;
       this.vel[p * 3 + 2] = (Math.random() - 0.5) * speed;
@@ -162,7 +173,7 @@ export class Particles {
       this.data[p * 4] = this.baseSize[p];
       this.data[p * 4 + 1] = 1;
       this.data[p * 4 + 2] = 1;
-      const tint = kind === "potion" ? blockId : 0xffffff;
+      const tint = kind === "potion" ? blockId : k.tint !== undefined ? (blockId || k.tint) : 0xffffff;
       this.color[p * 3] = ((tint >> 16) & 255) / 255;
       this.color[p * 3 + 1] = ((tint >> 8) & 255) / 255;
       this.color[p * 3 + 2] = (tint & 255) / 255;
@@ -170,7 +181,7 @@ export class Particles {
     this.attrColor.needsUpdate = true;
   }
 
-  update(dt: number, daylight: number): void {
+  update(dt: number, daylight: number, ambient = 0): void {
     for (let p = 0; p < MAX; p++) {
       if (this.life[p] <= 0) { this.data[p * 4 + 1] = 0; continue; }
       this.life[p] -= dt;
@@ -194,7 +205,7 @@ export class Particles {
       this.data[p * 4 + 1] = Math.min(1, t * 3);
       if (p % 8 === (this.frame & 7)) {
         const l = this.world.getLight(Math.floor(nx), Math.floor(ny), Math.floor(nz));
-        const lv = l < 0 ? 15 * daylight : Math.max((l >> 4) * daylight, l & 15);
+        const lv = Math.max(l < 0 ? 15 * daylight : Math.max((l >> 4) * daylight, l & 15), ambient * 15);
         this.data[p * 4 + 2] = 0.15 + (lv / 15) * 0.85;
       }
     }

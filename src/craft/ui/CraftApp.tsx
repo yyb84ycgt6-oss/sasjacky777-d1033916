@@ -47,6 +47,7 @@ function guestWorld(w: Welcome, room: string): WorldMeta {
     player: w.player,
     players: {},
     entities: [],
+    dimension: w.dimension,
     version: 1,
   };
 }

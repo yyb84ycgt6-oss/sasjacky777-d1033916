@@ -46,6 +46,7 @@ export type Screen =
   | { kind: "brewing"; x: number; y: number; z: number }
   | { kind: "enchanting"; x: number; y: number; z: number }
   | { kind: "anvil"; x: number; y: number; z: number }
+  | { kind: "smithing"; x: number; y: number; z: number }
   | { kind: "trade"; entityId: number }
   | { kind: "chat"; text: string }
   | { kind: "options" }
@@ -96,6 +97,8 @@ export interface Hud {
   saving: boolean;
   onFire: boolean;
   underwater: boolean;
+  /** How far through a portal's four seconds the player is (0 when not in one): the screen swirls purple. */
+  portal: number;
   perspective: 0 | 1 | 2;
   /** Active status effects, for the list in the corner. */
   effects: { kind: string; amp: number; seconds: number }[];

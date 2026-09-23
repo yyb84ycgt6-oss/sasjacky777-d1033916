@@ -11,11 +11,14 @@ import { blockByName } from "../engine/blocks";
 import { DAY_TICKS, WORLD_HEIGHT } from "../engine/constants";
 import { allItems, itemByName, itemDef, type StatusEffect } from "../engine/items";
 import { canApply, compatible, enchantDef, enchantLabel, ENCHANTMENTS } from "../engine/enchanting";
-import { Mob, MOB_KINDS, type MobKind } from "../engine/mobs";
-import { PROFESSIONS, type Profession } from "../engine/villages";
+import { isCubeMob, Mob, MOB_KINDS, type MobKind } from "../engine/mobs";
+import { DIMENSION_INFO, isDimension } from "../engine/dimension";
+import { fortressInRegion, FORTRESS_REGION } from "../engine/nether";
+import { Generator } from "../engine/worldgen";
+import { PROFESSIONS, villageInRegion, VILLAGE_REGION, type Profession } from "../engine/villages";
 import type { GameMode } from "../engine/player";
 import type { Game } from "./game";
-import type { GameRules } from "./save";
+import { DEFAULT_RULES, type GameRules } from "./save";
 
 interface Line { text: string; color?: string }
 
@@ -40,6 +43,7 @@ const HELP = [
   "/effect <speed|strength|fire_resistance|...> [seconds] [level] | /effect clear",
   "/enchant <enchantment> [level]   (the held item, e.g. /enchant sharpness 5)",
   "/xp add <amount>, /clear, /kill, /seed, /spawnpoint",
+  "/locate village|fortress, /dimension overworld|nether",
   "/difficulty peaceful|easy|normal|hard, /gamerule <rule> <true|false>",
 ];
 
@@ -204,8 +208,10 @@ export function runCommand(game: Game, line: string): Line[] {
       if (denied) return denied;
       const rules = game.meta.rules;
       const key = args[0] as keyof GameRules;
-      if (!key || !(key in rules)) return [{ text: `Game rules: ${Object.entries(rules).map(([k, v]) => `${k}=${v}`).join(", ")}` }];
-      if (args[1] === undefined) return [{ text: `${key} = ${rules[key]}` }];
+      // Against the defaults, so a rule added since the world was made can still be set.
+      const all = { ...DEFAULT_RULES, ...rules };
+      if (!key || !(key in DEFAULT_RULES)) return [{ text: `Game rules: ${Object.entries(all).map(([k, v]) => `${k}=${v}`).join(", ")}` }];
+      if (args[1] === undefined) return [{ text: `${key} = ${all[key]}` }];
       if (args[1] !== "true" && args[1] !== "false") return [{ text: "Use true or false", color: ERR }];
       rules[key] = args[1] === "true";
       return [{ text: `Game rule ${key} is now set to ${args[1]}` }];
@@ -218,9 +224,9 @@ export function runCommand(game: Game, line: string): Line[] {
       const b = p.body;
       const d = 2;
       const mob = new Mob(kind, b.x - Math.sin(p.yaw) * d, b.y, b.z - Math.cos(p.yaw) * d);
-      if (kind === "slime" && args[1] !== undefined) {
+      if (isCubeMob(kind) && args[1] !== undefined) {
         const size = Number(args[1]);
-        if (size !== 1 && size !== 2 && size !== 4) return [{ text: "A slime's size is 1, 2 or 4", color: ERR }];
+        if (size !== 1 && size !== 2 && size !== 4) return [{ text: `A ${kind.replace("_", " ")}'s size is 1, 2 or 4`, color: ERR }];
         mob.setSize(size);
       }
       if (kind === "villager" && args[1] !== undefined) {
@@ -232,6 +238,42 @@ export function runCommand(game: Game, line: string): Line[] {
       if (kind === "villager" || kind === "iron_golem") mob.home = { x: mob.body.x, z: mob.body.z };
       game.spawn(mob);
       return [{ text: `Summoned new ${kind}` }];
+    }
+    case "locate": {
+      // The nearest village (overworld) or fortress (Nether), searched region by region outward.
+      const what = (args[0] ?? "").toLowerCase();
+      const b = p.body;
+      if (what === "village") {
+        if (game.dimension !== "overworld" || !(game.generator instanceof Generator)) return [{ text: "Villages are in the overworld.", color: ERR }];
+        const gen = game.generator;
+        const size = VILLAGE_REGION * 16;
+        const hit = nearestInRegions(b.x, b.z, size, (rx, rz) => villageInRegion(gen, game.meta.seed, rx, rz));
+        return hit ? [{ text: `The nearest village is at ${hit.x}, ${hit.y}, ${hit.z} (${Math.round(Math.hypot(hit.x - b.x, hit.z - b.z))} blocks away)` }]
+          : [{ text: "No village within 4000 blocks.", color: ERR }];
+      }
+      if (what === "fortress") {
+        if (game.dimension !== "nether") return [{ text: "Fortresses are in the Nether.", color: ERR }];
+        const size = FORTRESS_REGION * 16;
+        const hit = nearestInRegions(b.x, b.z, size, (rx, rz) => {
+          const f = fortressInRegion(game.meta.seed, rx, rz);
+          return f ? { x: (f.x0 + f.x1) >> 1, y: f.y, z: (f.z0 + f.z1) >> 1 } : null;
+        });
+        return hit ? [{ text: `The nearest fortress is at ${hit.x}, ${hit.y}, ${hit.z} (${Math.round(Math.hypot(hit.x - b.x, hit.z - b.z))} blocks away)` }]
+          : [{ text: "No fortress within 4000 blocks.", color: ERR }];
+      }
+      return [{ text: "Usage: /locate village|fortress", color: ERR }];
+    }
+    case "dimension": {
+      const denied = needCheats() ?? needHost();
+      if (denied) return denied;
+      const to = (args[0] ?? "").toLowerCase();
+      if (!isDimension(to) || to === "end") return [{ text: "Usage: /dimension overworld|nether", color: ERR }];
+      if (to === game.dimension) return [{ text: `Already in ${DIMENSION_INFO[to].title}.` }];
+      // As if through a portal: at the matching spot, stepping out of a new one.
+      const b = p.body;
+      const scale = DIMENSION_INFO[game.dimension].scale / DIMENSION_INFO[to].scale;
+      game.changeDimension(to, { kind: "portal", x: Math.floor(b.x * scale), y: to === "nether" ? 64 : Math.max(64, Math.floor(b.y)), z: Math.floor(b.z * scale), axis: 0, known: false });
+      return [{ text: `Taking you to ${DIMENSION_INFO[to].title}` }];
     }
     case "effect": {
       const denied = needCheats();
@@ -279,4 +321,25 @@ export function runCommand(game: Game, line: string): Line[] {
     default:
       return [{ text: `Unknown command "/${cmd}". Type /help for the list.`, color: ERR }];
   }
+}
+
+/** The nearest of whatever each region holds, searching rings of regions out to about 4000 blocks. */
+function nearestInRegions(
+  x: number, z: number, regionBlocks: number, at: (rx: number, rz: number) => { x: number; y: number; z: number } | null,
+): { x: number; y: number; z: number } | null {
+  const rx0 = Math.floor(x / regionBlocks), rz0 = Math.floor(z / regionBlocks);
+  const rings = Math.ceil(4000 / regionBlocks);
+  let best: { x: number; y: number; z: number } | null = null, bestD = Infinity;
+  for (let r = 0; r <= rings; r++) {
+    for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
+      if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+      const hit = at(rx0 + dx, rz0 + dz);
+      if (!hit) continue;
+      const d = Math.hypot(hit.x - x, hit.z - z);
+      if (d < bestD) { best = hit; bestD = d; }
+    }
+    // A ring further out can hold nothing nearer than this one's best.
+    if (best && bestD < r * regionBlocks) break;
+  }
+  return best;
 }

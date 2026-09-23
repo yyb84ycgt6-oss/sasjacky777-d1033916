@@ -8,9 +8,10 @@
  * it is saved and sent to guests on the same path.
  */
 import {
-  B, block, CROP_MAX_AGE, FACE_DIRS, FACING_DIRS, isButton, isCrop, isDoor, isFluid, isLeaves, isLog, isRedstoneTorch, isSapling,
+  B, block, CROP_MAX_AGE, FACE_DIRS, FACING_DIRS, isButton, isCrop, isDoor, isFire, isFluid, isLeaves, isLog, isNylium, isRedstoneTorch, isSapling,
   isSlab, OPPOSITE_FACING,
 } from "./blocks";
+import { findPortalFrame, portalHolds, type PortalAxis } from "./portal";
 import { biomeDef } from "./biomes";
 import { blockIndex, WORLD_HEIGHT } from "./constants";
 import { itemByName, resolveDrops, type ItemStack } from "./items";
@@ -24,6 +25,30 @@ export interface RuleContext {
   sound(name: string, x: number, y: number, z: number, volume?: number, pitch?: number): void;
   isRaining(): boolean;
   random(): number;
+  /** Fire reached TNT. */
+  igniteTnt?(x: number, y: number, z: number): void;
+  /** A frame filled with portal (its bottom-left inner cell), for linking. */
+  portalLit?(x: number, y: number, z: number, axis: PortalAxis): void;
+  /** Whether fire spreads and burns out (the doFireTick rule). */
+  fireSpreads?(): boolean;
+}
+
+export interface DimensionRules {
+  /** Lava runs three times as fast and twice as far (the Nether). */
+  lavaFast?: boolean;
+  /** Fire lights portals here (not in the End). */
+  portals?: boolean;
+}
+
+const FIRE_DELAY = 30;
+
+/** How readily fire takes a block, per tick it touches it; 0 never. */
+function burnChance(id: number): number {
+  if (id === B.TNT) return 0.4;
+  const def = block(id);
+  if (isLeaves(id) || def.material === "wool" && def.flammable) return 0.3;
+  if (def.flammable || id === B.HAY || id === B.BOOKSHELF) return 0.1;
+  return 0;
 }
 
 const WATER_DELAY = 5;
@@ -36,6 +61,8 @@ export function tickDelay(id: number): number {
 }
 
 const SOIL = new Set<number>([B.GRASS, B.DIRT, B.PODZOL, B.COARSE_DIRT, B.MOSS, B.FARMLAND, B.MUD]);
+/** What Nether plants root in. */
+const NETHER_SOIL = new Set<number>([B.CRIMSON_NYLIUM, B.WARPED_NYLIUM, B.SOUL_SOIL, B.SOUL_SAND, B.NETHERRACK, ...SOIL]);
 
 /** Whether a block that needs support still has it. */
 export function supported(world: World, x: number, y: number, z: number, id: number, meta: number): boolean {
@@ -90,6 +117,27 @@ export function supported(world: World, x: number, y: number, z: number, id: num
     }
     case B.LILY_PAD:
       return below === B.WATER || below === B.ICE;
+    case B.NETHER_WART:
+      return below === B.SOUL_SAND;
+    case B.CRIMSON_FUNGUS: case B.WARPED_FUNGUS: case B.CRIMSON_ROOTS: case B.WARPED_ROOTS:
+      return NETHER_SOIL.has(below);
+    case B.WEEPING_VINES: {
+      const above = world.getBlock(x, y + 1, z);
+      return above < 0 || above === B.WEEPING_VINES || block(above).solid;
+    }
+    case B.TWISTING_VINES:
+      return below === B.TWISTING_VINES || belowDef.solid;
+    case B.SOUL_FIRE:
+      return below === B.SOUL_SAND || below === B.SOUL_SOIL;
+    case B.FIRE: {
+      // On anything solid, or clinging to something that burns.
+      if (belowDef.solid && !isFire(below)) return true;
+      for (const [dx, dy, dz] of FACE_DIRS) {
+        const n = world.getBlock(x + dx, y + dy, z + dz);
+        if (n < 0 || burnChance(n) > 0) return true;
+      }
+      return false;
+    }
     case B.SNOW: case B.LANTERN:
       return belowDef.solid && below !== B.ICE;
     case B.OAK_DOOR: case B.IRON_DOOR: {
@@ -112,8 +160,8 @@ export function supported(world: World, x: number, y: number, z: number, id: num
 }
 
 export class BlockRules {
-  constructor(private world: World, private ctx: RuleContext) {
-    world.delayFor = tickDelay;
+  constructor(private world: World, private ctx: RuleContext, private dim: DimensionRules = {}) {
+    world.delayFor = dim.lavaFast ? (id) => (id === B.LAVA ? LAVA_DELAY / 3 : tickDelay(id)) : tickDelay;
   }
 
   /** Breaks a block as the world (no tool), dropping what it would drop by hand. */
@@ -124,7 +172,7 @@ export class BlockRules {
     if (drop) {
       const meta = this.world.getMeta(x, y, z);
       let stacks = resolveDrops(def.drops, id, this.ctx.random);
-      if (isCrop(id)) stacks = cropDrops(id, meta, this.ctx.random);
+      if (isCrop(id) || id === B.NETHER_WART) stacks = cropDrops(id, meta, this.ctx.random);
       // A door or bed drops once, from its lower half / foot.
       if (isDoor(id) && meta & 8) stacks = [];
       if (id === B.RED_BED && meta & 4) stacks = [];
@@ -148,14 +196,84 @@ export class BlockRules {
       }
       return;
     }
+    // Fire first: fire held up by nothing in the middle of a portal frame still lights it.
+    if (isFire(id)) { this.fire(x, y, z, id); return; }
     if (def.needsSupport && !supported(world, x, y, z, id, world.getMeta(x, y, z))) {
       this.breakNaturally(x, y, z);
+      return;
+    }
+    if (id === B.NETHER_PORTAL) {
+      // A frame broken anywhere lets the whole sheet go, one neighbour after another.
+      if (!portalHolds((a, b, c) => world.getBlock(a, b, c), x, y, z, (world.getMeta(x, y, z) & 1) as PortalAxis)) {
+        world.setBlock(x, y, z, B.AIR, 0, "world");
+      }
       return;
     }
     if (id === B.FARMLAND && block(world.blockAt(x, y + 1, z)).opaque) world.setBlock(x, y, z, B.DIRT);
     if (isLeaves(id) && world.getMeta(x, y, z) === 0 && !this.hasLogNear(x, y, z)) {
       this.breakNaturally(x, y, z);
       this.ctx.sound("leaves", x + 0.5, y + 0.5, z + 0.5, 0.3);
+    }
+  }
+
+  /**
+   * Fire: lights a portal if it stands in a frame; otherwise burns down over
+   * a few seconds, catching what burns around it. On netherrack and magma it
+   * burns forever, as in the original.
+   */
+  private fire(x: number, y: number, z: number, id: number): void {
+    const world = this.world;
+    const rand = this.ctx.random;
+    const meta = world.getMeta(x, y, z);
+    if (id === B.FIRE && meta === 0 && this.dim.portals) {
+      const frame = findPortalFrame((a, b, c) => world.getBlock(a, b, c), x, y, z);
+      if (frame) {
+        for (const [cx, cy, cz] of frame.cells) world.setBlock(cx, cy, cz, B.NETHER_PORTAL, frame.axis, "world");
+        const [fx, fy, fz] = frame.cells[0];
+        this.ctx.sound("portal_trigger", fx + 0.5, fy + 1, fz + 0.5, 0.8);
+        this.ctx.portalLit?.(fx, fy, fz, frame.axis);
+        return;
+      }
+    }
+    if (!supported(world, x, y, z, id, meta)) { world.setBlock(x, y, z, B.AIR, 0, "world"); return; }
+    if (id === B.SOUL_FIRE) return;
+    const below = world.blockAt(x, y - 1, z);
+    const eternal = below === B.NETHERRACK || below === B.MAGMA_BLOCK;
+    if (this.ctx.fireSpreads && !this.ctx.fireSpreads()) {
+      if (meta === 0) world.setMeta(x, y, z, 1);
+      return;
+    }
+    const age = meta & 15;
+    const rained = this.ctx.isRaining() && world.topSolid(x, z) <= y;
+    if (rained && rand() < 0.4) { world.setBlock(x, y, z, B.AIR, 0, "world"); return; }
+    if (!eternal) {
+      const fuel = FACE_DIRS.some(([dx, dy, dz]) => burnChance(world.blockAt(x + dx, y + dy, z + dz)) > 0);
+      if (age >= 15 || (!fuel && age > 3 && rand() < 0.3)) {
+        world.setBlock(x, y, z, B.AIR, 0, "world");
+        return;
+      }
+    }
+    world.setMeta(x, y, z, Math.min(15, age + 1 + Math.floor(rand() * 3)));
+    world.schedule(x, y, z, FIRE_DELAY + Math.floor(rand() * 10));
+    // Neighbours that burn may catch, and burn away.
+    for (const [dx, dy, dz] of FACE_DIRS) {
+      const nx = x + dx, ny = y + dy, nz = z + dz;
+      const n = world.blockAt(nx, ny, nz);
+      const chance = burnChance(n);
+      if (!chance || rand() >= chance * (dy > 0 ? 1.5 : 1)) continue;
+      if (n === B.TNT) {
+        world.setBlock(nx, ny, nz, B.AIR, 0, "world");
+        this.ctx.igniteTnt?.(nx, ny, nz);
+        continue;
+      }
+      world.setBlock(nx, ny, nz, rand() < 0.5 ? B.FIRE : B.AIR, 0, "world");
+    }
+    // And jumps across small gaps to air beside other fuel.
+    if (rand() < 0.3) {
+      const tx = x + Math.floor(rand() * 3) - 1, ty = y + Math.floor(rand() * 4) - 1, tz = z + Math.floor(rand() * 3) - 1;
+      if (world.blockAt(tx, ty, tz) === B.AIR && FACE_DIRS.some(([dx, dy, dz]) => burnChance(world.blockAt(tx + dx, ty + dy, tz + dz)) > 0)) {
+        world.setBlock(tx, ty, tz, B.FIRE, 1, "world");
+      }
     }
   }
 
@@ -202,7 +320,7 @@ export class BlockRules {
   private fluid(x: number, y: number, z: number, id: number): void {
     const world = this.world;
     const water = id === B.WATER;
-    const step = water ? 1 : 2;
+    const step = water || this.dim.lavaFast ? 1 : 2;
     let meta = world.getMeta(x, y, z);
     let level = meta & 7;
     const falling = (meta & 8) !== 0;
@@ -269,7 +387,7 @@ export class BlockRules {
     // Then sideways, preferring the direction of the nearest drop.
     const spread = ((meta & 8) ? 0 : level) + step;
     if (spread > 7) return;
-    const dirs = this.flowDirections(x, y, z, id, water ? 4 : 2);
+    const dirs = this.flowDirections(x, y, z, id, water || this.dim.lavaFast ? 4 : 2);
     for (const d of dirs) {
       const [dx, dz] = FACING_DIRS[d];
       const nx = x + dx, nz = z + dz;
@@ -381,6 +499,14 @@ export class BlockRules {
       if (this.light(x, y + 1, z) >= 9 && rand() < 1 / 7) this.growTree(x, y, z, id);
       return;
     }
+    // Nether wart grows in the dark, slowly: about one stage in ten ticks it is given.
+    if (id === B.NETHER_WART) {
+      const age = world.getMeta(x, y, z) & 3;
+      if (age < 3 && rand() < 0.1) world.setMeta(x, y, z, age + 1);
+      return;
+    }
+    // Nylium with nothing but air above creeps onto bare netherrack beside it.
+    if (isNylium(id) && block(world.blockAt(x, y + 1, z)).opaque) { world.setBlock(x, y, z, B.NETHERRACK); return; }
     switch (id) {
       case B.GRASS: {
         const above = world.blockAt(x, y + 1, z);
@@ -491,6 +617,8 @@ export class BlockRules {
 
 /** Crops drop more when grown, and their seed when not — the whole farming loop hangs on this. */
 export function cropDrops(id: number, age: number, random: () => number): ItemStack[] {
+  // Nether wart: one back from unripe, two to four when full grown.
+  if (id === B.NETHER_WART) return [{ id: itemByName("nether_wart").id, count: (age & 3) === 3 ? 2 + Math.floor(random() * 3) : 1 }];
   const ripe = age >= CROP_MAX_AGE[id];
   const seedsFor = (n: number) => {
     let c = 0;

@@ -35,6 +35,8 @@ export interface FoodInfo {
 export type StatusEffect =
   | "regeneration" | "hunger" | "poison" | "absorption" | "speed" | "night_vision"
   | "slowness" | "strength" | "weakness" | "fire_resistance" | "invisibility" | "water_breathing"
+  /** From a wither skeleton's blade: like poison, but it can kill. */
+  | "wither"
   /** Instant effects: applied once, never listed. */
   | "instant_health" | "instant_damage";
 
@@ -43,7 +45,7 @@ export interface ArmorInfo {
   slot: 0 | 1 | 2 | 3;
   points: number;
   toughness: number;
-  material: "leather" | "iron" | "golden" | "diamond";
+  material: "leather" | "iron" | "golden" | "diamond" | "netherite";
 }
 
 export type ItemUse =
@@ -78,6 +80,8 @@ export interface ItemDef {
   use?: ItemUse;
   category: Category;
   hidden?: boolean;
+  /** Dropped in lava or fire it floats and survives (netherite). */
+  fireproof?: boolean;
 }
 
 const ITEMS: ItemDef[] = [];
@@ -123,6 +127,8 @@ const NATURAL = new Set([
   "andesite", "calcite", "tuff", "bedrock", "obsidian", "pumpkin", "melon", "cactus", "sugar_cane",
   "dead_bush", "short_grass", "fern", "brown_mushroom", "red_mushroom", "lily_pad", "cobweb",
   "amethyst_block",
+  "netherrack", "soul_sand", "soul_soil", "basalt", "blackstone", "magma_block", "crimson_nylium", "warped_nylium",
+  "crimson_stem", "warped_stem", "nether_wart_block", "warped_wart_block", "shroomlight", "bone_block", "ancient_debris",
 ]);
 const FUNCTIONAL = new Set([
   "crafting_table", "furnace", "chest", "torch", "lantern", "ladder", "tnt", "bookshelf", "glowstone",
@@ -280,6 +286,23 @@ TIERS.forEach((t, i) => {
   });
 });
 
+// Netherite is never crafted from scratch: a smithing table turns diamond gear into it,
+// enchantments and all. It fits the five ids left after the crafted tiers.
+const NETHERITE = { tier: 4, speed: 9, durability: 2031, bonus: 4 };
+item("netherite_sword", "Netherite Sword", {
+  maxStack: 1, durability: NETHERITE.durability, damage: 8, attackSpeed: 1.6, category: "combat", fireproof: true,
+  tool: { type: "sword", tier: NETHERITE.tier, speed: 1.5 },
+});
+for (const [type, name, damage, speed] of [
+  ["shovel", "Shovel", 6.5, 1], ["pickaxe", "Pickaxe", 6, 1.2], ["axe", "Axe", 10, 1], ["hoe", "Hoe", 1, 4],
+] as const) {
+  item(`netherite_${type}`, `Netherite ${name}`, {
+    maxStack: 1, durability: NETHERITE.durability, damage, attackSpeed: speed, category: "tools", fireproof: true,
+    use: type === "hoe" ? "hoe" : undefined, tool: { type, tier: NETHERITE.tier, speed: NETHERITE.speed },
+  });
+}
+if (next > 380) throw new Error("tool ids overflowed into the armour block");
+
 // ---- armour ------------------------------------------------------------------------
 
 next = 380;
@@ -288,6 +311,7 @@ const ARMOR = [
   { key: "iron", name: "Iron", points: [2, 6, 5, 2], toughness: 0, mult: 15 },
   { key: "golden", name: "Golden", points: [2, 5, 3, 1], toughness: 0, mult: 7 },
   { key: "diamond", name: "Diamond", points: [3, 8, 6, 3], toughness: 2, mult: 33 },
+  { key: "netherite", name: "Netherite", points: [3, 8, 6, 3], toughness: 3, mult: 37 },
 ] as const;
 const PIECES = [
   { key: "helmet", name: "Cap", base: 11 },
@@ -302,9 +326,11 @@ for (const a of ARMOR) {
     item(`${a.key}_${p.key}`, display, {
       maxStack: 1, durability: p.base * a.mult, category: "combat",
       armor: { slot: slot as 0 | 1 | 2 | 3, points: a.points[slot], toughness: a.toughness, material: a.key },
+      fireproof: a.key === "netherite" ? true : undefined,
     });
   });
 }
+if (next > 400) throw new Error("armour ids overflowed into the later block");
 
 // ---- redstone and later additions (400+) -----------------------------------------------
 
@@ -322,7 +348,7 @@ for (const p of POTIONS) {
   const name = p.key === "water_bottle" ? "Splash Water Bottle" : `Splash ${p.displayName}`;
   item(`splash_${p.key}`, name, { maxStack: 1, use: "splash", category: "food", icon: `splash_potion_${p.art}` });
 }
-item("nether_wart", "Nether Wart");
+item("nether_wart", "Nether Wart", { places: B.NETHER_WART, use: "plant" });
 item("blaze_rod", "Blaze Rod", { fuel: 2400 });
 item("blaze_powder", "Blaze Powder");
 item("ghast_tear", "Ghast Tear");
@@ -341,6 +367,14 @@ for (const wood of ["oak", "spruce", "birch", "jungle", "acacia"]) {
 }
 item("minecart", "Minecart", { maxStack: 1, use: "minecart", category: "tools" });
 item("tnt_minecart", "Minecart with TNT", { maxStack: 1, use: "minecart", category: "tools" });
+
+// The Nether.
+item("nether_brick", "Nether Brick");
+item("netherite_scrap", "Netherite Scrap", { fireproof: true });
+item("netherite_ingot", "Netherite Ingot", { fireproof: true });
+item("fire_charge", "Fire Charge", { use: "flint_and_steel" });
+// Bartered from piglins and dropped by endermen; thrown, it carries its thrower.
+item("ender_pearl", "Ender Pearl", { maxStack: 16 });
 
 // ---- lookups -----------------------------------------------------------------------
 

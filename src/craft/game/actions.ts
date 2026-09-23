@@ -11,7 +11,7 @@
  */
 import * as THREE from "three";
 import {
-  B, block, CLOCKWISE_FACING, collisionBoxes, Face, FACE_OF_FACING, FACING_DIRS, isButton, isCrop, isDoor, isFluid, isLeaves, isLog,
+  B, block, CLOCKWISE_FACING, collisionBoxes, Face, FACE_OF_FACING, FACING_DIRS, isButton, isCrop, isDoor, isFluid, isLeaves, isPillar,
   isRedstoneTorch, isSlab, isStairs, isTrapdoor, OPPOSITE_FACE, OPPOSITE_FACING,
   type BlockDef,
 } from "../engine/blocks";
@@ -24,6 +24,8 @@ import { potionOfItem } from "../engine/potions";
 import { isRail, neighboursToReshape, placedShape, railShape, RAIL_EXITS } from "../engine/rails";
 import { Vehicle } from "../engine/vehicles";
 import { compostChance } from "../engine/villages";
+import { DIMENSION_INFO } from "../engine/dimension";
+import { findPortalFrame } from "../engine/portal";
 import type { ThrowExtra } from "../net/session";
 import { aabbIntersects, bodyBox } from "../engine/physics";
 import { raycastBlocks, rayBox, type BlockHit } from "../engine/raycast";
@@ -144,7 +146,7 @@ export class Actions {
     if (a.type === "chat") { if (!g.screen) g.setScreen({ kind: "chat", text: a.text ?? "" }); return; }
     if (a.type === "inventory") {
       const k = g.screen?.kind;
-      if (k === "inventory" || k === "crafting" || k === "furnace" || k === "chest" || k === "brewing" || k === "enchanting" || k === "anvil" || k === "trade") g.setScreen(null);
+      if (k === "inventory" || k === "crafting" || k === "furnace" || k === "chest" || k === "brewing" || k === "enchanting" || k === "anvil" || k === "smithing" || k === "trade") g.setScreen(null);
       else if (!g.screen && !p.dead && p.gameMode !== "spectator") g.setScreen({ kind: "inventory" });
       return;
     }
@@ -385,7 +387,7 @@ export class Actions {
     if (drops && harvest) {
       if (held?.tool?.type === "shears" && SHEARABLE.has(id)) stacks = [{ id, count: 1 }];
       else if (silk) stacks = [{ id, count: 1 }];
-      else if (isCrop(id)) stacks = cropDrops(id, meta, Math.random);
+      else if (isCrop(id) || id === B.NETHER_WART) stacks = cropDrops(id, meta, Math.random);
       else if (isDoor(id) && meta & 8) stacks = [];
       else if (id === B.RED_BED && meta & 4) stacks = [];
       else if (isSlab(id) && meta === 2) stacks = [{ id, count: 2 }];
@@ -515,13 +517,15 @@ export class Actions {
         g.net?.interact(t.entity.id, name);
         if (name === "bucket" && t.entity.kind === "cow") this.replaceHeld({ id: itemId("milk_bucket"), count: 1 });
         else if (name && t.entity.spec.tempt.includes(name)) this.consumeHeld();
+        // A piglin that is free takes the gold; the host rolls what comes back.
+        else if (name === "gold_ingot" && t.entity.kind === "piglin" && t.entity.admiring <= 0 && t.entity.anger <= 0) this.consumeHeld();
         this.swing();
         return;
       }
       const result = t.entity.interact(g.ctx, name, p.id);
       if (result) {
         this.swing();
-        if (result === "fed" || result === "dyed") this.consumeHeld();
+        if (result === "fed" || result === "dyed" || result === "barter") this.consumeHeld();
         if (result === "sheared") this.wearHeld(1);
         if (result === "milked") this.replaceHeld({ id: itemId("milk_bucket"), count: 1 });
         if (result === "fed") g.particles("heart", t.entity.x, t.entity.y + t.entity.body.height, t.entity.z, 3);
@@ -819,17 +823,29 @@ export class Actions {
         }
       }
       if (def.use === "flint_and_steel") {
+        // A fire charge is spent where flint and steel only wears.
+        const spend = () => { if (def.name === "fire_charge") { if (p.survivalLike) this.consumeHeld(); } else this.wearHeld(1); };
         if (id === B.TNT) {
           w.setBlock(x, y, z, B.AIR, 0, "player");
           if (g.role === "guest") g.net?.primeTnt(x, y, z, 80);
           else g.spawn(new PrimedTnt(x + 0.5, y, z + 0.5, 80));
           g.sound("fuse", x + 0.5, y + 0.5, z + 0.5);
-          this.wearHeld(1);
+          spend();
           this.swing();
           return true;
         }
-        g.sound("ignite", x + 0.5, y + 0.5, z + 0.5);
-        this.wearHeld(1);
+        // Fire on the face clicked. Inside an obsidian frame it lights the portal on its first tick
+        // (the host's rules do that, so a guest's spark lights it for everyone).
+        const [nx, ny, nz] = FACE_NORMALS[hit.face];
+        const fx = x + nx, fy = y + ny, fz = z + nz;
+        const cur = w.getBlock(fx, fy, fz);
+        const inFrame = findPortalFrame((a, b2, c) => w.getBlock(a, b2, c), fx, fy, fz) !== null;
+        if (cur === B.AIR && (inFrame || supported(w, fx, fy, fz, B.FIRE, 0))) {
+          const soul = !inFrame && (w.blockAt(fx, fy - 1, fz) === B.SOUL_SAND || w.blockAt(fx, fy - 1, fz) === B.SOUL_SOIL);
+          w.setBlock(fx, fy, fz, soul ? B.SOUL_FIRE : B.FIRE, 0, "player");
+        }
+        g.sound(def.name === "fire_charge" ? "fire_charge" : "ignite", x + 0.5, y + 0.5, z + 0.5);
+        spend();
         this.swing();
         return true;
       }
@@ -899,6 +915,9 @@ export class Actions {
         return true;
       case "anvil":
         g.setScreen({ kind: "anvil", x, y, z });
+        return true;
+      case "smithing":
+        g.setScreen({ kind: "smithing", x, y, z });
         return true;
       case "brewing":
         g.containerAt(x, y, z, "brewing");
@@ -990,6 +1009,15 @@ export class Actions {
     const p = g.player;
     const [dx, dz] = FACING_DIRS[meta & 3];
     const hx = meta & 4 ? x : x + dx, hz = meta & 4 ? z : z + dz;
+    if (!DIMENSION_INFO[g.dimension].bedsWork) {
+      // The original's trap for the unwary: a bed anywhere but the overworld blows up.
+      const fx = meta & 4 ? x - dx : x, fz = meta & 4 ? z - dz : z;
+      g.world.setBlock(hx, y, hz, B.AIR, 0, "player");
+      g.world.setBlock(fx, y, fz, B.AIR, 0, "player");
+      if (g.role === "guest") g.net?.primeTnt(hx, y, hz, 1);
+      else g.explode(hx + 0.5, y + 0.5, hz + 0.5, 5, null, true);
+      return;
+    }
     if (!g.isNight() && g.thunder < 0.5) {
       p.spawn = { x: hx, y, z: hz };
       g.showActionbar("Respawn point set — you can only sleep at night or during thunderstorms");
@@ -1077,7 +1105,7 @@ export class Actions {
       meta = look;
       if (isStairs(id) && (hit.face === Face.Down || (hit.face !== Face.Up && fracY > 0.5))) meta |= 4;
     }
-    if (isLog(id)) {
+    if (isPillar(id)) {
       meta = hit.face === Face.Up || hit.face === Face.Down ? 0 : hit.face === Face.East || hit.face === Face.West ? 1 : 2;
     }
     if (isSlab(id)) meta = hit.face === Face.Down || (hit.face !== Face.Up && fracY > 0.5) ? 1 : 0;
@@ -1212,6 +1240,14 @@ export class Actions {
     const cur = g.world.getBlock(x, y, z);
     if (cur < 0 || !(cur === 0 || block(cur).replaceable || isFluid(cur))) return false;
     const fluid = def.use === "water_bucket" ? B.WATER : B.LAVA;
+    if (fluid === B.WATER && DIMENSION_INFO[g.dimension].waterEvaporates) {
+      // Too hot for water: it boils off in a puff, as in the original.
+      g.sound("fizz", x + 0.5, y + 0.5, z + 0.5, 0.6);
+      g.particles("smoke", x + 0.5, y + 0.5, z + 0.5, 8);
+      if (g.player.survivalLike) this.replaceHeld({ id: itemId("bucket"), count: 1 });
+      this.swing();
+      return true;
+    }
     g.world.setBlock(x, y, z, fluid, 0, "player");
     g.sound("bucket_empty", x + 0.5, y + 0.5, z + 0.5);
     if (g.player.survivalLike) this.replaceHeld({ id: itemId("bucket"), count: 1 });

@@ -23,7 +23,7 @@ export class Weather {
   private rainMat: THREE.LineBasicMaterial;
   private snowMat: THREE.PointsMaterial;
 
-  constructor(private world: World) {
+  constructor(public world: World) {
     for (let i = 0; i < DROPS; i++) {
       this.drops[i * 4] = (Math.random() * 2 - 1) * RADIUS;
       this.drops[i * 4 + 1] = (Math.random() * 2 - 1) * RADIUS;

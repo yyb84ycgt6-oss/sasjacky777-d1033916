@@ -9,6 +9,7 @@
  * actually happened.
  */
 import { ingredientIds } from "./crafting";
+import type { Dimension } from "./dimension";
 import type { Inventory } from "./inventory";
 
 export type Trigger =
@@ -21,7 +22,8 @@ export type Trigger =
   | { kind: "sleep" }
   | { kind: "eat" }
   | { kind: "enchant" }
-  | { kind: "brew" };
+  | { kind: "brew" }
+  | { kind: "dimension"; dimension: Dimension };
 
 export interface Advancement {
   id: string;
@@ -61,6 +63,10 @@ export const ADVANCEMENTS: readonly Advancement[] = [
   { id: "level10", title: "Seasoned", description: "Reach experience level 10", icon: "gold_ingot", trigger: { kind: "level", level: 10 } },
   { id: "enchanter", title: "Enchanter", description: "Enchant an item at an enchanting table", icon: "enchanting_table", trigger: { kind: "enchant" } },
   { id: "brewery", title: "Local Brewery", description: "Brew a potion", icon: "potion_healing", trigger: { kind: "brew" } },
+  { id: "nether", title: "Deeper Still", description: "Step through a portal into the Nether", icon: "obsidian", trigger: { kind: "dimension", dimension: "nether" } },
+  { id: "blaze", title: "Into the Fire", description: "Take a blaze rod from a blaze", icon: "blaze_rod", trigger: has("blaze_rod") },
+  { id: "debris", title: "Buried Treasure", description: "Dig out ancient debris", icon: "ancient_debris", trigger: has("ancient_debris") },
+  { id: "netherite", title: "Forged in Fire", description: "Make a netherite ingot", icon: "netherite_ingot", trigger: has("netherite_ingot") },
 ];
 
 export function advancement(id: string): Advancement | undefined {
@@ -82,9 +88,13 @@ export interface PlayerState {
   inventory: Inventory;
   y: number;
   level: number;
+  /** Heights only count in the overworld: the Nether's floor is not "deep down". */
+  dimension?: Dimension;
 }
 
-export type AdvancementEvent = { kind: "kill"; hostile: boolean } | { kind: "sleep" } | { kind: "eat" } | { kind: "enchant" } | { kind: "brew" };
+export type AdvancementEvent =
+  | { kind: "kill"; hostile: boolean } | { kind: "sleep" } | { kind: "eat" } | { kind: "enchant" } | { kind: "brew" }
+  | { kind: "dimension"; dimension: Dimension };
 
 /**
  * Which not-yet-earned advancements the player has now earned: from their
@@ -107,14 +117,15 @@ export function newlyEarned(done: ReadonlySet<string>, state: PlayerState, event
         break;
       }
       case "armor": earned = state.inventory.armor.some((s) => !!s); break;
-      case "below": earned = state.y < t.y; break;
-      case "above": earned = state.y > t.y; break;
+      case "below": earned = (state.dimension ?? "overworld") === "overworld" && state.y < t.y; break;
+      case "above": earned = (state.dimension ?? "overworld") === "overworld" && state.y > t.y; break;
       case "level": earned = state.level >= t.level; break;
       case "kill": earned = event?.kind === "kill" && (!t.hostile || event.hostile); break;
       case "sleep": earned = event?.kind === "sleep"; break;
       case "eat": earned = event?.kind === "eat"; break;
       case "enchant": earned = event?.kind === "enchant"; break;
       case "brew": earned = event?.kind === "brew"; break;
+      case "dimension": earned = event?.kind === "dimension" && event.dimension === t.dimension; break;
     }
     if (earned) out.push(a);
   }

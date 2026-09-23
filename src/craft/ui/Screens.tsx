@@ -7,7 +7,7 @@ import { enchantedBook, enchantLabel, ENCHANTMENTS, MAX_SHELVES } from "../engin
 import type { Slot } from "../engine/inventory";
 import type { Game } from "../game/game";
 import {
-  anvilView, brewingView, chestView, clickContainer, craftOutput, craftWidth, creativeTake, creativeTrash, dropCursor, enchantItem,
+  anvilView, brewingView, chestView, clickContainer, smithingView, craftOutput, craftWidth, creativeTake, creativeTrash, dropCursor, enchantItem,
   enchantOffers, fillRecipe, furnaceView, inventoryCounts, makeTrade, tradingWith, type Section,
 } from "../game/containers";
 import { canAfford as canAffordOffer, LEVEL_NAMES, LEVEL_XP } from "../engine/trading";
@@ -418,6 +418,32 @@ export function AnvilScreen({ game, mobile }: { game: Game; mobile: boolean }) {
             onClick={(b, sh) => clickContainer(game, "anvil_out", 0, b, sh)} />
         </div>
         {cost && <div style={{ color: cost.color, fontSize: "calc(var(--u) * 6)", textAlign: "right" }}>{cost.text}</div>}
+        <div className="bc-label">Inventory</div>
+        <PlayerSlots game={game} onHover={onHover} quick={quick} />
+      </Frame>
+      {tip}
+    </>
+  );
+}
+
+/** The smithing table: diamond gear and a netherite ingot in, netherite gear out. */
+export function SmithingScreen({ game, mobile }: { game: Game; mobile: boolean }) {
+  const { tip, onHover } = useTooltip();
+  const [quick, setQuick] = useState(false);
+  const out = smithingView(game);
+  const [base, ingot] = [game.craftGrid[0], game.craftGrid[1]];
+  const hint = !base ? "Put in a diamond tool, weapon or piece of armour" : !ingot ? "Add a netherite ingot" : !out ? "Only diamond gear takes netherite" : null;
+  return (
+    <>
+      <Frame game={game} title="Upgrade Gear" mobile={mobile} quick={quick} setQuick={setQuick}>
+        <div style={{ display: "flex", alignItems: "center", gap: "calc(var(--u) * 4)", justifyContent: "center" }}>
+          <SlotButton stack={base} onHover={onHover} quickMove={quick} onClick={(b, sh) => clickContainer(game, "work", 0, b, sh)} />
+          <span style={{ fontSize: "calc(var(--u) * 10)", color: "#555" }}>+</span>
+          <SlotButton stack={ingot} onHover={onHover} quickMove={quick} ghost={itemId("netherite_ingot")} onClick={(b, sh) => clickContainer(game, "work", 1, b, sh)} />
+          <Arrow />
+          <SlotButton stack={out} className="bc-result" onHover={onHover} quickMove={quick} onClick={(b, sh) => clickContainer(game, "smithing_out", 0, b, sh)} />
+        </div>
+        {hint && <div className="bc-sub" style={{ textAlign: "center" }}>{hint}</div>}
         <div className="bc-label">Inventory</div>
         <PlayerSlots game={game} onHover={onHover} quick={quick} />
       </Frame>

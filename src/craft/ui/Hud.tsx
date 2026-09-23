@@ -34,6 +34,9 @@ export function Hud({ hud, mobile, crosshair }: { hud: HudState; mobile: boolean
     <div className="absolute inset-0 pointer-events-none bc-shadow">
       {hurtFlash && <div className="absolute inset-0" style={{ boxShadow: "inset 0 0 120px 40px rgba(200,0,0,0.45)" }} />}
       {hud.onFire && survival && <div className="absolute inset-x-0 bottom-0 h-1/3" style={{ background: "linear-gradient(transparent, rgba(255,110,0,0.35))" }} />}
+      {hud.portal > 0 && (
+        <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(circle, rgba(150,60,255,${hud.portal * 0.35}) 0%, rgba(90,20,200,${hud.portal * 0.75}) 100%)` }} />
+      )}
       {hud.sleeping > 0 && <div className="absolute inset-0" style={{ background: `rgba(0,0,0,${hud.sleeping * 0.8})` }} />}
 
       {crosshair && hud.gameMode !== "spectator" && !hud.screen && (

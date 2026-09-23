@@ -63,7 +63,59 @@ const legs4 = (size: [number, number, number], uv: [number, number], x: number, 
   { name: "legBL", size, uv, pivot: [x, y, z], offset: [0, -size[1] / 2, 0] },
 ];
 
+/** Piglins and zombified piglins: a humanoid with a broad pig's head and a golden sword in hand. */
+const PIGLIN: PartSpec[] = [
+  { name: "body", size: [8, 12, 4], uv: [16, 16], pivot: [0, 18, 0] },
+  { name: "head", size: [10, 8, 8], uv: [0, 0], pivot: [0, 24, 0], offset: [0, 4, 0],
+    children: [
+      { name: "snout", size: [4, 3, 1], uv: [36, 0], pivot: [0, -1, -4.5] },
+      { name: "earR", size: [1, 5, 4], uv: [46, 0], pivot: [-5.5, 2, 0], offset: [0, -2, 0], rotation: [0, 0, 0.45] },
+      { name: "earL", size: [1, 5, 4], uv: [46, 0], pivot: [5.5, 2, 0], offset: [0, -2, 0], rotation: [0, 0, -0.45] },
+      { name: "tuskR", size: [1, 2, 1], uv: [56, 0], pivot: [-2.5, -2.5, -4.5] },
+      { name: "tuskL", size: [1, 2, 1], uv: [56, 0], pivot: [2.5, -2.5, -4.5] },
+    ] },
+  { name: "rightArm", size: [4, 12, 4], uv: [40, 16], pivot: [-6, 22, 0], offset: [0, -4, 0],
+    children: [{ name: "sword", size: [1, 10, 1], uv: [56, 16], pivot: [0, -5, -1], offset: [0, -4, 0], rotation: [Math.PI / 2, 0, 0] }] },
+  { name: "leftArm", size: [4, 12, 4], uv: [40, 16], pivot: [6, 22, 0], offset: [0, -4, 0] },
+  { name: "rightLeg", size: [4, 12, 4], uv: [0, 16], pivot: [-2, 12, 0], offset: [0, -6, 0] },
+  { name: "leftLeg", size: [4, 12, 4], uv: [0, 16], pivot: [2, 12, 0], offset: [0, -6, 0] },
+];
+
 const MODELS: Record<string, PartSpec[]> = {
+  piglin: PIGLIN,
+  zombified_piglin: PIGLIN,
+  // A skeleton half again as tall (drawn scaled up in pose()), in soot-black bone.
+  wither_skeleton: HUMANOID(true),
+  // A sixteen-pixel cube drawn four times over, with nine tentacles hanging from it.
+  ghast: [
+    { name: "body", size: [16, 16, 16], uv: [0, 0], pivot: [0, 8, 0] },
+    ...[-5, 0, 5].flatMap((x, i) => [-5, 0, 5].map((z, j): PartSpec => ({
+      name: `tentacle${i * 3 + j}`, size: [2, 9, 2], uv: [0, 32], pivot: [x, 0.5, z], offset: [0, -4.5, 0],
+    }))),
+  ],
+  // A head over three spinning rings of rods, narrowing downward.
+  blaze: [
+    { name: "head", size: [8, 8, 8], uv: [0, 0], pivot: [0, 24, 0] },
+    ...[[17, 7], [11, 5], [5, 3]].flatMap(([y, r], ring) => [0, 1, 2, 3].map((i): PartSpec => ({
+      name: `rod${ring}${i}`, size: [2, 8, 2], uv: [0, 16], pivot: [0, y, 0], offset: [r, 0, 0], rotation: [0, (i * Math.PI) / 2, 0],
+    }))),
+  ],
+  magma_cube: [
+    { name: "shell", size: [8, 8, 8], uv: [0, 0], pivot: [0, 4, 0] },
+  ],
+  // Modelled at half size and drawn at `size: 2`, like the vehicles, so the skin fits the sheet.
+  hoglin: [
+    { name: "body", size: [8, 7, 13], uv: [0, 0], pivot: [0, 8.5, 0] },
+    { name: "mane", size: [1, 4, 9], uv: [44, 0], pivot: [0, 12.5, -1] },
+    { name: "head", size: [7, 5, 8], uv: [0, 20], pivot: [0, 9, -6.5], offset: [0, -1.5, -4],
+      children: [
+        { name: "tuskR", size: [1, 3, 1], uv: [30, 20], pivot: [-3, 1.5, -3.5] },
+        { name: "tuskL", size: [1, 3, 1], uv: [30, 20], pivot: [3, 1.5, -3.5] },
+        { name: "earR", size: [3, 1, 2], uv: [34, 20], pivot: [-4.5, 2, 2.5] },
+        { name: "earL", size: [3, 1, 2], uv: [34, 20], pivot: [4.5, 2, 2.5] },
+      ] },
+    ...legs4([3, 5, 3], [0, 34], 2.5, 5, 4.5),
+  ],
   // Vehicles are modelled at half size and drawn at `size: 2`, so their skins fit the 64×64 sheet.
   boat: [
     { name: "bottom", size: [10, 1, 14], uv: [0, 0], pivot: [0, 0.5, 0] },
@@ -288,7 +340,7 @@ export function pose(m: ModelInstance, kind: string, p: PoseInput): void {
   if (head) head.rotation.set(p.pitch, 0, 0);
 
   switch (kind) {
-    case "player": case "zombie": case "skeleton": {
+    case "player": case "zombie": case "skeleton": case "piglin": case "zombified_piglin": case "wither_skeleton": {
       const sneak = p.sneaking ? 0.5 : 0;
       const body = m.parts.get("body");
       if (body) body.rotation.x = sneak;
@@ -322,7 +374,20 @@ export function pose(m: ModelInstance, kind: string, p: PoseInput): void {
       set("paddleR", 0.4 + Math.sin(stroke) * 0.4, 0.7 - Math.cos(stroke) * 0.25, 0);
       break;
     }
-    case "pig": case "cow": case "sheep": case "creeper":
+    case "ghast":
+      // Tentacles trail and sway.
+      for (let i = 0; i < 9; i++) set(`tentacle${i}`, Math.sin(p.time * 2 + i * 1.3) * 0.25 + 0.1, 0, Math.cos(p.time * 1.7 + i) * 0.12);
+      break;
+    case "blaze":
+      // The rings spin, alternate ones the other way, and bob.
+      for (let ring = 0; ring < 3; ring++) for (let i = 0; i < 4; i++) {
+        const part = m.parts.get(`rod${ring}${i}`);
+        if (!part) continue;
+        part.rotation.set(0, (ring % 2 ? -1 : 1) * p.time * (1.6 - ring * 0.3) + (i * Math.PI) / 2, 0);
+        part.position.y = ([17, 11, 5][ring] + Math.sin(p.time * 3 + i + ring) * 0.8) / 16;
+      }
+      break;
+    case "pig": case "cow": case "sheep": case "creeper": case "hoglin":
       set("legFR", swing); set("legBL", swing);
       set("legFL", -swing); set("legBR", -swing);
       break;

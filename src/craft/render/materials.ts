@@ -58,6 +58,8 @@ export interface SharedUniforms {
   uGamma: { value: number };
   uWave: { value: number };
   uNightVision: { value: number };
+  /** A floor under all light: the Nether's and the End's dim glow where no sky reaches. */
+  uAmbient: { value: number };
 }
 
 export function createSharedUniforms(): SharedUniforms {
@@ -71,6 +73,7 @@ export function createSharedUniforms(): SharedUniforms {
     uGamma: { value: 0.35 },
     uWave: { value: 1 },
     uNightVision: { value: 0 },
+    uAmbient: { value: 0 },
   };
 }
 
@@ -118,9 +121,10 @@ const LIGHTING = /* glsl */ `
 uniform float uDaylight;
 uniform float uGamma;
 uniform float uNightVision;
+uniform float uAmbient;
 vec3 applyLight(vec3 col, float sky, float blk, float shade) {
   float s = sky * uDaylight;
-  float l = max(max(s, blk), uNightVision);
+  float l = max(max(max(s, blk), uNightVision), uAmbient);
   float b = l / (4.0 - 3.0 * l);
   b = mix(b, sqrt(b), uGamma);
   b = max(b, 0.025);
@@ -233,7 +237,7 @@ export function createSpriteMaterial(shared: SharedUniforms, fog = true): THREE.
     fragmentShader: SPRITE_FRAGMENT,
     uniforms: {
       uAtlas: shared.uAtlas, uFogColor: shared.uFogColor, uFogNear: shared.uFogNear, uFogFar: shared.uFogFar,
-      uDaylight: shared.uDaylight, uGamma: shared.uGamma, uNightVision: shared.uNightVision,
+      uDaylight: shared.uDaylight, uGamma: shared.uGamma, uNightVision: shared.uNightVision, uAmbient: shared.uAmbient,
       uSky: { value: 1 }, uBlock: { value: 0 }, uTint: { value: new THREE.Color(1, 1, 1) }, uFlash: { value: 0 },
       uFog: { value: fog ? 1 : 0 },
     },
@@ -279,7 +283,7 @@ export function createLitBlockMaterial(shared: SharedUniforms, fog = true): THRE
     fragmentShader: LIT_CHUNK_FRAGMENT,
     uniforms: {
       uAtlas: shared.uAtlas, uFogColor: shared.uFogColor, uFogNear: shared.uFogNear, uFogFar: shared.uFogFar,
-      uDaylight: shared.uDaylight, uGamma: shared.uGamma, uNightVision: shared.uNightVision, uTime: shared.uTime,
+      uDaylight: shared.uDaylight, uGamma: shared.uGamma, uNightVision: shared.uNightVision, uAmbient: shared.uAmbient, uTime: shared.uTime,
       uWave: { value: 0 }, uSky: { value: 1 }, uBlock: { value: 0 }, uFlash: { value: 0 }, uFog: { value: fog ? 1 : 0 },
     },
     side: THREE.DoubleSide,

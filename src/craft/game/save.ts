@@ -16,6 +16,7 @@ import type { BlockEntity } from "../engine/chunk";
 import type { EntitySnapshot } from "../engine/entities";
 import type { GameMode, PlayerSave } from "../engine/player";
 import type { WorldType } from "../engine/worldgen";
+import type { Dimension } from "../engine/dimension";
 
 export interface GameRules {
   keepInventory: boolean;
@@ -25,6 +26,8 @@ export interface GameRules {
   naturalRegeneration: boolean;
   mobGriefing: boolean;
   doFallDamage: boolean;
+  /** Fire spreads and burns out. Absent in worlds saved before fire existed, which reads as on. */
+  doFireTick?: boolean;
 }
 
 export const DEFAULT_RULES: GameRules = {
@@ -35,6 +38,7 @@ export const DEFAULT_RULES: GameRules = {
   naturalRegeneration: true,
   mobGriefing: true,
   doFallDamage: true,
+  doFireTick: true,
 };
 
 export interface WorldMeta {
@@ -56,11 +60,17 @@ export interface WorldMeta {
   spawn: { x: number; y: number; z: number } | null;
   rules: GameRules;
   player: PlayerSave | null;
-  /** Online guests' saved state, by their stable client id. */
-  players: Record<string, PlayerSave & { name: string }>;
+  /** Online guests' saved state, by their stable client id (and the dimension it was saved in). */
+  players: Record<string, PlayerSave & { name: string; dimension?: Dimension }>;
   entities: EntitySnapshot[];
   /** Villages already given their villagers and golem, by region key, so none is populated twice. */
   villages?: string[];
+  /** The dimension the player (online, the host) is in; absent is the overworld. */
+  dimension?: Dimension;
+  /** Entities of the dimensions not loaded, waiting for someone to come back. */
+  otherEntities?: Partial<Record<Dimension, EntitySnapshot[]>>;
+  /** Every lit portal, by dimension (its bottom-left inner block and axis), so a trip links to the one it came through. */
+  portals?: Partial<Record<Dimension, [number, number, number, number][]>>;
   thumbnail?: string;
   version: 1;
 }
@@ -76,6 +86,8 @@ export interface ChunkData {
 interface StoredChunk {
   key: string;
   world: string;
+  /** Absent for the overworld, which is how every chunk saved before the Nether reads. */
+  dim?: Dimension;
   cx: number;
   cz: number;
   /** blocks followed by meta, possibly gzipped. */
@@ -87,7 +99,10 @@ interface StoredChunk {
 const DB_NAME = "blockcraft";
 const DB_VERSION = 1;
 
-export const chunkStoreKey = (world: string, cx: number, cz: number) => `${world}|${cx},${cz}`;
+/** Overworld keys keep the old form; the others are prefixed, still under the world's key range. */
+const DIM_PREFIX: Record<Dimension, string> = { overworld: "", nether: "n:", end: "e:" };
+export const chunkStoreKey = (world: string, cx: number, cz: number, dim: Dimension = "overworld") => `${world}|${DIM_PREFIX[dim]}${cx},${cz}`;
+const dimOfKey = (part: string): Dimension => (part.startsWith("n:") ? "nether" : part.startsWith("e:") ? "end" : "overworld");
 
 async function gzip(data: Uint8Array): Promise<{ data: Uint8Array; gz: boolean }> {
   if (typeof CompressionStream === "undefined") return { data, gz: false };
@@ -218,8 +233,8 @@ export class SaveStore {
     }
   }
 
-  async getChunk(world: string, cx: number, cz: number): Promise<ChunkData | null> {
-    const key = chunkStoreKey(world, cx, cz);
+  async getChunk(world: string, cx: number, cz: number, dim: Dimension = "overworld"): Promise<ChunkData | null> {
+    const key = chunkStoreKey(world, cx, cz, dim);
     const s = await this.store("chunks", "readonly");
     const stored = s ? await request(s.os.get(key) as IDBRequest<StoredChunk | undefined>) : this.memoryChunks.get(key);
     if (!stored) return null;
@@ -227,12 +242,12 @@ export class SaveStore {
     return { cx, cz, blocks, meta, entities: stored.entities ?? [] };
   }
 
-  async putChunks(world: string, chunks: ChunkData[]): Promise<void> {
+  async putChunks(world: string, chunks: ChunkData[], dim: Dimension = "overworld"): Promise<void> {
     if (!chunks.length) return;
     const packed: StoredChunk[] = [];
     for (const c of chunks) {
       const { data, gz } = await packChunk(c);
-      packed.push({ key: chunkStoreKey(world, c.cx, c.cz), world, cx: c.cx, cz: c.cz, data, gz, entities: c.entities });
+      packed.push({ key: chunkStoreKey(world, c.cx, c.cz, dim), world, dim: dim === "overworld" ? undefined : dim, cx: c.cx, cz: c.cz, data, gz, entities: c.entities });
     }
     const s = await this.store("chunks", "readwrite");
     if (!s) { for (const p of packed) this.memoryChunks.set(p.key, p); return; }
@@ -240,12 +255,14 @@ export class SaveStore {
     await done(s.tx);
   }
 
-  /** Keys ("cx,cz") of every chunk this world has saved — what an online guest must fetch rather than generate. */
-  async savedChunkKeys(world: string): Promise<string[]> {
+  /** Keys ("cx,cz") of every chunk this world has saved in a dimension — what an online guest must fetch rather than generate. */
+  async savedChunkKeys(world: string, dim: Dimension = "overworld"): Promise<string[]> {
     const s = await this.store("chunks", "readonly");
-    if (!s) return [...this.memoryChunks.keys()].filter((k) => k.startsWith(`${world}|`)).map((k) => k.split("|")[1]);
-    const keys = await request(s.os.getAllKeys(IDBKeyRange.bound(`${world}|`, `${world}|￿`)));
-    return (keys as string[]).map((k) => k.split("|")[1]);
+    const all = s
+      ? (await request(s.os.getAllKeys(IDBKeyRange.bound(`${world}|`, `${world}|￿`)))) as string[]
+      : [...this.memoryChunks.keys()].filter((k) => k.startsWith(`${world}|`));
+    const prefix = DIM_PREFIX[dim];
+    return all.map((k) => k.split("|")[1]).filter((part) => dimOfKey(part) === dim).map((part) => part.slice(prefix.length));
   }
 
   async allChunks(world: string): Promise<StoredChunk[]> {
@@ -265,7 +282,7 @@ export class SaveStore {
       format: "blockcraft-world",
       version: 1,
       meta,
-      chunks: chunks.map((c) => ({ cx: c.cx, cz: c.cz, gz: c.gz, data: toBase64(c.data), entities: c.entities })),
+      chunks: chunks.map((c) => ({ cx: c.cx, cz: c.cz, dim: c.dim, gz: c.gz, data: toBase64(c.data), entities: c.entities })),
     };
     return JSON.stringify(file);
   }
@@ -293,9 +310,13 @@ export class SaveStore {
     const keep = opts.keepId && typeof file.meta.id === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(file.meta.id);
     const id = keep ? file.meta.id : newWorldId();
     // Decoded before anything is replaced: a damaged file must not cost the copy already here.
-    const stored: StoredChunk[] = file.chunks.map((c) => ({
-      key: chunkStoreKey(id, c.cx, c.cz), world: id, cx: c.cx, cz: c.cz, gz: !!c.gz, data: fromBase64(c.data), entities: c.entities ?? [],
-    }));
+    const stored: StoredChunk[] = file.chunks.map((c) => {
+      const dim: Dimension = c.dim === "nether" || c.dim === "end" ? c.dim : "overworld";
+      return {
+        key: chunkStoreKey(id, c.cx, c.cz, dim), world: id, dim: dim === "overworld" ? undefined : dim, cx: c.cx, cz: c.cz,
+        gz: !!c.gz, data: fromBase64(c.data), entities: c.entities ?? [],
+      };
+    });
     if (keep) await this.deleteWorld(id);
     const others = (await this.listWorlds()).filter((w) => w.id !== id);
     const meta: WorldMeta = { ...file.meta, id, name: uniqueName(file.meta.name, others), lastPlayed: Date.now() };
@@ -314,7 +335,7 @@ export interface ExportFile {
   format: "blockcraft-world";
   version: 1;
   meta: WorldMeta;
-  chunks: { cx: number; cz: number; gz: boolean; data: string; entities: [number, BlockEntity][] }[];
+  chunks: { cx: number; cz: number; dim?: Dimension; gz: boolean; data: string; entities: [number, BlockEntity][] }[];
 }
 
 export function newWorldId(): string {

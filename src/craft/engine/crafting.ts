@@ -28,9 +28,9 @@ export interface Recipe {
 }
 
 const TAGS: Record<string, string[]> = {
-  planks: ["oak_planks", "birch_planks", "spruce_planks", "jungle_planks", "acacia_planks"],
+  planks: ["oak_planks", "birch_planks", "spruce_planks", "jungle_planks", "acacia_planks", "crimson_planks", "warped_planks"],
   logs: ["oak_log", "birch_log", "spruce_log", "jungle_log", "acacia_log"],
-  stone_crafting: ["cobblestone", "cobbled_deepslate"],
+  stone_crafting: ["cobblestone", "cobbled_deepslate", "blackstone"],
   coals: ["coal", "charcoal"],
   wool: WOOL_COLORS.map((c) => `${c}_wool`),
 };
@@ -53,6 +53,7 @@ function shapeless(id: string, ingredients: Ingredient[], item: string, count = 
 
 // Wood
 for (const wood of ["oak", "birch", "spruce", "jungle", "acacia"]) shapeless(`${wood}_planks`, [`${wood}_log`], `${wood}_planks`, 4);
+for (const wood of ["crimson", "warped"]) shapeless(`${wood}_planks`, [`${wood}_stem`], `${wood}_planks`, 4);
 shaped("stick", ["#", "#"], { "#": "#planks" }, "stick", 4);
 shaped("crafting_table", ["##", "##"], { "#": "#planks" }, "crafting_table");
 shaped("chest", ["###", "# #", "###"], { "#": "#planks" }, "chest");
@@ -366,6 +367,18 @@ export function layout(r: Recipe, width: number, take: (ids: number[]) => number
   return grid;
 }
 
+// The Nether
+shaped("nether_bricks", ["##", "##"], { "#": "nether_brick" }, "nether_bricks");
+shaped("nether_brick_fence", ["#N#", "#N#"], { "#": "nether_bricks", N: "nether_brick" }, "nether_brick_fence", 6);
+shaped("nether_brick_stairs", ["#  ", "## ", "###"], { "#": "nether_bricks" }, "nether_brick_stairs", 4);
+shaped("quartz_block", ["##", "##"], { "#": "quartz" }, "quartz_block");
+shaped("magma_block", ["##", "##"], { "#": "magma_cream" }, "magma_block");
+shaped("nether_wart_block", ["###", "###", "###"], { "#": "nether_wart" }, "nether_wart_block");
+shaped("bone_block", ["###", "###", "###"], { "#": "bone_meal" }, "bone_block");
+shapeless("bone_meal_from_block", ["bone_block"], "bone_meal", 9);
+shapeless("netherite_ingot", ["netherite_scrap", "netherite_scrap", "netherite_scrap", "netherite_scrap", "gold_ingot", "gold_ingot", "gold_ingot", "gold_ingot"], "netherite_ingot");
+shapeless("fire_charge", ["gunpowder", "blaze_powder", "#coals"], "fire_charge", 3);
+
 // ---- smelting ----------------------------------------------------------------------
 
 export interface Smelt {
@@ -403,6 +416,10 @@ const SMELTING: Smelt[] = [
   { input: "lapis_ore", output: "lapis_lazuli", xp: 0.2 },
   { input: "redstone_ore", output: "redstone", xp: 0.7 },
   { input: "emerald_ore", output: "emerald", xp: 1 },
+  { input: "netherrack", output: "nether_brick", xp: 0.1 },
+  { input: "nether_quartz_ore", output: "quartz", xp: 0.2 },
+  { input: "nether_gold_ore", output: "gold_ingot", xp: 1 },
+  { input: "ancient_debris", output: "netherite_scrap", xp: 2 },
 ].filter((s) => itemDefOrNull(s.output) && (s.input.startsWith("#") || itemDefOrNull(s.input)));
 
 export function smeltResult(id: number): Smelt | null {

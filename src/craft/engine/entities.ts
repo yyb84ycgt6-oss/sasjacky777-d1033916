@@ -10,14 +10,15 @@
  */
 import { block, B } from "./blocks";
 import { sameItem } from "./inventory";
-import { maxStack, type ItemStack } from "./items";
+import { itemDef, maxStack, type ItemStack, type StatusEffect } from "./items";
 import { bodyBox, moveBody, newBody, senseEnvironment, type AABB, type Body } from "./physics";
 import { raycastBlocks, rayBox } from "./raycast";
 import type { World } from "./world";
 
 export type EntityKind =
-  | "item" | "xp" | "arrow" | "snowball" | "egg" | "potion" | "xp_bottle" | "falling_block" | "tnt"
+  | "item" | "xp" | "arrow" | "snowball" | "egg" | "potion" | "xp_bottle" | "fireball" | "small_fireball" | "falling_block" | "tnt"
   | "pig" | "cow" | "sheep" | "chicken" | "zombie" | "skeleton" | "creeper" | "spider" | "slime" | "villager" | "iron_golem"
+  | "zombified_piglin" | "ghast" | "magma_cube" | "blaze" | "wither_skeleton" | "piglin" | "hoglin"
   | "boat" | "minecart" | "tnt_minecart";
 
 export interface PlayerRef {
@@ -32,9 +33,13 @@ export interface PlayerRef {
   sneaking: boolean;
   /** Under an invisibility potion: monsters notice them only up close. */
   invisible?: boolean;
+  /** Wearing a piece of gold armour, which piglins respect. */
+  goldArmor?: boolean;
 }
 
-export type DamageSource = "mob" | "arrow" | "explosion" | "fall" | "fire" | "lava" | "drown" | "starve" | "void" | "cactus" | "player" | "magic" | "suffocation";
+export type DamageSource = "mob" | "arrow" | "explosion" | "fall" | "fire" | "lava" | "drown" | "starve" | "void" | "cactus" | "player" | "magic" | "suffocation"
+  /** The wither effect; and a blaze's or ghast's fireball, which also sets its target alight. */
+  | "wither" | "fireball";
 
 export interface EntityContext {
   world: World;
@@ -51,7 +56,10 @@ export interface EntityContext {
   giveXp(id: string, amount: number): void;
   spawn(e: Entity): void;
   dropItem(x: number, y: number, z: number, stack: ItemStack, vx?: number, vy?: number, vz?: number): void;
-  explode(x: number, y: number, z: number, power: number, cause: Entity | null): void;
+  /** `fire` leaves flames among the rubble (a ghast's fireball). */
+  explode(x: number, y: number, z: number, power: number, cause: Entity | null, fire?: boolean): void;
+  /** A mob's blow carried an effect (a wither skeleton's wither). */
+  effectPlayer?(id: string, effect: StatusEffect, seconds: number, amp: number): void;
   sound(name: string, x: number, y: number, z: number, volume?: number, pitch?: number): void;
   particles(kind: string, x: number, y: number, z: number, count?: number, data?: number): void;
   entitiesNear(x: number, y: number, z: number, radius: number): Entity[];
@@ -174,7 +182,11 @@ export class ItemEntity extends Entity {
   tick(ctx: EntityContext): void {
     if (this.pickupDelay > 0) this.pickupDelay--;
     this.fall(ctx, 0.04, 0.98);
-    if (this.body.inLava || this.fireTicks > 0 && this.age % 10 === 0) {
+    // Netherite shrugs off fire and floats up out of lava; everything else burns.
+    if (itemDef(this.stack.id)?.fireproof) {
+      if (this.body.inLava) this.body.vy = Math.max(this.body.vy, 0.06);
+      this.fireTicks = 0;
+    } else if (this.body.inLava || this.fireTicks > 0 && this.age % 10 === 0) {
       this.removed = true;
       ctx.particles("smoke", this.x, this.y + 0.2, this.z, 4);
       ctx.sound("fizz", this.x, this.y, this.z, 0.4);
@@ -270,9 +282,10 @@ export function xpOrbValues(total: number): number[] {
 
 // ---- projectiles -----------------------------------------------------------------------
 
-export type ProjectileKind = "arrow" | "snowball" | "egg" | "potion" | "xp_bottle";
+export type ProjectileKind = "arrow" | "snowball" | "egg" | "potion" | "xp_bottle" | "fireball" | "small_fireball";
 export const isProjectileKind = (k: unknown): k is ProjectileKind =>
-  k === "arrow" || k === "snowball" || k === "egg" || k === "potion" || k === "xp_bottle";
+  k === "arrow" || k === "snowball" || k === "egg" || k === "potion" || k === "xp_bottle" || k === "fireball" || k === "small_fireball";
+const isFireball = (k: ProjectileKind) => k === "fireball" || k === "small_fireball";
 
 export class Projectile extends Entity {
   inGround = false;
@@ -290,12 +303,28 @@ export class Projectile extends Entity {
   item = 0;
 
   constructor(public readonly kind: ProjectileKind, x: number, y: number, z: number, vx: number, vy: number, vz: number, owner: string | null, id?: number) {
-    super(x, y, z, 0.25, 0.25, id);
+    const size = kind === "fireball" ? 1 : kind === "small_fireball" ? 0.3125 : 0.25;
+    super(x, y, z, size, size, id);
     this.body.vx = vx; this.body.vy = vy; this.body.vz = vz;
     this.owner = owner;
     this.pickup = kind === "arrow" && owner !== null && !owner.startsWith("mob:");
-    this.damage = kind === "arrow" ? 2 : 0;
+    this.damage = kind === "arrow" ? 2 : kind === "fireball" ? 6 : kind === "small_fireball" ? 5 : 0;
     this.faceVelocity();
+  }
+
+  /**
+   * A ghast's fireball can be batted back: any blow sends it off the way the
+   * blow was struck, and it counts as the striker's from then on.
+   */
+  hurt(_ctx: EntityContext, _amount: number, _source: DamageSource, fromX: number, fromZ: number, attacker?: string): boolean {
+    if (this.kind !== "fireball" || this.removed) return false;
+    const b = this.body;
+    const dx = b.x - fromX, dz = b.z - fromZ, d = Math.hypot(dx, dz) || 1;
+    const speed = Math.max(0.6, Math.hypot(b.vx, b.vy, b.vz));
+    b.vx = (dx / d) * speed; b.vz = (dz / d) * speed; b.vy = -b.vy * 0.5;
+    this.owner = attacker ?? null;
+    this.faceVelocity();
+    return true;
   }
 
   private faceVelocity(): void {
@@ -342,8 +371,19 @@ export class Projectile extends Entity {
     const blockHit = raycastBlocks(ctx.world, b.x, b.y, b.z, b.vx, b.vy, b.vz, speed);
     const blockT = blockHit ? blockHit.distance / Math.max(speed, 1e-6) : 2;
     if ((hitEntity || hitPlayer) && best < blockT) {
-      const dmg = this.kind === "arrow" ? Math.ceil(speed * this.damage) : this.kind === "snowball" ? 0 : 0;
+      // Snowballs sting blazes, and only blazes.
+      const dmg = this.kind === "arrow" ? Math.ceil(speed * this.damage) : isFireball(this.kind) ? this.damage
+        : this.kind === "snowball" && hitEntity?.kind === "blaze" ? 3 : 0;
       const nx = b.vx / (speed || 1), nz = b.vz / (speed || 1);
+      if (isFireball(this.kind)) {
+        if (hitEntity) {
+          hitEntity.hurt(ctx, dmg, "fireball", b.x - nx, b.z - nz, this.owner ?? undefined);
+          if (this.kind === "small_fireball") hitEntity.fireTicks = Math.max(hitEntity.fireTicks, 100);
+        }
+        if (hitPlayer) ctx.hurtPlayer(hitPlayer.id, dmg, "fireball", b.x - nx, b.z - nz, 0.4);
+        this.impact(ctx, hitEntity ?? hitPlayer);
+        return;
+      }
       // A bottle bursts on whatever it meets; only arrows and snowballs strike.
       if (this.kind !== "potion" && this.kind !== "xp_bottle") {
         if (hitEntity) {
@@ -371,6 +411,12 @@ export class Projectile extends Entity {
     }
     b.x += b.vx; b.y += b.vy; b.z += b.vz;
     senseEnvironment(ctx.world, b);
+    if (isFireball(this.kind)) {
+      // Fireballs fly straight, trailing smoke, and burn out after half a minute.
+      if (this.age % 2 === 0) ctx.particles("smoke", b.x, b.y + b.height / 2, b.z, 1);
+      if (this.age > 600 || b.y < -64) this.removed = true;
+      return;
+    }
     const drag = b.inWater ? 0.6 : 0.99;
     b.vx *= drag; b.vy = b.vy * drag - (this.kind === "arrow" ? 0.05 : 0.03); b.vz *= drag;
     this.faceVelocity();
@@ -380,6 +426,12 @@ export class Projectile extends Entity {
   private impact(ctx: EntityContext, struck: Entity | PlayerRef | null = null): void {
     this.removed = true;
     const b = this.body;
+    if (this.kind === "fireball") ctx.explode(b.x, b.y + b.height / 2, b.z, 1, null, true);
+    if (this.kind === "small_fireball") {
+      const x = Math.floor(b.x), y = Math.floor(b.y), z = Math.floor(b.z);
+      if (!struck && ctx.world.blockAt(x, y, z) === B.AIR) ctx.placeBlock(x, y, z, B.FIRE, 0);
+      ctx.sound("fire", b.x, b.y, b.z, 0.5);
+    }
     if (this.kind === "potion") ctx.splashPotion?.(this.item, b.x, b.y, b.z, struck, this.owner);
     if (this.kind === "xp_bottle") {
       ctx.sound("glass_break", b.x, b.y, b.z, 0.8);

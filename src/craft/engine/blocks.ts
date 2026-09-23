@@ -106,7 +106,7 @@ export interface BlockDef {
   facing?: "player" | "away" | "wall";
   /** Has an inventory or a screen. */
   interact?: "crafting" | "furnace" | "chest" | "bed" | "door" | "tnt" | "noteblock" | "redstone"
-    | "enchanting" | "anvil" | "brewing" | "cauldron" | "composter" | "bell";
+    | "enchanting" | "anvil" | "brewing" | "cauldron" | "composter" | "bell" | "smithing";
   flammable?: boolean;
   /** Hidden from the creative inventory (technical blocks). */
   hidden?: boolean;
@@ -125,6 +125,8 @@ export interface BlockDef {
   uvRotation?: (meta: number, face: number) => number;
   /** Six-way facing kept in meta bits 0-2 as a Face index (pistons, observers, dispensers, hoppers). */
   facing6?: boolean;
+  /** Its texture is ANIM_FRAMES consecutive atlas layers the shader steps through (portal, fire). */
+  animated?: boolean;
 }
 
 type Partial2<T> = { [K in keyof T]?: T[K] };
@@ -900,7 +902,7 @@ add(195, "stonecutter", "Stonecutter", {
 });
 add(196, "smithing_table", "Smithing Table", {
   facing: "player", textures: { top: "smithing_table_top", bottom: "smithing_table_bottom", side: "smithing_table_side", front: "smithing_table_front" },
-  hardness: 2.5, tool: A, material: "wood", flammable: true,
+  hardness: 2.5, tool: A, material: "wood", flammable: true, interact: "smithing",
 });
 add(197, "bell", "Bell", {
   shape: "boxes", layer: "cutout", opaque: false, facing: "player", interact: "bell",
@@ -917,6 +919,84 @@ add(184, "cauldron", "Cauldron", {
   textures: tex("cauldron_top", "cauldron_side", "cauldron_bottom"), hardness: 2, tool: P, harvestTier: 0, material: "metal",
   interact: "cauldron",
   boxTexture: (m, box, face) => ((m & 3) > 0 && box === 9 ? "cauldron_water" : box === 0 ? (face === Face.Up ? "cauldron_inner" : "cauldron_bottom") : undefined),
+});
+
+// ---- the Nether (198+) -------------------------------------------------------------------
+
+const NYLIUM_BELOW = "netherrack";
+add(198, "netherrack", "Netherrack", { hardness: 0.4, tool: P, harvestTier: 0 });
+add(199, "nether_quartz_ore", "Nether Quartz Ore", {
+  hardness: 3, tool: P, harvestTier: 0, drops: [{ item: "quartz", min: 1, max: 1 }], xp: [2, 5],
+});
+add(200, "nether_gold_ore", "Nether Gold Ore", {
+  hardness: 3, tool: P, harvestTier: 0, drops: [{ item: "gold_nugget", min: 2, max: 6 }], xp: [0, 1],
+});
+// A little lower than a full block, so whatever walks on it sinks in and slows.
+add(201, "soul_sand", "Soul Sand", {
+  hardness: 0.5, tool: S, material: "sand", speedFactor: 0.4, collision: () => [[0, 0, 0, 16, 14, 16]],
+});
+add(202, "soul_soil", "Soul Soil", { hardness: 0.5, tool: S, material: "sand" });
+add(203, "basalt", "Basalt", { textures: tex("basalt_top", "basalt_side"), hardness: 1.25, tool: P, harvestTier: 0 });
+add(204, "blackstone", "Blackstone", { textures: tex("blackstone_top", "blackstone"), hardness: 1.5, tool: P, harvestTier: 0 });
+add(205, "magma_block", "Magma Block", { hardness: 0.5, tool: P, harvestTier: 0, emission: 3 });
+add(206, "nether_bricks", "Nether Bricks", { hardness: 2, tool: P, harvestTier: 0 });
+add(207, "nether_brick_fence", "Nether Brick Fence", {
+  shape: "boxes", layer: "opaque", opaque: false, boxes: () => [[6, 0, 6, 10, 16, 10]],
+  collision: () => [[6, 0, 6, 10, 24, 10]], textures: tex("nether_bricks"), hardness: 2, tool: P, harvestTier: 0,
+});
+add(208, "nether_brick_stairs", "Nether Brick Stairs", {
+  shape: "boxes", layer: "opaque", opaque: false, boxes: stairBoxes, textures: tex("nether_bricks"),
+  hardness: 2, tool: P, harvestTier: 0, facing: "away",
+});
+// The crop, planted from the nether_wart item; four stages in meta.
+add(209, "nether_wart", "Nether Wart", {
+  shape: "crop", layer: "cutout", solid: false, opaque: false, hardness: 0, material: "plant", needsSupport: true,
+  textures: tex("nether_wart_stage_2"), hidden: true, drops: [{ item: "nether_wart", min: 1, max: 1 }],
+});
+add(210, "crimson_nylium", "Crimson Nylium", {
+  textures: tex("crimson_nylium", "crimson_nylium_side", NYLIUM_BELOW), hardness: 0.4, tool: P, harvestTier: 0,
+  drops: [{ item: "netherrack", min: 1, max: 1 }],
+});
+add(211, "warped_nylium", "Warped Nylium", {
+  textures: tex("warped_nylium", "warped_nylium_side", NYLIUM_BELOW), hardness: 0.4, tool: P, harvestTier: 0,
+  drops: [{ item: "netherrack", min: 1, max: 1 }],
+});
+// Nether wood does not burn: no fire spreads through a crimson forest.
+add(212, "crimson_stem", "Crimson Stem", { textures: tex("crimson_stem_top", "crimson_stem"), hardness: 2, tool: A, material: "wood" });
+add(213, "warped_stem", "Warped Stem", { textures: tex("warped_stem_top", "warped_stem"), hardness: 2, tool: A, material: "wood" });
+add(214, "crimson_planks", "Crimson Planks", { hardness: 2, tool: A, material: "wood" });
+add(215, "warped_planks", "Warped Planks", { hardness: 2, tool: A, material: "wood" });
+add(216, "nether_wart_block", "Nether Wart Block", { hardness: 1, tool: H, material: "leaves" });
+add(217, "warped_wart_block", "Warped Wart Block", { hardness: 1, tool: H, material: "leaves" });
+add(218, "shroomlight", "Shroomlight", { hardness: 1, tool: H, material: "leaves", emission: 15 });
+add(219, "crimson_fungus", "Crimson Fungus", { ...plant(), waves: false });
+add(220, "warped_fungus", "Warped Fungus", { ...plant(), waves: false });
+add(221, "crimson_roots", "Crimson Roots", { ...plant(), replaceable: true });
+add(222, "warped_roots", "Warped Roots", { ...plant(), replaceable: true });
+add(223, "weeping_vines", "Weeping Vines", { ...plant(), waves: false, climbable: true, drops: [{ item: "weeping_vines", min: 1, max: 1, chance: 0.33 }] });
+add(224, "twisting_vines", "Twisting Vines", { ...plant(), waves: false, climbable: true, drops: [{ item: "twisting_vines", min: 1, max: 1, chance: 0.33 }] });
+// The portal's sheet: thin along its axis (meta 0 spans x, 1 spans z), walked through, never mined.
+add(225, "nether_portal", "Nether Portal", {
+  shape: "boxes", layer: "translucent", solid: false, opaque: false, emission: 11, hardness: -1, material: "glass",
+  boxes: (m) => [(m & 1) === 0 ? [0, 0, 6, 16, 16, 10] : [6, 0, 0, 10, 16, 16]], collision: () => [],
+  textures: tex("nether_portal"), hidden: true, drops: [], animated: true,
+});
+add(226, "fire", "Fire", {
+  shape: "cross", layer: "cutout", solid: false, opaque: false, emission: 15, hardness: 0, material: "none",
+  replaceable: true, needsSupport: true, textures: tex("fire"), hidden: true, drops: [], animated: true,
+});
+add(227, "soul_fire", "Soul Fire", {
+  shape: "cross", layer: "cutout", solid: false, opaque: false, emission: 10, hardness: 0, material: "none",
+  replaceable: true, needsSupport: true, textures: tex("soul_fire"), hidden: true, drops: [], animated: true,
+});
+add(228, "bone_block", "Bone Block", { textures: tex("bone_block_top", "bone_block_side"), hardness: 2, tool: P, harvestTier: 0 });
+add(229, "ancient_debris", "Ancient Debris", {
+  textures: tex("ancient_debris_top", "ancient_debris_side"), hardness: 30, tool: P, harvestTier: 3, material: "metal",
+});
+add(230, "quartz_block", "Block of Quartz", { textures: tex("quartz_block_top", "quartz_block_side"), hardness: 0.8, tool: P, harvestTier: 0 });
+// A cage that breeds its mob (meta names which, from SPAWNER_MOBS) while a player is near.
+add(231, "spawner", "Monster Spawner", {
+  layer: "cutout", opaque: false, hardness: 5, tool: P, harvestTier: 0, material: "metal", drops: [], xp: [15, 43], hidden: true,
 });
 
 export const BLOCK_COUNT = BLOCKS.length;
@@ -969,7 +1049,20 @@ export const B = {
   RAIL: 185, POWERED_RAIL: 186, DETECTOR_RAIL: 187, ACTIVATOR_RAIL: 188,
   COMPOSTER: 189, LECTERN: 190, SMOKER: 191, BARREL: 192, FLETCHING_TABLE: 193, LOOM: 194, STONECUTTER: 195,
   SMITHING_TABLE: 196, BELL: 197,
+  NETHERRACK: 198, NETHER_QUARTZ_ORE: 199, NETHER_GOLD_ORE: 200, SOUL_SAND: 201, SOUL_SOIL: 202, BASALT: 203,
+  BLACKSTONE: 204, MAGMA_BLOCK: 205, NETHER_BRICKS: 206, NETHER_BRICK_FENCE: 207, NETHER_BRICK_STAIRS: 208,
+  NETHER_WART: 209, CRIMSON_NYLIUM: 210, WARPED_NYLIUM: 211, CRIMSON_STEM: 212, WARPED_STEM: 213,
+  CRIMSON_PLANKS: 214, WARPED_PLANKS: 215, NETHER_WART_BLOCK: 216, WARPED_WART_BLOCK: 217, SHROOMLIGHT: 218,
+  CRIMSON_FUNGUS: 219, WARPED_FUNGUS: 220, CRIMSON_ROOTS: 221, WARPED_ROOTS: 222, WEEPING_VINES: 223,
+  TWISTING_VINES: 224, NETHER_PORTAL: 225, FIRE: 226, SOUL_FIRE: 227, BONE_BLOCK: 228, ANCIENT_DEBRIS: 229,
+  QUARTZ_BLOCK: 230, SPAWNER: 231,
 } as const;
+
+/** Blocks that stand on an axis kept in meta like a log's (0 up, 1 along x, 2 along z). */
+export const isPillar = (id: number): boolean =>
+  isLog(id) || id === B.CRIMSON_STEM || id === B.WARPED_STEM || id === B.BASALT || id === B.BONE_BLOCK;
+export const isFire = (id: number): boolean => id === B.FIRE || id === B.SOUL_FIRE;
+export const isNylium = (id: number): boolean => id === B.CRIMSON_NYLIUM || id === B.WARPED_NYLIUM;
 
 export const isFluid = (id: number): boolean => id === B.WATER || id === B.LAVA;
 export const isLog = (id: number): boolean =>
@@ -979,7 +1072,7 @@ export const isLeaves = (id: number): boolean =>
 export const isCrop = (id: number): boolean => id === B.WHEAT || id === B.CARROTS || id === B.POTATOES;
 export const isSapling = (id: number): boolean => id >= B.OAK_SAPLING && id <= B.ACACIA_SAPLING;
 export const isSlab = (id: number): boolean => id >= B.OAK_SLAB && id <= B.STONE_BRICK_SLAB;
-export const isStairs = (id: number): boolean => id >= B.OAK_STAIRS && id <= B.STONE_BRICK_STAIRS;
+export const isStairs = (id: number): boolean => (id >= B.OAK_STAIRS && id <= B.STONE_BRICK_STAIRS) || id === B.NETHER_BRICK_STAIRS;
 export const isDoor = (id: number): boolean => id === B.OAK_DOOR || id === B.IRON_DOOR;
 export const isTrapdoor = (id: number): boolean => id === B.OAK_TRAPDOOR || id === B.IRON_TRAPDOOR;
 export const isButton = (id: number): boolean => id === B.STONE_BUTTON || id === B.OAK_BUTTON;
@@ -1001,7 +1094,7 @@ export const CROP_MAX_AGE: Record<number, number> = { [B.WHEAT]: 7, [B.CARROTS]:
  */
 export function faceTexture(def: BlockDef, meta: number, face: number): string {
   const t = def.textures;
-  if (isLog(def.id)) {
+  if (isPillar(def.id)) {
     const axis = meta & 3;
     const end = axis === 0 ? face === Face.Up || face === Face.Down : axis === 1 ? face === Face.East || face === Face.West : face === Face.South || face === Face.North;
     return end ? t.top : t.side;
@@ -1022,6 +1115,8 @@ export function faceTexture(def: BlockDef, meta: number, face: number): string {
     const base = def.id === B.WHEAT ? "wheat" : def.id === B.CARROTS ? "carrots" : "potatoes";
     return `${base}_stage_${meta & 7}`;
   }
+  // Four ages over three pictures: the middle two look alike, as in the original.
+  if (def.id === B.NETHER_WART) return `nether_wart_stage_${[0, 1, 1, 2][meta & 3]}`;
   if (face === Face.Up) return t.top;
   if (face === Face.Down) return t.bottom;
   if (t.front && def.facing === "player" && FACING_TO_FACE[meta & 3] === face) return t.front;

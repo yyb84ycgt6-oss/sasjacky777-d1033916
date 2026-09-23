@@ -6,7 +6,8 @@
 import { CHUNK_VOLUME } from "./constants";
 import { lightChunk } from "./lighting";
 import { Mesher, type ChunkMesh } from "./mesher";
-import { Generator, type GenSettings } from "./worldgen";
+import { createGenerator } from "./generators";
+import type { ChunkGenerator, GenSettings } from "./worldgen";
 
 export interface GenRequest {
   kind: "gen";
@@ -66,12 +67,12 @@ export type JobRequest = GenRequest | MeshRequest;
 export type JobResult = GenResult | MeshResult | ErrorResult;
 
 export class JobRunner {
-  private generator: Generator | null = null;
+  private generator: ChunkGenerator | null = null;
   private mesher: Mesher | null = null;
   private missing = 0;
 
   init(req: InitRequest): void {
-    this.generator = new Generator(req.settings);
+    this.generator = createGenerator(req.settings);
     const layers = req.layers;
     const fallback = layers["__missing__"] ?? 0;
     this.mesher = new Mesher((name) => {
@@ -90,7 +91,7 @@ export class JobRunner {
         blocks = req.saved.blocks;
         meta = req.saved.meta.length === CHUNK_VOLUME ? req.saved.meta : new Uint8Array(CHUNK_VOLUME);
         biomes = new Uint8Array(256);
-        for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) biomes[z * 16 + x] = this.generator.column(cx * 16 + x, cz * 16 + z).biome;
+        for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) biomes[z * 16 + x] = this.generator.biomeAt(cx * 16 + x, cz * 16 + z);
       } else {
         const g = this.generator.generate(cx, cz);
         blocks = g.blocks; meta = g.meta; biomes = g.biomes;

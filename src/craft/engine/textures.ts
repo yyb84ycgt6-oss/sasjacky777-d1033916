@@ -889,6 +889,157 @@ def("moon", (p, r) => {
   for (const [x, y] of [[5, 5], [9, 7], [6, 10], [10, 11]]) { p.set(x, y, hex("#b8c0cc")); p.set(x + 1, y, hex("#c8ced8")); }
 });
 
+// ---- the Nether ------------------------------------------------------------------------------
+
+const NETHERRACK = [hex("#4a1717"), hex("#5a1e1e"), hex("#6b2424"), hex("#7a2b2b"), hex("#8a3434")];
+function netherrack(p: Pixels, rng: Rng): void {
+  palette(p, rng, NETHERRACK, 4, 0.9);
+  speckle(p, rng, [hex("#3a1010"), hex("#962f2f")], 0.1);
+}
+def("netherrack", netherrack);
+def("nether_quartz_ore", (p, r) => ore(p, r, netherrack, [hex("#d8cfc2"), hex("#efe8de"), hex("#fffaf2")], 6));
+def("nether_gold_ore", (p, r) => ore(p, r, netherrack, [hex("#e0b030"), hex("#f5d84a"), hex("#fff08a")], 7));
+// Soul sand: sand with faces in it — two dark eyes and a mouth, here and there.
+def("soul_sand", (p, r) => {
+  palette(p, r, [hex("#3b2b20"), hex("#4a3627"), hex("#57402e"), hex("#634a36")], 4, 0.7);
+  for (const [x, y] of [[3, 3], [10, 9], [5, 11]]) {
+    const dark = hex("#241910");
+    p.set(x, y, dark); p.set(x + 2, y, dark); p.set(x + 1, y + 2, dark); p.set(x, y + 2, shade(dark, 1.3)); p.set(x + 2, y + 2, shade(dark, 1.3));
+  }
+});
+def("soul_soil", (p, r) => { palette(p, r, [hex("#3a2a20"), hex("#45322a"), hex("#4f3a2e"), hex("#5a4434")], 4, 0.8); speckle(p, r, [hex("#2a1e16")], 0.08); });
+def("basalt_side", (p, r) => {
+  const n = valueNoise(r, 8, 1);
+  for (let y = 0; y < TEX; y++) for (let x = 0; x < TEX; x++) {
+    const v = n[y * TEX + x] + (r.next() - 0.5) * 0.25;
+    p.set(x, y, shade(hex("#4b4b52"), 0.78 + v * 0.45));
+  }
+});
+def("basalt_top", (p, r) => {
+  for (let y = 0; y < TEX; y++) for (let x = 0; x < TEX; x++) {
+    const d = Math.hypot(x - 7.5, y - 7.5);
+    p.set(x, y, shade(hex("#55555c"), (Math.floor(d) % 3 === 0 ? 0.8 : 1) * (0.9 + r.next() * 0.15)));
+  }
+});
+def("blackstone", (p, r) => { palette(p, r, [hex("#1a171c"), hex("#221e25"), hex("#2b262e"), hex("#35303a")], 4, 0.7); speckle(p, r, [hex("#403a46")], 0.06); });
+def("blackstone_top", (p, r) => { palette(p, r, [hex("#1d1a20"), hex("#252128"), hex("#2e2932")], 8, 0.5); frame(p, hex("#141116")); });
+// Magma: a dark crust split by glowing seams.
+def("magma_block", (p, r) => {
+  const n = valueNoise(r, 4);
+  for (let y = 0; y < TEX; y++) for (let x = 0; x < TEX; x++) {
+    const v = n[y * TEX + x] + (r.next() - 0.5) * 0.1;
+    const seam = Math.abs(v - 0.5) < 0.07;
+    p.set(x, y, seam ? mix(hex("#ff8a1a"), hex("#ffd35a"), r.next()) : shade(hex("#5a2310"), 0.7 + v * 0.5));
+  }
+});
+def("nether_bricks", (p, r) => bricksPattern(p, r, hex("#4a2228"), hex("#23100f"), 4, 8));
+for (let stage = 0; stage < 3; stage++) {
+  def(`nether_wart_stage_${stage}`, (p, r) => {
+    p.clear();
+    const stalk = hex("#6a1a1c"), bulb = hex("#a42a2a"), tip = hex("#d04a44");
+    for (const x0 of [3, 7, 11]) {
+      const x = x0 + r.int(2);
+      const h = 3 + stage * 3 + r.int(2);
+      for (let j = 0; j < h; j++) p.set(x, 15 - j, stalk);
+      if (stage > 0) {
+        const top = 15 - h;
+        for (let dy = 0; dy <= stage; dy++) for (let dx = -1; dx <= 1; dx++) p.set(x + dx, top + dy, dy === 0 ? tip : bulb);
+      } else p.set(x, 15 - h, tip);
+    }
+  });
+}
+const nyliumTop = (colors: C[]) => (p: Pixels, r: Rng) => { palette(p, r, colors, 4, 0.9); speckle(p, r, [shade(colors[colors.length - 1], 1.2)], 0.06); };
+const nyliumSide = (colors: C[]) => (p: Pixels, r: Rng) => {
+  netherrack(p, r);
+  for (let x = 0; x < TEX; x++) {
+    const depth = 2 + r.int(3);
+    for (let y = 0; y < depth; y++) p.set(x, y, r.pick(colors));
+  }
+};
+const CRIMSON = [hex("#6e0c0c"), hex("#851212"), hex("#9c1a1a"), hex("#b02626")];
+const WARPED = [hex("#145149"), hex("#18665c"), hex("#1f7a6e"), hex("#2a8e80")];
+def("crimson_nylium", nyliumTop(CRIMSON));
+def("crimson_nylium_side", nyliumSide(CRIMSON));
+def("warped_nylium", nyliumTop(WARPED));
+def("warped_nylium_side", nyliumSide(WARPED));
+// Stems glow faintly in streaks, like the original's.
+const stemSide = (base: C, dark: C, glow: C) => (p: Pixels, r: Rng) => {
+  const n = valueNoise(r, 8, 2);
+  for (let y = 0; y < TEX; y++) for (let x = 0; x < TEX; x++) {
+    const v = n[y * TEX + x] + (r.next() - 0.5) * 0.3;
+    p.set(x, y, v < 0.32 ? dark : v > 0.82 ? glow : shade(base, 0.9 + v * 0.2));
+  }
+};
+def("crimson_stem", stemSide(hex("#6d2231"), hex("#4a1522"), hex("#e0584a")));
+def("crimson_stem_top", (p, r) => logTop(p, r, hex("#8b3a4c"), hex("#5c1a2b")));
+def("warped_stem", stemSide(hex("#2b5460"), hex("#1c3a44"), hex("#3ce6b8")));
+def("warped_stem_top", (p, r) => logTop(p, r, hex("#3a8a86"), hex("#2b4b58")));
+def("crimson_planks", (p, r) => planks(p, r, hex("#6a344b")));
+def("warped_planks", (p, r) => planks(p, r, hex("#2b6963")));
+def("nether_wart_block", (p, r) => palette(p, r, [hex("#6f0303"), hex("#800a0a"), hex("#960f0f"), hex("#aa1c1c")], 4, 0.8));
+def("warped_wart_block", (p, r) => palette(p, r, [hex("#0e6b62"), hex("#13796f"), hex("#1a8b80"), hex("#23a196")], 4, 0.8));
+def("shroomlight", (p, r) => { palette(p, r, [hex("#c9552a"), hex("#e2803a"), hex("#f1a548"), hex("#ffd285")], 4, 0.9); bevel(p, 1.1, 0.85); });
+const fungus = (cap: C, spot: C) => (p: Pixels, r: Rng) => {
+  p.clear();
+  const stalk = hex("#d8c9a8");
+  for (let y = 9; y <= 15; y++) { p.set(7, y, stalk); p.set(8, y, shade(stalk, 0.85)); }
+  for (let y = 4; y <= 8; y++) for (let x = 3; x <= 12; x++) {
+    const d = Math.hypot((x - 7.5) / 1.2, y - 8);
+    if (d < 4.4) p.set(x, y, shade(cap, 0.85 + r.next() * 0.3));
+  }
+  for (const [x, y] of [[5, 6], [9, 5], [10, 7], [6, 8]]) p.set(x, y, spot);
+};
+def("crimson_fungus", fungus(hex("#a41c1c"), hex("#ff9a3a")));
+def("warped_fungus", fungus(hex("#138a7c"), hex("#ff8a2a")));
+def("crimson_roots", (p, r) => blades(p, r, 7, 11, hex("#b0203a")));
+def("warped_roots", (p, r) => blades(p, r, 7, 11, hex("#18a08a")));
+const vines = (color: C, bud: C, hanging: boolean) => (p: Pixels, r: Rng) => {
+  p.clear();
+  for (const x0 of [4, 8, 11]) {
+    let x = x0;
+    for (let j = 0; j < 16; j++) {
+      const y = hanging ? j : 15 - j;
+      if (r.next() < 0.25) x += r.next() < 0.5 ? -1 : 1;
+      p.set(x, y, shade(color, 0.8 + r.next() * 0.35));
+      if (r.next() < 0.15) p.set(x + 1, y, bud);
+    }
+  }
+};
+def("weeping_vines", vines(hex("#8a1414"), hex("#d0402a"), true));
+def("twisting_vines", vines(hex("#128a78"), hex("#3ce6b8"), false));
+def("bone_block_side", (p, r) => {
+  noisy(p, r, hex("#e2dcc8"), 0.08, 2);
+  for (let y = 0; y < TEX; y++) for (const x of [0, 5, 10, 15]) p.set(x, y, hex("#c8c0a8"));
+});
+def("bone_block_top", (p, r) => {
+  noisy(p, r, hex("#e2dcc8"), 0.08, 2);
+  frame(p, hex("#c8c0a8"));
+  for (const [x, y] of [[4, 4], [11, 4], [4, 11], [11, 11], [7, 7], [8, 8]]) p.set(x, y, hex("#a8a088"));
+});
+def("ancient_debris_side", (p, r) => {
+  const n = valueNoise(r, 4, 8);
+  for (let y = 0; y < TEX; y++) for (let x = 0; x < TEX; x++) {
+    const v = n[y * TEX + x] + (r.next() - 0.5) * 0.2;
+    p.set(x, y, Math.abs(v - 0.5) < 0.06 ? hex("#8a7266") : shade(hex("#5e4238"), 0.75 + v * 0.45));
+  }
+});
+def("ancient_debris_top", (p, r) => {
+  for (let y = 0; y < TEX; y++) for (let x = 0; x < TEX; x++) {
+    const d = Math.hypot(x - 7.5, y - 7.5);
+    p.set(x, y, shade(Math.floor(d) % 3 === 0 ? hex("#7a5c50") : hex("#5a3e34"), 0.9 + r.next() * 0.15));
+  }
+});
+def("quartz_block_side", (p, r) => { noisy(p, r, hex("#ebe5da"), 0.05, 2); bevel(p, 1.03, 0.9); });
+def("quartz_block_top", (p, r) => { noisy(p, r, hex("#ebe5da"), 0.05, 2); frame(p, hex("#d8d0c2"), 1); });
+// A cage: dark bars with gaps you see the flame through.
+def("spawner", (p, r) => {
+  p.clear();
+  for (let y = 0; y < TEX; y++) for (let x = 0; x < TEX; x++) {
+    const bar = x % 5 === 0 || y % 5 === 0 || x === 15 || y === 15;
+    if (bar) p.set(x, y, shade(hex("#2a3440"), 0.8 + r.next() * 0.4));
+  }
+});
+
 // Water and lava are animated: ANIM_FRAMES consecutive layers, painted from a
 // looping path through 3D noise so the last frame flows into the first.
 const WATER_NOISE = new Simplex(4242);
@@ -908,6 +1059,42 @@ function fluidFrame(p: Pixels, frame: number, lava: boolean): void {
         const g = 150 + f * 70;
         p.set(x, y, [g, g, g], 175 + Math.round(f * 30));
       }
+    }
+  }
+}
+
+/** Textures with ANIM_FRAMES layers each, laid out first in the atlas; the shader steps through them. */
+export const ANIMATED_TEXTURES = ["water_still", "lava_still", "nether_portal", "fire", "soul_fire"] as const;
+
+// The portal: a purple swirl turning in place, from the same looping noise path.
+const PORTAL_NOISE = new Simplex(6161);
+function portalFrame(p: Pixels, frame: number): void {
+  const t = (frame / ANIM_FRAMES) * Math.PI * 2;
+  for (let y = 0; y < TEX; y++) {
+    for (let x = 0; x < TEX; x++) {
+      const ax = (x / 16) * Math.PI * 2, ay = (y / 16) * Math.PI * 2;
+      const v = PORTAL_NOISE.noise3(Math.cos(ax) + Math.cos(t) * 0.8, Math.sin(ax) + Math.cos(ay), Math.sin(ay) + Math.sin(t) * 0.8);
+      const f = (v + 1) / 2;
+      p.set(x, y, mix(hex("#3a0a8a"), hex("#c070ff"), Math.pow(f, 1.3)), 170 + Math.round(f * 60));
+    }
+  }
+}
+
+// Fire: tongues of flame rising through the frames, from noise scrolled upward.
+const FIRE_NOISE = new Simplex(3131);
+function fireFrame(p: Pixels, frame: number, soul: boolean): void {
+  p.clear();
+  const t = (frame / ANIM_FRAMES) * Math.PI * 2;
+  for (let y = 0; y < TEX; y++) {
+    for (let x = 0; x < TEX; x++) {
+      const ax = (x / 16) * Math.PI * 2;
+      const v = (FIRE_NOISE.noise3(Math.cos(ax) * 1.2, Math.sin(ax) * 1.2 + y * 0.18 + Math.cos(t) * 0.9, Math.sin(t) * 0.9) + 1) / 2;
+      // Taller in the middle, thinning to nothing at the top.
+      const heat = v * 1.3 - (15 - y) / 16 * 0.95 - Math.abs(x - 7.5) / 30;
+      if (heat < 0.18) continue;
+      const k = Math.min(1, (heat - 0.18) * 2);
+      const c = soul ? mix(hex("#1a8aa8"), hex("#b8fbff"), k) : mix(hex("#c2300a"), hex("#ffe27a"), k);
+      p.set(x, y, c);
     }
   }
 }
@@ -2006,9 +2193,9 @@ function paletteOf(main: string, extra: ItemPalette = {}): ItemPalette {
 }
 
 const TOOL_HEADS: Record<string, string> = {
-  wooden: "#8a6a3a", stone: "#8a8a8a", iron: "#dcdcdc", golden: "#f5d84a", diamond: "#4ce2e0",
+  wooden: "#8a6a3a", stone: "#8a8a8a", iron: "#dcdcdc", golden: "#f5d84a", diamond: "#4ce2e0", netherite: "#4d4549",
 };
-const ARMOR_COLORS: Record<string, string> = { leather: "#8f5a33", iron: "#d8d8d8", golden: "#f5d84a", diamond: "#4ce2e0" };
+const ARMOR_COLORS: Record<string, string> = { leather: "#8f5a33", iron: "#d8d8d8", golden: "#f5d84a", diamond: "#4ce2e0", netherite: "#4d4549" };
 const DYE_COLORS: Record<string, string> = {
   white: "#f0f0f0", red: "#b02e26", yellow: "#fed83d", blue: "#3c44aa", green: "#5e7c16", orange: "#f9801d",
   purple: "#8932b8", black: "#1d1d21",
@@ -2113,6 +2300,11 @@ art("blaze_rod", "stick", { a: hex("#8a5a00"), b: hex("#f8c030"), d: hex("#d88a1
 art("blaze_powder", "dust", paletteOf("#f0a020"));
 art("ghast_tear", "tear", paletteOf("#cfe8ea", { h: hex("#ffffff") }));
 art("magma_cream", "ball", paletteOf("#d86a18", { c: hex("#ffd040") }));
+art("nether_brick", "ingot", paletteOf("#5a2a30"));
+art("netherite_scrap", "raw", paletteOf("#6a5048"));
+art("netherite_ingot", "ingot", paletteOf("#4d4549", { c: hex("#7a6a70") }));
+art("fire_charge", "ball", paletteOf("#3a2a22", { c: hex("#ff9a2a") }));
+art("ender_pearl", "ball", paletteOf("#10584c", { c: hex("#46d8b8") }));
 art("fermented_spider_eye", "eye", paletteOf("#8a4a2a", { w: hex("#e08a70") }));
 art("glistering_melon_slice", "melon_slice", { a: hex("#8a6a10"), b: hex("#e0402f"), w: hex("#ffe060"), g: hex("#f0c030") });
 art("golden_carrot", "carrot", paletteOf("#f0c020", { g: hex("#d8b020") }));
@@ -2140,6 +2332,8 @@ export function paintTexture(name: string, frame = 0): Pixels | null {
   const p = new Pixels();
   if (name === "water_still") { fluidFrame(p, frame, false); return p; }
   if (name === "lava_still") { fluidFrame(p, frame, true); return p; }
+  if (name === "nether_portal") { portalFrame(p, frame); return p; }
+  if (name === "fire" || name === "soul_fire") { fireFrame(p, frame, name === "soul_fire"); return p; }
   const destroy = /^destroy_stage_(\d)$/.exec(name);
   if (destroy) { destroyStage(p, Number(destroy[1])); return p; }
   const painter = PAINTERS[name];

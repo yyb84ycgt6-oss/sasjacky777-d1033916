@@ -336,10 +336,11 @@ export class Mesher {
     const layer = this.layer(def, m, Face.South);
     // Small per-position jitter, so a meadow is not a grid of identical flowers.
     const h = ((x * 73856093) ^ (z * 19349663) ^ (y * 83492791)) >>> 0;
-    const jitter = def.id === B.SUGAR_CANE || def.id === B.COBWEB ? 0 : 1;
+    // Fire stands square in its block, as the original's does; plants are scattered a little.
+    const jitter = def.id === B.SUGAR_CANE || def.id === B.COBWEB || def.animated ? 0 : 1;
     const ox = jitter * (((h & 7) - 3.5) * 0.7), oz = jitter * ((((h >> 3) & 7) - 3.5) * 0.7);
     const bx = x * 16 + ox, bz = z * 16 + oz, by = y * 16;
-    const flags = def.waves ? FLAG_WAVE_TOP : 0;
+    const flags = def.animated ? FLAG_ANIMATED : def.waves ? FLAG_WAVE_TOP : 0;
     this.flatLight(input, x, y, z, 0.9);
     const lo = 1.6, hi = 14.4;
     for (const diag of [0, 1]) {
@@ -411,7 +412,7 @@ export class Mesher {
         }
         const named = def.boxTexture ? def.boxTexture(m, bi, f) : undefined;
         const layer = named ? this.lookupCached(named) : this.layer(def, m, f);
-        b.quad(sx, sy, sz, su, sv, layer, sSky, sBlk, sShade, 0, r, g, bl, tintMode);
+        b.quad(sx, sy, sz, su, sv, layer, sSky, sBlk, sShade, def.animated ? FLAG_ANIMATED : 0, r, g, bl, tintMode);
       }
     }
   }

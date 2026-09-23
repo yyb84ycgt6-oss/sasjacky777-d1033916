@@ -241,14 +241,22 @@ export class GameAudio {
         this.tone(out, t, "triangle", 440 * p, 439 * p, 1.6, 0.1);
         break;
       case "compost": this.noiseBurst(out, t, 0.18, "lowpass", 900 * p, 1.2, 0.5, 0.7); break;
+      // The portal: a low hum swelling as the four seconds run, and a rushing whoosh on the way through.
+      case "portal_trigger":
+        this.tone(out, t, "sine", 110, 220, 3.8, 0.18, 1.2);
+        this.tone(out, t, "sine", 165, 330, 3.8, 0.1, 1.2);
+        break;
+      case "portal_travel": this.noiseBurst(out, t, 1.6, "bandpass", 600, 0.5, 0.7, 0.8); this.tone(out, t, "sawtooth", 80, 400, 1.4, 0.12, 0.3); break;
+      case "fire_charge": this.noiseBurst(out, t, 0.35, "bandpass", 1500, 0.8, 0.6, 0.6); break;
       default:
         this.mob(name, out, t, p);
     }
   }
 
   private mob(name: string, out: AudioNode, t: number, p: number): void {
-    // "iron_golem_hurt" is the golem's, not an "iron" mob's.
-    const [kind, what] = name.startsWith("iron_golem") ? ["iron_golem", name.slice(11)] : name.split("_");
+    // "iron_golem_hurt" is the golem's, not an "iron" mob's: two-word kinds are matched whole.
+    const long = ["iron_golem", "zombified_piglin", "magma_cube", "wither_skeleton"].find((k) => name.startsWith(`${k}_`) || name === k);
+    const [kind, what] = long ? [long, name.slice(long.length + 1)] : name.split("_");
     const death = what === "death";
     const low = death ? 0.75 : 1;
     switch (kind) {
@@ -287,6 +295,33 @@ export class GameAudio {
         this.tone(out, t, "square", from * 2 * p, to * 2 * p, 0.3, 0.05, 0.05);
         break;
       }
+      // Piglins snort; the zombified ones grunt lower and wetter.
+      case "piglin": case "zombified_piglin": {
+        const z = kind === "zombified_piglin" ? 0.7 : 1;
+        const f = (what === "admire" ? 1.3 : 1) * z * p * low;
+        this.tone(out, t, "sawtooth", 260 * f, 170 * f, 0.18, 0.22);
+        this.tone(out, t + 0.1, "sawtooth", 230 * f, 150 * f, 0.16, 0.18);
+        this.noiseBurst(out, t, 0.15, "lowpass", 700 * z, 1, 0.25);
+        break;
+      }
+      case "hoglin": this.tone(out, t, "sawtooth", 110 * p * low, 70 * p * low, 0.4, 0.3, 0.05); this.noiseBurst(out, t, 0.3, "lowpass", 400, 1, 0.3); break;
+      case "wither_skeleton": for (let i = 0; i < 4; i++) this.noiseBurst(out, t + i * 0.06, 0.04, "bandpass", 1400, 4, 0.5); break;
+      // A ghast's long mournful cry; a shriek when hurt; a cough of fire when it spits.
+      case "ghast":
+        if (what === "shoot") { this.noiseBurst(out, t, 0.5, "lowpass", 1200, 0.8, 0.6, 0.7); this.tone(out, t, "sawtooth", 160, 60, 0.4, 0.3); }
+        else if (what === "warn" || what === "hurt") this.tone(out, t, "triangle", 900 * p, 1300 * p, 0.6, 0.25, 0.05);
+        else { this.tone(out, t, "sine", 520 * p * low, 380 * p * low, 1.6, 0.18, 0.3); this.tone(out, t + 0.2, "sine", 780 * p * low, 540 * p * low, 1.4, 0.08, 0.3); }
+        break;
+      // Blazes breathe in rasps of fire.
+      case "blaze":
+        if (what === "shoot") this.noiseBurst(out, t, 0.3, "bandpass", 1800, 0.8, 0.5, 0.4);
+        else if (what === "charge") this.noiseBurst(out, t, 0.8, "highpass", 2500, 0.6, 0.35, 1.2);
+        else { this.noiseBurst(out, t, 0.6, "bandpass", 700, 1.5, 0.35, 0.8); this.tone(out, t, "square", 120 * p, 90 * p, 0.3, 0.08); }
+        break;
+      case "magma": case "magma_cube":
+        this.tone(out, t, "sine", 120 * p * low, 60 * p * low, 0.2, 0.45);
+        this.noiseBurst(out, t, 0.15, "lowpass", 500 * p, 2, 0.4, 0.8);
+        break;
       // Clanking iron: a hollow knock under metallic ringing.
       case "iron_golem":
         this.tone(out, t, "square", 90 * low, 60 * low, 0.3, 0.3);

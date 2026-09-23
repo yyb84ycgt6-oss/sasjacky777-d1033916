@@ -11,18 +11,19 @@
  */
 import { B, block, WOOL_COLORS } from "./blocks";
 import {
-  Entity, Projectile, registerChickenSpawner, XpOrb, xpOrbValues,
+  Entity, ItemEntity, Projectile, registerChickenSpawner, XpOrb, xpOrbValues,
   type DamageSource, type EntityContext, type EntityKind, type EntitySnapshot, type PlayerRef,
 } from "./entities";
 import { itemByName, type ItemStack, type StatusEffect } from "./items";
-import { travel } from "./physics";
+import { moveBody, senseEnvironment, travel } from "./physics";
 import { raycastBlocks } from "./raycast";
 import { hashFloat, Rng } from "./rng";
 import { levelForXp, offersForLevel, sanitizeOffer, type Offer } from "./trading";
 import { JOB_BLOCKS, professionForBlock, PROFESSIONS, type Profession } from "./villages";
 
 export type MobKind =
-  | "pig" | "cow" | "sheep" | "chicken" | "zombie" | "skeleton" | "creeper" | "spider" | "slime" | "villager" | "iron_golem";
+  | "pig" | "cow" | "sheep" | "chicken" | "zombie" | "skeleton" | "creeper" | "spider" | "slime" | "villager" | "iron_golem"
+  | "zombified_piglin" | "ghast" | "magma_cube" | "blaze" | "wither_skeleton" | "piglin" | "hoglin";
 
 interface MobSpec {
   health: number;
@@ -37,6 +38,10 @@ interface MobSpec {
   burnsInDay: boolean;
   followRange: number;
   xp: [number, number];
+  /** Unhurt by fire and lava (the Nether's own). */
+  fireImmune?: boolean;
+  /** Flies rather than walks: no gravity, no fall damage. */
+  flies?: boolean;
 }
 
 export const MOB_SPECS: Record<MobKind, MobSpec> = {
@@ -52,12 +57,21 @@ export const MOB_SPECS: Record<MobKind, MobSpec> = {
   slime: { health: 1, width: 0.52, height: 0.52, speed: 0.1, hostile: true, attack: 0, tempt: [], burnsInDay: false, followRange: 16, xp: [1, 1] },
   villager: { health: 20, width: 0.6, height: 1.95, speed: 0.05, hostile: false, attack: 0, tempt: [], burnsInDay: false, followRange: 10, xp: [0, 0] },
   iron_golem: { health: 100, width: 1.4, height: 2.7, speed: 0.06, hostile: false, attack: 0, tempt: [], burnsInDay: false, followRange: 16, xp: [0, 0] },
+  // The Nether. Zombified piglins are neutral until struck; piglins spare anyone wearing gold.
+  zombified_piglin: { health: 20, width: 0.6, height: 1.95, speed: 0.058, hostile: true, attack: 5, tempt: [], burnsInDay: false, followRange: 35, xp: [5, 5], fireImmune: true },
+  ghast: { health: 10, width: 4, height: 4, speed: 0.03, hostile: true, attack: 0, tempt: [], burnsInDay: false, followRange: 64, xp: [5, 5], fireImmune: true, flies: true },
+  // Per unit of size, as a slime's.
+  magma_cube: { health: 1, width: 0.52, height: 0.52, speed: 0.12, hostile: true, attack: 0, tempt: [], burnsInDay: false, followRange: 16, xp: [1, 1], fireImmune: true },
+  blaze: { health: 20, width: 0.6, height: 1.8, speed: 0.06, hostile: true, attack: 6, tempt: [], burnsInDay: false, followRange: 48, xp: [10, 10], fireImmune: true, flies: true },
+  wither_skeleton: { health: 20, width: 0.7, height: 2.4, speed: 0.0625, hostile: true, attack: 5, tempt: [], burnsInDay: false, followRange: 16, xp: [5, 5], fireImmune: true },
+  piglin: { health: 16, width: 0.6, height: 1.95, speed: 0.07, hostile: true, attack: 5, tempt: [], burnsInDay: false, followRange: 16, xp: [5, 5] },
+  hoglin: { health: 40, width: 1.4, height: 1.4, speed: 0.06, hostile: true, attack: 6, tempt: [], burnsInDay: false, followRange: 16, xp: [5, 5] },
 };
 
 export const MOB_KINDS = Object.keys(MOB_SPECS) as MobKind[];
 
 /** Undead take Smite's extra damage, are hurt by healing and healed by harming, and shrug off poison. */
-const UNDEAD = new Set<string>(["zombie", "skeleton"]);
+const UNDEAD = new Set<string>(["zombie", "skeleton", "zombified_piglin", "wither_skeleton"]);
 /** Arthropods take Bane of Arthropods' extra damage. */
 const ARTHROPODS = new Set<string>(["spider"]);
 export const isUndead = (kind: string): boolean => UNDEAD.has(kind);
@@ -65,6 +79,19 @@ export const isArthropod = (kind: string): boolean => ARTHROPODS.has(kind);
 
 interface MobEffect { kind: StatusEffect; ticks: number; amp: number }
 export const isMobKind = (k: string): k is MobKind => k in MOB_SPECS;
+/** Slimes and magma cubes: hopping cubes in three sizes that split when they die. */
+export const isCubeMob = (k: string): boolean => k === "slime" || k === "magma_cube";
+
+/**
+ * What a piglin trades for a gold ingot, by weight: the original's list, with
+ * what this game has no item for folded into its nearest neighbour.
+ */
+export const BARTER: [string, number, number, number][] = [
+  ["ender_pearl", 10, 2, 4], ["string", 20, 3, 9], ["quartz", 20, 5, 12], ["obsidian", 40, 1, 1], ["fire_charge", 40, 1, 1],
+  ["leather", 40, 2, 4], ["soul_sand", 40, 2, 8], ["nether_brick", 40, 2, 8], ["arrow", 40, 6, 12], ["gravel", 40, 8, 16],
+  ["blackstone", 40, 8, 16], ["iron_nugget", 10, 10, 36], ["potion_fire_resistance", 8, 1, 1], ["splash_potion_fire_resistance", 8, 1, 1],
+  ["water_bottle", 10, 1, 1], ["iron_boots", 8, 1, 1],
+];
 
 /**
  * One chunk in ten lets slimes spawn underground at any light level. Fixed by
@@ -137,6 +164,15 @@ export class Mob extends Entity {
   /** A mob this one is fighting (zombies after villagers, golems after monsters), by entity id. */
   targetMob: number | null = null;
   private fleeFrom: { x: number; z: number } | null = null;
+  /** Zombified piglins: ticks left of anger at `targetId`. */
+  anger = 0;
+  /** Piglins: ticks left admiring a gold ingot before handing something back, and who gave it. */
+  admiring = 0;
+  private admirer: string | null = null;
+  /** Flyers: where they are heading. */
+  private flyTo: { x: number; y: number; z: number } | null = null;
+  /** Blazes: shots left in the current burst. */
+  private burst = 0;
 
   constructor(kind: MobKind, x: number, y: number, z: number, id?: number) {
     const spec = MOB_SPECS[kind];
@@ -149,7 +185,7 @@ export class Mob extends Entity {
     this.body.stepHeight = 0.6;
     if (kind === "sheep") this.woolColor = naturalWool(Math.random());
     if (kind === "chicken") this.eggTimer = 6000 + Math.floor(Math.random() * 6000);
-    if (kind === "slime") this.setSize(1 << Math.floor(Math.random() * 3));
+    if (isCubeMob(kind)) this.setSize(1 << Math.floor(Math.random() * 3));
   }
 
   /** Slimes come in sizes 1, 2 and 4: the box, the health and the bite all scale with it. */
@@ -192,7 +228,7 @@ export class Mob extends Entity {
 
   /** Voices pitch up for babies and small slimes, down for big ones. */
   private get voice(): number {
-    if (this.kind === "slime") return 1.6 - this.size * 0.2;
+    if (isCubeMob(this.kind)) return 1.6 - this.size * 0.2;
     return this.baby ? 1.5 : 1;
   }
 
@@ -259,7 +295,17 @@ export class Mob extends Entity {
   hurt(ctx: EntityContext, amount: number, source: DamageSource, fromX: number, fromZ: number, attacker?: string, knockback = 0): boolean {
     if (this.dying || this.removed) return false;
     if (this.invulnerable > 0 && source !== "void") return false;
-    if ((source === "fire" || source === "lava") && this.hasEffect("fire_resistance")) return false;
+    if ((source === "fire" || source === "lava") && (this.hasEffect("fire_resistance") || this.spec.fireImmune)) return false;
+    // Fireballs are fire: they bounce off the Nether's own, except a ghast's blast sent back at a ghast.
+    if (source === "fireball" && this.spec.fireImmune && this.kind !== "ghast") return false;
+    if (source === "wither" && this.kind === "wither_skeleton") return false;
+    // Strike one zombified piglin and every one nearby comes for you.
+    if (this.kind === "zombified_piglin" && attacker && !attacker.startsWith("mob:")) {
+      for (const e of ctx.entitiesNear(this.body.x, this.body.y, this.body.z, 24)) {
+        if (e instanceof Mob && e.kind === "zombified_piglin" && !e.dying) { e.targetId = attacker; e.anger = 400 + Math.floor(ctx.random() * 400); }
+      }
+    }
+    if (this.kind === "piglin" && attacker && !attacker.startsWith("mob:")) this.anger = 600;
     this.health -= amount;
     this.hurtTime = 10;
     this.invulnerable = 10;
@@ -309,13 +355,27 @@ export class Mob extends Entity {
     this.tickEffects(ctx);
     if (this.dying) return;
     const move = { forward: 0, jump: false, yaw: this.yaw, speedMul: 1 };
-    if (this.kind === "slime") this.slimeAi(ctx, move);
+    if (isCubeMob(this.kind)) this.slimeAi(ctx, move);
     else if (this.kind === "villager") this.villagerAi(ctx, move);
     else if (this.kind === "iron_golem") this.golemAi(ctx, move);
+    else if (this.kind === "ghast") this.ghastAi(ctx, move);
+    else if (this.kind === "blaze") this.blazeAi(ctx, move);
     else if (this.spec.hostile) this.hostileAi(ctx, move);
     else this.passiveAi(ctx, move);
 
     this.yaw = turnToward(this.yaw, move.yaw, 0.35);
+    if (this.spec.flies) {
+      // Flyers steer their own velocity; the world only stops them.
+      senseEnvironment(ctx.world, b);
+      moveBody(ctx.world, b, b.vx, b.vy, b.vz);
+      if (b.collidedH || b.collidedV) this.flyTo = null;
+      b.vx *= 0.91; b.vy *= 0.91; b.vz *= 0.91;
+      b.fallDistance = 0;
+      this.walkDist += Math.hypot(b.x - this.prevX, b.z - this.prevZ);
+      this.environment(ctx);
+      if (b.y < -64) this.removed = true;
+      return;
+    }
     const wasGround = b.onGround;
     const swift = this.effectLevel("speed"), slow = this.effectLevel("slowness");
     const potionSpeed = Math.max(0, (1 + (swift >= 0 ? 0.2 * (swift + 1) : 0)) * (1 - (slow >= 0 ? 0.15 * (slow + 1) : 0)));
@@ -328,27 +388,35 @@ export class Mob extends Entity {
     // Chickens flutter down.
     if (this.kind === "chicken" && !b.onGround && b.vy < -0.06) { b.vy = -0.06; b.fallDistance = 0; }
     this.walkDist += res.moved;
-    if (this.kind === "slime") {
+    // A magma cube springs higher the bigger it is.
+    if (this.kind === "magma_cube" && res.jumped) b.vy += 0.08 * this.size;
+    if (isCubeMob(this.kind)) {
       this.squish *= 0.6;
       if (b.onGround && !wasGround) {
         this.squish = -0.5;
-        ctx.sound("slime_squish", b.x, b.y, b.z, 0.3 + this.size * 0.1, this.voice);
-        if (this.size > 1) ctx.particles("slime", b.x, b.y + 0.1, b.z, this.size * 4);
+        ctx.sound(this.kind === "magma_cube" ? "magma_cube_squish" : "slime_squish", b.x, b.y, b.z, 0.3 + this.size * 0.1, this.voice);
+        if (this.size > 1) ctx.particles(this.kind === "magma_cube" ? "lava_spark" : "slime", b.x, b.y + 0.1, b.z, this.size * 4);
       }
     }
     // Chickens flutter, slimes bounce and golems are iron; none is hurt by a fall.
-    if (res.landedFrom > 3 && this.kind !== "chicken" && this.kind !== "slime" && this.kind !== "iron_golem") this.hurt(ctx, Math.ceil(res.landedFrom - 3), "fall", b.x, b.z);
+    if (res.landedFrom > 3 && this.kind !== "chicken" && !isCubeMob(this.kind) && this.kind !== "iron_golem") this.hurt(ctx, Math.ceil(res.landedFrom - 3), "fall", b.x, b.z);
     this.environment(ctx);
     if (b.y < -64) this.removed = true;
   }
 
   private environment(ctx: EntityContext): void {
     const b = this.body;
-    if (b.inLava) {
+    if (this.spec.fireImmune) this.fireTicks = 0;
+    else if (b.inLava) {
       this.fireTicks = 300;
       if (this.age % 10 === 0) this.hurt(ctx, 4, "lava", b.x, b.z);
+    } else if (this.age % 10 === 0) {
+      const feet = ctx.world.blockAt(Math.floor(b.x), Math.floor(b.y + 0.1), Math.floor(b.z));
+      if (feet === B.FIRE || feet === B.SOUL_FIRE) { this.fireTicks = Math.max(this.fireTicks, 160); this.hurt(ctx, 1, "fire", b.x, b.z); }
     }
     if (b.inWater) this.fireTicks = 0;
+    // Water hurts a blaze.
+    if (this.kind === "blaze" && b.inWater && this.age % 10 === 0) this.hurt(ctx, 1, "drown", b.x, b.z);
     if (this.spec.burnsInDay && ctx.daylight > 0.55 && !b.inWater && this.age % 20 === 0) {
       const hx = Math.floor(b.x), hy = Math.floor(b.y + b.height), hz = Math.floor(b.z);
       if (ctx.world.seesSky(hx, hy, hz) && ctx.random() < 0.8) this.fireTicks = Math.max(this.fireTicks, 160);
@@ -502,7 +570,11 @@ export class Mob extends Entity {
 
   private hostileAi(ctx: EntityContext, move: { forward: number; jump: boolean; yaw: number; speedMul: number }): void {
     const b = this.body;
-    const eligible = (p: PlayerRef) => p.targetable;
+    if (this.anger > 0) this.anger--;
+    // Neutral until provoked: a zombified piglin only fights whoever angered it (or its fellows).
+    const neutral = this.kind === "zombified_piglin" && this.anger <= 0;
+    if (this.kind === "piglin" && this.piglinTick(ctx, move)) return;
+    const eligible = (p: PlayerRef) => p.targetable && !neutral && (this.kind !== "piglin" || this.anger > 0 || !p.goldArmor);
     // Spiders keep to themselves in the light unless provoked.
     const bright = ctx.world.brightness(b.x, b.y + 0.5, b.z, ctx.daylight) > 11;
     const passiveNow = this.kind === "spider" && bright && this.lastAttacker === null;
@@ -514,6 +586,7 @@ export class Mob extends Entity {
       }
     }
     if (passiveNow && this.lastAttacker === null) this.targetId = null;
+    if (neutral) this.targetId = null;
     const target = this.targetId ? ctx.players().find((p) => p.id === this.targetId) ?? null : null;
     if ((!target || !target.targetable) && this.kind === "zombie" && this.huntVillager(ctx, move)) return;
     if (!target || !target.targetable) {
@@ -730,9 +803,11 @@ export class Mob extends Entity {
     }
     const dist = Math.hypot(target.x - b.x, target.z - b.z);
     const reach = (b.width + target.width) / 2 + 0.2;
-    if (this.size > 1 && dist < reach && target.y < b.y + b.height && target.y + target.height > b.y && this.attackCooldown <= 0) {
+    // The smallest slime only nudges; every magma cube burns.
+    const magma = this.kind === "magma_cube";
+    if ((this.size > 1 || magma) && dist < reach && target.y < b.y + b.height && target.y + target.height > b.y && this.attackCooldown <= 0) {
       this.attackCooldown = 10;
-      this.bite(ctx, target, this.size);
+      this.bite(ctx, target, magma ? [3, 3, 4, 4, 6][this.size] : this.size);
     }
   }
 
@@ -742,8 +817,163 @@ export class Mob extends Entity {
     const s = this.effectLevel("strength"), w = this.effectLevel("weakness");
     base = Math.max(0, base + (s >= 0 ? 3 * (s + 1) : 0) - (w >= 0 ? 4 * (w + 1) : 0));
     const dmg = diff === 1 ? Math.min(base, base / 2 + 1) : diff === 3 ? base * 1.5 : base;
-    // The attacker's id lets Thorns answer back.
-    if (diff > 0 && dmg > 0) ctx.hurtPlayer(target.id, dmg, "mob", this.body.x, this.body.z, 0.4, this.id);
+    // A hoglin tosses its victim; the attacker's id lets Thorns answer back.
+    const kb = this.kind === "hoglin" ? 1.2 : 0.4;
+    // A blaze's touch burns like its fireballs, setting its victim alight.
+    const source = this.kind === "blaze" ? "fireball" : "mob";
+    if (diff > 0 && dmg > 0) ctx.hurtPlayer(target.id, dmg, source, this.body.x, this.body.z, kb, this.id);
+    if (diff > 0 && this.kind === "wither_skeleton") ctx.effectPlayer?.(target.id, "wither", 10, 0);
+  }
+
+  /**
+   * Piglins: a gold ingot held out is taken and admired for six seconds, then
+   * something from the barter list is tossed back. Returns true while busy.
+   */
+  private piglinTick(ctx: EntityContext, move: { forward: number; jump: boolean; yaw: number; speedMul: number }): boolean {
+    const b = this.body;
+    if (this.admiring > 0) {
+      this.admiring--;
+      move.forward = 0;
+      if (this.admirer) {
+        const p = ctx.players().find((q) => q.id === this.admirer);
+        if (p) move.yaw = this.faceTo(p.x, p.z);
+      }
+      if (this.admiring === 0) {
+        const loot = barter(ctx.random);
+        ctx.dropItem(b.x - Math.sin(this.yaw) * 0.6, b.y + 1.2, b.z - Math.cos(this.yaw) * 0.6, loot, -Math.sin(this.yaw) * 0.2, 0.2, -Math.cos(this.yaw) * 0.2);
+        ctx.sound("piglin_idle", b.x, b.y + 1.5, b.z, 0.8);
+        this.admirer = null;
+      }
+      return true;
+    }
+    // Gold on the ground is picked up and admired as if handed over.
+    if (this.age % 10 === 0 && this.anger <= 0) {
+      const gold = ctx.entitiesNear(b.x, b.y, b.z, 1.6).find((e): e is ItemEntity => e instanceof ItemEntity && !e.removed && e.stack.id === goldIngot());
+      if (gold) {
+        gold.stack.count--;
+        if (gold.stack.count <= 0) gold.removed = true;
+        this.admiring = 120;
+        this.admirer = null;
+        ctx.sound("piglin_admire", b.x, b.y + 1.5, b.z, 0.8);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** A player offers a gold ingot; the piglin takes it unless angry. Returns whether it did. */
+  takeGold(ctx: EntityContext, playerId: string): boolean {
+    if (this.kind !== "piglin" || this.anger > 0 || this.admiring > 0 || this.dying) return false;
+    this.admiring = 120;
+    this.admirer = playerId;
+    ctx.sound("piglin_admire", this.x, this.y + 1.5, this.z, 0.8);
+    return true;
+  }
+
+  /** Picks a point within reach of home or target for a flyer to head to. */
+  private pickFlyTo(ctx: EntityContext, cx: number, cy: number, cz: number, spread: number): void {
+    this.flyTo = {
+      x: cx + (ctx.random() - 0.5) * 2 * spread,
+      y: Math.max(4, Math.min(120, cy + (ctx.random() - 0.5) * spread)),
+      z: cz + (ctx.random() - 0.5) * 2 * spread,
+    };
+  }
+
+  private flyToward(x: number, y: number, z: number, accel: number, max: number): void {
+    const b = this.body;
+    const dx = x - b.x, dy = y - (b.y + b.height / 2), dz = z - b.z;
+    const d = Math.hypot(dx, dy, dz);
+    if (d < 0.5) return;
+    b.vx += (dx / d) * accel; b.vy += (dy / d) * accel; b.vz += (dz / d) * accel;
+    const sp = Math.hypot(b.vx, b.vy, b.vz);
+    if (sp > max) { b.vx *= max / sp; b.vy *= max / sp; b.vz *= max / sp; }
+  }
+
+  private flyingTarget(ctx: EntityContext, range: number): PlayerRef | null {
+    const b = this.body;
+    if (this.age % 20 === 0) {
+      const current = this.targetId ? ctx.players().find((p) => p.id === this.targetId) : null;
+      if (!current || !current.targetable || Math.hypot(current.x - b.x, current.y - b.y, current.z - b.z) > range) {
+        const candidate = this.nearestPlayer(ctx, range, (p) => p.targetable);
+        this.targetId = candidate && this.canSee(ctx, candidate) ? candidate.id : null;
+      }
+    }
+    return this.targetId ? ctx.players().find((p) => p.id === this.targetId && p.targetable) ?? null : null;
+  }
+
+  /**
+   * Ghasts drift in wide lazy loops and, with a player in sight, wail and
+   * spit a fireball every three seconds or so. `fuse` doubles as the charge,
+   * so the renderer can show the mouth opening.
+   */
+  private ghastAi(ctx: EntityContext, move: { forward: number; jump: boolean; yaw: number; speedMul: number }): void {
+    const b = this.body;
+    const target = this.flyingTarget(ctx, 64);
+    if (!this.flyTo || ctx.random() < 1 / 120 || Math.hypot(this.flyTo.x - b.x, this.flyTo.y - b.y, this.flyTo.z - b.z) < 2) {
+      this.pickFlyTo(ctx, b.x, b.y, b.z, 16);
+    }
+    this.flyToward(this.flyTo!.x, this.flyTo!.y, this.flyTo!.z, 0.01, 0.12);
+    move.yaw = target ? this.faceTo(target.x, target.z) : Math.atan2(-b.vx, -b.vz);
+    if (target && this.canSee(ctx, target) && ctx.difficulty > 0) {
+      this.fuse++;
+      if (this.fuse === 10) ctx.sound("ghast_warn", b.x, b.y + 2, b.z, 1.2);
+      if (this.fuse >= 20) {
+        this.fuse = -40;
+        const sx = b.x - Math.sin(move.yaw) * 2.2, sy = b.y + 2, sz = b.z - Math.cos(move.yaw) * 2.2;
+        const dx = target.x - sx, dy = target.y + target.height / 2 - sy, dz = target.z - sz;
+        const d = Math.hypot(dx, dy, dz) || 1;
+        ctx.spawn(new Projectile("fireball", sx, sy - 0.5, sz, (dx / d) * 0.6, (dy / d) * 0.6, (dz / d) * 0.6, `mob:${this.id}`));
+        ctx.sound("ghast_shoot", sx, sy, sz, 1.2);
+      }
+    } else if (this.fuse > 0) this.fuse--;
+    else if (this.fuse < 0) this.fuse++;
+    if (ctx.random() < 1 / 200) ctx.sound("ghast_idle", b.x, b.y + 2, b.z, 1.5);
+  }
+
+  /**
+   * Blazes hover a little above their target and throw fire in bursts of
+   * three; up close they burn with a touch. With nothing to fight they drift
+   * and slowly sink.
+   */
+  private blazeAi(ctx: EntityContext, move: { forward: number; jump: boolean; yaw: number; speedMul: number }): void {
+    const b = this.body;
+    const target = this.flyingTarget(ctx, 48);
+    if (this.attackCooldown > 0) this.attackCooldown--;
+    if (!target) {
+      if (!this.flyTo || ctx.random() < 1 / 100) this.pickFlyTo(ctx, b.x, b.y - 1, b.z, 6);
+      this.flyToward(this.flyTo!.x, this.flyTo!.y, this.flyTo!.z, 0.006, 0.06);
+      b.vy -= 0.004;
+      if (ctx.random() < 1 / 160) ctx.sound("blaze_idle", b.x, b.y + 1, b.z, 0.8);
+      return;
+    }
+    move.yaw = this.faceTo(target.x, target.z);
+    const dist = Math.hypot(target.x - b.x, target.z - b.z);
+    const tx = dist > 9 ? target.x : b.x + Math.cos(this.age / 30) * 2;
+    const tz = dist > 9 ? target.z : b.z + Math.sin(this.age / 30) * 2;
+    this.flyToward(tx, target.y + target.height + 1.5, tz, 0.012, dist < 2 ? 0.2 : 0.09);
+    if (dist < 1.6 && Math.abs(target.y - b.y) < 2 && this.attackCooldown <= 0) {
+      this.attackCooldown = 20;
+      this.bite(ctx, target, this.spec.attack);
+      return;
+    }
+    // A burst: a charge-up, then three shots a third of a second apart; then a rest.
+    if (--this.shootCooldown > 0) return;
+    if (this.burst === 0) {
+      this.burst = 3;
+      this.shootCooldown = 30;
+      ctx.sound("blaze_charge", b.x, b.y + 1, b.z, 0.9);
+      return;
+    }
+    if (this.canSee(ctx, target) && ctx.difficulty > 0) {
+      const sx = b.x, sy = b.y + b.height * 0.6, sz = b.z;
+      const spread = Math.sqrt(dist) * 0.05;
+      const dx = target.x - sx + (ctx.random() - 0.5) * spread * 2, dy = target.y + target.height / 2 - sy, dz = target.z - sz + (ctx.random() - 0.5) * spread * 2;
+      const d = Math.hypot(dx, dy, dz) || 1;
+      ctx.spawn(new Projectile("small_fireball", sx, sy, sz, (dx / d) * 0.7, (dy / d) * 0.7, (dz / d) * 0.7, `mob:${this.id}`));
+      ctx.sound("blaze_shoot", sx, sy, sz, 0.8);
+    }
+    this.burst--;
+    this.shootCooldown = this.burst > 0 ? 6 : 100;
   }
 
   private shoot(ctx: EntityContext, target: PlayerRef): void {
@@ -765,8 +995,9 @@ export class Mob extends Entity {
   }
 
   /** Right-click with an item. Returns what happened, so the caller can consume the item. */
-  interact(ctx: EntityContext, itemName: string | null, playerId: string): "fed" | "sheared" | "milked" | "dyed" | "trade" | "refuse" | null {
+  interact(ctx: EntityContext, itemName: string | null, playerId: string): "fed" | "sheared" | "milked" | "dyed" | "trade" | "refuse" | "barter" | null {
     if (this.dying) return null;
+    if (this.kind === "piglin") return itemName === "gold_ingot" && this.takeGold(ctx, playerId) ? "barter" : null;
     if (this.kind === "villager") {
       if (this.profession !== "none" && this.offers.length) return "trade";
       // An unemployed villager shakes its head.
@@ -806,11 +1037,11 @@ export class Mob extends Entity {
     ctx.particles("poof", b.x, b.y + b.height / 2, b.z, 12);
     if (this.baby) return;
     // A slime bigger than the smallest comes apart into two to four of half its size.
-    if (this.kind === "slime" && this.size > 1) {
+    if (isCubeMob(this.kind) && this.size > 1) {
       const n = 2 + Math.floor(ctx.random() * 3);
       for (let i = 0; i < n; i++) {
         const ox = ((i % 2) - 0.5) * this.size * 0.25, oz = (Math.floor(i / 2) - 0.5) * this.size * 0.25;
-        const child = new Mob("slime", b.x + ox, b.y + 0.5, b.z + oz);
+        const child = new Mob(this.kind, b.x + ox, b.y + 0.5, b.z + oz);
         child.setSize(this.size / 2);
         child.targetId = this.lastAttacker && !this.lastAttacker.startsWith("mob:") ? this.lastAttacker : null;
         ctx.spawn(child);
@@ -822,7 +1053,7 @@ export class Mob extends Entity {
     // Experience only for kills a player had a hand in, as in the original.
     if (this.lastAttacker && !this.lastAttacker.startsWith("mob:")) {
       ctx.creditKill?.(this.lastAttacker, this.spec.hostile);
-      const [lo, hi] = this.kind === "slime" ? [this.size, this.size] : this.spec.xp;
+      const [lo, hi] = isCubeMob(this.kind) ? [this.size, this.size] : this.spec.xp;
       for (const v of xpOrbValues(lo + Math.floor(ctx.random() * (hi - lo + 1)))) ctx.spawn(new XpOrb(b.x, b.y + 0.5, b.z, v));
     }
   }
@@ -844,6 +1075,14 @@ export class Mob extends Entity {
       case "slime": return this.size === 1 ? it("slime_ball", r(0, 2)) : [];
       case "villager": return [];
       case "iron_golem": return [...it("iron_ingot", r(3, 5)), ...it("poppy", r(0, 2))];
+      case "zombified_piglin": return [...it("rotten_flesh", r(0, 1)), ...it("gold_nugget", r(0, 1)), ...(ctx.random() < 0.025 ? it("gold_ingot", 1) : [])];
+      case "ghast": return [...it("ghast_tear", r(0, 1)), ...it("gunpowder", r(0, 2))];
+      case "magma_cube": return this.size > 1 && ctx.random() < 0.25 + this.looting * 0.1 ? it("magma_cream", 1) : [];
+      // Blaze rods only for a kill a player made, as in the original.
+      case "blaze": return this.lastAttacker && !this.lastAttacker.startsWith("mob:") ? it("blaze_rod", r(0, 1)) : [];
+      case "wither_skeleton": return [...(ctx.random() < 0.33 ? it("coal", 1) : []), ...it("bone", r(0, 2))];
+      case "piglin": return ctx.random() < 0.085 ? it("golden_sword", 1) : [];
+      case "hoglin": return [...it(burnt ? "cooked_porkchop" : "porkchop", r(2, 4)), ...it("leather", r(0, 1))];
     }
   }
 
@@ -860,6 +1099,7 @@ export class Mob extends Entity {
         vh: this.home ?? undefined,
         // A guest draws the golem's swing from this; it has no attack of its own to time it.
         ac: this.kind === "iron_golem" && this.attackCooldown > 0 ? this.attackCooldown : undefined,
+        ad: this.kind === "piglin" && this.admiring > 0 ? this.admiring : undefined,
       },
     };
   }
@@ -882,7 +1122,8 @@ export class Mob extends Entity {
     this.love = d.lv ? 20 : 0;
     if (typeof d.p === "number") this.persistent = d.p === 1;
     // After the growth reset above, which would otherwise shrink a big slime's box back to one unit.
-    if (this.kind === "slime" && (d.sz === 1 || d.sz === 2 || d.sz === 4)) this.setSize(d.sz, false);
+    if (isCubeMob(this.kind) && (d.sz === 1 || d.sz === 2 || d.sz === 4)) this.setSize(d.sz, false);
+    if (typeof d.ad === "number") this.admiring = d.ad;
     if (typeof d.sq === "number") this.squish = d.sq / 10;
     if (Array.isArray(d.ef)) {
       this.effects = (d.ef as unknown[]).flatMap((e) => (Array.isArray(e) && typeof e[0] === "string" && typeof e[1] === "number" && typeof e[2] === "number"
@@ -916,3 +1157,17 @@ export function createEntityFromSnapshot(s: EntitySnapshot): Entity | null {
 }
 
 export type { EntityKind };
+
+let goldId = -1;
+const goldIngot = () => (goldId < 0 ? (goldId = itemByName("gold_ingot").id) : goldId);
+
+/** One roll of the piglin barter table. */
+export function barter(random: () => number): ItemStack {
+  const total = BARTER.reduce((t, [, w]) => t + w, 0);
+  let roll = random() * total;
+  for (const [name, w, lo, hi] of BARTER) {
+    roll -= w;
+    if (roll < 0) return { id: itemByName(name).id, count: lo + Math.floor(random() * (hi - lo + 1)) };
+  }
+  return { id: itemByName("gravel").id, count: 8 };
+}

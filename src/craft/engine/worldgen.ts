@@ -22,12 +22,24 @@ import { Simplex } from "./noise";
 import { hash4, Rng } from "./rng";
 import { buildTree, type Place } from "./trees";
 import { buildVillage, crowdsVillage, villagesTouching, type Terrain } from "./villages";
+import type { Dimension } from "./dimension";
 
 export type WorldType = "default" | "amplified" | "flat" | "large_biomes";
 
 export interface GenSettings {
   seed: number;
   type: WorldType;
+  /** Absent means the overworld (saves and workers from before the Nether). */
+  dimension?: Dimension;
+}
+
+/** What the game and the workers need from any dimension's generator. */
+export interface ChunkGenerator {
+  readonly seed: number;
+  generate(cx: number, cz: number): GeneratedChunk;
+  biomeAt(x: number, z: number): number;
+  tints(cx: number, cz: number): Tints;
+  findSpawn(): { x: number; y: number; z: number };
 }
 
 export interface Column {
@@ -64,7 +76,7 @@ const BADLANDS_BANDS = [
   B.TERRACOTTA, B.RED_TERRACOTTA, B.WHITE_TERRACOTTA, B.ORANGE_TERRACOTTA, B.TERRACOTTA, B.RED_TERRACOTTA,
 ];
 
-export class Generator {
+export class Generator implements ChunkGenerator {
   readonly seed: number;
   readonly type: WorldType;
   private continent: Simplex;
