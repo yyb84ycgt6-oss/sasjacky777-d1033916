@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import type { Hud as HudState } from "../game/types";
 import { glyph, textureBackground } from "./icons";
-import { StackView } from "./common";
+import { ItemIcon, StackView } from "./common";
+import { itemId } from "../engine/items";
 
 function Row({ full, max, icon, half, empty, reverse, shake }: {
   full: number; max: number; icon: string; half: string; empty: string; reverse?: boolean; shake?: boolean;
@@ -117,6 +118,23 @@ export function Hud({ hud, mobile, crosshair }: { hud: HudState; mobile: boolean
         <div className="absolute" style={{ right: "calc(var(--u) * 3)", top: mobile ? "calc(var(--u) * 22)" : "calc(var(--u) * 3)", fontSize: "calc(var(--u) * 6)", textAlign: "right", background: "rgba(0,0,0,0.35)", padding: "calc(var(--u) * 1) calc(var(--u) * 3)" }}>
           <div>{hud.net.role === "host" ? "Hosting" : "Joined"} · {hud.net.kind === "online" ? "online" : "this device"} · room <span style={{ color: "#ffff80" }}>{hud.net.room}</span></div>
           <div style={{ color: hud.net.status === "connected" ? "#9f9" : "#fc6" }}>{hud.net.players.length} player{hud.net.players.length === 1 ? "" : "s"} · {hud.net.status}</div>
+        </div>
+      )}
+      {hud.toasts.length > 0 && (
+        <div className="absolute" style={{ right: "calc(var(--u) * 2)", top: mobile ? "calc(var(--u) * 40)" : "calc(var(--u) * 2)", display: "flex", flexDirection: "column", gap: "calc(var(--u) * 2)" }}>
+          {hud.toasts.map((t) => (
+            <div key={t.id} style={{
+              width: "calc(var(--u) * 160)", display: "flex", gap: "calc(var(--u) * 4)", alignItems: "center", padding: "calc(var(--u) * 4)",
+              background: "#212121", border: "calc(var(--u) * 1) solid #000", boxShadow: "inset 0 0 0 calc(var(--u) * 1) #555",
+              animation: "bc-toast 5s ease-in-out forwards",
+            }}>
+              <ItemIcon id={itemId(t.icon)} />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ color: "#ffff55", fontSize: "calc(var(--u) * 6.5)" }}>Advancement Made!</div>
+                <div style={{ color: "#fff", fontSize: "calc(var(--u) * 6.5)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.title}</div>
+              </div>
+            </div>
+          ))}
         </div>
       )}
       {hud.saving && <div className="absolute" style={{ right: "calc(var(--u) * 3)", bottom: "calc(var(--u) * 3)", fontSize: "calc(var(--u) * 6)", color: "#ddd" }}>Saving world…</div>}

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Settings } from "../game/settings";
-import { Button, Cycle, Slider, Toggle } from "./common";
+import { ADVANCEMENTS } from "../engine/advancements";
+import { itemId } from "../engine/items";
+import { Button, Cycle, ItemIcon, Slider, Toggle } from "./common";
 
 export function MenuFrame({ title, children, width = 200, dim = true }: { title?: string; children: ReactNode; width?: number; dim?: boolean }) {
   return (
@@ -14,17 +16,18 @@ export function MenuFrame({ title, children, width = 200, dim = true }: { title?
   );
 }
 
-export function PauseMenu({ onResume, onOptions, onShare, onQuit, onExitApp, shareLabel, canShare, quitLabel }: {
-  onResume: () => void; onOptions: () => void; onShare: () => void; onQuit: () => void; onExitApp: () => void;
+export function PauseMenu({ onResume, onOptions, onShare, onAdvancements, onQuit, onExitApp, shareLabel, canShare, quitLabel }: {
+  onResume: () => void; onOptions: () => void; onShare: () => void; onAdvancements: () => void; onQuit: () => void; onExitApp: () => void;
   shareLabel: string; canShare: boolean; quitLabel: string;
 }) {
   return (
     <MenuFrame title="Game Menu">
       <Button wide onClick={onResume}>Back to Game</Button>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "calc(var(--u) * 4)" }}>
-        <Button onClick={onOptions}>Options…</Button>
+        <Button onClick={onAdvancements}>Advancements</Button>
         <Button onClick={onShare} disabled={!canShare}>{shareLabel}</Button>
       </div>
+      <Button wide onClick={onOptions}>Options…</Button>
       <Button wide onClick={onQuit}>{quitLabel}</Button>
       <Button wide onClick={onExitApp}>Back to Jackie</Button>
     </MenuFrame>
@@ -172,6 +175,33 @@ export function ShareScreen({ onOpen, onBack, busy, error, room, kind, onStop }:
       )}
       {error && <div style={{ color: "#ff8080", fontSize: "calc(var(--u) * 6)", textAlign: "center" }}>{error}</div>}
       <Button wide onClick={onBack}>Back</Button>
+    </MenuFrame>
+  );
+}
+
+export function AdvancementsScreen({ earned, onBack }: { earned: ReadonlySet<string>; onBack: () => void }) {
+  const done = ADVANCEMENTS.filter((a) => earned.has(a.id)).length;
+  return (
+    <MenuFrame title="Advancements" width={260}>
+      <div className="bc-sub" style={{ textAlign: "center" }}>{done} of {ADVANCEMENTS.length} earned in this world</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(calc(var(--u) * 120), 1fr))", gap: "calc(var(--u) * 3)" }}>
+        {ADVANCEMENTS.map((a) => {
+          const got = earned.has(a.id);
+          return (
+            <div key={a.id} style={{
+              display: "flex", gap: "calc(var(--u) * 4)", alignItems: "center", padding: "calc(var(--u) * 3)",
+              background: got ? "rgba(40,90,40,0.75)" : "rgba(0,0,0,0.5)", border: `calc(var(--u) * 1) solid ${got ? "#6c6" : "#333"}`,
+            }}>
+              <span style={{ opacity: got ? 1 : 0.35, filter: got ? undefined : "grayscale(1)" }}><ItemIcon id={itemId(a.icon)} /></span>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: "calc(var(--u) * 6.5)", color: got ? "#ffff55" : "#bbb" }}>{a.title}</div>
+                <div className="bc-sub" style={{ lineHeight: 1.3 }}>{a.description}</div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <Button wide onClick={onBack}>Done</Button>
     </MenuFrame>
   );
 }

@@ -32,6 +32,7 @@ import { buildAtlas } from "../engine/atlas";
 import { WorkerPool } from "../engine/workerPool";
 import { World, type BlockChange } from "../engine/world";
 import { biomeDef } from "../engine/biomes";
+import { newlyEarned, type AdvancementEvent } from "../engine/advancements";
 import { GameAudio } from "../audio";
 import { WorldRenderer, type RemotePlayerView } from "../render/renderer";
 import { Actions } from "./actions";
@@ -69,6 +70,8 @@ export interface NetLink {
   giveRemote(id: string, stack: ItemStack): void;
   xpRemote(id: string, amount: number): void;
   effect(kind: "sound" | "particles" | "explosion", data: unknown[]): void;
+  /** A guest earned an advancement through something only the host simulates (a kill, a night slept through). */
+  advanceRemote?(id: string, event: AdvancementEvent): void;
   close(): void;
 }
 
@@ -415,6 +418,10 @@ export class Game {
         return out;
       },
       placeBlock: (x, y, z, id, meta) => this.world.setBlock(x, y, z, id, meta, "world"),
+      creditKill: (id, hostile) => {
+        if (id === this.player.id) this.advance({ kind: "kill", hostile });
+        else this.net?.advanceRemote?.(id, { kind: "kill", hostile });
+      },
     };
   }
 
@@ -927,6 +934,7 @@ export class Game {
       void this.saveNow().catch((e: Error) => this.message(`Autosave failed: ${e.message}`, "#ff6666"));
     }
     if (this.tickCount % 20 === 0) this.audio.tickMusic(1, !this.isNight());
+    if (this.tickCount % 10 === 0) this.advance();
   }
 
   private handlePlayerEvents(events: PlayerEvent[]): void {
@@ -959,6 +967,7 @@ export class Game {
           break;
         case "eat":
           this.sound("burp", null, 0, 0, 0.4, 0.9 + Math.random() * 0.2);
+          this.advance({ kind: "eat" });
           break;
       }
     }
@@ -1114,6 +1123,8 @@ export class Game {
         this.time = Math.ceil(this.time / DAY_TICKS) * DAY_TICKS;
         this.meta.weather.rain = 0; this.meta.weather.thunder = 0;
         this.rain = 0; this.thunder = 0;
+        if (this.player.sleeping) this.advance({ kind: "sleep" });
+        for (const r of this.remote.values()) if (r.sleeping) this.net?.advanceRemote?.(r.id, { kind: "sleep" });
         this.actions.wakeUp();
         this.sleepCounter = 0;
       }
@@ -1216,6 +1227,7 @@ export class Game {
       onFire: p.fireTicks > 0,
       underwater: p.body.eyesInWater,
       perspective: this.perspective,
+      toasts: this.toasts.filter((t) => performance.now() - t.at < 5000),
     };
   }
 
@@ -1242,6 +1254,21 @@ export class Game {
       ...(t ? [`Target: ${block(this.world.blockAt(t.x, t.y, t.z)).name} @ ${t.x} ${t.y} ${t.z} meta ${this.world.getMeta(t.x, t.y, t.z)}`] : []),
       ...(this.streamer.lastError ? [`Last chunk error: ${this.streamer.lastError}`] : []),
     ];
+  }
+
+  private toasts: Hud["toasts"] = [];
+
+  /** Records and announces whatever the player has just earned. */
+  advance(event?: AdvancementEvent): void {
+    const p = this.player;
+    if (p.gameMode === "spectator") return;
+    for (const a of newlyEarned(p.advancements, { inventory: p.inventory, y: p.body.y, level: p.xpLevel }, event)) {
+      p.advancements.add(a.id);
+      this.toasts = [...this.toasts.filter((t) => performance.now() - t.at < 5000), { id: a.id, title: a.title, icon: a.icon, at: performance.now() }];
+      this.message(`${p.name} has made the advancement [${a.title}]`, "#55ff55");
+      this.net?.chat(`\u0000adv:${p.name} has made the advancement [${a.title}]`);
+      this.sound("pop", null, 0, 0, 0.6, 0.7);
+    }
   }
 
   setNetStatus(net: Hud["net"]): void {

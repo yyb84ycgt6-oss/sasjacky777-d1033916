@@ -52,6 +52,8 @@ export interface EntityContext {
   entitiesNear(x: number, y: number, z: number, radius: number): Entity[];
   /** Places a block as the world (sand landing), returning whether it took. */
   placeBlock(x: number, y: number, z: number, id: number, meta: number): boolean;
+  /** A player's blow finished a mob off (for advancements). */
+  creditKill?(playerId: string, hostile: boolean): void;
 }
 
 let nextEntityId = 1;

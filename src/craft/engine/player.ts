@@ -76,6 +76,8 @@ export class Player {
   xpPoints = 0;
   /** Experience collected since the last death — the death screen's score. */
   score = 0;
+  /** Advancement ids earned in this world; kept with the player so a guest's travel in the host's save. */
+  advancements = new Set<string>();
   gameMode: GameMode = "survival";
   flying = false;
   spawn: { x: number; y: number; z: number } | null = null;
@@ -411,7 +413,7 @@ export class Player {
       x: b.x, y: b.y, z: b.z, yaw: this.yaw, pitch: this.pitch, health: this.health, food: this.food,
       saturation: this.saturation, exhaustion: this.exhaustion, air: this.air, xpLevel: this.xpLevel, xpPoints: this.xpPoints,
       gameMode: this.gameMode, flying: this.flying, spawn: this.spawn, inventory: this.inventory.toJSON(), effects: this.effects,
-      fireTicks: this.fireTicks, dead: this.dead, score: this.score,
+      fireTicks: this.fireTicks, dead: this.dead, score: this.score, advancements: [...this.advancements],
     };
   }
 
@@ -424,6 +426,7 @@ export class Player {
     this.food = Math.max(0, Math.min(20, num(s.food, 20)));
     this.saturation = num(s.saturation, 5); this.exhaustion = num(s.exhaustion, 0);
     this.air = num(s.air, 300); this.xpLevel = num(s.xpLevel, 0); this.xpPoints = num(s.xpPoints, 0); this.score = num(s.score, 0);
+    this.advancements = new Set(Array.isArray(s.advancements) ? s.advancements.filter((a): a is string => typeof a === "string") : []);
     this.setGameMode(s.gameMode ?? "survival");
     this.flying = !!s.flying && this.canFly;
     this.spawn = s.spawn ?? null;
@@ -444,4 +447,5 @@ export interface PlayerSave {
   fireTicks: number;
   dead: boolean;
   score?: number;
+  advancements?: string[];
 }

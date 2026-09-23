@@ -23,6 +23,7 @@ import { itemDef, type ItemStack } from "../engine/items";
 import { Mob, isMobKind } from "../engine/mobs";
 import { block } from "../engine/blocks";
 import type { PlayerSave } from "../engine/player";
+import type { AdvancementEvent } from "../engine/advancements";
 import type { BlockChange } from "../engine/world";
 import type { Game, NetLink, RemotePlayer } from "../game/game";
 import { packChunk, toBase64, fromBase64, unpackChunk, type ChunkData, type GameRules } from "../game/save";
@@ -288,6 +289,7 @@ export class NetSession implements NetLink {
     this.push(["hu", id, r2(amount), source, r2(fx), r2(fz), r2(kb)]);
   }
   giveRemote(id: string, stack: ItemStack): void { this.push(["gv", id, stack]); }
+  advanceRemote(id: string, event: AdvancementEvent): void { this.push(["av", id, event]); }
   xpRemote(id: string, amount: number): void { this.push(["xp", id, amount]); }
   effect(kind: "sound" | "particles" | "explosion", data: unknown[]): void {
     if (this.role === "host") this.push(["fx", kind, ...data]);
@@ -468,8 +470,9 @@ export class NetSession implements NetLink {
         case "ch": {
           const text = String(op[1] ?? "").slice(0, 256);
           if (text.startsWith("\u0000")) {
-            const [, msg] = text.slice(1).split(/:(.*)/s);
-            if (msg && !(this.role === "host")) g.message(msg, "#ffff55");
+            // System lines (joins, deaths, advancements): shown as the game's words, not as chat.
+            const [kind, msg] = text.slice(1).split(/:(.*)/s);
+            if (msg) g.message(msg, kind === "adv" ? "#55ff55" : kind === "death" ? "#ff8888" : "#ffff55");
           } else g.message(`<${String(op[2] ?? "?").slice(0, 16)}> ${text}`);
           break;
         }
@@ -501,6 +504,11 @@ export class NetSession implements NetLink {
           }
           break;
         case "xp": if (op[1] === this.myId && finite(op[2])) g.addXp(op[2] as number); break;
+        case "av": {
+          const ev = op[2] as AdvancementEvent | null;
+          if (op[1] === this.myId && fromHost && ev && (ev.kind === "kill" || ev.kind === "sleep" || ev.kind === "eat")) g.advance(ev);
+          break;
+        }
         case "be": this.onBlockEntity(from, op); break;
         case "at": if (this.role === "host") this.onAttack(from, op); break;
         case "in": if (this.role === "host") this.onInteract(from, op); break;

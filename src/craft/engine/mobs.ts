@@ -481,6 +481,7 @@ export class Mob extends Entity {
     }
     // Experience only for kills a player had a hand in, as in the original.
     if (this.lastAttacker && !this.lastAttacker.startsWith("mob:")) {
+      ctx.creditKill?.(this.lastAttacker, this.spec.hostile);
       const [lo, hi] = this.spec.xp;
       for (const v of xpOrbValues(lo + Math.floor(ctx.random() * (hi - lo + 1)))) ctx.spawn(new XpOrb(b.x, b.y + 0.5, b.z, v));
     }

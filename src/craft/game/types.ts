@@ -46,7 +46,8 @@ export type Screen =
   | { kind: "chat"; text: string }
   | { kind: "options" }
   | { kind: "share" }
-  | { kind: "death" };
+  | { kind: "death" }
+  | { kind: "advancements" };
 
 export interface ChatLine {
   id: number;
@@ -92,4 +93,6 @@ export interface Hud {
   onFire: boolean;
   underwater: boolean;
   perspective: 0 | 1 | 2;
+  /** Advancements earned in the last few seconds, newest last. */
+  toasts: { id: string; title: string; icon: string; at: number }[];
 }

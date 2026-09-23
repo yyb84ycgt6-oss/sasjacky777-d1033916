@@ -14,6 +14,61 @@ import { Player, xpToNext } from "@/craft/engine/player";
 import { explosionBlocks, blastImpact } from "@/craft/engine/explosion";
 import { Mob } from "@/craft/engine/mobs";
 import type { EntityContext } from "@/craft/engine/entities";
+import { ADVANCEMENTS, newlyEarned } from "@/craft/engine/advancements";
+
+describe("advancements", () => {
+  const state = (inv = new Inventory(), y = 64, level = 0) => ({ inventory: inv, y, level });
+
+  it("names only items that exist, for every trigger and every icon", () => {
+    for (const a of ADVANCEMENTS) {
+      expect(() => itemId(a.icon), `${a.id} icon`).not.toThrow();
+    }
+    // Resolving every "has" trigger once must not throw either.
+    expect(() => newlyEarned(new Set(), state())).not.toThrow();
+  });
+
+  it("awards Timber! the moment any log is in the inventory, and never twice", () => {
+    const inv = new Inventory();
+    inv.add({ id: itemId("birch_log"), count: 1 });
+    const first = newlyEarned(new Set(), state(inv)).map((a) => a.id);
+    expect(first).toContain("timber");
+    expect(newlyEarned(new Set(first), state(inv)).map((a) => a.id)).not.toContain("timber");
+  });
+
+  it("counts a kill toward Monster Slayer only when the mob was hostile", () => {
+    expect(newlyEarned(new Set(), state(), { kind: "kill", hostile: false }).map((a) => a.id)).not.toContain("hunter");
+    expect(newlyEarned(new Set(), state(), { kind: "kill", hostile: true }).map((a) => a.id)).toContain("hunter");
+  });
+
+  it("marks depth and height from where the player stands", () => {
+    expect(newlyEarned(new Set(), state(undefined, 12)).map((a) => a.id)).toContain("deep");
+    expect(newlyEarned(new Set(), state(undefined, 115)).map((a) => a.id)).toContain("summit");
+    expect(newlyEarned(new Set(), state(undefined, 64)).map((a) => a.id)).toEqual([]);
+  });
+
+  it("keeps what a player earned in their save", () => {
+    const p = new Player("p", "Steve", 0.5, 70, 0.5);
+    p.advancements.add("timber");
+    const q = new Player("p", "Steve", 0.5, 70, 0.5);
+    q.load(JSON.parse(JSON.stringify(p.toJSON())));
+    expect([...q.advancements]).toEqual(["timber"]);
+  });
+
+  it("credits the player whose blow killed the mob", () => {
+    const world = flatWorld(ground);
+    const credited: [string, boolean][] = [];
+    const ctx: EntityContext = {
+      world, tick: 0, daylight: 1, difficulty: 2, random: () => 0.5, players: () => [],
+      hurtPlayer: () => {}, givePlayer: () => 0, giveXp: () => {}, spawn: () => {}, dropItem: () => {},
+      explode: () => {}, sound: () => {}, particles: () => {}, entitiesNear: () => [], placeBlock: () => true,
+      creditKill: (id, hostile) => credited.push([id, hostile]),
+    };
+    const z = new Mob("zombie", 0.5, 11, 0.5);
+    z.hurt(ctx, 100, "player", 0, 0, "steve");
+    for (let i = 0; i < 40 && !z.removed; i++) { z.beginTick(); z.tick(ctx); }
+    expect(credited).toEqual([["steve", true]]);
+  });
+});
 
 function flatWorld(fill: (x: number, y: number, z: number) => number, radius = 1): World {
   const world = new World();

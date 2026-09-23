@@ -18,7 +18,7 @@ import { NetSession } from "../net/session";
 import { clientId, newRoomCode } from "../net/transport";
 import { Button } from "./common";
 import { Hud } from "./Hud";
-import { ChatInput, DeathScreen, MenuFrame, OptionsScreen, PauseMenu, ShareScreen } from "./Menus";
+import { AdvancementsScreen, ChatInput, DeathScreen, MenuFrame, OptionsScreen, PauseMenu, ShareScreen } from "./Menus";
 import { ChestScreen, CraftingScreen, FurnaceScreen, InventoryScreen } from "./Screens";
 import { TouchControls } from "./TouchControls";
 
@@ -204,12 +204,16 @@ function Overlay({ game, input, settings, onSettings, onQuit, onExitApp }: GameV
           onResume={() => game.setScreen(null)}
           onOptions={() => game.setScreen({ kind: "options" })}
           onShare={() => game.setScreen({ kind: "share" })}
+          onAdvancements={() => game.setScreen({ kind: "advancements" })}
           onQuit={() => quit()}
           onExitApp={() => { leaving.current = true; onExitApp(); }}
           canShare={!guest}
           shareLabel={guest ? "Joined a friend" : net ? "Playing together…" : "Open to friends"}
           quitLabel={guest ? "Disconnect" : "Save and quit to title"}
         />
+      )}
+      {screen?.kind === "advancements" && (
+        <AdvancementsScreen earned={game.player.advancements} onBack={() => game.setScreen({ kind: "pause" })} />
       )}
       {screen?.kind === "options" && (
         <OptionsScreen settings={settings} onChange={changeSettings} onDone={() => game.setScreen({ kind: "pause" })} inGame />
