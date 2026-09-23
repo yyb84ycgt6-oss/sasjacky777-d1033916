@@ -194,6 +194,7 @@ src/lib/jackie-*.ts           memory, tasks, tags, files, attachments, archive
 src/lib/appActions.ts         everything an agent may do to the app (rule 9)
 src/lib/appAgent.ts           the in-app act→observe loop; localModels.ts reaches LM Studio/Ollama
 src/lib/mcp/                  the MCP server's tools (generates supabase/functions/mcp)
+src/craft/                    BlockCraft, the /craft game — engine, renderer, UI (docs/BLOCKCRAFT.md)
 src/components/ui/            shadcn primitives
 src/test/                     vitest
 

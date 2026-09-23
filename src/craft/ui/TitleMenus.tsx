@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { randomSeed, seedFromString } from "../engine/rng";
 import type { GameMode } from "../engine/player";
 import type { WorldType } from "../engine/worldgen";
+import { deleteCloudWorld, downloadWorld, listCloudWorlds, uploadWorld, type CloudWorld } from "../game/cloud";
 import { newWorldMeta, type SaveStore, type WorldMeta } from "../game/save";
 import { effectiveControls, type Settings } from "../game/settings";
 import { normalizeRoomCode } from "../net/transport";
@@ -47,7 +48,7 @@ export function Logo() {
       <div className="bc-sub" style={{ marginTop: "calc(var(--u) * 2)", color: "#ddd" }}>BROWSER EDITION</div>
       <div
         style={{
-          position: "absolute", right: "-2%", bottom: "calc(var(--u) * -4)", color: "#ffff00", fontSize: "calc(var(--u) * 7.5)",
+          position: "absolute", right: "-2%", bottom: "calc(var(--u) * 9)", color: "#ffff00", fontSize: "calc(var(--u) * 7.5)",
           transform: "rotate(-18deg)", animation: "bc-pulse 0.5s ease-in-out infinite", whiteSpace: "nowrap",
           textShadow: "calc(var(--u) * 0.7) calc(var(--u) * 0.7) 0 #3f3f00",
         }}
@@ -105,6 +106,8 @@ export function WorldSelect({ saves, ready, onPlay, onCreate, onBack }: {
   const [renaming, setRenaming] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const [busy, setBusy] = useState(false);
+  const [cloud, setCloud] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const reload = async () => {
@@ -128,6 +131,7 @@ export function WorldSelect({ saves, ready, onPlay, onCreate, onBack }: {
   const run = async (what: string, fn: () => Promise<void>) => {
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
       await fn();
     } catch (err) {
@@ -165,6 +169,23 @@ export function WorldSelect({ saves, ready, onPlay, onCreate, onBack }: {
     setConfirmDelete(false);
     await reload();
   });
+
+  const upload = (w: WorldMeta) => run("Upload failed", async () => {
+    const v = await uploadWorld(saves, w);
+    if (!v.ok) throw new Error(v.error);
+    setNotice(`"${w.name}" is saved in the cloud. Open Cloud Worlds on another device to download it.`);
+  });
+
+  if (cloud) {
+    return (
+      <CloudWorlds
+        saves={saves}
+        localIds={new Set((worlds ?? []).map((w) => w.id))}
+        onBack={() => { setCloud(false); void reload(); }}
+        onDownloaded={(meta) => { setCloud(false); void reload().then(() => setSelected(meta.id)); setNotice(`Downloaded "${meta.name}".`); }}
+      />
+    );
+  }
 
   if (confirmDelete && sel) {
     return (
@@ -235,6 +256,9 @@ export function WorldSelect({ saves, ready, onPlay, onCreate, onBack }: {
         {(error || saves.problem) && (
           <div style={{ textAlign: "center", color: "#ff8080", fontSize: "calc(var(--u) * 6)", margin: "calc(var(--u) * 3) auto 0", maxWidth: "calc(var(--u) * 260)" }}>{error ?? saves.problem}</div>
         )}
+        {notice && !error && (
+          <div style={{ textAlign: "center", color: "#aaffaa", fontSize: "calc(var(--u) * 6)", margin: "calc(var(--u) * 3) auto 0", maxWidth: "calc(var(--u) * 260)" }}>{notice}</div>
+        )}
         <div style={{ width: "min(100%, calc(var(--u) * 310))", margin: "calc(var(--u) * 4) auto 0", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(calc(var(--u) * 72), 1fr))", gap: "calc(var(--u) * 3)" }}>
           <Button disabled={!sel || busy} onClick={() => sel && onPlay(sel)}>Play Selected World</Button>
           <Button disabled={busy} onClick={onCreate}>Create New World</Button>
@@ -242,12 +266,109 @@ export function WorldSelect({ saves, ready, onPlay, onCreate, onBack }: {
           <Button disabled={!sel || busy} onClick={() => setConfirmDelete(true)}>Delete</Button>
           <Button disabled={!sel || busy} onClick={() => sel && void exportWorld(sel)}>Export…</Button>
           <Button disabled={busy} onClick={() => fileRef.current?.click()}>Import…</Button>
+          <Button disabled={!sel || busy} onClick={() => sel && void upload(sel)}>☁ Upload to Cloud</Button>
+          <Button disabled={busy} onClick={() => setCloud(true)}>☁ Cloud Worlds…</Button>
           <Button onClick={onBack}>Cancel</Button>
         </div>
         <input
           ref={fileRef} type="file" accept=".json,application/json" style={{ display: "none" }}
           onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void importWorld(f); }}
         />
+      </div>
+    </>
+  );
+}
+
+/** Worlds this account keeps in the cloud: download one here, or remove it. */
+function CloudWorlds({ saves, localIds, onBack, onDownloaded }: {
+  saves: SaveStore; localIds: Set<string>; onBack: () => void; onDownloaded: (meta: WorldMeta) => void;
+}) {
+  const [list, setList] = useState<CloudWorld[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [confirm, setConfirm] = useState<"replace" | "delete" | null>(null);
+
+  const load = async () => {
+    const v = await listCloudWorlds();
+    if (v.ok) { setList(v.value); setSelected((s) => s ?? v.value[0]?.id ?? null); setError(null); }
+    else { setList([]); setError(v.error); }
+  };
+  useEffect(() => { void load(); }, []);
+
+  const sel = list?.find((w) => w.id === selected) ?? null;
+
+  const download = async (w: CloudWorld) => {
+    setBusy(true);
+    const v = await downloadWorld(saves, w.id);
+    setBusy(false);
+    setConfirm(null);
+    if (v.ok) onDownloaded(v.value);
+    else setError(v.error);
+  };
+
+  const remove = async (w: CloudWorld) => {
+    setBusy(true);
+    const v = await deleteCloudWorld(w.id);
+    setBusy(false);
+    setConfirm(null);
+    if (v.ok) { setSelected(null); await load(); } else setError(v.error);
+  };
+
+  if (confirm && sel) {
+    return (
+      <>
+        <MenuBackground />
+        <MenuFrame title={confirm === "replace" ? "Replace this device's copy?" : "Remove from the cloud?"} dim={false}>
+          <div style={{ textAlign: "center", fontSize: "calc(var(--u) * 7)", lineHeight: 1.6 }}>
+            {confirm === "replace"
+              ? `'${sel.name}' is already on this device. Downloading replaces it with the cloud copy from ${new Date(sel.updatedAt).toLocaleString()}.`
+              : `The cloud copy of '${sel.name}' will be deleted. Copies on your devices stay.`}
+          </div>
+          <Button wide danger disabled={busy} onClick={() => void (confirm === "replace" ? download(sel) : remove(sel))}>
+            {confirm === "replace" ? "Replace" : "Remove"}
+          </Button>
+          <Button wide onClick={() => setConfirm(null)}>Cancel</Button>
+        </MenuFrame>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <MenuBackground />
+      <div className="absolute inset-0 flex flex-col bc-shadow" style={{ padding: "calc(var(--u) * 4)" }}>
+        <div className="bc-title" style={{ textAlign: "center", marginBottom: "calc(var(--u) * 4)" }}>Cloud Worlds</div>
+        <div className="bc-scroll" style={{ flex: 1, background: "rgba(0,0,0,0.5)", borderTop: "calc(var(--u) * 1) solid #000", borderBottom: "calc(var(--u) * 1) solid #000", padding: "calc(var(--u) * 3) 0" }}>
+          <div style={{ width: "min(100%, calc(var(--u) * 240))", margin: "0 auto", display: "flex", flexDirection: "column", gap: "calc(var(--u) * 2)" }}>
+            {list === null && <div className="bc-sub" style={{ textAlign: "center" }}>Asking the cloud…</div>}
+            {list?.length === 0 && !error && (
+              <div style={{ textAlign: "center", padding: "calc(var(--u) * 10)", fontSize: "calc(var(--u) * 7)", lineHeight: 1.6 }}>
+                Nothing in the cloud yet. Select a world and choose Upload to Cloud.
+              </div>
+            )}
+            {list?.map((w) => (
+              <div key={w.id} className={`bc-list-item ${w.id === selected ? "sel" : ""}`} onClick={() => setSelected(w.id)}>
+                <div style={{ width: "calc(var(--u) * 48)", height: "calc(var(--u) * 27)", flex: "none", background: "#222", border: "calc(var(--u) * 0.5) solid #555", overflow: "hidden" }}>
+                  {w.summary.thumbnail && <img src={w.summary.thumbnail} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+                </div>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: "calc(var(--u) * 7.5)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{w.name}</div>
+                  <div className="bc-sub">Uploaded {new Date(w.updatedAt).toLocaleString()} · {(w.summary.bytes / 1048576).toFixed(1)} MB</div>
+                  <div className="bc-sub" style={{ color: w.summary.hardcore ? "#ff5555" : undefined }}>
+                    {w.summary.hardcore ? "Hardcore Mode!" : `${MODE_LABEL[w.summary.gameMode] ?? w.summary.gameMode} Mode`} · Day {w.summary.day}{localIds.has(w.id) ? " · on this device" : ""}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        {error && <div style={{ textAlign: "center", color: "#ff8080", fontSize: "calc(var(--u) * 6)", margin: "calc(var(--u) * 3) auto 0", maxWidth: "calc(var(--u) * 260)", lineHeight: 1.5 }}>{error}</div>}
+        <div style={{ width: "min(100%, calc(var(--u) * 240))", margin: "calc(var(--u) * 4) auto 0", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(calc(var(--u) * 72), 1fr))", gap: "calc(var(--u) * 3)" }}>
+          <Button disabled={!sel || busy} onClick={() => sel && (localIds.has(sel.id) ? setConfirm("replace") : void download(sel))}>{busy ? "Working…" : "Download"}</Button>
+          <Button disabled={!sel || busy} onClick={() => setConfirm("delete")}>Remove from Cloud</Button>
+          <Button onClick={onBack}>Back</Button>
+        </div>
       </div>
     </>
   );

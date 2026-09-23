@@ -130,6 +130,19 @@ probe "public.is_admin removed from API" "$B" "SELECT public.is_admin('$B');" "d
 probe "read api_key_rate_events" "$B" "SELECT count(*) FROM public.api_key_rate_events;" "permission denied"
 probe "read xai_generation_requests" "$B" "SELECT count(*) FROM public.xai_generation_requests;" "permission denied"
 probe "read provider_quota_policy" "$B" "SELECT count(*) FROM public.provider_quota_policy;" "permission denied"
+probe "read another user's BlockCraft worlds" "$B" \
+  "SELECT count(*) FROM public.craft_worlds WHERE user_id='$A';" "0"
+probe "overwrite another user's BlockCraft world" "$B" \
+  "WITH u AS (UPDATE public.craft_worlds SET data='x' WHERE user_id='$A' RETURNING 1) SELECT count(*) FROM u;" "0"
+probe "delete another user's BlockCraft world" "$B" \
+  "WITH d AS (DELETE FROM public.craft_worlds WHERE user_id='$A' RETURNING 1) SELECT count(*) FROM d;" "0"
+probe "upload a world under another user's id" "$B" \
+  "INSERT INTO public.craft_worlds (id,user_id,name,summary,data) VALUES ('wB','$A','x','{}','{}');" \
+  "violates row-level security"
+probe "upload own world still works" "$B" \
+  "INSERT INTO public.craft_worlds (id,user_id,name,summary,data) VALUES ('wB','$B','Mine','{}','{}') RETURNING id;" "wB"
+probe "backdate own world to win a sync" "$B" \
+  "INSERT INTO public.craft_worlds (id,user_id,name,summary,data,updated_at) VALUES ('wC','$B','Mine','{}','{}','3000-01-01') RETURNING updated_at < '2999-01-01';" "t"
 
 echo
 if [ "$fail" -gt 0 ]; then

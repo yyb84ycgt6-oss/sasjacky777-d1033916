@@ -254,7 +254,8 @@ export class SaveStore {
 
   // ---- files ----------------------------------------------------------------------
 
-  async exportWorld(id: string): Promise<Blob> {
+  /** The world as an export file's text — what a download writes and a cloud upload sends. */
+  async exportText(id: string): Promise<string> {
     const meta = await this.getWorld(id);
     if (!meta) throw new Error("That world is not in this browser any more.");
     const chunks = await this.allChunks(id);
@@ -264,10 +265,20 @@ export class SaveStore {
       meta,
       chunks: chunks.map((c) => ({ cx: c.cx, cz: c.cz, gz: c.gz, data: toBase64(c.data), entities: c.entities })),
     };
-    return new Blob([JSON.stringify(file)], { type: "application/json" });
+    return JSON.stringify(file);
   }
 
-  async importWorld(text: string): Promise<WorldMeta> {
+  async exportWorld(id: string): Promise<Blob> {
+    return new Blob([await this.exportText(id)], { type: "application/json" });
+  }
+
+  /**
+   * Adds a world from an export file. A file becomes a new world with its own
+   * id, so importing twice gives two worlds; `keepId` keeps the file's id
+   * instead (a cloud download replacing its own local copy, so uploading it
+   * again updates the same cloud row).
+   */
+  async importWorld(text: string, opts: { keepId?: boolean } = {}): Promise<WorldMeta> {
     let file: ExportFile;
     try {
       file = JSON.parse(text);
@@ -277,13 +288,17 @@ export class SaveStore {
     if (file?.format !== "blockcraft-world" || !file.meta || !Array.isArray(file.chunks)) {
       throw new Error("That file is not a BlockCraft world export.");
     }
-    const id = newWorldId();
-    const meta: WorldMeta = { ...file.meta, id, name: uniqueName(file.meta.name, await this.listWorlds()), lastPlayed: Date.now() };
-    await this.putWorld(meta);
-    const s = await this.store("chunks", "readwrite");
+    const keep = opts.keepId && typeof file.meta.id === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(file.meta.id);
+    const id = keep ? file.meta.id : newWorldId();
+    // Decoded before anything is replaced: a damaged file must not cost the copy already here.
     const stored: StoredChunk[] = file.chunks.map((c) => ({
       key: chunkStoreKey(id, c.cx, c.cz), world: id, cx: c.cx, cz: c.cz, gz: !!c.gz, data: fromBase64(c.data), entities: c.entities ?? [],
     }));
+    if (keep) await this.deleteWorld(id);
+    const others = (await this.listWorlds()).filter((w) => w.id !== id);
+    const meta: WorldMeta = { ...file.meta, id, name: uniqueName(file.meta.name, others), lastPlayed: Date.now() };
+    await this.putWorld(meta);
+    const s = await this.store("chunks", "readwrite");
     if (!s) for (const c of stored) this.memoryChunks.set(c.key, c);
     else {
       for (const c of stored) s.os.put(c);

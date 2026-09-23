@@ -29,6 +29,10 @@ ON CONFLICT DO NOTHING;
 INSERT INTO public.jackie_tasks (user_id, title)
 VALUES ('aaaaaaaa-0000-0000-0000-000000000001','A private task');
 
+INSERT INTO public.craft_worlds (id, user_id, name, summary, data)
+VALUES ('wA', 'aaaaaaaa-0000-0000-0000-000000000001', 'A world', '{}', '{}')
+ON CONFLICT DO NOTHING;
+
 -- Service-role writes: the schema must refuse what a buggy function permits --
 -- These are the exact inserts the unfixed api-keys function would have made.
 DO $$
