@@ -215,6 +215,10 @@ for (const dye of DYES) {
   item(`${dye}_dye`, `${dye[0].toUpperCase()}${dye.slice(1)} Dye`, { category: "ingredients" });
 }
 
+item("iron_nugget", "Iron Nugget");
+item("gold_nugget", "Gold Nugget");
+if (next > 340) throw new Error("item ids before the tool block overflowed into it");
+
 // ---- tools -------------------------------------------------------------------------
 
 export const TIERS = [

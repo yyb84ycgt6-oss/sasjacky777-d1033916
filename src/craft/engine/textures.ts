@@ -968,6 +968,15 @@ const ITEM_TEMPLATES: Record<string, string[]> = {
     "..acbbda.acbbda.",
     "..aaaaaa.aaaaaa.",
   ],
+  nugget: [
+    "................", "................", "................", "................", "................", "................",
+    "......aaa.......",
+    ".....acbba......",
+    "....acbbbda.....",
+    "....abbbdda.....",
+    ".....addda......",
+    "......aaa.......",
+  ],
   ingot: [
     "................", "................", "................", "................", "................",
     "......aaaaaaaa..",
@@ -1453,6 +1462,8 @@ art("iron_ingot", "ingot", paletteOf("#d8d8d8"));
 art("gold_ingot", "ingot", paletteOf("#f5d84a"));
 art("copper_ingot", "ingot", paletteOf("#d97a4f"));
 art("brick", "ingot", paletteOf("#a3533f"));
+art("iron_nugget", "nugget", paletteOf("#d8d8d8"));
+art("gold_nugget", "nugget", paletteOf("#f5d84a"));
 art("raw_iron", "raw", paletteOf("#c9a88f"));
 art("raw_gold", "raw", paletteOf("#e8c03a"));
 art("raw_copper", "raw", paletteOf("#c46b45"));

@@ -47,6 +47,14 @@ export class World implements LightVolume {
   private cacheId = -1;
   private cacheChunk: Chunk | undefined;
   tick = 0;
+  /**
+   * Whether this copy of the world runs block rules. An online guest's copy
+   * does not: the host decides where water flows and sand falls, and sends
+   * the result, so two players never disagree about it.
+   */
+  simulates = true;
+  /** Ticks until a block reacts to a neighbour changing. */
+  delayFor: (id: number) => number = () => 1;
 
   onChange(listener: (change: BlockChange) => void): () => void {
     this.listeners.add(listener);
@@ -222,15 +230,24 @@ export class World implements LightVolume {
     if (cur === undefined || cur > due) this.scheduled.set(key, due);
   }
 
-  /** Neighbours of a change get a tick: sand falls, water flows, torches lose their wall. */
+  /**
+   * Neighbours of a change get a tick: sand falls, water flows, torches lose
+   * their wall. How soon depends on the block — water moves every 5 ticks and
+   * lava every 30, which is what makes lava feel thick.
+   */
   wakeNeighbours(x: number, y: number, z: number): void {
-    this.schedule(x, y, z, 1);
-    this.schedule(x + 1, y, z, 1);
-    this.schedule(x - 1, y, z, 1);
-    this.schedule(x, y + 1, z, 1);
-    if (y > 0) this.schedule(x, y - 1, z, 1);
-    this.schedule(x, y, z + 1, 1);
-    this.schedule(x, y, z - 1, 1);
+    if (!this.simulates) return;
+    const wake = (wx: number, wy: number, wz: number) => {
+      if (wy < 0 || wy >= WORLD_HEIGHT) return;
+      this.schedule(wx, wy, wz, this.delayFor(this.blockAt(wx, wy, wz)));
+    };
+    wake(x, y, z);
+    wake(x + 1, y, z);
+    wake(x - 1, y, z);
+    wake(x, y + 1, z);
+    wake(x, y - 1, z);
+    wake(x, y, z + 1);
+    wake(x, y, z - 1);
   }
 
   /** Removes and returns the positions whose tick is due. */
