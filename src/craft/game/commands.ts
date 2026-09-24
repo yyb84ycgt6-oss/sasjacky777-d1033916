@@ -310,7 +310,7 @@ export function runCommand(game: Game, line: string): Line[] {
       if (args[0] === "clear") { p.effects = []; return [{ text: "Removed every effect" }]; }
       const kinds: StatusEffect[] = [
         "regeneration", "hunger", "poison", "absorption", "speed", "night_vision", "slowness", "strength", "weakness",
-        "fire_resistance", "invisibility", "water_breathing", "instant_health", "instant_damage",
+        "fire_resistance", "invisibility", "water_breathing", "instant_health", "instant_damage", "levitation",
       ];
       const kind = args[0] as StatusEffect;
       if (!kinds.includes(kind)) return [{ text: `Usage: /effect ${kinds.join("|")} [seconds] [level], or /effect clear`, color: ERR }];

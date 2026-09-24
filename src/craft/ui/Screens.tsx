@@ -327,7 +327,8 @@ export function ChestScreen({ game, mobile }: { game: Game; mobile: boolean }) {
   const s = game.screen;
   const blockId = s && s.kind === "chest" ? game.world.blockAt(s.x, s.y, s.z) : B.CHEST;
   // The same screen serves chests (27), hoppers (a row of 5) and dispensers and droppers (3×3).
-  const title = blockId === B.HOPPER ? "Item Hopper" : blockId === B.DISPENSER ? "Dispenser" : blockId === B.DROPPER ? "Dropper" : "Chest";
+  const title = blockId === B.HOPPER ? "Item Hopper" : blockId === B.DISPENSER ? "Dispenser" : blockId === B.DROPPER ? "Dropper"
+    : blockId === B.SHULKER_BOX ? "Shulker Box" : blockId === B.BARREL ? "Barrel" : "Chest";
   const cols = chest.items.length === 9 ? 3 : chest.items.length === 5 ? 5 : 9;
   return (
     <>

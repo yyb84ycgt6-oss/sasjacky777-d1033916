@@ -11,13 +11,13 @@
  */
 import * as THREE from "three";
 import {
-  B, block, CLOCKWISE_FACING, collisionBoxes, Face, FACE_OF_FACING, FACING_DIRS, isButton, isCrop, isDoor, isFluid, isLeaves, isPillar,
+  B, block, CLOCKWISE_FACING, collisionBoxes, Face, FACE_DIRS, FACE_OF_FACING, FACING_DIRS, isButton, isCrop, isDoor, isFluid, isLeaves, isPillar,
   isRedstoneTorch, isSlab, isStairs, isTrapdoor, OPPOSITE_FACE, OPPOSITE_FACING, FRAME_EYE,
   type BlockDef,
 } from "../engine/blocks";
 import { cropDrops, supported } from "../engine/blockRules";
 import { applyFortune, damageBonus, efficiencyBonus, levelOf, wears } from "../engine/enchanting";
-import { EndCrystal, PrimedTnt, Projectile, type ProjectileKind } from "../engine/entities";
+import { EndCrystal, ItemFrame, PrimedTnt, Projectile, type ProjectileKind } from "../engine/entities";
 import { itemDef, itemId, resolveDrops, type ItemDef, type ItemStack } from "../engine/items";
 import { isArthropod, isUndead, Mob } from "../engine/mobs";
 import { potionOfItem } from "../engine/potions";
@@ -203,7 +203,9 @@ export class Actions {
     const hit = p.gameMode === "spectator" ? null : raycastBlocks(g.world, ox, oy, oz, d.x, d.y, d.z, reach);
     let best: Entity | null = null, bestT = Math.min(entityReach, hit ? hit.distance : Infinity);
     for (const e of g.entities.values()) {
-      if (!(e instanceof Mob || e instanceof Vehicle || e instanceof EndCrystal) || (e instanceof Mob && e.dying)) continue;
+      // Also what can be struck out of the air (a ghast's fireball, a shulker's bullet) and item frames.
+      const swattable = e instanceof Projectile && (e.kind === "fireball" || e.kind === "shulker_bullet");
+      if (!(e instanceof Mob || e instanceof Vehicle || e instanceof EndCrystal || e instanceof ItemFrame || swattable) || (e instanceof Mob && e.dying)) continue;
       // The vehicle you sit in is not in your way.
       if (e instanceof Vehicle && e.id === p.riding) continue;
       if (Math.abs(e.x - ox) > 6 + e.body.width / 2 || Math.abs(e.z - oz) > 6 + e.body.width / 2) continue;
@@ -402,6 +404,8 @@ export class Actions {
       else stacks = applyFortune(resolveDrops(def.drops, id, Math.random), levelOf(p.inventory.held, "fortune"), Math.random, id);
     }
     if (drops) g.dropContainerContents(x, y, z);
+    // A creative player breaking a shulker box that holds something still gets the box back, full.
+    else if (id === B.SHULKER_BOX) g.dropContainerContents(x, y, z, false);
     else g.world.setEntity(x, y, z, undefined);
 
     // Two-block things come down together.
@@ -475,7 +479,7 @@ export class Actions {
       const e = t.entity;
       if (crit) g.particles("crit", e.x, e.y + e.body.height * 0.7, e.z, 10);
       if (g.role === "guest") g.net?.attack(e.id, damage, b.x, b.z, knockback, fire, looting);
-      else if (e instanceof Vehicle || e instanceof EndCrystal) e.hurt(g.ctx, damage, "player", b.x, b.z, p.id);
+      else if (e instanceof Vehicle || e instanceof EndCrystal || e instanceof ItemFrame || e instanceof Projectile) e.hurt(g.ctx, damage, "player", b.x, b.z, p.id);
       else if (e instanceof Mob) {
         e.looting = looting;
         if (e.hurt(g.ctx, damage, "player", b.x, b.z, p.id, knockback)) {
@@ -506,6 +510,17 @@ export class Actions {
 
     if (t?.entity instanceof Vehicle && fresh && !p.sneaking) {
       g.mount(t.entity);
+      this.swing();
+      return;
+    }
+
+    if (t?.entity instanceof ItemFrame && fresh) {
+      const frame = t.entity;
+      const empty = !frame.item;
+      if (empty && !held) return;
+      if (g.role === "guest") g.net?.interact(frame.id, def?.name ?? null, empty ? { ...held!, count: 1 } : null);
+      else frame.use(g.ctx, held);
+      if (empty && p.survivalLike) this.consumeHeld();
       this.swing();
       return;
     }
@@ -853,6 +868,18 @@ export class Actions {
       return true;
     }
 
+    if (fresh && def.use === "item_frame") {
+      // Hung on the face that was clicked, in the cell in front of it.
+      const [dx, dy, dz] = FACE_DIRS[hit.face];
+      const fx = x + dx, fy = y + dy, fz = z + dz;
+      if (!bdef.solid || block(w.blockAt(fx, fy, fz)).solid) return false;
+      if (g.role === "guest") g.net?.placeFrame?.(hit.face, fx, fy, fz);
+      else if (!g.placeFrame(hit.face, fx, fy, fz)) return false;
+      if (p.survivalLike) this.consumeHeld();
+      this.swing();
+      return true;
+    }
+
     // Tools used on blocks.
     if (fresh) {
       if (def.use === "hoe" && (id === B.GRASS || id === B.DIRT || id === B.DIRT_PATH || id === B.COARSE_DIRT) && hit.face !== Face.Down && w.blockAt(x, y + 1, z) === 0) {
@@ -1195,8 +1222,9 @@ export class Actions {
       if (!supported(w, x, y, z, id, meta)) return false;
     }
     if (def.facing6) {
-      // A hopper points into the block it was placed against; the rest face the player.
+      // A hopper points into the block it was placed against; a shulker box opens away from it; the rest face the player.
       if (id === B.HOPPER) meta = hit.face === Face.Up || hit.face === Face.Down ? Face.Down : OPPOSITE_FACE[hit.face];
+      else if (id === B.SHULKER_BOX) meta = hit.face | ((p.inventory.held?.color ?? 0) << 3);
       else meta = this.facing6();
     }
     if (isTrapdoor(id)) {
@@ -1260,9 +1288,16 @@ export class Actions {
 
   private commit(x: number, y: number, z: number, id: number, meta: number, item: ItemDef): boolean {
     const g = this.game;
+    const held = g.player.inventory.held;
     if (!g.world.setBlock(x, y, z, id, meta, "player")) return false;
     const def = block(id);
     if (def.interact === "chest") g.containerAt(x, y, z, "chest");
+    // A shulker box unpacks what it carried as it is set down.
+    if (id === B.SHULKER_BOX && held?.contents) {
+      const box = g.containerAt(x, y, z, "chest");
+      if (box.kind === "chest") held.contents.forEach((s, i) => { if (i < box.items.length) box.items[i] = s ? { ...s } : null; });
+      g.containerChanged(x, y, z);
+    }
     if (def.interact === "furnace") g.containerAt(x, y, z, "furnace");
     return this.afterPlace(x, y, z, def, item);
   }

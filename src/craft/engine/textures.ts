@@ -1124,6 +1124,62 @@ def("iron_bars", (p) => {
   for (let x = 0; x < TEX; x++) for (const y of [0, 15]) p.set(x, y, bar);
 });
 
+// Shulker boxes, in the shulker's purple and in each dye: a lid with a rim over a darker base.
+const BOX_SHELLS: [string, string][] = [
+  ["", "#8e5b8e"], ["white", "#d8d8d8"], ["red", "#a8342e"], ["yellow", "#e0c040"], ["blue", "#3c4ab0"],
+  ["green", "#4e7a22"], ["orange", "#e0782a"], ["purple", "#7a3aa8"], ["black", "#2a2a2e"],
+];
+for (const [name, color] of BOX_SHELLS) {
+  const c = hex(color), suffix = name ? `_${name}` : "";
+  def(`shulker_box_top${suffix}`, (p, r) => {
+    noisy(p, r, shade(c, 1.08), 0.06, 4);
+    frame(p, shade(c, 0.7));
+    frame16(p, 3, 3, 12, 12, shade(c, 0.85));
+    rect(p, 6, 6, 9, 9, shade(c, 1.2));
+  });
+  def(`shulker_box_side${suffix}`, (p, r) => {
+    noisy(p, r, c, 0.07, 4);
+    // The lid comes down over the top half; a dark seam where it meets the base.
+    rect(p, 0, 0, 15, 7, (x, y) => shade(c, y === 0 ? 1.25 : x % 5 === 0 ? 0.92 : 1.1));
+    for (let x = 0; x < TEX; x++) { p.set(x, 8, shade(c, 0.55)); p.set(x, 15, shade(c, 0.7)); }
+    for (let y = 9; y < 15; y++) { p.set(0, y, shade(c, 0.8)); p.set(15, y, shade(c, 0.8)); }
+  });
+  def(`shulker_box_bottom${suffix}`, (p, r) => {
+    noisy(p, r, shade(c, 0.85), 0.06, 4);
+    frame(p, shade(c, 0.65));
+  });
+}
+
+// The dragon's head: black scales, ridged; violet eyes over a red-lined snout.
+const DRAGON_SCALE = hex("#19181c"), DRAGON_RIDGE = hex("#2c2a32");
+const dragonScales = (p: Pixels, r: Rng) => {
+  noisy(p, r, DRAGON_SCALE, 0.12, 4);
+  for (let y = 1; y < TEX; y += 4) for (let x = (y >> 2) % 2 ? 0 : 2; x < TEX; x += 4) { p.set(x, y, DRAGON_RIDGE); p.set(x + 1, y, DRAGON_RIDGE); }
+};
+def("dragon_head_side", dragonScales);
+def("dragon_head_top", (p, r) => { dragonScales(p, r); for (let y = 0; y < TEX; y++) p.set(7, y, hex("#3a3842")); });
+def("dragon_head_face", (p, r) => {
+  dragonScales(p, r);
+  rect(p, 2, 5, 5, 6, hex("#c060ff"));
+  rect(p, 10, 5, 13, 6, hex("#c060ff"));
+  p.set(3, 5, hex("#f2c8ff")); p.set(11, 5, hex("#f2c8ff"));
+});
+def("dragon_head_snout", (p, r) => {
+  dragonScales(p, r);
+  for (let x = 0; x < TEX; x++) p.set(x, 13, hex("#6a1e22"));
+});
+def("dragon_head_snout_top", (p, r) => {
+  dragonScales(p, r);
+  rect(p, 3, 2, 4, 3, hex("#3a3842")); rect(p, 11, 2, 12, 3, hex("#3a3842"));
+});
+def("dragon_head_horn", (p, r) => noisy(p, r, hex("#b8b0a0"), 0.1, 4));
+def("magenta_stained_glass", (p) => {
+  const tint = hex("#c74ebd");
+  p.fill(tint, 110);
+  for (let i = 0; i < 16; i++) { p.set(i, 0, shade(tint, 1.15), 220); p.set(0, i, shade(tint, 1.05), 220); p.set(i, 15, shade(tint, 0.8), 220); p.set(15, i, shade(tint, 0.85), 220); }
+  for (let j = 0; j < 4; j++) p.set(3 + j, 6 - j, hex("#ffe0fa"), 170);
+});
+
 // Water and lava are animated: ANIM_FRAMES consecutive layers, painted from a
 // looping path through 3D noise so the last frame flows into the first.
 const WATER_NOISE = new Simplex(4242);
@@ -2171,6 +2227,38 @@ const ITEM_TEMPLATES: Record<string, string[]> = {
     "....kkkkkkkk....",
     "....kdkkdkkk....",
   ],
+  shell: [
+    "................",
+    "................",
+    "....aaaaaaaa....",
+    "...acccccccba...",
+    "..accbbbbbbbba..",
+    "..acbcbcbcbcba..",
+    "..abbbbbbbbbba..",
+    "..abcbcbcbcbda..",
+    "..abbbbbbbbbda..",
+    "...addddddddda..",
+    "....aaaaaaaa....",
+    "....awwwwwwa....",
+    ".....aaaaaa.....",
+  ],
+  frame: [
+    "................",
+    ".aaaaaaaaaaaaaa.",
+    ".acccccccccccda.",
+    ".acbbbbbbbbbbda.",
+    ".acbllllllllbda.",
+    ".acblmmmmmmlbda.",
+    ".acblmmmmmmlbda.",
+    ".acblmmmmmmlbda.",
+    ".acblmmmmmmlbda.",
+    ".acblmmmmmmlbda.",
+    ".acblmmmmmmlbda.",
+    ".acbllllllllbda.",
+    ".acbbbbbbbbbbda.",
+    ".addddddddddddd.",
+    ".aaaaaaaaaaaaaa.",
+  ],
   elytra: [
     "................",
     "..aaaa....aaaa..",
@@ -2457,6 +2545,8 @@ art("end_crystal", "crystal", { ...paletteOf("#d8b0e0", { f: hex("#ff7ad8") }), 
 art("chorus_fruit", "ball", paletteOf("#7a4e7a", { c: hex("#b88ab8") }));
 art("popped_chorus_fruit", "ball", paletteOf("#b894b8", { c: hex("#e6cce6"), d: hex("#8a6a8a") }));
 art("elytra", "elytra", paletteOf("#8a8aa0", { c: hex("#c8c8dc"), d: hex("#5e5e72") }));
+art("shulker_shell", "shell", paletteOf("#8e5b8e", { c: hex("#c498c4"), w: hex("#f0e0a0") }));
+art("item_frame", "frame", { a: hex("#5a3e1e"), b: hex("#8a6a3a"), c: hex("#b08a52"), d: hex("#6e4c26"), l: hex("#a88a5e"), m: hex("#96784c") });
 art("firework_rocket", "rocket", { a: hex("#c8342a"), b: hex("#f2f0e6"), p: hex("#8a2020"), r: hex("#e04a3a"), w: hex("#ffd0c0"), k: hex("#6b4a26") });
 art("fermented_spider_eye", "eye", paletteOf("#8a4a2a", { w: hex("#e08a70") }));
 art("glistering_melon_slice", "melon_slice", { a: hex("#8a6a10"), b: hex("#e0402f"), w: hex("#ffe060"), g: hex("#f0c030") });

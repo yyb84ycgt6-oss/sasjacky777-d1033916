@@ -342,6 +342,18 @@ export function skin(kind: string, variant = 0): HTMLCanvasElement {
       p.box(56, 32, 2, 30, 2, skinOf, 0.04);
       break;
     }
+    case "shulker": {
+      // A purple shell (or a dyed one: variant is the box colour) of overlapping plates, and a pale head.
+      const SHELLS = ["#8e5b8e", "#d8d8d8", "#a8342e", "#e0c040", "#3c4ab0", "#4e7a22", "#e0782a", "#7a3aa8", "#2a2a2e"];
+      const shell = hex(SHELLS[variant] ?? SHELLS[0]);
+      const dark: RGB = [shell[0] * 0.72, shell[1] * 0.72, shell[2] * 0.72], lite: RGB = [Math.min(255, shell[0] * 1.2), Math.min(255, shell[1] * 1.2), Math.min(255, shell[2] * 1.2)];
+      const plates = (f: Face, x: number, y: number): RGB => (f === "top" ? ((x + y) % 4 === 0 ? dark : lite) : y === 0 ? lite : (x % 4 === 0 || y % 3 === 0) ? dark : shell);
+      p.box(0, 0, 8, 4, 8, plates, 0.06);
+      p.box(0, 12, 8, 6, 8, (f, x, y) => (f === "bottom" ? dark : plates(f, x, y)), 0.06);
+      const head = p.box(0, 28, 3, 3, 3, hex("#e8e4b0"), 0.04);
+      p.px(head.front.x, head.front.y + 1, hex("#1a1a1a"), 0); p.px(head.front.x + 2, head.front.y + 1, hex("#1a1a1a"), 0);
+      break;
+    }
     case "silverfish": {
       const grey = hex("#8c8f93"), dark = hex("#63666a");
       const seg = (_f: Face, x: number, y: number): RGB => ((x + y) % 3 === 0 ? dark : grey);

@@ -9,7 +9,7 @@
  * Numbers — health, speed, damage, the creeper's 1.5 second fuse, a zombie's
  * reach — follow the original so fights play out as expected.
  */
-import { B, block, WOOL_COLORS } from "./blocks";
+import { B, block, Face, FACE_DIRS, WOOL_COLORS } from "./blocks";
 import {
   Entity, ItemEntity, Projectile, registerChickenSpawner, XpOrb, xpOrbValues,
   type DamageSource, type EntityContext, type EntityKind, type EntitySnapshot, type PlayerRef,
@@ -25,7 +25,7 @@ import { DRAGON_PHASES, dragonHurt, dragonTick, newDragonState, type DragonState
 export type MobKind =
   | "pig" | "cow" | "sheep" | "chicken" | "zombie" | "skeleton" | "creeper" | "spider" | "slime" | "villager" | "iron_golem"
   | "zombified_piglin" | "ghast" | "magma_cube" | "blaze" | "wither_skeleton" | "piglin" | "hoglin"
-  | "enderman" | "silverfish" | "ender_dragon";
+  | "enderman" | "silverfish" | "ender_dragon" | "shulker";
 
 interface MobSpec {
   health: number;
@@ -73,6 +73,8 @@ export const MOB_SPECS: Record<MobKind, MobSpec> = {
   silverfish: { health: 8, width: 0.4, height: 0.3, speed: 0.07, hostile: true, attack: 1, tempt: [], burnsInDay: false, followRange: 16, xp: [5, 5] },
   // One box for the body; the head, neck and wings reach well past it (dragon.ts).
   ender_dragon: { health: 200, width: 6, height: 3, speed: 0, hostile: true, attack: 10, tempt: [], burnsInDay: false, followRange: 150, xp: [0, 0], fireImmune: true, flies: true },
+  // A box clinging to a block in an End city, which opens to shoot and leaves only by teleporting.
+  shulker: { health: 30, width: 1, height: 1, speed: 0, hostile: true, attack: 0, tempt: [], burnsInDay: false, followRange: 16, xp: [5, 5] },
 };
 
 export const MOB_KINDS = Object.keys(MOB_SPECS) as MobKind[];
@@ -186,6 +188,12 @@ export class Mob extends Entity {
   scream = 0;
   /** The dragon's fight: its phase, where it is flying, the crystal it draws on. */
   dragon: DragonState | null = null;
+  /** Shulkers: the Face of its box that holds to a block; how far its lid is open (0-1) and where it is going; its colour. */
+  attach: number = Face.Down;
+  peek = 0;
+  private peekTo = 0;
+  private peekFor = 0;
+  shellColor = 0;
 
   constructor(kind: MobKind, x: number, y: number, z: number, id?: number) {
     const spec = MOB_SPECS[kind];
@@ -204,6 +212,8 @@ export class Mob extends Entity {
       this.persistent = true;
       this.body.noClip = true;
     }
+    // A shulker is part of the city it guards: it never wanders off or despawns.
+    if (kind === "shulker") { this.persistent = true; this.yaw = 0; }
   }
 
   /** Slimes come in sizes 1, 2 and 4: the box, the health and the bite all scale with it. */
@@ -325,6 +335,14 @@ export class Mob extends Entity {
       return false;
     }
     if (this.kind === "enderman" && attacker && !attacker.startsWith("mob:")) { this.targetId = attacker; this.anger = 600; }
+    if (this.kind === "shulker") {
+      // Shut, its shell turns arrows aside and takes most of any blow.
+      const shut = this.peek < 0.1;
+      if (shut && source === "arrow") return false;
+      if (shut) amount *= 0.2;
+      // Hurt and below half, it may flee to another wall.
+      if (this.health - amount < this.maxHealth / 2 && this.health - amount > 0 && ctx.random() < 0.25) this.shulkerTeleport(ctx);
+    }
     if ((source === "fire" || source === "lava") && (this.hasEffect("fire_resistance") || this.spec.fireImmune)) return false;
     // Fireballs are fire: they bounce off the Nether's own, except a ghast's blast sent back at a ghast.
     if (source === "fireball" && this.spec.fireImmune && this.kind !== "ghast") return false;
@@ -346,7 +364,7 @@ export class Mob extends Entity {
     // Knockback away from the source.
     const dx = this.body.x - fromX, dz = this.body.z - fromZ;
     const d = Math.hypot(dx, dz) || 1;
-    if (knockback >= 0 && source !== "fire" && source !== "drown" && source !== "fall" && source !== "starve" && source !== "magic" && this.kind !== "iron_golem") {
+    if (knockback >= 0 && source !== "fire" && source !== "drown" && source !== "fall" && source !== "starve" && source !== "magic" && this.kind !== "iron_golem" && this.kind !== "shulker") {
       this.body.vx = this.body.vx / 2 + (dx / d) * (0.4 + knockback);
       this.body.vz = this.body.vz / 2 + (dz / d) * (0.4 + knockback);
       if (this.body.onGround) this.body.vy = Math.min(0.4, this.body.vy / 2 + 0.4);
@@ -390,6 +408,11 @@ export class Mob extends Entity {
 
     this.tickEffects(ctx);
     if (this.dying) return;
+    if (this.kind === "shulker") {
+      this.shulkerAi(ctx);
+      this.environment(ctx);
+      return;
+    }
     const move = { forward: 0, jump: false, yaw: this.yaw, speedMul: 1 };
     if (isCubeMob(this.kind)) this.slimeAi(ctx, move);
     else if (this.kind === "villager") this.villagerAi(ctx, move);
@@ -419,6 +442,7 @@ export class Mob extends Entity {
     const res = travel(ctx.world, b, {
       forward: move.forward, strafe: 0, yaw: this.yaw, jump: move.jump, sneak: false, sprint: false, flying: false,
       speed: this.spec.speed * move.speedMul * (this.baby ? 1.3 : 1) * potionSpeed, floats: true,
+      levitation: this.effectLevel("levitation") + 1,
     });
     // Spiders climb walls.
     if (this.kind === "spider" && b.collidedH && move.forward > 0) b.vy = 0.2;
@@ -1096,6 +1120,81 @@ export class Mob extends Entity {
    * three; up close they burn with a touch. With nothing to fight they drift
    * and slowly sink.
    */
+  /**
+   * A shulker: still, holding to its block. Now and then it lifts its lid a
+   * crack to look about; with a player in sight it opens wide and fires a
+   * bullet every one to five seconds. Its block gone, it teleports.
+   */
+  private shulkerAi(ctx: EntityContext): void {
+    const b = this.body;
+    b.vx = b.vy = b.vz = 0;
+    b.fallDistance = 0;
+    if (this.age % 10 === 0) {
+      const [dx, dy, dz] = FACE_DIRS[this.attach];
+      const x = Math.floor(b.x), y = Math.floor(b.y + 0.5), z = Math.floor(b.z);
+      if (ctx.world.isLoaded(x, z) && !block(ctx.world.blockAt(x + dx, y + dy, z + dz)).solid && !this.shulkerTeleport(ctx)) {
+        // Nowhere to go: it drops, as anything unsupported does.
+        const g = ctx.world;
+        let fy = y;
+        while (fy > 1 && !block(g.blockAt(x, fy - 1, z)).solid) fy--;
+        b.y = fy; this.attach = Face.Down;
+      }
+    }
+    const target = this.flyingTarget(ctx, this.spec.followRange);
+    if (target) {
+      this.peekTo = 1;
+      this.peekFor = 0;
+      this.headYaw = this.faceTo(target.x, target.z);
+      if (--this.shootCooldown <= 0) {
+        this.shootCooldown = 20 + Math.floor(ctx.random() * 10) * 10;
+        if (ctx.difficulty > 0 && this.peek > 0.5) {
+          const [fx, fy, fz] = FACE_DIRS[this.attach];
+          // Out of the open side of the box, away from the block it holds.
+          const bullet = new Projectile("shulker_bullet", b.x - fx * 0.6, b.y + 0.5 - fy * 0.6, b.z - fz * 0.6, 0, 0, 0, `mob:${this.id}`);
+          bullet.homing = target.id;
+          ctx.spawn(bullet);
+          ctx.sound("shulker_shoot", b.x, b.y + 0.5, b.z, 0.8);
+        }
+      }
+    } else if (this.peekFor > 0) {
+      if (--this.peekFor === 0) this.peekTo = 0;
+    } else if (ctx.random() < 1 / 120) {
+      this.peekTo = ctx.random() < 0.5 ? 0.3 : 0;
+      this.peekFor = 40 + Math.floor(ctx.random() * 60);
+    }
+    const was = this.peek;
+    this.peek += Math.max(-0.05, Math.min(0.05, this.peekTo - this.peek));
+    if (was < 0.05 && this.peek >= 0.05) ctx.sound("shulker_open", b.x, b.y + 0.5, b.z, 0.6);
+    if (was >= 0.05 && this.peek < 0.05) ctx.sound("shulker_close", b.x, b.y + 0.5, b.z, 0.6);
+  }
+
+  /** A shulker's escape: up to five tries at an empty cell within eight blocks that has a solid face to hold to. */
+  shulkerTeleport(ctx: EntityContext): boolean {
+    const b = this.body, w = ctx.world;
+    for (let i = 0; i < 5; i++) {
+      const x = Math.floor(b.x + (ctx.random() - 0.5) * 16), y = Math.floor(b.y + (ctx.random() - 0.5) * 16), z = Math.floor(b.z + (ctx.random() - 0.5) * 16);
+      if (y < 1 || y > 126 || !w.isLoaded(x, z)) continue;
+      const here = w.blockAt(x, y, z);
+      if (here !== B.AIR) continue;
+      // Down first, as it rests on floors by preference.
+      const face = [Face.Down, Face.Up, Face.North, Face.South, Face.West, Face.East].find((f) => {
+        const [dx, dy, dz] = FACE_DIRS[f];
+        return block(w.blockAt(x + dx, y + dy, z + dz)).solid;
+      });
+      if (face === undefined) continue;
+      if (ctx.entitiesNear(x + 0.5, y + 0.5, z + 0.5, 0.9).some((e) => e !== this && e instanceof Mob && e.kind === "shulker")) continue;
+      ctx.particles("portal", b.x, b.y + 0.5, b.z, 12);
+      ctx.sound("shulker_teleport", b.x, b.y + 0.5, b.z, 0.8);
+      b.x = x + 0.5; b.y = y; b.z = z + 0.5;
+      this.prevX = b.x; this.prevY = b.y; this.prevZ = b.z;
+      this.attach = face;
+      this.peek = 0; this.peekTo = 0;
+      ctx.particles("portal", b.x, b.y + 0.5, b.z, 12);
+      return true;
+    }
+    return false;
+  }
+
   private blazeAi(ctx: EntityContext, move: { forward: number; jump: boolean; yaw: number; speedMul: number }): void {
     const b = this.body;
     const target = this.flyingTarget(ctx, 48);
@@ -1248,6 +1347,8 @@ export class Mob extends Entity {
       case "enderman": return [...it("ender_pearl", r(0, 1)), ...(this.carried ? [{ id: this.carried, count: 1 }] : [])];
       case "silverfish": return [];
       case "ender_dragon": return [];
+      // Half the time a shell, and Looting helps.
+      case "shulker": return ctx.random() < 0.5 + this.looting * 0.0625 ? it("shulker_shell", 1) : [];
     }
   }
 
@@ -1269,6 +1370,8 @@ export class Mob extends Entity {
         cb: this.kind === "enderman" && this.carried ? this.carried : undefined,
         sc: this.kind === "enderman" && (this.scream > 0 || this.anger > 0) ? 1 : undefined,
         dg: this.dragon ? { p: this.dragon.phase, t: this.dragon.timer, py: this.dragon.podiumY, cr: this.dragon.crystal ?? undefined } : undefined,
+        // A shulker's hold, lid and colour; its head turns toward what it watches.
+        sk: this.kind === "shulker" ? [this.attach, Math.round(this.peek * 100), this.shellColor, Math.round(this.headYaw * 100)] : undefined,
       },
     };
   }
@@ -1315,6 +1418,13 @@ export class Mob extends Entity {
       if (typeof g.t === "number") this.dragon.timer = g.t;
       if (typeof g.py === "number") this.dragon.podiumY = g.py;
       this.dragon.crystal = typeof g.cr === "number" ? g.cr : null;
+    }
+    if (this.kind === "shulker" && Array.isArray(d.sk)) {
+      const [f, pk, c, hy] = d.sk as unknown[];
+      if (typeof f === "number" && f >= 0 && f < 6) this.attach = f;
+      if (typeof pk === "number") this.peek = Math.max(0, Math.min(1, pk / 100));
+      if (typeof c === "number" && c >= 0 && c < 9) this.shellColor = c;
+      if (typeof hy === "number") this.headYaw = hy / 100;
     }
     const h = d.vh as { x?: unknown; z?: unknown } | undefined;
     this.home = h && typeof h.x === "number" && typeof h.z === "number" ? { x: h.x, z: h.z } : null;

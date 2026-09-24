@@ -1081,6 +1081,41 @@ add(244, "iron_bars", "Iron Bars", {
   textures: tex("iron_bars"), hardness: 5, tool: P, harvestTier: 0, material: "metal",
 });
 
+/**
+ * Shulker box colours, by the number kept in meta bits 3-6 and on the item
+ * (`color`): 0 is the shulker's own purple, then the dyes in items.ts DYES order.
+ */
+export const BOX_COLORS = ["", "white", "red", "yellow", "blue", "green", "orange", "purple", "black"] as const;
+export const boxColorOf = (meta: number): number => (meta >> 3) & 15;
+const boxTex = (part: "top" | "side" | "bottom", color: number) => `shulker_box_${part}${BOX_COLORS[color] ? `_${BOX_COLORS[color]}` : ""}`;
+// A shulker box: a chest that keeps what is in it when it is broken, so a
+// whole inventory travels as one item. Meta bits 0-2: the Face its lid opens
+// toward; bits 3-6: its colour.
+add(245, "shulker_box", "Shulker Box", {
+  facing6: true, textures: tex("shulker_box_top", "shulker_box_side", "shulker_box_bottom"), hardness: 2, tool: P, material: "stone",
+  interact: "chest", drops: [],
+  boxTexture: (m, _b, face) => boxTex(face === (m & 7) ? "top" : face === OPPOSITE_FACE[m & 7] ? "bottom" : "side", boxColorOf(m)),
+  uvRotation: sixWayUV,
+});
+// The dragon's head, from the prow of an End ship: set down facing whoever places it, or worn.
+add(246, "dragon_head", "Dragon Head", {
+  shape: "boxes", layer: "cutout", opaque: false, facing: "player", hardness: 1, material: "stone",
+  boxes: (m) => ([[3, 0, 5, 13, 9, 15], [5, 0, 0, 11, 5, 5], [4, 9, 10, 6, 12, 14], [10, 9, 10, 12, 12, 14]] as Box[]).map((b) => hFacingBox(b, m & 3)),
+  textures: tex("dragon_head_top", "dragon_head_side"),
+  boxTexture: (m, box, face) => {
+    if (box >= 2) return "dragon_head_horn";
+    if (box === 1) return face === Face.Up ? "dragon_head_snout_top" : "dragon_head_snout";
+    return face === FACING_TO_FACE[m & 3] ? "dragon_head_face" : face === Face.Up ? "dragon_head_top" : "dragon_head_side";
+  },
+});
+add(247, "purpur_slab", "Purpur Slab", {
+  shape: "boxes", layer: "opaque", opaque: false, boxes: slabBoxes, textures: tex("purpur_block"),
+  hardness: 2, tool: P, harvestTier: 0,
+});
+add(248, "magenta_stained_glass", "Magenta Stained Glass", {
+  layer: "translucent", opaque: false, hardness: 0.3, material: "glass", drops: [],
+});
+
 export const BLOCK_COUNT = BLOCKS.length;
 
 const AIR_DEF = BLOCKS[0];
@@ -1140,7 +1175,7 @@ export const B = {
   QUARTZ_BLOCK: 230, SPAWNER: 231,
   END_STONE: 232, END_STONE_BRICKS: 233, PURPUR_BLOCK: 234, PURPUR_PILLAR: 235, PURPUR_STAIRS: 236, END_ROD: 237,
   CHORUS_PLANT: 238, CHORUS_FLOWER: 239, END_PORTAL_FRAME: 240, END_PORTAL: 241, END_GATEWAY: 242, DRAGON_EGG: 243,
-  IRON_BARS: 244,
+  IRON_BARS: 244, SHULKER_BOX: 245, DRAGON_HEAD: 246, PURPUR_SLAB: 247, MAGENTA_STAINED_GLASS: 248,
 } as const;
 
 /** Blocks that stand on an axis kept in meta like a log's (0 up, 1 along x, 2 along z). */
@@ -1156,7 +1191,7 @@ export const isLeaves = (id: number): boolean =>
   id === B.OAK_LEAVES || id === B.BIRCH_LEAVES || id === B.SPRUCE_LEAVES || id === B.JUNGLE_LEAVES || id === B.ACACIA_LEAVES;
 export const isCrop = (id: number): boolean => id === B.WHEAT || id === B.CARROTS || id === B.POTATOES;
 export const isSapling = (id: number): boolean => id >= B.OAK_SAPLING && id <= B.ACACIA_SAPLING;
-export const isSlab = (id: number): boolean => id >= B.OAK_SLAB && id <= B.STONE_BRICK_SLAB;
+export const isSlab = (id: number): boolean => (id >= B.OAK_SLAB && id <= B.STONE_BRICK_SLAB) || id === B.PURPUR_SLAB;
 export const isStairs = (id: number): boolean =>
   (id >= B.OAK_STAIRS && id <= B.STONE_BRICK_STAIRS) || id === B.NETHER_BRICK_STAIRS || id === B.PURPUR_STAIRS;
 export const isDoor = (id: number): boolean => id === B.OAK_DOOR || id === B.IRON_DOOR;
@@ -1167,7 +1202,7 @@ export const isRedstoneTorch = (id: number): boolean => id === B.REDSTONE_TORCH 
 export const isPiston = (id: number): boolean => id === B.PISTON || id === B.STICKY_PISTON;
 /** Blocks that keep an inventory in a block entity, and how many slots. */
 export function containerSize(id: number): number {
-  return id === B.CHEST || id === B.BARREL ? 27 : id === B.HOPPER ? 5 : id === B.DISPENSER || id === B.DROPPER ? 9 : 0;
+  return id === B.CHEST || id === B.BARREL || id === B.SHULKER_BOX ? 27 : id === B.HOPPER ? 5 : id === B.DISPENSER || id === B.DROPPER ? 9 : 0;
 }
 
 /** Maximum growth stage for crops (meta holds the age). */

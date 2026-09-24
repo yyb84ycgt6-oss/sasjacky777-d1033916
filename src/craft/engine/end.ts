@@ -24,6 +24,7 @@ import { rollEnchantments } from "./enchanting";
 import { Simplex } from "./noise";
 import { hash4, Rng } from "./rng";
 import type { GeneratedChunk, Tints } from "./worldgen";
+import { CITY_REACH, planCity, stampPlan, type CityPlan } from "./endCity";
 
 /** Blocks from the centre to where the outer islands begin. */
 export const OUTER_ISLANDS = 1024;
@@ -216,7 +217,7 @@ export class EndGenerator {
     if (outer) {
       this.smallIslands(place, cx, cz);
       this.chorus(blocks, meta, cx, cz);
-      for (const c of endCitiesTouching(this, cx, cz)) stampCity(c, place, x0, z0);
+      for (const c of endCitiesTouching(this, cx, cz)) stampPlan(c, place, x0, z0);
       for (let i = 0; i < GATEWAY_COUNT; i++) {
         const [gx, gz] = gatewayExitXZ(i);
         if (gx < x0 - 2 || gx > x0 + 17 || gz < z0 - 2 || gz > z0 + 17) continue;
@@ -418,16 +419,10 @@ function chorusJoinsIn(plant: Map<string, number>, x: number, y: number, z: numb
 /** Chunks per side of an End city region: at most one city in each. */
 export const CITY_REGION = 20;
 
-export interface EndCity {
+export interface EndCity extends CityPlan {
   key: string;
   /** The base house's centre and floor. */
   x: number; y: number; z: number;
-  /** The tower's height above the house roof. */
-  tower: number;
-  /** A ship floats beside the tower's top, facing (dx, dz). */
-  ship: { x: number; y: number; z: number; alongX: boolean } | null;
-  chests: [number, number, number, "city" | "ship"][];
-  x0: number; z0: number; x1: number; z1: number;
 }
 
 const cityCache = new Map<string, EndCity | null>();
@@ -438,21 +433,11 @@ export function cityInRegion(gen: EndGenerator, rx: number, rz: number): EndCity
   if (hit !== undefined) return hit;
   const rng = new Rng(hash4(gen.seed, rx, rz, 0xc17));
   let city: EndCity | null = null;
-  const x = (rx * CITY_REGION + 4 + rng.int(CITY_REGION - 8)) * 16 + 8;
-  const z = (rz * CITY_REGION + 4 + rng.int(CITY_REGION - 8)) * 16 + 8;
+  const x = (rx * CITY_REGION + 5 + rng.int(CITY_REGION - 10)) * 16 + 8;
+  const z = (rz * CITY_REGION + 5 + rng.int(CITY_REGION - 10)) * 16 + 8;
   if (rng.next() < 0.6 && Math.hypot(x, z) > OUTER_ISLANDS + 100 && gen.massAt(x, z) > 45) {
     const y = gen.surfaceY(x, z) + 1;
-    const tower = 16 + rng.int(3) * 4;
-    const top = y + 6 + tower;
-    const dir = rng.int(4);
-    const [dx, dz] = FACING_DIRS[dir];
-    const ship = rng.next() < 0.65 ? { x: x + dx * 16, y: Math.min(WORLD_HEIGHT - 12, top + 6), z: z + dz * 16, alongX: dx !== 0 } : null;
-    const chests: EndCity["chests"] = [[x + 2, top + 1, z + 2, "city"], [x - 3, y, z + 3, "city"]];
-    if (ship) chests.push([ship.alongX ? ship.x + 4 : ship.x, ship.y + 1, ship.alongX ? ship.z : ship.z + 4, "ship"]);
-    city = {
-      key, x, y, z, tower, ship, chests,
-      x0: x - 24, z0: z - 24, x1: x + 24, z1: z + 24,
-    };
+    city = { key, x, y, z, ...planCity(hash4(gen.seed, rx, rz, 0xc18), x, y, z) };
   }
   if (cityCache.size > 256) cityCache.clear();
   cityCache.set(key, city);
@@ -461,8 +446,9 @@ export function cityInRegion(gen: EndGenerator, rx: number, rz: number): EndCity
 
 export function endCitiesTouching(gen: EndGenerator, cx: number, cz: number): EndCity[] {
   const out: EndCity[] = [];
-  for (let rx = Math.floor((cx - 2) / CITY_REGION); rx <= Math.floor((cx + 2) / CITY_REGION); rx++) {
-    for (let rz = Math.floor((cz - 2) / CITY_REGION); rz <= Math.floor((cz + 2) / CITY_REGION); rz++) {
+  const reach = Math.ceil(CITY_REACH / 16) + 1;
+  for (let rx = Math.floor((cx - reach) / CITY_REGION); rx <= Math.floor((cx + reach) / CITY_REGION); rx++) {
+    for (let rz = Math.floor((cz - reach) / CITY_REGION); rz <= Math.floor((cz + reach) / CITY_REGION); rz++) {
       const c = cityInRegion(gen, rx, rz);
       if (c && c.x1 >= cx * 16 && c.x0 <= cx * 16 + 15 && c.z1 >= cz * 16 && c.z0 <= cz * 16 + 15) out.push(c);
     }
@@ -471,94 +457,19 @@ export function endCitiesTouching(gen: EndGenerator, cx: number, cz: number): En
 }
 
 /**
- * An End city, simplified: a purpur house on the island, a tower rising from
- * its roof with a ladder inside and floors every few blocks, a lookout on
- * top, and — often — a ship moored in the air beside it, holding elytra.
+ * An End city chest: gold, iron, diamonds, emeralds and enchanted iron and
+ * diamond gear. A ship's chests lean richer; its elytra hang in the cabin's
+ * frame, not in a chest.
  */
-function stampCity(c: EndCity, place: Place, x0: number, z0: number): void {
-  const inside = (x: number, z: number) => x >= x0 - 1 && x <= x0 + 16 && z >= z0 - 1 && z <= z0 + 16;
-  const put = (x: number, y: number, z: number, id: number, m = 0) => { if (inside(x, z)) place(x, y, z, id, m); };
-  const { x: X, y: Y, z: Z } = c;
-  const wallOf = (dx: number, dz: number, r: number) => (Math.abs(dx) === r && Math.abs(dz) === r ? B.PURPUR_PILLAR : B.PURPUR_BLOCK);
-
-  // The house: 11 across, two floors, a door on the south.
-  for (let dz = -5; dz <= 5; dz++) for (let dx = -5; dx <= 5; dx++) {
-    const edge = Math.abs(dx) === 5 || Math.abs(dz) === 5;
-    for (let dy = -3; dy <= 0; dy++) put(X + dx, Y + dy - 1, Z + dz, B.END_STONE_BRICKS);
-    for (let dy = 0; dy <= 5; dy++) {
-      const door = dz === 5 && Math.abs(dx) <= 1 && dy <= 2;
-      const window = edge && !door && (dy === 2 || dy === 3) && (Math.abs(dx) === 2 || Math.abs(dz) === 2);
-      put(X + dx, Y + dy, Z + dz, edge && !door ? (window ? B.GLASS : wallOf(dx, dz, 5)) : B.AIR);
-    }
-    put(X + dx, Y + 6, Z + dz, edge ? B.PURPUR_BLOCK : B.END_STONE_BRICKS);
-    if (edge && (Math.abs(dx) + Math.abs(dz)) % 2 === 0) put(X + dx, Y + 7, Z + dz, B.PURPUR_STAIRS, dz === -5 ? 1 : dz === 5 ? 0 : dx === -5 ? 3 : 2);
-  }
-  put(X - 3, Y, Z + 3, B.CHEST, 1);
-  put(X + 4, Y, Z - 4, B.END_ROD, Face.Up);
-
-  // The tower: 7 across, rising from the roof, a ladder up its north wall and a floor every four blocks.
-  const base = Y + 6, top = base + c.tower;
-  for (let y = base; y <= top; y++) {
-    for (let dz = -3; dz <= 3; dz++) for (let dx = -3; dx <= 3; dx++) {
-      const edge = Math.abs(dx) === 3 || Math.abs(dz) === 3;
-      const floor = (y - base) % 4 === 0;
-      const window = edge && (y - base) % 4 === 2 && (dx === 0 || dz === 0);
-      if (edge) put(X + dx, y, Z + dz, window ? B.GLASS : wallOf(dx, dz, 3));
-      else if (floor && !(dx === 0 && dz === -2)) put(X + dx, y, Z + dz, B.PURPUR_BLOCK);
-      else put(X + dx, y, Z + dz, B.AIR);
-    }
-    // A ladder against the inside of the north wall, through the gap left in each floor.
-    if (y > base) put(X, y, Z - 2, B.LADDER, 0);
-  }
-  // The way up from the house below: a pillar to hang the ladder on, through a gap in the roof.
-  for (let y = Y; y <= base; y++) {
-    put(X, y, Z - 3, B.PURPUR_PILLAR);
-    if (y > Y) put(X, y, Z - 2, B.LADDER, 0);
-  }
-
-  // The lookout: a wider floor with a rim, end rods at the corners, and a chest.
-  for (let dz = -5; dz <= 5; dz++) for (let dx = -5; dx <= 5; dx++) {
-    const rim = Math.abs(dx) === 5 || Math.abs(dz) === 5;
-    put(X + dx, top, Z + dz, rim ? B.PURPUR_BLOCK : B.END_STONE_BRICKS);
-    for (let dy = 1; dy <= 3; dy++) put(X + dx, top + dy, Z + dz, B.AIR);
-    if (rim && (Math.abs(dx) + Math.abs(dz)) % 2 === 1) put(X + dx, top + 1, Z + dz, B.PURPUR_STAIRS, dz === -5 ? 1 : dz === 5 ? 0 : dx === -5 ? 3 : 2);
-    if (Math.abs(dx) === 5 && Math.abs(dz) === 5) put(X + dx, top + 1, Z + dz, B.END_ROD, Face.Up);
-  }
-  put(X, top, Z - 2, B.LADDER, 0);
-  put(X + 2, top + 1, Z + 2, B.CHEST, 1);
-
-  if (!c.ship) return;
-  // The ship: a hull of purpur along its axis, a mast, and a cabin at the stern with the chest.
-  const s = c.ship;
-  for (let a = -7; a <= 7; a++) {
-    const beam = a < -5 || a > 5 ? 1 : 2;
-    for (let b = -beam; b <= beam; b++) {
-      const [x, z] = s.alongX ? [s.x + a, s.z + b] : [s.x + b, s.z + a];
-      put(x, s.y, z, a === 7 || a === -7 ? B.PURPUR_PILLAR : B.PURPUR_BLOCK);
-      if (Math.abs(b) === beam) put(x, s.y + 1, z, B.PURPUR_STAIRS, s.alongX ? (b < 0 ? 1 : 0) : (b < 0 ? 3 : 2));
-      else for (let dy = 1; dy <= 3; dy++) put(x, s.y + dy, z, B.AIR);
-      put(x, s.y - 1, z, Math.abs(b) < beam ? B.PURPUR_BLOCK : B.AIR);
-    }
-  }
-  // The mast forward, the chest astern, an end rod on the bow.
-  const at = (a: number): [number, number] => (s.alongX ? [s.x + a, s.z] : [s.x, s.z + a]);
-  const [mx, mz] = at(-3), [cxx, czz] = at(4), [rx, rz] = at(-6);
-  for (let dy = 1; dy <= 7; dy++) put(mx, s.y + dy, mz, dy === 7 ? B.END_ROD : B.PURPUR_PILLAR, dy === 7 ? Face.Up : 0);
-  put(cxx, s.y + 1, czz, B.CHEST, s.alongX ? 2 : 0);
-  put(rx, s.y + 1, rz, B.END_ROD, Face.Up);
-}
-
-/** An End city chest: gold, iron, diamonds, emeralds and enchanted iron and diamond gear; a ship's always holds elytra. */
 export function cityLoot(items: (ItemStack | null)[], seed: number, ship: boolean): void {
   const rng = new Rng(seed);
-  if (ship) items[13] = { id: itemByName("elytra").id, count: 1 };
   const table: [string, number, number, number, boolean][] = [
     ["diamond", 2, 7, 0.35, false], ["iron_ingot", 4, 8, 0.6, false], ["gold_ingot", 2, 7, 0.6, false], ["emerald", 2, 6, 0.4, false],
     ["diamond_sword", 1, 1, 0.12, true], ["diamond_pickaxe", 1, 1, 0.12, true], ["diamond_chestplate", 1, 1, 0.1, true],
     ["iron_sword", 1, 1, 0.2, true], ["iron_helmet", 1, 1, 0.15, true], ["iron_boots", 1, 1, 0.15, true], ["ender_pearl", 1, 3, 0.2, false],
   ];
   for (const [name, lo, hi, chance, enchant] of table) {
-    if (rng.next() >= chance) continue;
+    if (rng.next() >= chance * (ship ? 1.3 : 1)) continue;
     const slot = rng.int(items.length);
     if (items[slot]) continue;
     const stack: ItemStack = { id: itemByName(name).id, count: lo + rng.int(hi - lo + 1) };

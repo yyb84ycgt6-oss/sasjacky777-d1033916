@@ -25,7 +25,7 @@ export type Trigger =
   | { kind: "brew" }
   | { kind: "dimension"; dimension: Dimension }
   /** Something that happened once, named: the dragon slain, a stronghold found, a gateway taken. */
-  | { kind: "event"; event: "dragon" | "stronghold" | "gateway" };
+  | { kind: "event"; event: "dragon" | "stronghold" | "gateway" | "city" | "levitate" };
 
 export interface Advancement {
   id: string;
@@ -75,6 +75,9 @@ export const ADVANCEMENTS: readonly Advancement[] = [
   { id: "egg", title: "The Next Generation", description: "Hold the dragon's egg", icon: "dragon_egg", trigger: has("dragon_egg") },
   { id: "gateway", title: "Remote Getaway", description: "Escape the island through a gateway", icon: "ender_pearl", trigger: { kind: "event", event: "gateway" } },
   { id: "elytra", title: "Sky's the Limit", description: "Find a pair of elytra", icon: "elytra", trigger: has("elytra") },
+  { id: "city", title: "The City at the End of the Game", description: "Walk into an End city", icon: "purpur_block", trigger: { kind: "event", event: "city" } },
+  { id: "levitate", title: "Great View From Up Here", description: "Float fifty blocks up on a shulker's levitation", icon: "shulker_shell", trigger: { kind: "event", event: "levitate" } },
+  { id: "box", title: "Pack It Up", description: "Make a shulker box", icon: "shulker_box", trigger: has("shulker_box") },
 ];
 
 export function advancement(id: string): Advancement | undefined {
@@ -102,7 +105,8 @@ export interface PlayerState {
 
 export type AdvancementEvent =
   | { kind: "kill"; hostile: boolean } | { kind: "sleep" } | { kind: "eat" } | { kind: "enchant" } | { kind: "brew" }
-  | { kind: "dimension"; dimension: Dimension } | { kind: "dragon" } | { kind: "stronghold" } | { kind: "gateway" };
+  | { kind: "dimension"; dimension: Dimension } | { kind: "dragon" } | { kind: "stronghold" } | { kind: "gateway" }
+  | { kind: "city" } | { kind: "levitate" };
 
 /**
  * Which not-yet-earned advancements the player has now earned: from their

@@ -10,7 +10,7 @@
  * the grid accepts — mobile players craft almost entirely from the book, and a
  * book that lists a recipe the grid refuses is a broken promise.
  */
-import { WOOL_COLORS } from "./blocks";
+import { B, WOOL_COLORS } from "./blocks";
 import { DYES, itemByName, itemDef, TIERS, type ItemStack } from "./items";
 import type { Slot } from "./inventory";
 
@@ -25,6 +25,11 @@ export interface Recipe {
   result: { item: string; count: number };
   /** Fits in the 2×2 player grid. */
   small: boolean;
+  /**
+   * Makes the result from what is actually in the grid, for results that carry
+   * something over from an ingredient (a dyed shulker box keeps its contents).
+   */
+  special?: (grid: Slot[]) => ItemStack | null;
 }
 
 const TAGS: Record<string, string[]> = {
@@ -33,6 +38,7 @@ const TAGS: Record<string, string[]> = {
   stone_crafting: ["cobblestone", "cobbled_deepslate", "blackstone"],
   coals: ["coal", "charcoal"],
   wool: WOOL_COLORS.map((c) => `${c}_wool`),
+  dye: DYES.map((d) => `${d}_dye`),
 };
 
 /** The item ids an ingredient accepts. */
@@ -234,6 +240,22 @@ function itemDefOrNull(name: string): boolean {
   try { itemByName(name); return true; } catch { return false; }
 }
 
+// The End.
+shaped("shulker_box", ["S", "C", "S"], { S: "shulker_shell", C: "chest" }, "shulker_box");
+shaped("purpur_slab", ["###"], { "#": "purpur_block" }, "purpur_slab", 6);
+shaped("item_frame", ["SSS", "SLS", "SSS"], { S: "stick", L: "leather" }, "item_frame");
+// A box and a dye: the same box, same contents, new colour.
+RECIPES.push({
+  id: "shulker_box_dyed", ingredients: ["shulker_box", "#dye"], result: { item: "shulker_box", count: 1 }, small: true,
+  special: (grid) => {
+    const box = grid.find((s) => s?.id === B.SHULKER_BOX);
+    const dye = grid.find((s) => s && s.id !== B.SHULKER_BOX);
+    if (!box || !dye) return null;
+    const color = (DYES as readonly string[]).indexOf(itemDef(dye.id)?.name.replace(/_dye$/, "") ?? "") + 1;
+    return color > 0 ? { ...box, count: 1, color } : null;
+  },
+});
+
 export function allRecipes(): readonly Recipe[] {
   return RECIPES;
 }
@@ -304,7 +326,12 @@ export function matchRecipe(grid: Slot[], width: number): Recipe | null {
   return null;
 }
 
-export function recipeResult(r: Recipe): ItemStack {
+/** What a recipe makes — from the grid itself when the result carries something over (see Recipe.special). */
+export function recipeResult(r: Recipe, grid?: Slot[]): ItemStack {
+  if (r.special && grid) {
+    const made = r.special(grid);
+    if (made) return made;
+  }
   return { id: itemByName(r.result.item).id, count: r.result.count };
 }
 

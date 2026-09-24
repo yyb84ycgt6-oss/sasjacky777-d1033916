@@ -236,6 +236,8 @@ export interface MoveInput {
   speed: number;
   /** Swim upward when jump is held in water (players); mobs always float. */
   floats?: boolean;
+  /** Levitation's level plus one (0 for none): gravity gives way to a steady climb. */
+  levitation?: number;
 }
 
 export interface MoveResult {
@@ -315,7 +317,9 @@ export function travel(world: BlockReader, b: Body, input: MoveInput): MoveResul
     } else if (b.vy < 0) {
       b.fallDistance -= b.vy;
     }
-    b.vy = (b.vy - 0.08) * 0.98;
+    // Levitation eases toward a climb of a twentieth of a block a tick per level, as the original's.
+    if (input.levitation) { b.vy += (0.05 * input.levitation - b.vy) * 0.2; b.fallDistance = 0; }
+    else b.vy = (b.vy - 0.08) * 0.98;
     b.vx *= friction; b.vz *= friction;
   }
   if (b.y < -64) b.fallDistance = 0;

@@ -19,14 +19,14 @@
 import type { BlockEntity } from "../engine/chunk";
 import { chunkKey } from "../engine/constants";
 import {
-  AreaCloud, EndCrystal, Entity, FallingBlock, isProjectileKind, ItemEntity, PrimedTnt, Projectile, XpOrb,
+  AreaCloud, EndCrystal, Entity, FallingBlock, isProjectileKind, ItemEntity, ItemFrame, PrimedTnt, Projectile, XpOrb,
   type DamageSource, type EntitySnapshot, type ProjectileKind,
 } from "../engine/entities";
 import { itemDef, type ItemStack, type StatusEffect } from "../engine/items";
 import { sanitizeStack } from "../engine/inventory";
 import { Mob, isMobKind } from "../engine/mobs";
 import { isVehicleKind, Vehicle, vehicleFromSnapshot } from "../engine/vehicles";
-import { B, block } from "../engine/blocks";
+import { B, block, Face } from "../engine/blocks";
 import type { PlayerSave } from "../engine/player";
 import type { AdvancementEvent } from "../engine/advancements";
 import { isDimension, type Dimension } from "../engine/dimension";
@@ -364,7 +364,8 @@ export class NetSession implements NetLink {
   attack(entityId: number, damage: number, fx: number, fz: number, knockback = 0, fire = 0, looting = 0): void {
     this.push(["at", entityId, r2(damage), r2(fx), r2(fz), r2(knockback), fire, looting]);
   }
-  interact(entityId: number, item: string | null): void { this.push(["in", entityId, item]); }
+  /** `stack` goes along when the whole stack matters (hung in an item frame, enchantments and all). */
+  interact(entityId: number, item: string | null, stack?: ItemStack | null): void { this.push(["in", entityId, item, stack ?? undefined]); }
   drops(x: number, y: number, z: number, stacks: ItemStack[], xp: number): void { this.push(["dr", r2(x), r2(y), r2(z), stacks, xp]); }
   throwItem(kind: ProjectileKind, x: number, y: number, z: number, vx: number, vy: number, vz: number, extra: ThrowExtra = {}): void {
     this.push(["th", kind, r2(x), r2(y), r2(z), r3(vx), r3(vy), r3(vz), extra.item ?? 0, r2(extra.damage ?? 0), extra.knockback ?? 0, extra.fire ? 1 : 0]);
@@ -389,6 +390,9 @@ export class NetSession implements NetLink {
   vehiclePose(v: Vehicle): void {
     const b = v.body;
     this.push(["vp", v.id, r3(b.x), r3(b.y), r3(b.z), r3(v.yaw), r3(b.vx), r3(b.vy), r3(b.vz)]);
+  }
+  placeFrame(face: number, x: number, y: number, z: number): void {
+    this.push(["pf", face, x, y, z]);
   }
   placeVehicle(kind: string, x: number, y: number, z: number, yaw: number, wood: number): void {
     this.push(["pv", kind, r3(x), r3(y), r3(z), r3(yaw), wood]);
@@ -639,6 +643,7 @@ export class NetSession implements NetLink {
         case "tr": if (this.role === "host") this.onTrade(from, op); break;
         case "vp": if (this.role === "host") this.onVehiclePose(from, op); break;
         case "pv": if (this.role === "host") this.onPlaceVehicle(from, op); break;
+        case "pf": if (this.role === "host") this.onPlaceFrame(from, op); break;
         case "tp": if (op[1] === this.myId && fromHost) this.onTeleport(op[2]); break;
         case "ec":
           // A guest's end crystal, set on a block near them.
@@ -808,7 +813,7 @@ export class NetSession implements NetLink {
     const [, id, dmg, fx, fz, kb, fire, looting] = op;
     if (!finite(id, dmg, fx, fz)) return;
     const e = g.entities.get(id as number);
-    if (e instanceof Vehicle || e instanceof EndCrystal) { e.hurt(g.ctx, Math.min(40, dmg as number), "player", fx as number, fz as number, from); return; }
+    if (e instanceof Vehicle || e instanceof EndCrystal || e instanceof ItemFrame || e instanceof Projectile) { e.hurt(g.ctx, Math.min(40, dmg as number), "player", fx as number, fz as number, from); return; }
     if (e instanceof Mob) {
       e.looting = int(looting) ? Math.max(0, Math.min(3, looting as number)) : 0;
       const took = e.hurt(g.ctx, Math.min(40, dmg as number), "player", fx as number, fz as number, from, Math.min(2, Math.max(0, Number(kb) || 0)));
@@ -819,9 +824,11 @@ export class NetSession implements NetLink {
 
   private onInteract(from: string, op: Op): void {
     const g = this.game!;
-    const [, id, item] = op;
+    const [, id, item, stack] = op;
     const e = g.entities.get(id as number);
     if (e instanceof Mob) e.interact(g.ctx, typeof item === "string" ? item : null, from);
+    // The guest has already given up the item it hung; the frame takes the stack it sent.
+    if (e instanceof ItemFrame) e.use(g.ctx, sanitizeStack(stack));
   }
 
   private onDrops(op: Op): void {
@@ -880,6 +887,15 @@ export class NetSession implements NetLink {
     g.placeVehicle(kind, x as number, y as number, z as number, yaw as number, int(wood) ? (wood as number) : 0);
   }
 
+  private onPlaceFrame(from: string, op: Op): void {
+    const g = this.game!;
+    const [, face, x, y, z] = op;
+    if (!int(face) || (face as number) < 0 || (face as number) > 5 || !int(x) || !int(y) || !int(z)) return;
+    const r = g.remote.get(from);
+    if (r && Math.hypot(r.x - (x as number), r.y - (y as number), r.z - (z as number)) > 8) return;
+    g.placeFrame(face as number, x as number, y as number, z as number);
+  }
+
   /** The host moved this player: a pearl landed (at once), or a gateway flung them (land once it loads). */
   private onTeleport(data: unknown): void {
     const g = this.game!;
@@ -927,6 +943,7 @@ export function entityFromSnapshot(s: EntitySnapshot): Entity | null {
   else if (s.kind === "tnt") e = new PrimedTnt(s.x, s.y, s.z, Number(s.data?.fuse ?? 80), s.id);
   else if (s.kind === "end_crystal") e = new EndCrystal(s.x, s.y, s.z, s.data?.b !== 0, s.id);
   else if (s.kind === "area_cloud") e = new AreaCloud(s.x, s.y, s.z, Number(s.data?.r ?? 3), Number(s.data?.d ?? 600), null, s.id);
+  else if (s.kind === "item_frame") e = new ItemFrame(Face.North, Math.floor(s.x), Math.floor(s.y), Math.floor(s.z), null, 0, s.id);
   if (e) {
     e.applySnapshot(s);
     e.prevX = e.x; e.prevY = e.y; e.prevZ = e.z;

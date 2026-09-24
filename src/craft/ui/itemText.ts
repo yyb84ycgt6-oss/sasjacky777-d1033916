@@ -5,16 +5,17 @@
  */
 import { enchantLabel, enchantsOf, isEnchanted } from "../engine/enchanting";
 import type { Slot } from "../engine/inventory";
-import { itemDef } from "../engine/items";
+import { BOX_COLORS } from "../engine/blocks";
+import { displayName, itemDef } from "../engine/items";
 import { potionOfItem } from "../engine/potions";
 
 const EFFECT_NAMES: Record<string, string> = {
   speed: "Speed", slowness: "Slowness", strength: "Strength", weakness: "Weakness", instant_health: "Instant Health",
   instant_damage: "Instant Damage", poison: "Poison", regeneration: "Regeneration", fire_resistance: "Fire Resistance",
   night_vision: "Night Vision", invisibility: "Invisibility", water_breathing: "Water Breathing", hunger: "Hunger", absorption: "Absorption",
-  wither: "Wither",
+  wither: "Wither", levitation: "Levitation",
 };
-const HARMFUL = new Set(["slowness", "weakness", "instant_damage", "poison", "hunger", "wither"]);
+const HARMFUL = new Set(["slowness", "weakness", "instant_damage", "poison", "hunger", "wither", "levitation"]);
 const ROMAN = ["", "", " II", " III", " IV", " V"];
 export const effectName = (kind: string, amp = 0): string => `${EFFECT_NAMES[kind] ?? kind}${ROMAN[amp + 1] ?? ` ${amp + 1}`}`;
 export const clock = (seconds: number): string => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
@@ -27,7 +28,15 @@ export function tooltipLines(stack: Slot): TipLine[] {
   if (!stack || !def) return [];
   const lines: TipLine[] = [];
   const enchanted = isEnchanted(stack);
-  lines.push({ text: stack.name ?? def.displayName, color: enchanted ? "#55ffff" : "#fff", italic: !!stack.name });
+  const color = stack.color ? BOX_COLORS[stack.color] : "";
+  const dyed = color ? `${color[0].toUpperCase()}${color.slice(1)} ${def.displayName}` : def.displayName;
+  lines.push({ text: stack.name ?? dyed, color: enchanted ? "#55ffff" : "#fff", italic: !!stack.name });
+  // A shulker box says what it carries: the first five stacks, and how many more.
+  if (stack.contents) {
+    const held = stack.contents.filter((c): c is NonNullable<typeof c> => !!c);
+    for (const c of held.slice(0, 5)) lines.push({ text: `${c.name ?? displayName(c.id)} x${c.count}`, color: "#dddddd", small: true });
+    if (held.length > 5) lines.push({ text: `and ${held.length - 5} more…`, color: "#aaaaaa", italic: true, small: true });
+  }
   for (const [name, level] of enchantsOf(stack)) lines.push({ text: enchantLabel(name, level), color: "#aaaaaa", small: true });
   const potion = potionOfItem(def.name);
   if (potion) {

@@ -8,9 +8,9 @@
  * context decides whether "damage this player" means changing a local health
  * bar or sending a message to someone else's browser.
  */
-import { block, B } from "./blocks";
-import { sameItem } from "./inventory";
-import { itemDef, maxStack, type ItemStack, type StatusEffect } from "./items";
+import { block, B, FACE_DIRS, Face } from "./blocks";
+import { sameItem, sanitizeStack } from "./inventory";
+import { itemByName, itemDef, maxStack, type ItemStack, type StatusEffect } from "./items";
 import { bodyBox, moveBody, newBody, senseEnvironment, type AABB, type Body } from "./physics";
 import { raycastBlocks, rayBox } from "./raycast";
 import type { World } from "./world";
@@ -20,7 +20,8 @@ export type EntityKind =
   | "ender_pearl" | "eye_of_ender" | "dragon_fireball" | "end_crystal" | "area_cloud" | "enderman" | "silverfish" | "ender_dragon"
   | "pig" | "cow" | "sheep" | "chicken" | "zombie" | "skeleton" | "creeper" | "spider" | "slime" | "villager" | "iron_golem"
   | "zombified_piglin" | "ghast" | "magma_cube" | "blaze" | "wither_skeleton" | "piglin" | "hoglin"
-  | "boat" | "minecart" | "tnt_minecart";
+  | "boat" | "minecart" | "tnt_minecart"
+  | "shulker" | "shulker_bullet" | "item_frame";
 
 export interface PlayerRef {
   id: string;
@@ -301,10 +302,10 @@ export function xpOrbValues(total: number): number[] {
 // ---- projectiles -----------------------------------------------------------------------
 
 export type ProjectileKind = "arrow" | "snowball" | "egg" | "potion" | "xp_bottle" | "fireball" | "small_fireball"
-  | "ender_pearl" | "eye_of_ender" | "dragon_fireball";
+  | "ender_pearl" | "eye_of_ender" | "dragon_fireball" | "shulker_bullet";
 export const isProjectileKind = (k: unknown): k is ProjectileKind =>
   k === "arrow" || k === "snowball" || k === "egg" || k === "potion" || k === "xp_bottle" || k === "fireball" || k === "small_fireball"
-  || k === "ender_pearl" || k === "eye_of_ender" || k === "dragon_fireball";
+  || k === "ender_pearl" || k === "eye_of_ender" || k === "dragon_fireball" || k === "shulker_bullet";
 const isFireball = (k: ProjectileKind) => k === "fireball" || k === "small_fireball" || k === "dragon_fireball";
 
 export class Projectile extends Entity {
@@ -324,14 +325,18 @@ export class Projectile extends Entity {
   /** An eye of ender: the point it flies toward, and whether it drops back down when spent (four in five do). */
   target: { x: number; y: number; z: number } | null = null;
   survives = true;
+  /** A shulker's bullet: the player it hunts, and the axis-bound heading it holds until it next turns. */
+  homing: string | null = null;
+  private turnIn = 0;
+  private heading: [number, number, number] = [0, 0, 0];
 
   constructor(public readonly kind: ProjectileKind, x: number, y: number, z: number, vx: number, vy: number, vz: number, owner: string | null, id?: number) {
-    const size = kind === "fireball" || kind === "dragon_fireball" ? 1 : kind === "small_fireball" ? 0.3125 : 0.25;
+    const size = kind === "fireball" || kind === "dragon_fireball" ? 1 : kind === "small_fireball" || kind === "shulker_bullet" ? 0.3125 : 0.25;
     super(x, y, z, size, size, id);
     this.body.vx = vx; this.body.vy = vy; this.body.vz = vz;
     this.owner = owner;
     this.pickup = kind === "arrow" && owner !== null && !owner.startsWith("mob:");
-    this.damage = kind === "arrow" ? 2 : kind === "fireball" ? 6 : kind === "small_fireball" ? 5 : 0;
+    this.damage = kind === "arrow" ? 2 : kind === "fireball" ? 6 : kind === "small_fireball" ? 5 : kind === "shulker_bullet" ? 4 : 0;
     this.faceVelocity();
   }
 
@@ -339,7 +344,14 @@ export class Projectile extends Entity {
    * A ghast's fireball can be batted back: any blow sends it off the way the
    * blow was struck, and it counts as the striker's from then on.
    */
-  hurt(_ctx: EntityContext, _amount: number, _source: DamageSource, fromX: number, fromZ: number, attacker?: string): boolean {
+  hurt(ctx: EntityContext, _amount: number, _source: DamageSource, fromX: number, fromZ: number, attacker?: string): boolean {
+    // A shulker's bullet is swatted out of the air by any blow.
+    if (this.kind === "shulker_bullet" && !this.removed) {
+      this.removed = true;
+      ctx.particles("crit", this.body.x, this.body.y, this.body.z, 8);
+      ctx.sound("shulker_bullet_hit", this.body.x, this.body.y, this.body.z, 0.8);
+      return true;
+    }
     if (this.kind !== "fireball" || this.removed) return false;
     const b = this.body;
     const dx = b.x - fromX, dz = b.z - fromZ, d = Math.hypot(dx, dz) || 1;
@@ -392,9 +404,39 @@ export class Projectile extends Entity {
     }
   }
 
+  /**
+   * A shulker's bullet flies along one axis at a time — never straight at its
+   * mark — turning every half second or so onto whichever axis still has the
+   * most distance to close. That is what makes it dodgeable, and why it
+   * swerves around corners. With its mark gone it sinks and bursts.
+   */
+  private steerBullet(ctx: EntityContext): void {
+    const b = this.body;
+    const mark = this.homing ? ctx.players().find((p) => p.id === this.homing && p.targetable) : undefined;
+    if (!mark) {
+      this.heading = [0, -0.15, 0];
+    } else if (--this.turnIn <= 0) {
+      const d = [mark.x - b.x, mark.y + mark.height / 2 - b.y, mark.z - b.z];
+      const axes = [0, 1, 2].filter((i) => Math.abs(d[i]) > 0.5);
+      let axis = axes.length ? axes[0] : 1;
+      // Weighted toward the longest leg, but not always it.
+      let total = 0;
+      for (const i of axes) total += Math.abs(d[i]);
+      let roll = ctx.random() * total;
+      for (const i of axes) { roll -= Math.abs(d[i]); if (roll <= 0) { axis = i; break; } }
+      this.heading = [0, 0, 0];
+      this.heading[axis] = Math.sign(d[axis] || 1) * 0.15;
+      this.turnIn = 10 + Math.floor(ctx.random() * 5) * 5;
+    }
+    b.vx += (this.heading[0] - b.vx) * 0.2;
+    b.vy += (this.heading[1] - b.vy) * 0.2;
+    b.vz += (this.heading[2] - b.vz) * 0.2;
+  }
+
   tick(ctx: EntityContext): void {
     const b = this.body;
     if (this.kind === "eye_of_ender") { this.eyeTick(ctx); return; }
+    if (this.kind === "shulker_bullet") this.steerBullet(ctx);
     if (this.inGround) {
       this.groundTicks++;
       if (this.groundTicks > 1200) this.removed = true;
@@ -442,6 +484,19 @@ export class Projectile extends Entity {
       const dmg = this.kind === "arrow" ? Math.ceil(speed * this.damage) : isFireball(this.kind) ? this.damage
         : this.kind === "snowball" && hitEntity?.kind === "blaze" ? 3 : this.kind === "ender_pearl" ? 0.001 : 0;
       const nx = b.vx / (speed || 1), nz = b.vz / (speed || 1);
+      if (this.kind === "shulker_bullet") {
+        // It strikes, and lifts what it struck: ten seconds rising, and a fall at the end of it.
+        if (hitEntity) {
+          hitEntity.hurt(ctx, this.damage, "arrow", b.x - nx, b.z - nz, this.owner ?? undefined);
+          (hitEntity as Entity & { applyEffect?: (c: EntityContext, k: StatusEffect, s: number, a: number) => void }).applyEffect?.(ctx, "levitation", 10, 0);
+        }
+        if (hitPlayer) {
+          ctx.hurtPlayer(hitPlayer.id, this.damage, "arrow", b.x - nx, b.z - nz, 0.2);
+          ctx.effectPlayer?.(hitPlayer.id, "levitation", 10, 0);
+        }
+        this.impact(ctx, hitEntity ?? hitPlayer);
+        return;
+      }
       if (this.kind === "dragon_fireball") {
         // It bursts into a cloud of breath rather than striking; the dragon does not burst its own.
         if (hitEntity && `mob:${hitEntity.id}` === this.owner) { b.x += b.vx; b.y += b.vy; b.z += b.vz; return; }
@@ -484,6 +539,11 @@ export class Projectile extends Entity {
     }
     b.x += b.vx; b.y += b.vy; b.z += b.vz;
     senseEnvironment(ctx.world, b);
+    if (this.kind === "shulker_bullet") {
+      if (this.age % 2 === 0) ctx.particles("end_rod", b.x, b.y, b.z, 1);
+      if (this.age > 600 || b.y < -64) this.removed = true;
+      return;
+    }
     if (isFireball(this.kind)) {
       // Fireballs fly straight, trailing smoke (the dragon's, its breath), and burn out after half a minute.
       if (this.age % 2 === 0) ctx.particles(this.kind === "dragon_fireball" ? "dragon_breath" : "smoke", b.x, b.y + b.height / 2, b.z, this.kind === "dragon_fireball" ? 3 : 1);
@@ -499,6 +559,10 @@ export class Projectile extends Entity {
   private impact(ctx: EntityContext, struck: Entity | PlayerRef | null = null): void {
     this.removed = true;
     const b = this.body;
+    if (this.kind === "shulker_bullet") {
+      ctx.particles("crit", b.x, b.y, b.z, 10);
+      ctx.sound("shulker_bullet_hit", b.x, b.y, b.z, 0.9);
+    }
     if (this.kind === "fireball") ctx.explode(b.x, b.y + b.height / 2, b.z, 1, null, true);
     if (this.kind === "dragon_fireball") {
       ctx.spawn(new AreaCloud(b.x, b.y, b.z, 3, 600, this.owner));
@@ -698,5 +762,100 @@ export class EndCrystal extends Entity {
     this.showBase = s.data?.b !== 0;
     const bm = s.data?.bm;
     this.beam = Array.isArray(bm) && bm.length === 3 && bm.every((v) => typeof v === "number") ? { x: bm[0], y: bm[1], z: bm[2] } : null;
+  }
+}
+
+// ---- item frames ---------------------------------------------------------------------
+
+/**
+ * An item frame: hung on a face of a block, holding one item, which it shows
+ * turned in eighths. Using it puts in what is held, or turns what is there; a
+ * blow knocks the item out, and the next takes the frame down. It stays only
+ * while the block behind it stands.
+ */
+export class ItemFrame extends Entity {
+  readonly kind = "item_frame" as const;
+
+  /**
+   * `face` is the way the frame looks out (the face of the block it was hung
+   * on); (bx, by, bz) is the cell in front of that face, which it occupies.
+   */
+  constructor(public face: number, public bx: number, public by: number, public bz: number, public item: ItemStack | null = null, public turn = 0, id?: number) {
+    const flat = face === Face.Up || face === Face.Down;
+    super(bx + 0.5, by, bz + 0.5, 0.75, flat ? 0.25 : 0.75, id);
+    this.place();
+  }
+
+  /** Sits the body flat against the block behind it. */
+  private place(): void {
+    const [dx, , dz] = FACE_DIRS[this.face];
+    const b = this.body;
+    b.x = this.bx + 0.5 - dx * 0.47;
+    b.z = this.bz + 0.5 - dz * 0.47;
+    b.y = this.face === Face.Up ? this.by : this.face === Face.Down ? this.by + 0.75 : this.by + 0.125;
+    b.vx = b.vy = b.vz = 0;
+    this.prevX = b.x; this.prevY = b.y; this.prevZ = b.z;
+  }
+
+  /** The block it hangs on. */
+  get support(): [number, number, number] {
+    const [dx, dy, dz] = FACE_DIRS[this.face];
+    return [this.bx - dx, this.by - dy, this.bz - dz];
+  }
+
+  tick(ctx: EntityContext): void {
+    this.place();
+    if (this.age % 10 !== 0) return;
+    const [x, y, z] = this.support;
+    if (ctx.world.isLoaded(x, z) && !block(ctx.world.blockAt(x, y, z)).solid) this.breakDown(ctx);
+  }
+
+  /** Right-click: take what is held (one of it) into an empty frame, or turn what is in it. Returns what happened. */
+  use(ctx: EntityContext, held: ItemStack | null): "placed" | "turned" | null {
+    if (!this.item) {
+      if (!held) return null;
+      this.item = { ...held, count: 1 };
+      ctx.sound("item_frame_add", this.body.x, this.body.y + 0.4, this.body.z, 0.8);
+      return "placed";
+    }
+    this.turn = (this.turn + 1) % 8;
+    ctx.sound("item_frame_rotate", this.body.x, this.body.y + 0.4, this.body.z, 0.6);
+    return "turned";
+  }
+
+  hurt(ctx: EntityContext): boolean {
+    if (this.removed) return false;
+    const b = this.body;
+    if (this.item) {
+      ctx.dropItem(b.x, b.y + 0.3, b.z, this.item);
+      this.item = null;
+      this.turn = 0;
+      ctx.sound("item_frame_remove", b.x, b.y + 0.4, b.z, 0.8);
+      return true;
+    }
+    this.breakDown(ctx);
+    return true;
+  }
+
+  private breakDown(ctx: EntityContext): void {
+    const b = this.body;
+    this.removed = true;
+    if (this.item) ctx.dropItem(b.x, b.y + 0.3, b.z, this.item);
+    ctx.dropItem(b.x, b.y + 0.3, b.z, { id: itemByName("item_frame").id, count: 1 });
+    ctx.sound("item_frame_break", b.x, b.y + 0.4, b.z, 0.8);
+  }
+
+  snapshot(): EntitySnapshot {
+    return { ...super.snapshot(), data: { f: this.face, c: [this.bx, this.by, this.bz], it: this.item ?? undefined, t: this.turn } };
+  }
+
+  applySnapshot(s: EntitySnapshot): void {
+    super.applySnapshot(s);
+    const d = s.data ?? {};
+    if (typeof d.f === "number" && d.f >= 0 && d.f < 6) this.face = d.f;
+    if (Array.isArray(d.c) && d.c.length === 3 && d.c.every((v) => typeof v === "number" && Number.isFinite(v))) [this.bx, this.by, this.bz] = d.c as [number, number, number];
+    this.item = sanitizeStack(d.it);
+    this.turn = typeof d.t === "number" ? ((Math.floor(d.t) % 8) + 8) % 8 : 0;
+    this.place();
   }
 }

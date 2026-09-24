@@ -33,7 +33,7 @@ import {
 import { entityStacks, type BlockEntity, type Chunk } from "./chunk";
 import { WORLD_HEIGHT } from "./constants";
 import { maxStack, resolveDrops, type ItemStack } from "./items";
-import { mergeInto, range, sameItem, type Slot } from "./inventory";
+import { fitsInBox, mergeInto, range, sameItem, type Slot } from "./inventory";
 import { isBottle, isBrewingFuel, isBrewingIngredient } from "./brewing";
 import { railChainPowered } from "./rails";
 import { smeltResult, fuelTicks } from "./crafting";
@@ -919,6 +919,7 @@ export class Redstone {
     }
     const slots = this.slotsAt(x, y, z);
     if (!slots) return false;
+    if (id === B.SHULKER_BOX && !fitsInBox(one)) return false;
     return mergeInto(one, slots, range(0, slots.length)) === null;
   }
 

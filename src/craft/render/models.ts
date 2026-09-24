@@ -108,6 +108,13 @@ const DRAGON: PartSpec[] = [
 ];
 
 const MODELS: Record<string, PartSpec[]> = {
+  // Modelled at half size and drawn at size 2: a shell in two halves, the lid rising and
+  // turning to open, and the soft head that looks out from inside.
+  shulker: [
+    { name: "base", size: [8, 4, 8], uv: [0, 0], pivot: [0, 2, 0] },
+    { name: "lid", size: [8, 6, 8], uv: [0, 12], pivot: [0, 5, 0] },
+    { name: "head", size: [3, 3, 3], uv: [0, 28], pivot: [0, 4, 0] },
+  ],
   // Long-limbed and black; its head tips back to scream (see pose), arms forward when carrying.
   enderman: [
     { name: "rightLeg", size: [2, 30, 2], uv: [56, 32], pivot: [-2, 30, 0], offset: [0, -15, 0] },
@@ -351,7 +358,14 @@ export interface PoseInput {
   carrying?: boolean;
   /** The dragon: its climb or dive (radians), and whether it is perched. */
   bank?: number;
+  /** A shulker: the Face that holds to its block, how open its lid is (0-1), and where its head looks. */
+  attach?: number;
+  peek?: number;
+  headYaw?: number;
 }
+
+/** Turns a shulker so the side it holds by faces its block: [x, z] rotations by the Face (E W U D S N). */
+const SHULKER_ORIENT: [number, number][] = [[0, Math.PI / 2], [0, -Math.PI / 2], [Math.PI, 0], [0, 0], [-Math.PI / 2, 0], [Math.PI / 2, 0]];
 
 const WOOL_TINTS = WOOL_COLORS.map((c) => ({
   white: "#f0f0f0", orange: "#f9801d", magenta: "#c74ebd", light_blue: "#3ab3da", yellow: "#fed83d", lime: "#80c71f",
@@ -413,6 +427,18 @@ export function pose(m: ModelInstance, kind: string, p: PoseInput): void {
         set("rightArm", -swing * 0.6 + attack, 0, 0.05); set("leftArm", swing * 0.6, 0, -0.05);
       }
       set("rightLeg", swing * 0.6); set("leftLeg", -swing * 0.6);
+      break;
+    }
+    case "shulker": {
+      // Turned about the middle of its block, so it can hold to a wall or a ceiling as well as a floor.
+      const [ox, oz] = SHULKER_ORIENT[p.attach ?? 3] ?? [0, 0];
+      r.rotation.set(ox, 0, oz);
+      r.position.y += 0.5;
+      scale.position.y = -0.5;
+      const peek = p.peek ?? 0;
+      const lid = m.parts.get("lid");
+      if (lid) { lid.position.y = (5 + peek * 4) / 16; lid.rotation.set(0, peek * Math.PI * 0.4, 0); }
+      set("head", 0, p.headYaw ?? 0, 0);
       break;
     }
     case "silverfish":

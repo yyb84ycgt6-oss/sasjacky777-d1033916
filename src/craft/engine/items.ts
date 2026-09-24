@@ -37,6 +37,8 @@ export type StatusEffect =
   | "slowness" | "strength" | "weakness" | "fire_resistance" | "invisibility" | "water_breathing"
   /** From a wither skeleton's blade: like poison, but it can kill. */
   | "wither"
+  /** From a shulker's bullet: carried slowly upward, whatever is underfoot. */
+  | "levitation"
   /** Instant effects: applied once, never listed. */
   | "instant_health" | "instant_damage";
 
@@ -58,7 +60,9 @@ export type ItemUse =
   /** Thrown: an ender pearl carries its thrower; an eye of ender flies toward the stronghold (or fills a frame). */
   | "pearl" | "ender_eye"
   /** Set on obsidian or bedrock (end crystals); fired while gliding for a burst of speed (rockets). */
-  | "end_crystal" | "rocket";
+  | "end_crystal" | "rocket"
+  /** Hung on the face of a block. */
+  | "item_frame";
 
 export type Category = "building" | "colored" | "natural" | "functional" | "redstone" | "tools" | "combat" | "food" | "ingredients";
 
@@ -169,6 +173,9 @@ for (const def of allBlocks()) {
     category,
   });
 }
+
+// A box carries a whole inventory; two never share a slot.
+ITEMS[B.SHULKER_BOX].maxStack = 1;
 
 // ---- materials ---------------------------------------------------------------
 
@@ -394,6 +401,9 @@ item("elytra", "Elytra", {
   maxStack: 1, durability: 432, category: "tools", armor: { slot: 1, points: 0, toughness: 0, material: "elytra" },
 });
 item("firework_rocket", "Firework Rocket", { use: "rocket", category: "tools" });
+// Shulkers' shells, which make shulker boxes; and the frame an End ship hangs its elytra in.
+item("shulker_shell", "Shulker Shell");
+item("item_frame", "Item Frame", { use: "item_frame", category: "functional" });
 
 // ---- lookups -----------------------------------------------------------------------
 
@@ -418,6 +428,10 @@ export function isItem(id: number): boolean {
 export interface ItemStack {
   id: number;
   count: number;
+  /** A shulker box's inventory, carried with it (27 slots, never another box). */
+  contents?: (ItemStack | null)[];
+  /** A shulker box's colour, as BOX_COLORS in blocks.ts (0 or absent: undyed). */
+  color?: number;
   /** Uses spent, for items with durability. */
   damage?: number;
   /** Enchantments, by name → level (enchanting.ts). */

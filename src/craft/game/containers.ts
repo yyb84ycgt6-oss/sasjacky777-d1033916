@@ -7,7 +7,7 @@
  * input and fuel into its fuel slot — because that is the move experienced
  * players make hundreds of times a session without looking.
  */
-import { clickSlot, mergeInto, range, sameItem, type ClickButton, type Slot } from "../engine/inventory";
+import { clickSlot, fitsInBox, mergeInto, range, sameItem, type ClickButton, type Slot } from "../engine/inventory";
 import { consumeGrid, fuelTicks, layout, matchRecipe, recipeResult, smeltResult, type Recipe } from "../engine/crafting";
 import { itemDef, itemId, maxStack, type ItemStack } from "../engine/items";
 import { B } from "../engine/blocks";
@@ -53,7 +53,7 @@ export function craftWidth(game: Game): number {
 export function craftOutput(game: Game): { recipe: Recipe; stack: ItemStack } | null {
   if (game.screen?.kind !== "inventory" && game.screen?.kind !== "crafting") return null;
   const r = matchRecipe(game.craftGrid, craftWidth(game));
-  return r ? { recipe: r, stack: recipeResult(r) } : null;
+  return r ? { recipe: r, stack: recipeResult(r, game.craftGrid) } : null;
 }
 
 function changed(game: Game): void {
@@ -62,9 +62,16 @@ function changed(game: Game): void {
   else game.bumpInv();
 }
 
+/** The open container is a shulker box, which takes anything but another box. */
+function inBox(game?: Game): boolean {
+  const s = game?.screen;
+  return s?.kind === "chest" && game!.world.blockAt(s.x, s.y, s.z) === B.SHULKER_BOX;
+}
+
 function accepts(section: Section, index: number, game?: Game): (s: ItemStack) => boolean {
   // A carved pumpkin can be worn as a helmet: it hides the wearer from endermen's stares.
-  if (section === "armor") return (s) => itemDef(s.id)?.armor?.slot === index || (index === 0 && s.id === B.CARVED_PUMPKIN);
+  if (section === "armor") return (s) => itemDef(s.id)?.armor?.slot === index || (index === 0 && (s.id === B.CARVED_PUMPKIN || s.id === B.DRAGON_HEAD));
+  if (section === "chest" && inBox(game)) return fitsInBox;
   if (section === "furnace" && index === 1) return (s) => fuelTicks(s.id) > 0;
   if (section === "furnace" && index === 2) return () => false;
   if (section === "brewing") return index < 3 ? isBottle : index === 3 ? isBrewingIngredient : isBrewingFuel;
@@ -114,7 +121,7 @@ function quickMove(game: Game, from: Section, index: number, stack: ItemStack): 
   if (from === "inv") {
     if (kind === "chest") {
       const chest = chestOf(game);
-      if (chest) return mergeInto(stack, chest.items, range(0, chest.items.length));
+      if (chest && (!inBox(game) || fitsInBox(stack))) return mergeInto(stack, chest.items, range(0, chest.items.length));
     }
     if (kind === "furnace") {
       const f = furnaceOf(game);
@@ -251,7 +258,7 @@ function takeResult(game: Game, shift: boolean): void {
     for (let i = 0; i < 64; i++) {
       const r = matchRecipe(game.craftGrid, width);
       if (!r || r.id !== out.recipe.id) break;
-      const stack = recipeResult(r);
+      const stack = recipeResult(r, game.craftGrid);
       const probe = inv.slots.map((s) => (s ? { ...s } : null));
       if (mergeInto(stack, probe, range(0, 36))) break;
       mergeInto(stack, inv.slots, [...range(9, 36), ...range(0, 9)]);

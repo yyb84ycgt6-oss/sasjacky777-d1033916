@@ -266,6 +266,11 @@ export class GameAudio {
         break;
       case "firework_launch": this.noiseBurst(out, t, 0.6, "highpass", 1800, 0.6, 0.5, 1.5); break;
       case "dragon_fireball_explode": this.noiseBurst(out, t, 1, "lowpass", 700, 0.8, 0.8, 0.3); this.tone(out, t, "sine", 120, 50, 0.8, 0.4); break;
+      // Item frames: a wooden tap to hang, a click to turn, a pop as the item comes out.
+      case "item_frame_place": case "item_frame_break": this.noiseBurst(out, t, 0.1, "bandpass", 700, 2, 0.6); this.tone(out, t, "sine", 180, 110, 0.1, 0.3); break;
+      case "item_frame_add": this.noiseBurst(out, t, 0.08, "bandpass", 1300, 2, 0.4); break;
+      case "item_frame_rotate": this.tone(out, t, "square", 1100, 1000, 0.03, 0.1); break;
+      case "item_frame_remove": this.tone(out, t, "sine", 600, 950, 0.08, 0.3); break;
       default:
         this.mob(name, out, t, p);
     }
@@ -344,6 +349,14 @@ export class GameAudio {
       case "enderman":
         if (what === "scream" || what === "stare") { this.tone(out, t, "sawtooth", 600 * p, 1500 * p, 0.7, 0.25, 0.05); this.tone(out, t, "square", 310 * p, 760 * p, 0.7, 0.1, 0.05); }
         else { this.tone(out, t, "triangle", 260 * p * low, 380 * p * low, 0.35, 0.2); this.tone(out, t + 0.15, "triangle", 420 * p * low, 220 * p * low, 0.4, 0.15); }
+        break;
+      // Shulkers: the lid's hollow clack, a soft blip as a bullet leaves, a chime where it lands.
+      case "shulker":
+        if (what === "open" || what === "close") this.noiseBurst(out, t, 0.12, "bandpass", what === "open" ? 900 : 650, 3, 0.4);
+        else if (what === "shoot") this.tone(out, t, "sine", 700 * p, 1400 * p, 0.15, 0.2);
+        else if (what === "bullet") { this.tone(out, t, "triangle", 1500, 900, 0.2, 0.2); this.noiseBurst(out, t, 0.1, "highpass", 3000, 1, 0.2); }
+        else if (what === "teleport") { this.tone(out, t, "sawtooth", 300 * p, 1100 * p, 0.2, 0.1); }
+        else { this.noiseBurst(out, t, 0.15, "bandpass", 1100 * p, 2.5, 0.4); this.tone(out, t, "square", 300 * p * low, 200 * p * low, 0.15, 0.1); }
         break;
       case "silverfish": for (let i = 0; i < 3; i++) this.noiseBurst(out, t + i * 0.05, 0.04, "bandpass", 3200, 5, 0.3); break;
       // The dragon: a low roar with a rasp over it; a gurgle before it spits.

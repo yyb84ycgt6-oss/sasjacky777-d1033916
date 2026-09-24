@@ -7,6 +7,7 @@
  * single item, shift-click sends a stack to the other section. Getting any of
  * these subtly different is the fastest way to make the game feel wrong.
  */
+import { B } from "./blocks";
 import { enchantDef } from "./enchanting";
 import { itemDef, maxStack, type ItemStack } from "./items";
 
@@ -21,8 +22,17 @@ function sameEnchants(a: ItemStack, b: ItemStack): boolean {
 /** Whether two stacks may merge: the same item, wear, enchantments, name and anvil history. */
 export function sameItem(a: Slot, b: Slot): boolean {
   return !!a && !!b && a.id === b.id && (a.damage ?? 0) === (b.damage ?? 0)
-    && (a.name ?? "") === (b.name ?? "") && (a.repair ?? 0) === (b.repair ?? 0) && sameEnchants(a, b);
+    && (a.name ?? "") === (b.name ?? "") && (a.repair ?? 0) === (b.repair ?? 0) && sameEnchants(a, b)
+    && (a.color ?? 0) === (b.color ?? 0) && sameContents(a, b);
 }
+
+function sameContents(a: ItemStack, b: ItemStack): boolean {
+  if (!a.contents && !b.contents) return true;
+  return JSON.stringify(a.contents ?? []) === JSON.stringify(b.contents ?? []);
+}
+
+/** Whether a stack may go inside a shulker box: anything but another box, which would nest without end. */
+export const fitsInBox = (s: ItemStack): boolean => s.id !== B.SHULKER_BOX;
 
 export function cloneStack(s: Slot): Slot {
   return s ? { ...s } : null;
@@ -171,6 +181,15 @@ export function sanitizeStack(value: unknown): Slot {
   }
   if (typeof s.name === "string" && s.name.trim()) out.name = s.name.slice(0, 35);
   if (typeof s.repair === "number" && s.repair > 0) out.repair = Math.min(63, Math.floor(s.repair));
+  if (typeof s.color === "number" && s.color > 0 && s.color < 9) out.color = Math.floor(s.color);
+  // A box's contents, one level deep: a box inside a box is refused here as it is in the slots.
+  if (s.id === B.SHULKER_BOX && Array.isArray(s.contents)) {
+    const items = s.contents.slice(0, 27).map((c) => {
+      const clean = sanitizeStack(c);
+      return clean && fitsInBox(clean) ? clean : null;
+    });
+    if (items.some(Boolean)) out.contents = items;
+  }
   return out;
 }
 

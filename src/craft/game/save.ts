@@ -67,6 +67,12 @@ export interface WorldMeta {
   entities: EntitySnapshot[];
   /** Villages already given their villagers and golem, by region key, so none is populated twice. */
   villages?: string[];
+  /**
+   * One-time structure spawns already made (an End city's shulkers, its ship's
+   * frame), by kind and cell — so a chunk that is generated again, never having
+   * been saved, does not people its city a second time.
+   */
+  spawned?: string[];
   /** The dimension the player (online, the host) is in; absent is the overworld. */
   dimension?: Dimension;
   /** Entities of the dimensions not loaded, waiting for someone to come back. */

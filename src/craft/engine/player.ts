@@ -402,6 +402,7 @@ export class Player {
       res = travel(world, b, {
         forward: input.forward, strafe: input.strafe, yaw: this.yaw, jump: input.jump, sneak: input.sneak,
         sprint: this.sprinting, flying: this.flying, speed: 0.1 * speedBoost,
+        levitation: this.flying ? 0 : this.effectLevel("levitation") + 1,
       });
     }
     if (!wasInWater && b.inWater && b.vy < -0.3) this.events.push({ type: "splash" });

@@ -13,14 +13,14 @@
  * and asks the host for everything else, so there is exactly one answer to
  * where the water went.
  */
-import { B, block, containerSize, FACE_DIRS, isFluid, isLeaves, isLog, type Material } from "../engine/blocks";
+import { B, block, boxColorOf, containerSize, FACE_DIRS, isFluid, isLeaves, isLog, type Material } from "../engine/blocks";
 import { Redstone, type Body as RedstoneBody, type RedstoneContext } from "../engine/redstone";
 import { chunkId, entityStacks, newBrewing, newChest, newFurnace, type BlockEntity, type BrewingEntity, type Chunk, type FurnaceEntity } from "../engine/chunk";
 import { DAY_TICKS, SEA_LEVEL, TICK_MS, WORLD_HEIGHT } from "../engine/constants";
 import { BlockRules, tickDelay } from "../engine/blockRules";
 import { COOK_TICKS, fuelTicks, smeltResult } from "../engine/crafting";
 import {
-  AreaCloud, bumpEntityIds, EndCrystal, FallingBlock, ItemEntity, PrimedTnt, Projectile, XpOrb, xpOrbValues,
+  AreaCloud, bumpEntityIds, EndCrystal, FallingBlock, ItemEntity, ItemFrame, PrimedTnt, Projectile, XpOrb, xpOrbValues,
   type DamageSource, type Entity, type EntityContext, type EntitySnapshot, type PlayerRef, type ProjectileKind,
 } from "../engine/entities";
 import { blastImpact, explosionBlocks, exposure } from "../engine/explosion";
@@ -46,7 +46,7 @@ import { golemParts, villageLoot } from "../engine/villages";
 import { fortressesTouching, fortressLoot, inFortress, NETHER_LAVA_LEVEL, SPAWNER_MOBS } from "../engine/nether";
 import { planPortal, type PortalAxis } from "../engine/portal";
 import { findEndPortal, inStronghold, nearestStronghold, strongholdLoot } from "../engine/stronghold";
-import { buildGateway, cityLoot, END_SPAWN, EndGenerator, endCitiesTouching, GATEWAY_COUNT, gatewayPosition } from "../engine/end";
+import { buildGateway, cityLoot, END_SPAWN, EndGenerator, endCitiesTouching, GATEWAY_COUNT, gatewayPosition, type EndCity } from "../engine/end";
 import { EndFight } from "./endFight";
 import { FRAME_EYE } from "../engine/blocks";
 import { hash4 } from "../engine/rng";
@@ -76,7 +76,7 @@ export interface NetLink {
   requestChunk(cx: number, cz: number): Promise<ChunkData | null>;
   isModified(cx: number, cz: number): boolean;
   attack(entityId: number, damage: number, fromX: number, fromZ: number, knockback?: number, fire?: number, looting?: number): void;
-  interact(entityId: number, item: string | null): void;
+  interact(entityId: number, item: string | null, stack?: ItemStack | null): void;
   drops(x: number, y: number, z: number, stacks: ItemStack[], xp: number): void;
   throwItem(kind: ProjectileKind, x: number, y: number, z: number, vx: number, vy: number, vz: number, extra?: ThrowExtra): void;
   primeTnt(x: number, y: number, z: number, fuse: number): void;
@@ -99,6 +99,7 @@ export interface NetLink {
   trade?(entityId: number, offer: number): void;
   vehiclePose?(v: Vehicle): void;
   placeVehicle?(kind: string, x: number, y: number, z: number, yaw: number, wood: number): void;
+  placeFrame?(face: number, x: number, y: number, z: number): void;
   /** Host: the party moves to another dimension, arriving around x, y, z. */
   dimensionChanged?(dim: Dimension, x: number, y: number, z: number): void;
   /** Host: where it actually landed there (by the portal it came out of), for guests to land beside. */
@@ -195,6 +196,8 @@ export class Game {
   readonly store: Store<Hud>;
   readonly actions: Actions;
   net: NetLink | null = null;
+  /** Where the current dose of levitation began, for the advancement. */
+  private levitatedFrom: number | null = null;
 
   time: number;
   rain = 0;
@@ -475,7 +478,7 @@ export class Game {
   private persistentEntities(): EntitySnapshot[] {
     return [...this.entities.values()]
       // A dragon keeps even its death throes: reloading mid-fall finishes the fall rather than losing the reward.
-      .filter((e) => (e instanceof Mob && e.persistent && (!e.dying || e.kind === "ender_dragon")) || e instanceof ItemEntity || e instanceof Vehicle || e instanceof EndCrystal)
+      .filter((e) => (e instanceof Mob && e.persistent && (!e.dying || e.kind === "ender_dragon")) || e instanceof ItemEntity || e instanceof Vehicle || e instanceof EndCrystal || e instanceof ItemFrame)
       .slice(0, 600)
       .map((e) => e.snapshot());
   }
@@ -911,6 +914,9 @@ export class Game {
       e = new XpOrb(s.x, s.y, s.z, Number(s.data?.value ?? 1), s.id);
     } else if (s.kind === "end_crystal") {
       e = new EndCrystal(s.x, s.y, s.z, s.data?.b !== 0, s.id);
+    } else if (s.kind === "item_frame") {
+      e = new ItemFrame(0, Math.floor(s.x), Math.floor(s.y), Math.floor(s.z), null, 0, s.id);
+      e.applySnapshot(s);
     } else {
       e = vehicleFromSnapshot(s);
       // Nobody is riding anything when a world opens.
@@ -1198,6 +1204,8 @@ export class Game {
       // A crystal's blast never touches the dragon it serves; another crystal it sets off.
       if (e instanceof Mob && e.kind === "ender_dragon" && cause instanceof EndCrystal) continue;
       if (e instanceof Mob || e instanceof Vehicle || e instanceof EndCrystal) e.hurt(this.ctx, hit.damage, "explosion", x, z);
+      // A blast takes a frame down whole, item and all.
+      if (e instanceof ItemFrame && !e.removed) { e.hurt(this.ctx); if (!e.removed) e.hurt(this.ctx); }
       else if (e instanceof ItemEntity || e instanceof XpOrb) { if (hit.damage > 4) e.removed = true; }
       const n = d || 1;
       e.body.vx += ((cx - x) / n) * hit.push; e.body.vy += ((cy - y) / n) * hit.push; e.body.vz += ((cz - z) / n) * hit.push;
@@ -1260,9 +1268,44 @@ export class Game {
     if (this.dimension === "end" && this.generator instanceof EndGenerator) {
       for (const c of endCitiesTouching(this.generator, cx, cz)) {
         this.fillChests(cx, cz, c.chests.map(([x, y, z, kind]) => [x, y, z, (items) => cityLoot(items, hash4(this.meta.seed ^ 0xe7, x, y, z), kind === "ship")]));
+        this.settleCity(c, cx, cz);
       }
     }
     this.findSpawners(cx, cz);
+  }
+
+  /**
+   * The part of an End city in a freshly generated chunk: its brewing stands
+   * get two potions of Healing II, and — once only, whatever happens to the
+   * chunk later — its shulkers take their places and the ship's frame is hung
+   * with the elytra.
+   */
+  private settleCity(c: EndCity, cx: number, cz: number): void {
+    const w = this.world;
+    const here = (x: number, z: number) => x >> 4 === cx && z >> 4 === cz;
+    const spawned = (this.meta.spawned ??= []);
+    const once = (key: string) => {
+      if (spawned.includes(key)) return false;
+      spawned.push(key);
+      if (spawned.length > 4000) spawned.splice(0, spawned.length - 4000);
+      return true;
+    };
+    for (const [x, y, z] of c.brewing) {
+      if (!here(x, z) || w.blockAt(x, y, z) !== B.BREWING_STAND || w.getEntity(x, y, z)) continue;
+      const stand = newBrewing();
+      stand.bottles = [{ id: itemId("strong_potion_healing"), count: 1 }, null, { id: itemId("strong_potion_healing"), count: 1 }];
+      w.setEntity(x, y, z, stand);
+    }
+    for (const [x, y, z, face] of c.shulkers) {
+      if (!here(x, z) || !once(`shulker:${x},${y},${z}`)) continue;
+      const s = new Mob("shulker", x + 0.5, y, z + 0.5);
+      s.attach = face;
+      this.spawn(s);
+    }
+    const f = c.frame;
+    if (f && here(f.x, f.z) && once(`frame:${f.x},${f.y},${f.z}`)) {
+      this.spawn(new ItemFrame(f.face, f.x, f.y, f.z, { id: itemId("elytra"), count: 1 }));
+    }
   }
 
   /** Puts loot in a structure's chests that stand in chunk (cx, cz) and are still empty chests there. */
@@ -1311,8 +1354,24 @@ export class Game {
     }
   }
 
-  /** Spills a container's contents when it is broken. */
-  dropContainerContents(x: number, y: number, z: number): void {
+  /**
+   * Spills a container's contents when it is broken — except a shulker box,
+   * which keeps them: it drops as one box item carrying its inventory and
+   * colour. `always` drops even an empty box (a survival player's mining;
+   * in creative only a box with something in it comes away).
+   */
+  dropContainerContents(x: number, y: number, z: number, always = true): void {
+    if (this.world.blockAt(x, y, z) === B.SHULKER_BOX) {
+      const e = this.world.getEntity(x, y, z);
+      const items = e?.kind === "chest" ? e.items.map((s) => (s ? { ...s } : null)) : [];
+      const stack: ItemStack = { id: B.SHULKER_BOX, count: 1 };
+      const color = boxColorOf(this.world.getMeta(x, y, z));
+      if (color) stack.color = color;
+      if (items.some(Boolean)) stack.contents = items;
+      if (always || stack.contents) this.dropItem(x + 0.5, y + 0.5, z + 0.5, stack);
+      this.world.setEntity(x, y, z, undefined);
+      return;
+    }
     const e = this.world.getEntity(x, y, z);
     if (!e) return;
     const stacks = entityStacks(e);
@@ -1911,6 +1970,18 @@ export class Game {
     }
     if (this.tickCount % 20 === 0) this.audio.tickMusic(1, !this.isNight());
     if (this.tickCount % 10 === 0) this.advance();
+    // The City at the End of the Game: inside a city's bounds, above its island.
+    if (this.tickCount % 20 === 7 && this.dimension === "end" && this.generator instanceof EndGenerator && !this.player.advancements.has("city")) {
+      const b = this.player.body;
+      for (const c of endCitiesTouching(this.generator, Math.floor(b.x) >> 4, Math.floor(b.z) >> 4)) {
+        if (b.x >= c.x0 && b.x <= c.x1 + 1 && b.z >= c.z0 && b.z <= c.z1 + 1 && b.y >= c.y - 2) this.advance({ kind: "city" });
+      }
+    }
+    // Great View From Up Here: fifty blocks up on one dose of levitation.
+    if (this.player.hasEffect("levitation")) {
+      this.levitatedFrom ??= this.player.body.y;
+      if (this.player.body.y - this.levitatedFrom >= 50) this.advance({ kind: "levitate" });
+    } else this.levitatedFrom = null;
     // Eye Spy: standing in a stronghold's halls.
     if (this.tickCount % 20 === 5 && this.dimension === "overworld" && !this.player.advancements.has("stronghold") && this.meta.type !== "flat"
       && inStronghold(this.meta.seed, this.player.body.x, this.player.body.y, this.player.body.z)) this.advance({ kind: "stronghold" });
@@ -2062,6 +2133,16 @@ export class Game {
     b.x = v.x; b.y = v.riderY(); b.z = v.z;
     // A boat turns its rider with it.
     if (v instanceof Boat) this.player.yaw += v.yaw - v.prevYaw;
+  }
+
+  /** Hangs an item frame on a face of a block (the host's half); false when the spot is taken or unsupported. */
+  placeFrame(face: number, x: number, y: number, z: number): boolean {
+    const [dx, dy, dz] = FACE_DIRS[face];
+    if (block(this.world.blockAt(x, y, z)).solid || !block(this.world.blockAt(x - dx, y - dy, z - dz)).solid) return false;
+    for (const e of this.entities.values()) if (e instanceof ItemFrame && !e.removed && e.face === face && e.bx === x && e.by === y && e.bz === z) return false;
+    this.spawn(new ItemFrame(face, x, y, z));
+    this.sound("item_frame_place", x + 0.5, y + 0.5, z + 0.5, 0.8);
+    return true;
   }
 
   /** Puts a vehicle into the world (the host's half of placing one). */

@@ -8,11 +8,11 @@
  * guest's copy that only ever receives snapshots.
  */
 import * as THREE from "three";
-import { B, block, modelBoxes } from "../engine/blocks";
+import { B, block, Face, FACE_DIRS, modelBoxes } from "../engine/blocks";
 import { buildAtlas, layerOf } from "../engine/atlas";
 import type { ChunkMesh } from "../engine/mesher";
 import type { Entity } from "../engine/entities";
-import { EndCrystal, ItemEntity, PrimedTnt, FallingBlock, Projectile, XpOrb } from "../engine/entities";
+import { EndCrystal, ItemEntity, ItemFrame, PrimedTnt, FallingBlock, Projectile, XpOrb } from "../engine/entities";
 import { Mob } from "../engine/mobs";
 import { Boat, Vehicle } from "../engine/vehicles";
 import { PROFESSIONS } from "../engine/villages";
@@ -94,6 +94,8 @@ interface EntityView {
   variant?: number;
   /** An end crystal's spinning cage and its beam to the dragon. */
   crystal?: { cage: THREE.Object3D; core: THREE.Object3D; beam: THREE.Mesh };
+  /** Materials this view owns (an item frame's board, shaded by its own light). */
+  mats?: THREE.MeshBasicMaterial[];
 }
 
 export class WorldRenderer {
@@ -248,7 +250,7 @@ export class WorldRenderer {
   private viewFor(e: Entity): EntityView {
     let v = this.views.get(e.id);
     // A villager who takes up a trade changes clothes: rebuild its model.
-    if (v && v.entity === e && (!(e instanceof Mob) || v.variant === skinVariant(e))) return v;
+    if (v && v.entity === e && (!(e instanceof Mob) || v.variant === skinVariant(e)) && (!(e instanceof ItemFrame) || v.variant === (e.item?.id ?? 0))) return v;
     if (v) this.dropView(e.id);
     const object = new THREE.Group();
     v = { entity: e, object };
@@ -264,6 +266,21 @@ export class WorldRenderer {
         v.model.parts.get("__scale")!.add(held);
       }
       object.add(v.model.root);
+    } else if (e instanceof ItemFrame) {
+      // A thin wooden board with a lighter backing, and the item laid on it (rebuilt when the item changes).
+      v.variant = e.item?.id ?? 0;
+      const [rim, back] = frameGeometry();
+      v.mats = [new THREE.MeshBasicMaterial({ color: col("#6e4c26") }), new THREE.MeshBasicMaterial({ color: col("#b08a52") })];
+      const board = new THREE.Group();
+      board.add(new THREE.Mesh(rim, v.mats[0]), new THREE.Mesh(back, v.mats[1]));
+      object.add(board);
+      if (e.item) {
+        v.item = new ItemView(this.shared, e.item.id, 1, 0.9);
+        v.item.root.position.z = 0.06;
+        board.add(v.item.root);
+      }
+      const [nx, ny, nz] = FACE_DIRS[e.face];
+      board.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(nx, ny, nz));
     } else if (e instanceof EndCrystal) {
       v.crystal = crystalView();
       object.add(v.crystal.cage, v.crystal.core);
@@ -304,6 +321,15 @@ export class WorldRenderer {
         const g = new THREE.Group();
         g.add(shaft, tip, fl);
         object.add(g);
+      } else if (e.kind === "shulker_bullet") {
+        // A pale knot of light, two crossed cubes spinning as it goes (one shared mesh set: bullets come in volleys).
+        const [core, rim] = bulletMeshes();
+        const g = new THREE.Group();
+        const a = new THREE.Mesh(core.geometry, core.material);
+        const b2 = new THREE.Mesh(rim.geometry, rim.material);
+        a.rotation.set(0.6, 0.6, 0);
+        g.add(a, b2);
+        object.add(g);
       } else if (e.kind === "fireball" || e.kind === "small_fireball" || e.kind === "dragon_fireball") {
         // A ball of fire: the fire charge's picture, facing the camera, big for a ghast's; the dragon's, bigger.
         v.item = new ItemView(this.shared, itemId(e.kind === "dragon_fireball" ? "chorus_fruit" : "fire_charge"), 1, e.kind === "fireball" ? 3 : e.kind === "dragon_fireball" ? 3.5 : 1);
@@ -337,6 +363,7 @@ export class WorldRenderer {
     v.model?.material.dispose();
     v.model?.wool?.dispose();
     v.model?.gel?.dispose();
+    for (const m of v.mats ?? []) m.dispose();
     if (v.crystal) this.scene.remove(v.crystal.beam);
     this.views.delete(id);
   }
@@ -373,6 +400,7 @@ export class WorldRenderer {
           screaming: e.kind === "enderman" && e.scream > 0, carrying: e.kind === "enderman" && e.carried > 0,
           // The dragon noses down in a dive and up in a climb, and folds its wings on its perch.
           bank: e.kind === "ender_dragon" ? Math.max(-0.6, Math.min(0.6, -Math.atan2(e.y - e.prevY, Math.hypot(e.x - e.prevX, e.z - e.prevZ) + 0.05))) : 0,
+          attach: e.attach, peek: e.peek, headYaw: e.kind === "shulker" ? e.headYaw : 0,
         });
         if (e.kind === "ender_dragon") {
           // It is perched when its phase says so; the flag doubles as "wings folded".
@@ -424,6 +452,17 @@ export class WorldRenderer {
         }
         continue;
       }
+      if (e instanceof ItemFrame) {
+        // The body sits against the block; the board is drawn at its middle, flush with the face.
+        const flat = e.face === Face.Up || e.face === Face.Down;
+        v.object.position.set(x, flat ? (e.face === Face.Up ? e.by + 0.03 : e.by + 0.97) : y + 0.375, z);
+        const [s, b] = this.lightAt(e.bx + 0.5, e.by + 0.5, e.bz + 0.5);
+        v.item?.setLight(s, b);
+        if (v.item) v.item.root.rotation.set(0, 0, -e.turn * Math.PI / 4);
+        const shade = Math.max(0.15, s * this.shared.uDaylight.value, b);
+        if (v.mats) { v.mats[0].color.set("#6e4c26").multiplyScalar(shade); v.mats[1].color.set("#b08a52").multiplyScalar(shade); }
+        continue;
+      }
       if (v.item && e instanceof ItemEntity) {
         const [s, b] = this.lightAt(x, y + 0.2, z);
         v.item.setLight(s, b);
@@ -434,7 +473,8 @@ export class WorldRenderer {
         v.item.setLight(s, b);
         v.item.root.lookAt(camPos);
       } else if (e instanceof Projectile) {
-        v.object.rotation.set(-e.pitch, e.yaw, 0, "YXZ");
+        if (e.kind === "shulker_bullet") v.object.rotation.set(this.time * 5, this.time * 7, 0);
+        else v.object.rotation.set(-e.pitch, e.yaw, 0, "YXZ");
       } else if (v.lit && (e instanceof FallingBlock || e instanceof PrimedTnt)) {
         const [s, b] = this.lightAt(x, y + 0.5, z);
         v.lit.uniforms.uSky.value = s;
@@ -659,6 +699,7 @@ function skinVariant(e: Mob): number {
   if (e.kind === "ghast") return e.fuse > 10 ? 1 : 0;
   // An enderman's stare, and the block in its arms (drawn with the model, so a new one rebuilds it).
   if (e.kind === "enderman") return (e.scream > 0 ? 1 : 0) | (e.carried << 1);
+  if (e.kind === "shulker") return e.shellColor;
   return 0;
 }
 
@@ -668,6 +709,7 @@ function modelScale(e: Mob): number {
     case "ghast": return 4;
     case "ender_dragon": return 4;
     case "hoglin": return 2;
+    case "shulker": return 2;
     case "wither_skeleton": return 1.2;
     default: return e.size;
   }
@@ -678,6 +720,20 @@ function setBodyVisible(model: ModelInstance, on: boolean): void {
   model.root.traverse((o) => {
     if (o instanceof THREE.Mesh && o.material === model.material) o.visible = on;
   });
+}
+
+let frameParts: [THREE.BufferGeometry, THREE.BufferGeometry] | null = null;
+/** An item frame's board: a rim of dark wood and a paler back (geometry shared by every frame). */
+function frameGeometry(): [THREE.BufferGeometry, THREE.BufferGeometry] {
+  return (frameParts ??= [new THREE.BoxGeometry(0.75, 0.75, 0.05), new THREE.BoxGeometry(0.6, 0.6, 0.02).translate(0, 0, 0.026)]);
+}
+
+let bullet: [THREE.Mesh, THREE.Mesh] | null = null;
+function bulletMeshes(): [THREE.Mesh, THREE.Mesh] {
+  return (bullet ??= [
+    new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.22, 0.22), new THREE.MeshBasicMaterial({ color: col("#f4ecff") })),
+    new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.12, 0.12), new THREE.MeshBasicMaterial({ color: col("#c9a8e8") })),
+  ]);
 }
 
 function itemIdFor(kind: string): number {
