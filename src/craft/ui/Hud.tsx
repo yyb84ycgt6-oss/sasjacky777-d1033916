@@ -6,15 +6,32 @@ import { clock, effectName } from "./itemText";
 import { itemId } from "../engine/items";
 import { MINIMAP_ROOM } from "./MapView";
 
-function Row({ full, max, icon, half, empty, reverse, shake }: {
+function Row({ full, max, icon, half, empty, reverse, shake, preview, glow }: {
   full: number; max: number; icon: string; half: string; empty: string; reverse?: boolean; shake?: boolean;
+  /** What the bar would reach (AppleSkin): the difference blinks. */
+  preview?: number;
+  /** A golden rim on the first `glow` halves (saturation). */
+  glow?: number;
 }) {
   const cells = [];
   for (let i = 0; i < max / 2; i++) {
     const v = full - i * 2;
-    const src = v >= 2 ? glyph(icon) : v === 1 ? glyph(half) : glyph(empty);
+    const pv = preview !== undefined ? preview - i * 2 : -1;
+    const ghost = v < 2 && pv > v;
+    const shown = ghost ? pv : v;
+    const src = shown >= 2 ? glyph(icon) : shown === 1 ? glyph(half) : glyph(empty);
     const jitter = shake ? (Math.random() * 2 - 1) : 0;
-    cells.push(<img key={i} src={src} className="bc-glyph" alt="" style={{ marginRight: "calc(var(--u) * -0)", transform: `translateY(calc(var(--u) * ${jitter}))` }} />);
+    const rim = glow !== undefined && glow - i * 2 >= 1;
+    cells.push(
+      <img
+        key={i} src={src} className="bc-glyph" alt=""
+        style={{
+          marginRight: "calc(var(--u) * -0)", transform: `translateY(calc(var(--u) * ${jitter}))`,
+          animation: ghost ? "bc-blink 1s ease-in-out infinite" : undefined,
+          filter: rim ? "drop-shadow(0 0 calc(var(--u) * 0.6) #ffd84a)" : undefined,
+        }}
+      />,
+    );
   }
   return <div style={{ display: "flex", flexDirection: reverse ? "row-reverse" : "row" }}>{cells}</div>;
 }
@@ -98,7 +115,10 @@ export function Hud({ hud, mobile, crosshair }: { hud: HudState; mobile: boolean
                   {Array.from({ length: Math.ceil(Math.max(0, hud.air) / 30) }, (_, i) => <img key={i} src={glyph("bubble")} className="bc-glyph" alt="" />)}
                 </div>
               )}
-              <Row full={hud.food} max={20} icon="food" half="foodHalf" empty="foodEmpty" reverse />
+              <Row
+                full={hud.food} max={20} icon="food" half="foodHalf" empty="foodEmpty" reverse
+                preview={hud.foodPreview?.food} glow={hud.foodPreview ? hud.foodPreview.saturation : hud.saturation ?? undefined}
+              />
             </div>
           </div>
         )}

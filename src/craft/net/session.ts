@@ -407,6 +407,10 @@ export class NetSession implements NetLink {
   waystonesChanged(): void { if (this.role === "host") this.push(["wz", this.game?.meta.waystones ?? {}]); }
   registerWaystone(x: number, y: number, z: number): void { if (this.role === "guest") this.push(["wr", x, y, z]); }
   renameWaystone(key: string, name: string): void { if (this.role === "guest") this.push(["wn", key, name]); }
+  placeGrave(x: number, y: number, z: number, items: (ItemStack | null)[], owner: string, yaw: number): void {
+    if (this.role === "guest") this.push(["gr", r3(x), r3(y), r3(z), items, owner, r3(yaw)]);
+  }
+  collectGrave(x: number, y: number, z: number): void { if (this.role === "guest") this.push(["gc", x, y, z]); }
   placeVehicle(kind: string, x: number, y: number, z: number, yaw: number, wood: number): void {
     this.push(["pv", kind, r3(x), r3(y), r3(z), r3(yaw), wood]);
   }
@@ -660,6 +664,8 @@ export class NetSession implements NetLink {
         case "pf": if (this.role === "host") this.onPlaceFrame(from, op); break;
         case "wz": if (this.role === "guest" && fromHost) g.meta.waystones = sanitizeWaystones(op[1]); break;
         case "wr": if (this.role === "host") this.onRegisterWaystone(from, op); break;
+        case "gr": if (this.role === "host") this.onGuestGrave(from, op); break;
+        case "gc": if (this.role === "host") this.onCollectGrave(from, op); break;
         case "wn": if (this.role === "host" && typeof op[1] === "string" && typeof op[2] === "string") g.renameWaystone(op[1], op[2]); break;
         case "fw": if (this.role === "host") this.onFirework(from, op); break;
         case "tp": if (op[1] === this.myId && fromHost) this.onTeleport(op[2]); break;
@@ -918,6 +924,33 @@ export class NetSession implements NetLink {
     // flight 0: a glider's spent rocket, bursting where they are.
     if ((raw as { flight?: unknown }).flight === 0) g.spawn(new FireworkRocket(x as number, y as number, z as number, rocket, 0, 0, 0, 0, from));
     else g.launchFirework(x as number, y as number, z as number, rocket, from);
+  }
+
+  /**
+   * A guest died: the host lays their gravestone where they fell (near where
+   * the host last saw them), or, with nowhere to lay it, drops their things there.
+   */
+  private onGuestGrave(from: string, op: Op): void {
+    const g = this.game!;
+    const [, x, y, z, raw, owner, yaw] = op;
+    if (!finite(x, y, z, yaw) || !Array.isArray(raw)) return;
+    const r = g.remote.get(from);
+    if (r && Math.hypot(r.x - (x as number), r.y - (y as number), r.z - (z as number)) > 16) return;
+    const items = raw.slice(0, 64).map((s) => sanitizeStack(s));
+    if (!items.some(Boolean)) return;
+    const name = typeof owner === "string" ? owner : r?.name ?? "Player";
+    if (!g.placeGrave(x as number, y as number, z as number, items, name, yaw as number)) {
+      for (const s of items) if (s) g.dropItem(x as number, (y as number) + 1, z as number, s);
+    }
+  }
+
+  private onCollectGrave(from: string, op: Op): void {
+    const g = this.game!;
+    const [, x, y, z] = op;
+    if (!int(x) || !int(y) || !int(z)) return;
+    const r = g.remote.get(from);
+    if (r && Math.hypot(r.x - (x as number), r.y - (y as number), r.z - (z as number)) > 8) return;
+    g.collectGrave(x as number, y as number, z as number, from);
   }
 
   /** A guest found a waystone the world did not list: the host checks it is there, near them, and lists it. */

@@ -7,6 +7,8 @@ export type BlockEntity = ChestEntity | FurnaceEntity | BrewingEntity;
 export interface ChestEntity {
   kind: "chest";
   items: (ItemStack | null)[];
+  /** A gravestone's: whose things these were. */
+  owner?: string;
 }
 
 export interface FurnaceEntity {

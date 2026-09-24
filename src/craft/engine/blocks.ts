@@ -106,7 +106,7 @@ export interface BlockDef {
   facing?: "player" | "away" | "wall";
   /** Has an inventory or a screen. */
   interact?: "crafting" | "furnace" | "chest" | "bed" | "door" | "tnt" | "noteblock" | "redstone"
-    | "enchanting" | "anvil" | "brewing" | "cauldron" | "composter" | "bell" | "smithing" | "waystone";
+    | "enchanting" | "anvil" | "brewing" | "cauldron" | "composter" | "bell" | "smithing" | "waystone" | "grave";
   flammable?: boolean;
   /** Hidden from the creative inventory (technical blocks). */
   hidden?: boolean;
@@ -1115,6 +1115,14 @@ add(247, "purpur_slab", "Purpur Slab", {
 add(248, "magenta_stained_glass", "Magenta Stained Glass", {
   layer: "translucent", opaque: false, hardness: 0.3, material: "glass", drops: [],
 });
+// A gravestone (engine/graves.ts): a headstone on a low plinth, holding what its player carried.
+// It gives back what it holds when used or broken, and nothing of itself.
+add(250, "gravestone", "Gravestone", {
+  shape: "boxes", layer: "opaque", opaque: false, facing: "player", hardness: 1.5, material: "stone", hidden: true, drops: [],
+  interact: "grave",
+  boxes: (m) => ([[1, 0, 2, 15, 2, 14], [3, 2, 6, 13, 13, 10], [5, 13, 6, 11, 15, 10]] as Box[]).map((b) => hFacingBox(b, m & 3)),
+  textures: tex("gravestone"),
+});
 // A waystone (engine/waystones.ts): a carved pillar on a plinth, its rune glowing faintly.
 add(249, "waystone", "Waystone", {
   shape: "boxes", layer: "cutout", opaque: false, hardness: 5, tool: P, harvestTier: 0, material: "stone", emission: 6,
@@ -1182,7 +1190,7 @@ export const B = {
   QUARTZ_BLOCK: 230, SPAWNER: 231,
   END_STONE: 232, END_STONE_BRICKS: 233, PURPUR_BLOCK: 234, PURPUR_PILLAR: 235, PURPUR_STAIRS: 236, END_ROD: 237,
   CHORUS_PLANT: 238, CHORUS_FLOWER: 239, END_PORTAL_FRAME: 240, END_PORTAL: 241, END_GATEWAY: 242, DRAGON_EGG: 243,
-  IRON_BARS: 244, SHULKER_BOX: 245, DRAGON_HEAD: 246, PURPUR_SLAB: 247, MAGENTA_STAINED_GLASS: 248, WAYSTONE: 249,
+  IRON_BARS: 244, SHULKER_BOX: 245, DRAGON_HEAD: 246, PURPUR_SLAB: 247, MAGENTA_STAINED_GLASS: 248, WAYSTONE: 249, GRAVESTONE: 250,
 } as const;
 
 /** Blocks that stand on an axis kept in meta like a log's (0 up, 1 along x, 2 along z). */

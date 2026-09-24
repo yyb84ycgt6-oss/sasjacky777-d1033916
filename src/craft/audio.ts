@@ -11,6 +11,7 @@
  * Browsers only start audio after a user gesture, so the context is created
  * lazily and resumed on the first click or key.
  */
+import type { AmbientCue } from "./engine/ambience";
 import type { Material } from "./engine/blocks";
 
 
@@ -379,6 +380,51 @@ export class GameAudio {
         this.noiseBurst(out, t, 0.25, "bandpass", 1800, 5, 0.4);
         this.tone(out, t, "sine", 1250 * p, 1240 * p, 0.5, 0.08);
         break;
+    }
+  }
+
+  /**
+   * One ambient sound (engine/ambience.ts), at x, y, z — somewhere around
+   * the listener, so a bird is off to one side rather than inside the head.
+   */
+  ambient(cue: AmbientCue, x: number, y: number, z: number): void {
+    if (!this.ready()) return;
+    const out = this.placed(x, y, z, 1, 24);
+    if (!out) return;
+    const t = this.ctx!.currentTime + 0.02;
+    const r = Math.random;
+    switch (cue) {
+      case "birds": {
+        // A short song: two to five chirps, each a quick upward sweep.
+        const base = 2400 + r() * 1400;
+        const n = 2 + Math.floor(r() * 4);
+        for (let i = 0; i < n; i++) this.tone(out, t + i * (0.09 + r() * 0.08), "sine", base * (0.9 + r() * 0.2), base * (1.2 + r() * 0.3), 0.07, 0.05);
+        break;
+      }
+      case "crickets":
+        for (let i = 0; i < 6; i++) this.tone(out, t + i * 0.05, "square", 4600, 4550, 0.03, 0.012);
+        for (let i = 0; i < 6; i++) this.tone(out, t + 0.6 + i * 0.05, "square", 4600, 4550, 0.03, 0.012);
+        break;
+      case "owl":
+        this.tone(out, t, "sine", 400, 360, 0.35, 0.06, 0.05);
+        this.tone(out, t + 0.5, "sine", 380, 330, 0.6, 0.06, 0.05);
+        break;
+      case "frogs":
+        for (let i = 0; i < 3; i++) this.tone(out, t + i * 0.18, "triangle", 170 + r() * 30, 120, 0.12, 0.08);
+        break;
+      case "waves": this.noiseBurst(out, t, 2.6, "lowpass", 500, 0.5, 0.06, 2.2); break;
+      case "wind": this.noiseBurst(out, t, 3.2, "bandpass", 380, 0.8, 0.05, 2.4); break;
+      case "leaves": this.noiseBurst(out, t, 0.9, "highpass", 3200, 0.6, 0.025, 1.3); break;
+      case "cave_drip":
+        this.tone(out, t, "sine", 1900 + r() * 600, 700, 0.09, 0.07);
+        this.tone(out, t + 0.28, "sine", 1500 + r() * 400, 600, 0.07, 0.025);
+        break;
+      case "cave_rumble": this.noiseBurst(out, t, 3, "lowpass", 140, 0.7, 0.12, 0.6); break;
+      case "nether_moan":
+        this.tone(out, t, "sine", 95 + r() * 20, 65, 3, 0.1, 0.8);
+        this.noiseBurst(out, t, 2.5, "lowpass", 220, 0.6, 0.05, 0.7);
+        break;
+      case "end_hum": this.tone(out, t, "sine", 55, 52, 4, 0.08, 1.2); this.tone(out, t, "sine", 110.5, 104, 4, 0.03, 1.5); break;
     }
   }
 

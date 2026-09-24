@@ -271,6 +271,14 @@ export class XpOrb extends Entity {
   tick(ctx: EntityContext): void {
     this.fall(ctx, 0.03, 0.98);
     if (this.age > 6000) { this.removed = true; return; }
+    // Orbs that meet become one (after Clumps): a mob farm's hundred orbs are a handful of entities, not a hundred.
+    if ((this.age + this.id) % 10 === 0) {
+      for (const e of ctx.entitiesNear(this.x, this.y, this.z, 1.5)) {
+        if (e === this || !(e instanceof XpOrb) || e.removed) continue;
+        this.value += e.value;
+        e.removed = true;
+      }
+    }
     let best: PlayerRef | null = null, bestD = 8;
     for (const p of ctx.players()) {
       const d = Math.hypot(p.x - this.x, p.y + 0.9 - this.y, p.z - this.z);

@@ -59,6 +59,8 @@ export type Screen =
   | { kind: "poem" }
   /** The world map and its waypoints (M). */
   | { kind: "map" }
+  /** A backpack in the player's inventory slot `slot`, opened. */
+  | { kind: "backpack"; slot: number }
   /** A waystone's list of the others this player has found. */
   | { kind: "waystone"; x: number; y: number; z: number };
 
@@ -114,6 +116,9 @@ export interface Hud {
   toasts: { id: string; title: string; icon: string; at: number }[];
   /** A boss in range (the dragon): its name and health, 0..1. */
   boss: { name: string; health: number } | null;
+  /** Hidden hunger made visible (after AppleSkin): saturation, and what the held food would restore. */
+  saturation: number | null;
+  foodPreview: { food: number; saturation: number } | null;
   /** The minimap is showing in the top right corner, so what usually sits there moves down. */
   minimap: boolean;
 }

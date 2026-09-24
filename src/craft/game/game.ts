@@ -13,7 +13,7 @@
  * and asks the host for everything else, so there is exactly one answer to
  * where the water went.
  */
-import { B, block, boxColorOf, containerSize, FACE_DIRS, isFluid, isLeaves, isLog, type Material } from "../engine/blocks";
+import { B, block, boxColorOf, containerSize, FACE_DIRS, isFluid, isLeaves, isLog, OPPOSITE_FACING, type Material } from "../engine/blocks";
 import { Redstone, type Body as RedstoneBody, type RedstoneContext } from "../engine/redstone";
 import { chunkId, entityStacks, newBrewing, newChest, newFurnace, type BlockEntity, type BrewingEntity, type Chunk, type FurnaceEntity } from "../engine/chunk";
 import { DAY_TICKS, SEA_LEVEL, TICK_MS, WORLD_HEIGHT } from "../engine/constants";
@@ -28,6 +28,8 @@ import { itemDef, itemId, itemLight, maxStack, resolveDrops, type ItemStack, typ
 import { modEnabled } from "../engine/mods";
 import { WorldMap } from "./worldMap";
 import { withDeathPoint } from "../engine/waypoints";
+import { graveSpot, packGrave, unpackGrave } from "../engine/graves";
+import { ambientCue } from "../engine/ambience";
 import { travelCost, WAYSTONE_NAME_MAX, waystoneKey, waystoneName, type Waystone } from "../engine/waystones";
 import { seasonAt, seasonLabel, seasonTint, snowsHere, warmBiome, type Season } from "../engine/seasons";
 import { MAX_DYNAMIC_LIGHTS } from "../render/materials";
@@ -57,7 +59,7 @@ import { buildGateway, cityLoot, END_SPAWN, EndGenerator, endCitiesTouching, GAT
 import { EndFight } from "./endFight";
 import { FRAME_EYE } from "../engine/blocks";
 import { hash4 } from "../engine/rng";
-import { Actions } from "./actions";
+import { Actions, lookFacing } from "./actions";
 import type { ThrowExtra } from "../net/session";
 import type { LinkKind } from "../net/transport";
 import { GAME_SHORT } from "../edition";
@@ -122,6 +124,10 @@ export interface NetLink {
   registerWaystone?(x: number, y: number, z: number): void;
   /** Guest → host: a waystone's new name. */
   renameWaystone?(key: string, name: string): void;
+  /** Guest → host: lay a gravestone for my death at x, y, z. */
+  placeGrave?(x: number, y: number, z: number, items: Slot[], owner: string, yaw: number): void;
+  /** Guest → host: give me the gravestone at x, y, z. */
+  collectGrave?(x: number, y: number, z: number): void;
   /** Guest: settles once the host has said which chunks of the new dimension it changed. */
   readonly keysReady?: Promise<void> | null;
   /** Guest: the host's connection id. */
@@ -184,6 +190,8 @@ export interface GameOptions {
 const AUTOSAVE_TICKS = 600;
 const MAX_HOSTILE = 14;
 const MAX_PASSIVE = 10;
+/** Slots in a backpack: a chest's worth. */
+const BACKPACK_SLOTS = 27;
 
 export class Game {
   readonly meta: WorldMeta;
@@ -1698,6 +1706,7 @@ export class Game {
     // The enchanting table and the anvil hold their two stacks only while open, like a crafting grid.
     else if (screen?.kind === "enchanting" || screen?.kind === "anvil" || screen?.kind === "smithing") { this.craftGrid = [null, null]; this.anvilName = null; }
     if (was?.kind === "chest" && screen?.kind !== "chest") this.sound("chest_close", was.x + 0.5, was.y + 0.5, was.z + 0.5, 0.5);
+    if (was?.kind === "backpack" && screen?.kind !== "backpack") this.closeBackpack(was.slot);
     this.screen = screen;
     if (screen) { this.controls.attack = false; this.controls.use = false; this.actions.stopUsing(); }
     this.store.set({ screen, inv: this.store.get().inv + 1 });
@@ -2024,6 +2033,7 @@ export class Game {
     }
     if (this.tickCount % 20 === 0) this.audio.tickMusic(1, !this.isNight());
     if (this.tickCount % 20 === 11) this.repaintMap();
+    if (this.tickCount % 20 === 13 && this.modOn("ambient_sounds")) this.ambience();
     if (this.tickCount % 10 === 0) this.advance();
     // The City at the End of the Game: inside a city's bounds, above its island.
     if (this.tickCount % 20 === 7 && this.dimension === "end" && this.generator instanceof EndGenerator && !this.player.advancements.has("city")) {
@@ -2095,15 +2105,25 @@ export class Game {
     this.actions.stopUsing();
     if (!this.meta.rules.keepInventory) {
       const inv = p.inventory;
-      for (const s of [...inv.slots, ...inv.armor, inv.offhand]) {
-        if (s) this.dropItem(b.x, b.y + 1, b.z, s, (Math.random() - 0.5) * 0.5, 0.2 + Math.random() * 0.2, (Math.random() - 0.5) * 0.5);
+      // A gravestone keeps it all together where they fell (engine/graves.ts); without one, it scatters.
+      const grave = this.modOn("gravestones") ? packGrave(inv, [this.cursor, ...this.craftGrid]) : null;
+      if (grave && this.role === "guest") {
+        this.net?.placeGrave?.(b.x, b.y, b.z, grave, p.name, p.yaw);
+        this.message("Your things rest in a gravestone where you fell.", "#c0c0c0");
+      } else if (grave && this.placeGrave(b.x, b.y, b.z, grave, p.name, p.yaw)) {
+        this.message("Your things rest in a gravestone where you fell. Use it to take them back.", "#c0c0c0");
+      } else {
+        for (const s of [...inv.slots, ...inv.armor, inv.offhand]) {
+          if (s) this.dropItem(b.x, b.y + 1, b.z, s, (Math.random() - 0.5) * 0.5, 0.2 + Math.random() * 0.2, (Math.random() - 0.5) * 0.5);
+        }
+        if (this.cursor) this.dropItem(b.x, b.y + 1, b.z, this.cursor);
+        for (const s of this.craftGrid) if (s) this.dropItem(b.x, b.y + 1, b.z, s);
       }
       inv.clear();
+      this.cursor = null;
+      this.craftGrid = this.craftGrid.map(() => null);
       this.spawnXp(b.x, b.y + 1, b.z, p.deathXp());
       p.xpLevel = 0; p.xpPoints = 0;
-      if (this.cursor) { this.dropItem(b.x, b.y + 1, b.z, this.cursor); this.cursor = null; }
-      for (const s of this.craftGrid) if (s) this.dropItem(b.x, b.y + 1, b.z, s);
-      this.craftGrid = this.craftGrid.map(() => null);
     }
     this.bumpInv();
     this.setScreen({ kind: "death" });
@@ -2292,6 +2312,98 @@ export class Game {
     if (!this.waystones[key]) return;
     delete this.waystones[key];
     this.net?.waystonesChanged?.();
+  }
+
+  /**
+   * AppleSkin's view of hunger: the saturation the bar hides, and — holding
+   * food — the bar as it would be after eating it. Nothing when switched off.
+   */
+  private hungerPreview(): Pick<Hud, "saturation" | "foodPreview"> {
+    const p = this.player;
+    if (!this.modOn("appleskin")) return { saturation: null, foodPreview: null };
+    const food = itemDef(p.inventory.held?.id ?? -1)?.food;
+    const preview = food && p.food < 20
+      ? { food: Math.min(20, p.food + food.hunger), saturation: Math.min(Math.min(20, p.food + food.hunger), p.saturation + food.saturation) }
+      : null;
+    return { saturation: p.saturation, foodPreview: preview };
+  }
+
+  /** Once a second: perhaps a sound of the place the player is in (engine/ambience.ts). */
+  private ambience(): void {
+    const b = this.player.body;
+    const x = Math.floor(b.x), y = Math.floor(b.y + 1.5), z = Math.floor(b.z);
+    const l = this.world.getLight(x, y, z);
+    const biome = biomeDef(this.world.chunkAt(x, z)?.biomes[((z & 15) << 4) | (x & 15)] ?? 7);
+    let nearWater = false;
+    for (let dz = -8; dz <= 8 && !nearWater; dz += 4) for (let dx = -8; dx <= 8 && !nearWater; dx += 4) {
+      const top = this.world.topSolid(x + dx, z + dz);
+      nearWater = top >= 0 && this.world.blockAt(x + dx, top, z + dz) === B.WATER;
+    }
+    const cue = ambientCue({
+      dimension: this.dimension, biome: biome.name, night: this.isNight(), raining: this.rain > 0.5 && this.dimension === "overworld",
+      underground: l >= 0 && l >> 4 < 4 && y < SEA_LEVEL - 4, y: b.y, nearWater,
+    }, Math.random);
+    if (cue) this.audio.ambient(cue, b.x + (Math.random() - 0.5) * 16, b.y + 2 + Math.random() * 4, b.z + (Math.random() - 0.5) * 16);
+  }
+
+  // ---- gravestones ----------------------------------------------------------------------------
+
+  /**
+   * Host: lays a gravestone for a death at x, y, z, holding `items`, facing
+   * the way its player looked. False when there is nowhere open near enough.
+   */
+  placeGrave(x: number, y: number, z: number, items: Slot[], owner: string, yaw: number): boolean {
+    const spot = graveSpot((a, b, c) => this.world.blockAt(a, b, c), x, y, z);
+    if (!spot) return false;
+    const [gx, gy, gz] = spot;
+    this.world.setBlock(gx, gy, gz, B.GRAVESTONE, OPPOSITE_FACING[lookFacing(yaw)], "world");
+    this.world.setEntity(gx, gy, gz, { kind: "chest", items: items.map((s) => (s ? { ...s } : null)), owner: owner.slice(0, 16) });
+    this.containerChanged(gx, gy, gz);
+    return true;
+  }
+
+  /** Using a gravestone: here, its things go back where they were carried; a guest asks the host. */
+  useGrave(x: number, y: number, z: number): void {
+    if (this.role === "guest") this.net?.collectGrave?.(x, y, z);
+    else this.collectGrave(x, y, z, null);
+  }
+
+  /**
+   * Host: empties a gravestone into a player — this one (`who` null), each
+   * thing into the slot it came from, or a guest by connection — and clears it away.
+   */
+  collectGrave(x: number, y: number, z: number, who: string | null): void {
+    if (this.world.blockAt(x, y, z) !== B.GRAVESTONE) return;
+    const e = this.world.getEntity(x, y, z);
+    const items = e?.kind === "chest" ? e.items : [];
+    this.world.setEntity(x, y, z, undefined);
+    this.world.setBlock(x, y, z, B.AIR, 0, "world");
+    if (who === null) {
+      for (const s of unpackGrave(items, this.player.inventory)) this.dropItem(x + 0.5, y + 0.5, z + 0.5, s);
+      this.bumpInv();
+    } else for (const s of items) if (s) this.net?.giveRemote(who, s);
+    this.sound("chest_open", x + 0.5, y + 0.5, z + 0.5, 0.6, 0.7);
+    this.particles("block", x + 0.5, y + 0.6, z + 0.5, 16, B.GRAVESTONE);
+  }
+
+  // ---- backpacks ------------------------------------------------------------------------------
+
+  /** Opens the backpack in inventory slot `slot`: its 27 slots become the open container. */
+  openBackpack(slot: number): void {
+    const pack = this.player.inventory.slots[slot];
+    if (!pack || itemDef(pack.id)?.use !== "backpack" || !this.modOn("backpacks")) return;
+    const items = pack.contents ?? [];
+    pack.contents = Array.from({ length: BACKPACK_SLOTS }, (_, i) => items[i] ?? null);
+    this.sound("chest_open", null, 0, 0, 0.4, 1.3);
+    this.setScreen({ kind: "backpack", slot });
+  }
+
+  /** An empty backpack carries no contents list, so it stacks and compares as a fresh one does. */
+  private closeBackpack(slot: number): void {
+    const pack = this.player.inventory.slots[slot];
+    if (pack?.contents && !pack.contents.some(Boolean)) delete pack.contents;
+    this.sound("chest_close", null, 0, 0, 0.4, 1.3);
+    this.bumpInv();
   }
 
   /** Cheats: the world allows them, or the player is in creative. */
@@ -2636,6 +2748,7 @@ export class Game {
     return {
       health: p.health,
       food: p.food,
+      ...this.hungerPreview(),
       air: p.air,
       armor: p.armor,
       xpLevel: p.xpLevel,

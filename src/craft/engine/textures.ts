@@ -1180,6 +1180,16 @@ def("magenta_stained_glass", (p) => {
   for (let j = 0; j < 4; j++) p.set(3 + j, 6 - j, hex("#ffe0fa"), 170);
 });
 
+// A gravestone: weathered, mossy stone with a cross cut into it.
+const GRAVE_STONE = hex("#8a8a8e");
+def("gravestone", (p, r) => {
+  noisy(p, r, GRAVE_STONE, 0.12, 4);
+  speckle(p, r, [hex("#5e7a3a"), hex("#6a8a44")], 0.06);
+  frame(p, shade(GRAVE_STONE, 0.72));
+  for (let y = 3; y <= 11; y++) { p.set(7, y, shade(GRAVE_STONE, 0.5)); p.set(8, y, shade(GRAVE_STONE, 0.6)); }
+  for (let x = 5; x <= 10; x++) { p.set(x, 5, shade(GRAVE_STONE, 0.5)); p.set(x, 6, shade(GRAVE_STONE, 0.6)); }
+});
+
 // A waystone: dark carved stone, its rune a thin line of blue light.
 const WAYSTONE_STONE = hex("#56565f");
 const RUNE = hex("#7fe3ff");
@@ -1674,6 +1684,23 @@ def("bell_top", (p, r) => { noisy(p, r, hex("#f0cc50"), 0.1, 2); frame(p, hex("#
 type ItemPalette = Record<string, C>;
 const H = hex("#6b4a26"), HD = hex("#46301a"), HL = hex("#8a6536");
 const ITEM_TEMPLATES: Record<string, string[]> = {
+  backpack: [
+    "................",
+    ".....aaaaaa.....",
+    "....ab....ba....",
+    "...aaaaaaaaaa...",
+    "..abbbbbbbbbbd..",
+    "..abccccccccbd..",
+    "..abcbbbbbbcbd..",
+    "..abbbbwwbbbbd..",
+    "..abbbbwwbbbbd..",
+    "..abbbbbbbbbbd..",
+    "..abccccccccbd..",
+    "..abcbbbbbbcbd..",
+    "..abcbbbbbbcbd..",
+    "..abbbbbbbbbbd..",
+    "...dddddddddd...",
+  ],
   boat: [
     "................", "................", "................", "................",
     "..a..........a..",
@@ -2603,6 +2630,7 @@ art("chorus_fruit", "ball", paletteOf("#7a4e7a", { c: hex("#b88ab8") }));
 art("popped_chorus_fruit", "ball", paletteOf("#b894b8", { c: hex("#e6cce6"), d: hex("#8a6a8a") }));
 art("elytra", "elytra", paletteOf("#8a8aa0", { c: hex("#c8c8dc"), d: hex("#5e5e72") }));
 art("shulker_shell", "shell", paletteOf("#8e5b8e", { c: hex("#c498c4"), w: hex("#f0e0a0") }));
+art("backpack", "backpack", paletteOf("#8a5a2e", { c: hex("#6e4420"), w: hex("#d8c070") }));
 art("item_frame", "frame", { a: hex("#5a3e1e"), b: hex("#8a6a3a"), c: hex("#b08a52"), d: hex("#6e4c26"), l: hex("#a88a5e"), m: hex("#96784c") });
 art("firework_rocket", "rocket", { a: hex("#c8342a"), b: hex("#f2f0e6"), p: hex("#8a2020"), r: hex("#e04a3a"), w: hex("#ffd0c0"), k: hex("#6b4a26") });
 art("fermented_spider_eye", "eye", paletteOf("#8a4a2a", { w: hex("#e08a70") }));

@@ -7,7 +7,7 @@ import { enchantedBook, enchantLabel, ENCHANTMENTS, MAX_SHELVES } from "../engin
 import type { Slot } from "../engine/inventory";
 import type { Game } from "../game/game";
 import {
-  anvilView, brewingView, chestView, clickContainer, smithingView, craftOutput, craftWidth, creativeTake, creativeTrash, dropCursor, enchantItem,
+  anvilView, brewingView, chestView, clickContainer, smithingView, sortContainer, craftOutput, craftWidth, creativeTake, creativeTrash, dropCursor, enchantItem,
   enchantOffers, fillRecipe, furnaceView, inventoryCounts, makeTrade, tradingWith, type Section,
 } from "../game/containers";
 import { canAfford as canAffordOffer, LEVEL_NAMES, LEVEL_XP } from "../engine/trading";
@@ -279,7 +279,10 @@ export function InventoryScreen({ game, mobile }: { game: Game; mobile: boolean 
     <>
       <Frame game={game} title="Inventory" mobile={mobile} quick={quick} setQuick={setQuick} side={<RecipeBook game={game} open={book} />}>
         <SurvivalBody game={game} onHover={onHover} quick={quick} />
-        <Button onClick={() => setBook(!book)}>📖 {book ? "Hide" : "Show"} recipe book</Button>
+        <div style={{ display: "flex", gap: "calc(var(--u) * 2)" }}>
+          <Button onClick={() => setBook(!book)}>📖 {book ? "Hide" : "Show"} recipe book</Button>
+          {game.modOn("inventory_sort") && <SortButton onClick={() => sortContainer(game, "inv")} label="Sort inventory" />}
+        </div>
       </Frame>
       {tip}
     </>
@@ -339,21 +342,41 @@ export function ChestScreen({ game, mobile }: { game: Game; mobile: boolean }) {
   if (!chest) return null;
   const s = game.screen;
   const blockId = s && s.kind === "chest" ? game.world.blockAt(s.x, s.y, s.z) : B.CHEST;
-  // The same screen serves chests (27), hoppers (a row of 5) and dispensers and droppers (3×3).
-  const title = blockId === B.HOPPER ? "Item Hopper" : blockId === B.DISPENSER ? "Dispenser" : blockId === B.DROPPER ? "Dropper"
+  // The same screen serves chests (27), hoppers (a row of 5) and dispensers and droppers (3×3), and an open backpack.
+  const title = s?.kind === "backpack" ? (game.player.inventory.slots[s.slot]?.name ?? "Backpack")
+    : blockId === B.HOPPER ? "Item Hopper" : blockId === B.DISPENSER ? "Dispenser" : blockId === B.DROPPER ? "Dropper"
     : blockId === B.SHULKER_BOX ? "Shulker Box" : blockId === B.BARREL ? "Barrel" : "Chest";
   const cols = chest.items.length === 9 ? 3 : chest.items.length === 5 ? 5 : 9;
+  const sortable = game.modOn("inventory_sort") && chest.items.length >= 9;
   return (
     <>
       <Frame game={game} title={title} mobile={mobile} quick={quick} setQuick={setQuick}>
         <div style={{ display: "flex", justifyContent: "center" }}>
           <Grid slots={chest.items} cols={cols} section="chest" game={game} onHover={onHover} quick={quick} />
         </div>
-        <div className="bc-label">Inventory</div>
+        <div className="bc-label" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>Inventory</span>
+          {sortable && (
+            <span style={{ display: "flex", gap: "calc(var(--u) * 2)" }}>
+              <SortButton onClick={() => sortContainer(game, "chest")} label="Sort chest" />
+              <SortButton onClick={() => sortContainer(game, "inv")} label="Sort inventory" />
+            </span>
+          )}
+        </div>
         <PlayerSlots game={game} onHover={onHover} quick={quick} />
       </Frame>
       {tip}
     </>
+  );
+}
+
+/** Sorting (after Inventory Profiles): like stacks merged, then kinds together. */
+function SortButton({ onClick, label }: { onClick: () => void; label: string }) {
+  return (
+    <button type="button" className="bc-btn" title={label} aria-label={label} onClick={onClick}
+      style={{ minHeight: "calc(var(--u) * 11)", fontSize: "calc(var(--u) * 5)", padding: "0 calc(var(--u) * 3)" }}>
+      ⇅ {label.replace(/^Sort /, "")}
+    </button>
   );
 }
 

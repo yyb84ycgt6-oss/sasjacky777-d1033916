@@ -268,7 +268,7 @@ function Overlay({ game, input, settings, onSettings, onQuit, onExitApp }: GameV
       {screen?.kind === "inventory" && <InventoryScreen game={game} mobile={mobile} />}
       {screen?.kind === "crafting" && <CraftingScreen game={game} mobile={mobile} />}
       {screen?.kind === "furnace" && <FurnaceScreen game={game} mobile={mobile} />}
-      {screen?.kind === "chest" && <ChestScreen game={game} mobile={mobile} />}
+      {(screen?.kind === "chest" || screen?.kind === "backpack") && <ChestScreen game={game} mobile={mobile} />}
       {screen?.kind === "brewing" && <BrewingScreen game={game} mobile={mobile} />}
       {screen?.kind === "enchanting" && <EnchantingScreen game={game} mobile={mobile} />}
       {screen?.kind === "anvil" && <AnvilScreen game={game} mobile={mobile} />}

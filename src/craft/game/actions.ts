@@ -11,11 +11,12 @@
  */
 import * as THREE from "three";
 import {
-  B, block, CLOCKWISE_FACING, collisionBoxes, Face, FACE_DIRS, FACE_OF_FACING, FACING_DIRS, isButton, isCrop, isDoor, isFluid, isLeaves, isPillar,
+  B, block, CLOCKWISE_FACING, collisionBoxes, CROP_MAX_AGE, Face, FACE_DIRS, FACE_OF_FACING, FACING_DIRS, isButton, isCrop, isDoor, isFluid, isLeaves, isPillar,
   isRedstoneTorch, isSlab, isStairs, isTrapdoor, OPPOSITE_FACE, OPPOSITE_FACING, FRAME_EYE,
   type BlockDef,
 } from "../engine/blocks";
 import { cropDrops, supported } from "../engine/blockRules";
+import { isOre, isTrunk, oreVein, treeLogs, type Pos } from "../engine/chains";
 import { applyFortune, damageBonus, efficiencyBonus, levelOf, wears } from "../engine/enchanting";
 import { AreaCloud, EndCrystal, ItemFrame, PrimedTnt, Projectile, type ProjectileKind } from "../engine/entities";
 import { rocketLife, rocketOf } from "../engine/fireworks";
@@ -41,6 +42,8 @@ export interface Target {
 }
 
 const FACE_NORMALS: [number, number, number][] = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+/** The seed a harvested crop keeps back to replant itself. */
+const REPLANT: Record<number, string> = { [B.WHEAT]: "wheat_seeds", [B.CARROTS]: "carrot", [B.POTATOES]: "potato", [B.NETHER_WART]: "nether_wart" };
 const SHEARABLE = new Set<number>([B.OAK_LEAVES, B.BIRCH_LEAVES, B.SPRUCE_LEAVES, B.JUNGLE_LEAVES, B.ACACIA_LEAVES, B.SHORT_GRASS, B.FERN, B.DEAD_BUSH, B.COBWEB]);
 
 /** Ticks to break a block with a held item; 0 is instant, Infinity never. */
@@ -150,7 +153,7 @@ export class Actions {
     if (a.type === "chat") { if (!g.screen) g.setScreen({ kind: "chat", text: a.text ?? "" }); return; }
     if (a.type === "inventory") {
       const k = g.screen?.kind;
-      if (k === "inventory" || k === "crafting" || k === "furnace" || k === "chest" || k === "brewing" || k === "enchanting" || k === "anvil" || k === "smithing" || k === "trade") g.setScreen(null);
+      if (k === "inventory" || k === "crafting" || k === "furnace" || k === "chest" || k === "brewing" || k === "enchanting" || k === "anvil" || k === "smithing" || k === "trade" || k === "backpack") g.setScreen(null);
       else if (!g.screen && !p.dead && p.gameMode !== "spectator") g.setScreen({ kind: "inventory" });
       return;
     }
@@ -392,14 +395,42 @@ export class Actions {
       g.particles("block", hit.px, hit.py, hit.pz, 2, id, false);
     }
     if (m.progress >= 1) {
+      const heldId = p.inventory.held?.id ?? null;
       this.breakBlock(x, y, z, true);
       this.mining = null;
       this.useCooldown = Math.max(this.useCooldown, 0);
+      if (held && breakTicks(def, held, false, true).harvest) this.chainBreak(x, y, z, id, held, heldId);
     }
   }
 
-  /** Breaks a block as the player, dropping what the held tool earns. */
-  breakBlock(x: number, y: number, z: number, drops: boolean): void {
+  /**
+   * Tree felling and vein mining (engine/chains.ts): an axe brings down the
+   * rest of the tree whose trunk it cut, unless the player is sneaking; a
+   * pickaxe, while sneaking, follows the vein. Each block is broken as the
+   * player's own — dropping, wearing the tool, reaching friends — and it stops
+   * with a point of the tool's life left rather than breaking it.
+   */
+  private chainBreak(x: number, y: number, z: number, id: number, tool: ItemDef, heldId: number | null): void {
+    const g = this.game;
+    const p = g.player;
+    if (!g.modOn("tree_felling") || !tool.tool) return;
+    const get = (a: number, b: number, c: number) => g.world.blockAt(a, b, c);
+    let more: Pos[] = [];
+    if (tool.tool.type === "axe" && isTrunk(id) && !p.sneaking) more = treeLogs(get, x, y, z, id);
+    else if (tool.tool.type === "pickaxe" && isOre(id) && p.sneaking) more = oreVein(get, x, y, z, id);
+    const b = p.body;
+    for (const [bx, by, bz] of more) {
+      const held = p.inventory.held;
+      if (!held || held.id !== heldId) break;
+      if (p.survivalLike && tool.durability && tool.durability - (held.damage ?? 0) <= 1) break;
+      // A guest's edits count only near where they stand; the host would refuse the rest.
+      if (g.role === "guest" && (Math.abs(bx - b.x) > 11 || Math.abs(by - b.y) > 11 || Math.abs(bz - b.z) > 11)) continue;
+      this.breakBlock(bx, by, bz, true, true);
+    }
+  }
+
+  /** Breaks a block as the player, dropping what the held tool earns. `chained`: one of many at once, heard as one. */
+  breakBlock(x: number, y: number, z: number, drops: boolean, chained = false): void {
     const g = this.game;
     const p = g.player;
     const id = g.world.blockAt(x, y, z);
@@ -421,8 +452,10 @@ export class Actions {
       else stacks = applyFortune(resolveDrops(def.drops, id, Math.random), levelOf(p.inventory.held, "fortune"), Math.random, id);
     }
     if (drops) g.dropContainerContents(x, y, z);
-    // A creative player breaking a shulker box that holds something still gets the box back, full.
+    // A creative player breaking a shulker box that holds something still gets the box back, full;
+    // a gravestone gives back what it holds to anyone.
     else if (id === B.SHULKER_BOX) g.dropContainerContents(x, y, z, false);
+    else if (id === B.GRAVESTONE) g.dropContainerContents(x, y, z);
     else g.world.setEntity(x, y, z, undefined);
 
     // Two-block things come down together.
@@ -442,8 +475,8 @@ export class Actions {
     const replacement = id === B.ICE && drops && !silk && block(g.world.blockAt(x, y - 1, z)).solid ? B.WATER : B.AIR;
     g.world.setBlock(x, y, z, replacement, 0, "player");
     // Not broadcast: everyone else plays these from the block change itself, and would hear it twice.
-    g.blockSound(def.material, "break", x + 0.5, y + 0.5, z + 0.5, false);
-    g.particles("block", x + 0.5, y + 0.5, z + 0.5, 16, id, false);
+    if (!chained || Math.random() < 0.2) g.blockSound(def.material, "break", x + 0.5, y + 0.5, z + 0.5, false);
+    g.particles("block", x + 0.5, y + 0.5, z + 0.5, chained ? 4 : 16, id, false);
 
     for (const s of stacks) g.dropItem(x + 0.5, y + 0.3, z + 0.5, s);
     if (drops && harvest && def.xp && !silk) {
@@ -614,6 +647,10 @@ export class Actions {
     }
     if (def.use === "bow") {
       if (!p.survivalLike || this.nextArrow() !== null) this.bow = { ticks: 0 };
+      return;
+    }
+    if (def.use === "backpack") {
+      g.openBackpack(p.inventory.selected);
       return;
     }
     if (def.use === "pearl") {
@@ -891,6 +928,7 @@ export class Actions {
     if ((!p.sneaking || !def) && fresh && bdef.interact) {
       if (this.interactBlock(x, y, z, id, meta, def)) return true;
     }
+    if (fresh && !p.sneaking && p.gameMode !== "adventure" && g.modOn("right_click_harvest") && this.harvestCrop(x, y, z, id, meta)) return true;
     if (fresh && id === B.DRAGON_EGG && !p.sneaking) {
       g.teleportEgg(x, y, z);
       this.swing();
@@ -1072,6 +1110,10 @@ export class Actions {
       case "waystone":
         g.useWaystone(x, y, z);
         return true;
+      case "grave":
+        g.useGrave(x, y, z);
+        this.swing();
+        return true;
       case "brewing":
         g.containerAt(x, y, z, "brewing");
         g.setScreen({ kind: "brewing", x, y, z });
@@ -1098,6 +1140,18 @@ export class Actions {
         const nl = open ? lower | 4 : lower & ~4;
         w.setBlock(x, lowerY, z, B.OAK_DOOR, nl, "player");
         if (w.blockAt(x, lowerY + 1, z) === B.OAK_DOOR) w.setBlock(x, lowerY + 1, z, B.OAK_DOOR, nl | 8, "player");
+        // Double doors (after Couplings): the other of a pair — beside it, facing the same way, hinged
+        // on the other side, and in the same state this one was — swings with it.
+        if (g.modOn("double_doors")) {
+          for (const [dx, dz] of FACING_DIRS) {
+            const om = w.getMeta(x + dx, lowerY, z + dz);
+            if (w.blockAt(x + dx, lowerY, z + dz) !== B.OAK_DOOR || om & 8 || (om & 3) !== (lower & 3) || (om & 16) === (lower & 16) || (om & 4) !== (lower & 4)) continue;
+            const on = open ? om | 4 : om & ~4;
+            w.setBlock(x + dx, lowerY, z + dz, B.OAK_DOOR, on, "player");
+            if (w.blockAt(x + dx, lowerY + 1, z + dz) === B.OAK_DOOR) w.setBlock(x + dx, lowerY + 1, z + dz, B.OAK_DOOR, on | 8, "player");
+            break;
+          }
+        }
         g.sound(open ? "door_open" : "door_close", x + 0.5, y + 0.5, z + 0.5, 0.8);
         this.swing();
         return true;
@@ -1119,6 +1173,27 @@ export class Actions {
       }
     }
     return false;
+  }
+
+  /**
+   * Right-click harvest (after the Right Click Harvest mod): a ripe crop gives
+   * its harvest and is replanted where it stood, one seed kept back for it.
+   */
+  private harvestCrop(x: number, y: number, z: number, id: number, meta: number): boolean {
+    const ripe = isCrop(id) ? meta >= CROP_MAX_AGE[id] : id === B.NETHER_WART && (meta & 3) === 3;
+    if (!ripe) return false;
+    const g = this.game;
+    const stacks = cropDrops(id, meta, Math.random);
+    const seed = itemId(REPLANT[id]);
+    const kept = stacks.find((s) => s.id === seed);
+    if (kept) kept.count--;
+    g.world.setBlock(x, y, z, id, 0, "player");
+    g.blockSound(block(id).material, "break", x + 0.5, y + 0.5, z + 0.5, false);
+    g.particles("block", x + 0.5, y + 0.3, z + 0.5, 8, id, false);
+    for (const s of stacks) if (s.count > 0) g.dropItem(x + 0.5, y + 0.3, z + 0.5, s);
+    g.player.addExhaustion(0.005);
+    this.swing();
+    return true;
   }
 
   /** Flicking a lever, pressing a button, setting a repeater's delay or a comparator's mode, inverting a detector. */

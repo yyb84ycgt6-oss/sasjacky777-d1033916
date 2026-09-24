@@ -269,6 +269,8 @@ function itemDefOrNull(name: string): boolean {
 shaped("shulker_box", ["S", "C", "S"], { S: "shulker_shell", C: "chest" }, "shulker_box");
 shaped("purpur_slab", ["###"], { "#": "purpur_block" }, "purpur_slab", 6);
 shaped("item_frame", ["SSS", "SLS", "SSS"], { S: "stick", L: "leather" }, "item_frame");
+// A backpack: leather round a chest, a string strap.
+shaped("backpack", ["LSL", "LCL", "LLL"], { L: "leather", S: "string", C: "chest" }, "backpack");
 // A waystone: a stone-brick pillar on obsidian, an ender pearl at its heart for the travelling.
 shaped("waystone", [" B ", "BPB", "OOO"], { B: "stone_bricks", P: "ender_pearl", O: "obsidian" }, "waystone");
 // A box and a dye: the same box, same contents, new colour.

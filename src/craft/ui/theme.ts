@@ -88,6 +88,7 @@ export const THEME_CSS = `
 @keyframes bc-toast { 0% { transform: translateX(110%) } 8% { transform: translateX(0) } 88% { transform: translateX(0) } 100% { transform: translateX(110%) } }
 @keyframes bc-fadeout { 0% { opacity: 1 } 80% { opacity: 1 } 100% { opacity: 0 } }
 @keyframes bc-pulse { 0%, 100% { transform: scale(1) } 50% { transform: scale(1.12) } }
+@keyframes bc-blink { 0%, 100% { opacity: 0.3 } 50% { opacity: 0.95 } }
 .bc-glint {
   position: absolute; width: calc(var(--u) * 16); height: calc(var(--u) * 16); pointer-events: none;
   background:

@@ -63,7 +63,9 @@ export type ItemUse =
   /** Set on obsidian or bedrock (end crystals); fired while gliding for a burst of speed (rockets). */
   | "end_crystal" | "rocket"
   /** Hung on the face of a block. */
-  | "item_frame";
+  | "item_frame"
+  /** Opened in the hand: a satchel of 27 slots carried with you. */
+  | "backpack";
 
 export type Category = "building" | "colored" | "natural" | "functional" | "redstone" | "tools" | "combat" | "food" | "ingredients";
 
@@ -405,6 +407,7 @@ item("firework_rocket", "Firework Rocket", { use: "rocket", category: "tools" })
 // Shulkers' shells, which make shulker boxes; and the frame an End ship hangs its elytra in.
 item("shulker_shell", "Shulker Shell");
 item("item_frame", "Item Frame", { use: "item_frame", category: "functional" });
+item("backpack", "Backpack", { use: "backpack", maxStack: 1, category: "tools" });
 item("firework_star", "Firework Star");
 // Bottled from the dragon's breath: brewed into a splash potion, it makes it linger.
 item("dragon_breath", "Dragon's Breath", { category: "ingredients" });

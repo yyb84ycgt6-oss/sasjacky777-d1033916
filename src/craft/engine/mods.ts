@@ -41,6 +41,42 @@ export const MODS: readonly ModFeature[] = [
     id: "seasons", name: "Seasons", inspiredBy: "Serene Seasons, Fabric Seasons", url: "https://www.curseforge.com/minecraft/mc-mods/serene-seasons",
     description: "Spring, summer, autumn and winter, a week each: leaves turn, snow falls where it rained, and crops slow in autumn and stop in winter.", toggle: true,
   },
+  {
+    id: "gravestones", name: "Gravestones", inspiredBy: "Gravestone Mod, Corail Tombstone", url: "https://www.curseforge.com/minecraft/mc-mods/gravestone-mod",
+    description: "Dying leaves a headstone holding everything you carried, safe from lava and despawning; use it and each thing goes back where it was.", toggle: true,
+  },
+  {
+    id: "backpacks", name: "Backpacks", inspiredBy: "Traveler's Backpack, Sophisticated Backpacks", url: "https://www.curseforge.com/minecraft/mc-mods/travelers-backpack",
+    description: "A leather backpack with a chest's worth of room, opened from your hand wherever you are.", toggle: true,
+  },
+  {
+    id: "tree_felling", name: "Tree Felling & Vein Mining", inspiredBy: "FallingTree, Veinminer", url: "https://www.curseforge.com/minecraft/mc-mods/falling-tree",
+    description: "Cut a trunk with an axe and the whole tree comes down (sneak to take one log); sneak with a pickaxe and a whole ore vein comes out.", toggle: true,
+  },
+  {
+    id: "right_click_harvest", name: "Right-Click Harvest", inspiredBy: "Right Click Harvest", url: "https://modrinth.com/mod/rightclickharvest",
+    description: "Use a ripe crop to harvest it and replant it in one go.", toggle: true,
+  },
+  {
+    id: "double_doors", name: "Double Doors", inspiredBy: "Couplings", url: "https://www.curseforge.com/minecraft/mc-mods/couplings",
+    description: "Open one of a pair of doors and the other swings with it.", toggle: true,
+  },
+  {
+    id: "inventory_sort", name: "Inventory Sorting", inspiredBy: "Inventory Profiles Next, Mouse Tweaks", url: "https://www.curseforge.com/minecraft/mc-mods/inventory-profiles-next",
+    description: "A button to tidy a chest, a backpack or your inventory: like stacks merged, kinds together.", toggle: true,
+  },
+  {
+    id: "appleskin", name: "Hunger Preview", inspiredBy: "AppleSkin", url: "https://www.curseforge.com/minecraft/mc-mods/appleskin",
+    description: "The hunger bar shows your hidden saturation, and — holding food — what eating it would fill.", toggle: true,
+  },
+  {
+    id: "clumps", name: "Experience Clumps", inspiredBy: "Clumps", url: "https://www.curseforge.com/minecraft/mc-mods/clumps",
+    description: "Experience orbs that meet merge into one, so a busy farm stays smooth.", toggle: false,
+  },
+  {
+    id: "ambient_sounds", name: "Ambient Sounds", inspiredBy: "AmbientSounds, Dynamic Surroundings", url: "https://www.curseforge.com/minecraft/mc-mods/ambientsounds",
+    description: "Birds in the forest, crickets and owls at night, frogs in the swamp, surf, wind on the peaks, drips in caves, the Nether's moan.", toggle: true,
+  },
 ];
 
 /** Whether a feature is on in a world: everything is, unless the world switched it off. */

@@ -33,8 +33,10 @@ function sameContents(a: ItemStack, b: ItemStack): boolean {
   return JSON.stringify(a.contents ?? []) === JSON.stringify(b.contents ?? []);
 }
 
-/** Whether a stack may go inside a shulker box: anything but another box, which would nest without end. */
-export const fitsInBox = (s: ItemStack): boolean => s.id !== B.SHULKER_BOX;
+/** A carried container: a shulker box, or a backpack. */
+export const isCarriedContainer = (id: number): boolean => id === B.SHULKER_BOX || itemDef(id)?.use === "backpack";
+/** Whether a stack may go inside a carried container: anything but another, which would nest without end. */
+export const fitsInBox = (s: ItemStack): boolean => !isCarriedContainer(s.id);
 
 export function cloneStack(s: Slot): Slot {
   return s ? { ...s } : null;
@@ -200,8 +202,8 @@ export function sanitizeStack(value: unknown): Slot {
   if (typeof s.color === "number" && s.color > 0 && s.color < 9) out.color = Math.floor(s.color);
   if (s.burst) { const b = sanitizeBurst(s.burst); if (b) out.burst = b; }
   if (s.fw) { const r = sanitizeRocket(s.fw); if (r) out.fw = r; }
-  // A box's contents, one level deep: a box inside a box is refused here as it is in the slots.
-  if (s.id === B.SHULKER_BOX && Array.isArray(s.contents)) {
+  // A box's or a backpack's contents, one level deep: a box inside a box is refused here as it is in the slots.
+  if (isCarriedContainer(s.id) && Array.isArray(s.contents)) {
     const items = s.contents.slice(0, 27).map((c) => {
       const clean = sanitizeStack(c);
       return clean && fitsInBox(clean) ? clean : null;
@@ -277,4 +279,28 @@ export function range(from: number, to: number): number[] {
   const out: number[] = [];
   for (let i = from; i < to; i++) out.push(i);
   return out;
+}
+
+/**
+ * Sorts the stacks at `indices` (after Inventory Profiles and Mouse Tweaks):
+ * like stacks merged, then ordered by the item's place in the game's list, so
+ * blocks sit with blocks and tools with tools. Empty slots go to the end.
+ */
+export function sortSlots(slots: Slot[], indices: number[]): void {
+  const stacks = indices.map((i) => slots[i]).filter((s): s is ItemStack => !!s);
+  const merged: ItemStack[] = [];
+  for (const s of stacks) {
+    let left = s.count;
+    for (const m of merged) {
+      if (left <= 0) break;
+      if (!sameItem(m, s)) continue;
+      const room = maxStack(m.id) - m.count;
+      const n = Math.min(room, left);
+      m.count += n;
+      left -= n;
+    }
+    if (left > 0) merged.push({ ...s, count: left });
+  }
+  merged.sort((a, b) => a.id - b.id || (a.name ?? "").localeCompare(b.name ?? "") || (a.damage ?? 0) - (b.damage ?? 0) || b.count - a.count);
+  indices.forEach((slot, i) => { slots[slot] = merged[i] ?? null; });
 }

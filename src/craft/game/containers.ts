@@ -7,7 +7,7 @@
  * input and fuel into its fuel slot — because that is the move experienced
  * players make hundreds of times a session without looking.
  */
-import { clickSlot, fitsInBox, mergeInto, range, sameItem, type ClickButton, type Slot } from "../engine/inventory";
+import { clickSlot, fitsInBox, isCarriedContainer, mergeInto, range, sameItem, sortSlots, type ClickButton, type Slot } from "../engine/inventory";
 import { consumeGrid, fuelTicks, layout, matchRecipe, recipeResult, smeltResult, type Recipe } from "../engine/crafting";
 import { itemDef, itemId, maxStack, type ItemStack } from "../engine/items";
 import { B } from "../engine/blocks";
@@ -25,6 +25,11 @@ export type Section = "inv" | "armor" | "offhand" | "grid" | "result" | "chest" 
 
 function chestOf(game: Game): ChestEntity | null {
   const s = game.screen;
+  // An open backpack is a chest whose slots are its own stack's contents, edited in place.
+  if (s?.kind === "backpack") {
+    const pack = game.player.inventory.slots[s.slot];
+    return pack && isCarriedContainer(pack.id) && pack.contents ? { kind: "chest", items: pack.contents } : null;
+  }
   if (s?.kind !== "chest") return null;
   const e = game.world.getEntity(s.x, s.y, s.z);
   return e?.kind === "chest" ? e : null;
@@ -62,10 +67,10 @@ function changed(game: Game): void {
   else game.bumpInv();
 }
 
-/** The open container is a shulker box, which takes anything but another box. */
+/** The open container is a shulker box or a backpack, which take anything but another. */
 function inBox(game?: Game): boolean {
   const s = game?.screen;
-  return s?.kind === "chest" && game!.world.blockAt(s.x, s.y, s.z) === B.SHULKER_BOX;
+  return s?.kind === "backpack" || (s?.kind === "chest" && game!.world.blockAt(s.x, s.y, s.z) === B.SHULKER_BOX);
 }
 
 function accepts(section: Section, index: number, game?: Game): (s: ItemStack) => boolean {
@@ -119,7 +124,7 @@ function quickMove(game: Game, from: Section, index: number, stack: ItemStack): 
   const inv = game.player.inventory;
   const kind = game.screen?.kind;
   if (from === "inv") {
-    if (kind === "chest") {
+    if (kind === "chest" || kind === "backpack") {
       const chest = chestOf(game);
       if (chest && (!inBox(game) || fitsInBox(stack))) return mergeInto(stack, chest.items, range(0, chest.items.length));
     }
@@ -181,6 +186,8 @@ function quickMove(game: Game, from: Section, index: number, stack: ItemStack): 
 export function clickContainer(game: Game, section: Section, index: number, button: ClickButton, shift: boolean): void {
   const inv = game.player.inventory;
   if (section === "result") { takeResult(game, shift); return; }
+  // The open backpack stays where it is: picked up, it would be carrying the screen showing it.
+  if (game.screen?.kind === "backpack" && section === "inv" && index === game.screen.slot) return;
 
   if (section === "brewing") {
     const e = brewingOf(game);
@@ -503,6 +510,19 @@ export function furnaceView(game: Game): FurnaceEntity | null {
 
 export function chestView(game: Game): ChestEntity | null {
   return chestOf(game);
+}
+
+/**
+ * Sorts the open chest (or backpack) or, with none open, the player's main
+ * inventory — never the hotbar, which is laid out by hand.
+ */
+export function sortContainer(game: Game, which: "chest" | "inv"): void {
+  if (which === "chest") {
+    const c = chestOf(game);
+    if (!c) return;
+    sortSlots(c.items, range(0, c.items.length));
+  } else sortSlots(game.player.inventory.slots, range(9, 36));
+  changed(game);
 }
 
 // ---- trading ---------------------------------------------------------------------------------
