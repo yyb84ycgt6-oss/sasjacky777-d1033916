@@ -68,7 +68,11 @@ export interface Welcome {
 }
 
 // 2: dimensions (the "dm" and "mk" ops, and the welcome's dimension).
-const PROTOCOL = 2;
+// 3: End cities grown into towers and ships, and catacombs and spider caves — ground an older copy
+//    would generate differently, so a guest on it would walk through walls the host sees — plus
+//    shulkers, fireworks, waystones, gravestones and the mod switches (the "wz", "wr", "wn", "gr",
+//    "gc", "md" and "fw" ops, and the welcome's disabledMods and waystones).
+const PROTOCOL = 3;
 const FLUSH_TICKS = 2;
 const ENTITY_TICKS = 4;
 const ENV_TICKS = 40;
