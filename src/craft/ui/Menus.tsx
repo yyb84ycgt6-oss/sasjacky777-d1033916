@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Settings } from "../game/settings";
+import { edition } from "../edition";
+import type { LinkKind } from "../net/transport";
 import { ADVANCEMENTS } from "../engine/advancements";
 import { itemId } from "../engine/items";
 import { Button, Cycle, ItemIcon, Slider, Toggle } from "./common";
@@ -17,9 +19,10 @@ export function MenuFrame({ title, children, width = 200, dim = true }: { title?
 }
 
 export function PauseMenu({ onResume, onOptions, onShare, onAdvancements, onQuit, onExitApp, shareLabel, canShare, quitLabel }: {
-  onResume: () => void; onOptions: () => void; onShare: () => void; onAdvancements: () => void; onQuit: () => void; onExitApp: () => void;
+  onResume: () => void; onOptions: () => void; onShare: () => void; onAdvancements: () => void; onQuit: () => void; onExitApp?: () => void;
   shareLabel: string; canShare: boolean; quitLabel: string;
 }) {
+  const exitLabel = onExitApp ? edition().exitLabel : null;
   return (
     <MenuFrame title="Game Menu">
       <Button wide onClick={onResume}>Back to Game</Button>
@@ -29,7 +32,7 @@ export function PauseMenu({ onResume, onOptions, onShare, onAdvancements, onQuit
       </div>
       <Button wide onClick={onOptions}>Options…</Button>
       <Button wide onClick={onQuit}>{quitLabel}</Button>
-      <Button wide onClick={onExitApp}>Back to Jackie</Button>
+      {exitLabel && <Button wide onClick={onExitApp}>{exitLabel}</Button>}
     </MenuFrame>
   );
 }
@@ -152,24 +155,39 @@ export function OptionsScreen({ settings, onChange, onDone, inGame }: {
   );
 }
 
-export function ShareScreen({ onOpen, onBack, busy, error, room, kind, onStop }: {
-  onOpen: (kind: "online" | "device") => void; onBack: () => void; busy: boolean; error: string | null;
-  room: string | null; kind: "online" | "device" | null; onStop: () => void;
+export function ShareScreen({ onOpen, onBack, busy, error, room, kind, addresses, onStop }: {
+  onOpen: (kind: LinkKind) => void; onBack: () => void; busy: boolean; error: string | null;
+  room: string | null; kind: LinkKind | null; addresses?: string[]; onStop: () => void;
 }) {
+  const e = edition();
+  const where = kind === "online" ? "online" : kind === "lan" ? "to your local network" : "to other tabs on this device";
   return (
     <MenuFrame title="Play Together" width={240}>
       {room ? (
         <>
-          <div className="bc-sub" style={{ textAlign: "center" }}>Your world is open {kind === "online" ? "online" : "to other tabs on this device"}. Friends join from Multiplayer with this code:</div>
+          <div className="bc-sub" style={{ textAlign: "center" }}>
+            Your world is open {where}. Friends join from Multiplayer{kind === "lan" ? " → LAN, with this address and code" : " with this code"}:
+          </div>
+          {kind === "lan" && (
+            addresses?.length
+              ? addresses.map((a) => <div key={a} style={{ textAlign: "center", fontSize: "calc(var(--u) * 11)", color: "#55ffff" }}>{a}</div>)
+              : <div className="bc-sub" style={{ textAlign: "center", color: "#ffcc55" }}>This computer reports no network address — is it connected to Wi-Fi or a cable?</div>
+          )}
           <div style={{ textAlign: "center", fontSize: "calc(var(--u) * 22)", color: "#ffff55", letterSpacing: "0.2em" }}>{room}</div>
-          <Button wide onClick={() => { void navigator.clipboard?.writeText(room); }}>Copy code</Button>
+          <Button wide onClick={() => { void navigator.clipboard?.writeText(kind === "lan" && addresses?.[0] ? `${addresses[0]} ${room}` : room); }}>Copy code</Button>
           <Button wide danger onClick={onStop}>Close world to others</Button>
         </>
       ) : (
         <>
           <div className="bc-sub" style={{ textAlign: "center" }}>Open this world so friends can join. You stay the host: the world is saved on your side.</div>
-          <Button wide disabled={busy} onClick={() => onOpen("online")}>🌐 Open online</Button>
-          <Button wide disabled={busy} onClick={() => onOpen("device")}>🖥 Open to tabs on this device</Button>
+          {e.online && <Button wide disabled={busy} onClick={() => onOpen("online")}>🌐 Open online</Button>}
+          {e.lanHost && <Button wide disabled={busy} onClick={() => onOpen("lan")}>📡 Open to LAN</Button>}
+          {e.device && <Button wide disabled={busy} onClick={() => onOpen("device")}>🖥 Open to tabs on this device</Button>}
+          {!e.online && !e.lanHost && (
+            <div className="bc-sub" style={{ textAlign: "center", lineHeight: 1.5 }}>
+              To host friends on other computers, run the desktop app (it opens a LAN server), or start one with <span style={{ color: "#ffff55" }}>node relay.mjs</span> and join it from every copy.
+            </div>
+          )}
           {busy && <div className="bc-sub" style={{ textAlign: "center" }}>Opening…</div>}
         </>
       )}

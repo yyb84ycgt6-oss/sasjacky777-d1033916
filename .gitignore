@@ -41,3 +41,6 @@ __pycache__/
 .pytest_cache/
 *.egg-info/
 .venv/
+
+# CollinSurvivalCraft single-file build (csc/dist is covered by "dist" above).
+csc/dist-single/

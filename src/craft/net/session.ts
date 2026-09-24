@@ -33,7 +33,7 @@ import { isDimension, type Dimension } from "../engine/dimension";
 import type { BlockChange } from "../engine/world";
 import type { Arrival, Game, NetLink, RemotePlayer } from "../game/game";
 import { packChunk, toBase64, fromBase64, unpackChunk, type ChunkData, type GameRules } from "../game/save";
-import { clientId, connectionId, DeviceTransport, MAX_PART, OnlineTransport, type NetMessage, type Transport } from "./transport";
+import { clientId, connectionId, DeviceTransport, LanTransport, MAX_PART, OnlineTransport, type LinkKind, type NetMessage, type Transport } from "./transport";
 
 type Op = unknown[];
 
@@ -71,14 +71,26 @@ const TIMEOUT_MS = 20000;
 const finite = (...v: unknown[]) => v.every((n) => typeof n === "number" && Number.isFinite(n));
 const int = (v: unknown) => typeof v === "number" && Number.isInteger(v);
 
-export function makeTransport(kind: "online" | "device", room: string): Transport {
-  return kind === "online" ? new OnlineTransport(room) : new DeviceTransport(room);
+/** `address` is the relay's host:port, and only LAN links have one. */
+export function makeTransport(kind: LinkKind, room: string, address?: string): Transport {
+  if (kind === "online") return new OnlineTransport(room);
+  if (kind === "lan") {
+    if (!address) throw new Error("Type the host's address (shown on their Play Together screen) to join over the local network.");
+    return new LanTransport(address, room);
+  }
+  return new DeviceTransport(room);
+}
+
+async function linked(t: Transport): Promise<void> {
+  if (t instanceof OnlineTransport || t instanceof LanTransport) await t.ready;
 }
 
 export class NetSession implements NetLink {
   readonly role: "host" | "guest";
   readonly room: string;
-  readonly kind: "online" | "device";
+  readonly kind: LinkKind;
+  /** Where others on the network reach a LAN host (host:port for each of its addresses); empty otherwise. */
+  shareAddresses: string[] = [];
   private game: Game | null = null;
   private out: Op[] = [];
   private stateOp: Op | null = null;
@@ -104,17 +116,19 @@ export class NetSession implements NetLink {
     transport.onStatus?.((live) => {
       this.status = live ? "connected" : "reconnecting";
       this.updateStatus();
-      this.game?.message(live ? "Reconnected to the online server." : "Lost the online server — reconnecting. Edits made meanwhile are sent when it is back.", live ? "#aaffaa" : "#ffcc55");
+      const other = this.kind === "lan" ? (this.role === "host" ? "the LAN relay" : "the host") : "the online server";
+      this.game?.message(live ? `Reconnected to ${other}.` : `Lost ${other} — reconnecting. Edits made meanwhile are sent when it is back.`, live ? "#aaffaa" : "#ffcc55");
     });
   }
 
   // ---- setup ------------------------------------------------------------------------------
 
   /** Opens the host's running world to others. */
-  static async host(game: Game, kind: "online" | "device", room: string): Promise<NetSession> {
-    const t = makeTransport(kind, room);
-    if (t instanceof OnlineTransport) await t.ready;
+  static async host(game: Game, kind: LinkKind, room: string, lan?: { address: string; share: string[] }): Promise<NetSession> {
+    const t = makeTransport(kind, room, lan?.address);
+    await linked(t);
     const s = new NetSession("host", t, room, game.player.id);
+    s.shareAddresses = lan?.share ?? [];
     const keys = await game.saves.savedChunkKeys(game.meta.id, game.dimension).catch(() => [] as string[]);
     for (const k of game.pendingChunkKeys(game.dimension)) s.modified.add(k);
     for (const k of keys) s.modified.add(k);
@@ -128,9 +142,9 @@ export class NetSession implements NetLink {
    * (not yet attached to a game) and what the guest needs to build one; the
    * guest's Player must use `session.myId` so the host's messages reach it.
    */
-  static async join(kind: "online" | "device", room: string, name: string, skin: number): Promise<{ session: NetSession; welcome: Welcome }> {
-    const t = makeTransport(kind, room);
-    if (t instanceof OnlineTransport) await t.ready;
+  static async join(kind: LinkKind, room: string, name: string, skin: number, address?: string): Promise<{ session: NetSession; welcome: Welcome }> {
+    const t = makeTransport(kind, room, address);
+    await linked(t);
     const myId = connectionId();
     const s = new NetSession("guest", t, room, myId);
     const pid = clientId();
@@ -256,7 +270,7 @@ export class NetSession implements NetLink {
     const g = this.game;
     if (!g) return;
     const players = [g.player.name, ...[...g.remote.values()].map((r) => r.name)];
-    g.setNetStatus({ role: this.role, room: this.room, kind: this.kind, players, status: this.status });
+    g.setNetStatus({ role: this.role, room: this.room, kind: this.kind, players, status: this.status, addresses: this.shareAddresses });
   }
 
   // ---- sending ------------------------------------------------------------------------------

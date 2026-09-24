@@ -18,6 +18,7 @@ import type { EntitySnapshot } from "../engine/entities";
 import type { GameMode, PlayerSave } from "../engine/player";
 import type { WorldType } from "../engine/worldgen";
 import type { Dimension } from "../engine/dimension";
+import { GAME_NAME } from "../edition";
 
 export interface GameRules {
   keepInventory: boolean;
@@ -305,10 +306,10 @@ export class SaveStore {
     try {
       file = JSON.parse(text);
     } catch {
-      throw new Error("That file is not a BlockCraft world (it is not JSON).");
+      throw new Error(`That file is not a ${GAME_NAME} world (it is not JSON).`);
     }
     if (file?.format !== "blockcraft-world" || !file.meta || !Array.isArray(file.chunks)) {
-      throw new Error("That file is not a BlockCraft world export.");
+      throw new Error(`That file is not a ${GAME_NAME} world export.`);
     }
     const keep = opts.keepId && typeof file.meta.id === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(file.meta.id);
     const id = keep ? file.meta.id : newWorldId();

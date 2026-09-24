@@ -26,6 +26,7 @@ import { Particles } from "./particles";
 import { Sky, skyState } from "./sky";
 import { Weather } from "./weather";
 import { blockGeometry, itemModel, spriteGeometry } from "./itemModels";
+import { GAME_NAME } from "../edition";
 
 export interface RemotePlayerView {
   id: string;
@@ -134,7 +135,7 @@ export class WorldRenderer {
     const needed = buildAtlas().count;
     if (maxLayers && needed > maxLayers) {
       this.renderer.dispose();
-      throw new Error(`This device's graphics hold ${maxLayers} texture layers and BlockCraft needs ${needed}.`);
+      throw new Error(`This device's graphics hold ${maxLayers} texture layers and ${GAME_NAME} needs ${needed}.`);
     }
     this.renderer.autoClear = false;
     this.renderer.sortObjects = true;

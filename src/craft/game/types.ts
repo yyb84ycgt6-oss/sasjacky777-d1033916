@@ -1,5 +1,6 @@
 import type { Slot } from "../engine/inventory";
 import type { GameMode } from "../engine/player";
+import type { LinkKind } from "../net/transport";
 
 /** What the input layer (keyboard/mouse or touch) writes and the game reads each frame. */
 export interface Controls {
@@ -92,7 +93,7 @@ export interface Hud {
   inv: number;
   title: { text: string; sub?: string; at: number } | null;
   actionbar: { text: string; at: number } | null;
-  net: { role: "host" | "guest"; room: string; kind: "online" | "device"; players: string[]; status: string } | null;
+  net: { role: "host" | "guest"; room: string; kind: LinkKind; players: string[]; status: string; addresses?: string[] } | null;
   saveProblem: string | null;
   saving: boolean;
   onFire: boolean;

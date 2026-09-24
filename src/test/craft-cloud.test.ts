@@ -1,36 +1,33 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { configureEdition } from "@/craft/edition";
+import { cloudAvailable, deleteCloudWorld, downloadWorld, explainCloudError, listCloudWorlds, NO_CLOUD, uploadWorld } from "@/craft/game/cloud";
+import { newWorldMeta, SaveStore } from "@/craft/game/save";
+import { CHUNK_VOLUME } from "@/craft/engine/constants";
 
 // A stand-in for the Supabase client: a signed-in (or not) session, and a
 // craft_worlds table that is one in-memory map of rows.
-const state = vi.hoisted(() => ({
+const state = {
   user: "user-1" as string | null,
   rows: new Map<string, Record<string, unknown>>(),
   fail: null as { message: string; code?: string } | null,
-}));
+};
 
-vi.mock("@/integrations/supabase/client", () => {
-  const result = <T>(data: T) => Promise.resolve(state.fail ? { data: null, error: state.fail } : { data, error: null });
-  return {
-    supabase: {
-      auth: { getSession: async () => ({ data: { session: state.user ? { user: { id: state.user } } : null } }) },
-      from: () => ({
-        select: () => ({
-          order: () => result([...state.rows.values()]),
-          eq: (_c: string, id: string) => ({ maybeSingle: () => result(state.rows.get(id) ?? null) }),
-        }),
-        upsert: (row: Record<string, unknown>) => {
-          if (!state.fail) state.rows.set(row.id as string, { ...row, updated_at: new Date().toISOString() });
-          return result(null);
-        },
-        delete: () => ({ eq: (_c: string, id: string) => { if (!state.fail) state.rows.delete(id); return result(null); } }),
-      }),
+const result = <T>(data: T) => Promise.resolve(state.fail ? { data: null, error: state.fail } : { data, error: null });
+const fakeClient = {
+  auth: { getSession: async () => ({ data: { session: state.user ? { user: { id: state.user } } : null } }) },
+  from: () => ({
+    select: () => ({
+      order: () => result([...state.rows.values()]),
+      eq: (_c: string, id: string) => ({ maybeSingle: () => result(state.rows.get(id) ?? null) }),
+    }),
+    upsert: (row: Record<string, unknown>) => {
+      if (!state.fail) state.rows.set(row.id as string, { ...row, updated_at: new Date().toISOString() });
+      return result(null);
     },
-  };
-});
-
-import { deleteCloudWorld, downloadWorld, explainCloudError, listCloudWorlds, uploadWorld } from "@/craft/game/cloud";
-import { newWorldMeta, SaveStore } from "@/craft/game/save";
-import { CHUNK_VOLUME } from "@/craft/engine/constants";
+    delete: () => ({ eq: (_c: string, id: string) => { if (!state.fail) state.rows.delete(id); return result(null); } }),
+  }),
+};
 
 function world(name = "Home") {
   return newWorldMeta({ name, seed: 42, seedText: "42", type: "default", gameMode: "survival", difficulty: 2, hardcore: false, cheats: false });
@@ -38,6 +35,8 @@ function world(name = "Home") {
 
 describe("cloud worlds", () => {
   beforeEach(() => {
+    // As the SAS-JACKY page sets it up: the app's client, signed in, with cloud saves.
+    configureEdition({ kind: "sas-jacky", online: fakeClient as unknown as SupabaseClient, cloud: true });
     state.user = "user-1";
     state.rows.clear();
     state.fail = null;
@@ -112,5 +111,19 @@ describe("cloud worlds", () => {
   it("names a network failure as the network, and an unknown one in the server's words", () => {
     expect(explainCloudError("TypeError: Failed to fetch")).toMatch(/connection/);
     expect(explainCloudError("something odd")).toBe("The cloud refused: something odd");
+  });
+
+  it("tells the solo copy's player where cloud saves live instead of asking them to sign in", async () => {
+    configureEdition({ kind: "standalone", online: null, cloud: false });
+    expect(cloudAvailable()).toBe(false);
+    const saves = new SaveStore();
+    const meta = world();
+    await saves.putWorld(meta);
+    for (const v of [await listCloudWorlds(), await uploadWorld(saves, meta), await downloadWorld(saves, meta.id), await deleteCloudWorld(meta.id)]) {
+      expect(v.ok).toBe(false);
+      expect(v.error).toBe(NO_CLOUD);
+    }
+    expect(NO_CLOUD).toMatch(/Export/);
+    expect(state.rows.size).toBe(0);
   });
 });

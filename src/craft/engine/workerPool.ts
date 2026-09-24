@@ -17,6 +17,14 @@ interface Slot {
   busy: number;
 }
 
+// A module worker loaded from its own file. The single-file build of the solo
+// copy has no other file to load it from, so it swaps in one inlined as a blob.
+let makeWorker = (): Worker => new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
+
+export function setWorkerFactory(factory: () => Worker): void {
+  makeWorker = factory;
+}
+
 export class WorkerPool {
   private slots: Slot[] = [];
   private pending = new Map<number, Pending>();
@@ -31,7 +39,7 @@ export class WorkerPool {
     try {
       if (typeof Worker === "undefined") throw new Error("no Worker");
       for (let i = 0; i < size; i++) {
-        const worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
+        const worker = makeWorker();
         const slot: Slot = { worker, busy: 0 };
         worker.onmessage = (e: MessageEvent<JobResult>) => {
           slot.busy--;

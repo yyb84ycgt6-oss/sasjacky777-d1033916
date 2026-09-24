@@ -15,7 +15,8 @@ import type { SaveStore, WorldMeta } from "../game/save";
 import { effectiveControls, type Settings } from "../game/settings";
 import type { Hud as HudState } from "../game/types";
 import { NetSession } from "../net/session";
-import { clientId, newRoomCode } from "../net/transport";
+import { clientId, newRoomCode, type LinkKind } from "../net/transport";
+import { edition, GAME_NAME } from "../edition";
 import { Button } from "./common";
 import { Hud } from "./Hud";
 import { AdvancementsScreen, ChatInput, DeathScreen, MenuFrame, OptionsScreen, PauseMenu, ShareScreen } from "./Menus";
@@ -32,7 +33,7 @@ export interface GameViewProps {
   onSettings: (s: Settings) => void;
   /** Back to the title screen, optionally with a message explaining why. */
   onQuit: (message?: string) => void;
-  onExitApp: () => void;
+  onExitApp?: () => void;
   /** Handed the final save once the world stops, so the world list can wait for it. */
   onStopped?: (saved: Promise<void>) => void;
 }
@@ -40,7 +41,7 @@ export interface GameViewProps {
 function webglProblem(err: unknown): string {
   const text = err instanceof Error ? err.message : String(err);
   if (/webgl|context/i.test(text)) {
-    return "BlockCraft needs WebGL 2, and this browser would not create a WebGL 2 canvas. Turn on hardware acceleration in the browser's settings, or try another browser.";
+    return `${GAME_NAME} needs WebGL 2, and this browser would not create a WebGL 2 canvas. Turn on hardware acceleration in the browser's settings, or try another browser.`;
   }
   return `The world could not start: ${text}`;
 }
@@ -98,7 +99,7 @@ export function GameView(props: GameViewProps) {
 
   if (startError) {
     return (
-      <MenuFrame title="BlockCraft could not start">
+      <MenuFrame title={`${GAME_NAME} could not start`}>
         <div style={{ fontSize: "calc(var(--u) * 7)", lineHeight: 1.5, textAlign: "center" }}>{startError}</div>
         <Button wide onClick={() => props.onQuit()}>Back to title</Button>
       </MenuFrame>
@@ -154,10 +155,18 @@ function Overlay({ game, input, settings, onSettings, onQuit, onExitApp }: GameV
     game.applySettings(s);
   };
 
-  const openToOthers = async (kind: "online" | "device") => {
+  const openToOthers = async (kind: LinkKind) => {
     setShare({ busy: true, error: null });
     try {
-      await NetSession.host(game, kind, newRoomCode());
+      if (kind === "lan") {
+        const relay = edition().lanHost;
+        if (!relay) throw new Error("Only the desktop app can host over the local network.");
+        const { port, addresses } = await relay.start();
+        // The host reaches its own relay on loopback; guests use the addresses the relay reported.
+        await NetSession.host(game, "lan", newRoomCode(), { address: `127.0.0.1:${port}`, share: addresses.map((a) => `${a}:${port}`) });
+      } else {
+        await NetSession.host(game, kind, newRoomCode());
+      }
       setShare({ busy: false, error: null });
     } catch (err) {
       setShare({ busy: false, error: (err as Error).message });
@@ -206,7 +215,7 @@ function Overlay({ game, input, settings, onSettings, onQuit, onExitApp }: GameV
           onShare={() => game.setScreen({ kind: "share" })}
           onAdvancements={() => game.setScreen({ kind: "advancements" })}
           onQuit={() => quit()}
-          onExitApp={() => { leaving.current = true; onExitApp(); }}
+          onExitApp={onExitApp && (() => { leaving.current = true; onExitApp(); })}
           canShare={!guest}
           shareLabel={guest ? "Joined a friend" : net ? "Playing together…" : "Open to friends"}
           quitLabel={guest ? "Disconnect" : "Save and quit to title"}
@@ -224,6 +233,7 @@ function Overlay({ game, input, settings, onSettings, onQuit, onExitApp }: GameV
           error={share.error}
           room={net?.role === "host" ? net.room : null}
           kind={net?.kind ?? null}
+          addresses={net?.addresses}
           onOpen={(kind) => void openToOthers(kind)}
           onStop={() => { game.net?.close(); game.message("The world is closed to others again.", "#ffff55"); }}
           onBack={() => game.setScreen({ kind: "pause" })}

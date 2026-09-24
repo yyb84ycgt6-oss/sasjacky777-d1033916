@@ -298,6 +298,7 @@ const App = () => (
                   <Route path="/marvels" element={<ProtectedRoute><MarvelsRace /></ProtectedRoute>} />
                   <Route path="/craft" element={<ProtectedRoute><BlockCraft /></ProtectedRoute>} />
                   <Route path="/minecraft" element={<Navigate to="/craft" replace />} />
+                  <Route path="/csc" element={<Navigate to="/craft" replace />} />
                   <Route path="/sentinel" element={<ProtectedRoute><SentinelDashboard /></ProtectedRoute>} />
                   <Route path="/sentinel/board" element={<ProtectedRoute><SentinelBoard /></ProtectedRoute>} />
                   <Route path="/apex" element={<ProtectedRoute><ApexHub /></ProtectedRoute>} />

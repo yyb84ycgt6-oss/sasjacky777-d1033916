@@ -1,5 +1,5 @@
 /**
- * BlockCraft, start to finish: title → worlds → a running world, or title →
+ * CollinSurvivalCraft, start to finish: title → worlds → a running world, or title →
  * multiplayer → a friend's world. Mounted full-screen over the app; leaving
  * saves whatever is running.
  */
@@ -8,6 +8,7 @@ import type { Role } from "../game/game";
 import { SaveStore, type WorldMeta } from "../game/save";
 import { loadSettings, saveSettings, type Settings } from "../game/settings";
 import { NetSession, type Welcome } from "../net/session";
+import type { LinkKind } from "../net/transport";
 import { guiUnit } from "./common";
 import { GameView } from "./GameView";
 import { OptionsScreen } from "./Menus";
@@ -52,7 +53,8 @@ function guestWorld(w: Welcome, room: string): WorldMeta {
   };
 }
 
-export function CraftApp({ onExit }: { onExit: () => void }) {
+/** `onExit` leaves the game entirely; without one (a browser tab) there is no such button. */
+export function CraftApp({ onExit }: { onExit?: () => void }) {
   const saves = useMemo(() => new SaveStore(), []);
   const [settings, setSettingsState] = useState<Settings>(loadSettings);
   const [view, setView] = useState<View>({ kind: "title" });
@@ -61,6 +63,26 @@ export function CraftApp({ onExit }: { onExit: () => void }) {
   const runs = useRef(0);
   // The last world's final save; the world list waits on it so it never shows stale data.
   const [lastSave, setLastSave] = useState<Promise<void>>(Promise.resolve());
+  const [exiting, setExiting] = useState(false);
+  // Read by the exit below in the same commit that unmounts the world, before the state catches up.
+  const finalSave = useRef<Promise<void>>(Promise.resolve());
+  const exited = useRef(false);
+
+  // Leaving the game entirely steps out of the running world first, so its
+  // final save is written before whatever comes next — for the desktop app,
+  // closing the window, which would otherwise cut an IndexedDB write short.
+  const exitApp = onExit && (() => { setExiting(true); setView({ kind: "title" }); });
+  useEffect(() => {
+    if (!exiting || view.kind === "game" || !onExit || exited.current) return;
+    exited.current = true;
+    void finalSave.current.finally(onExit);
+  }, [exiting, view.kind, onExit]);
+  // The desktop shell asks with this event when its window's close button is pressed.
+  useEffect(() => {
+    if (!exitApp) return;
+    window.addEventListener("csc:exit-request", exitApp);
+    return () => window.removeEventListener("csc:exit-request", exitApp);
+  });
 
   useEffect(() => {
     const onResize = () => setSize({ w: window.innerWidth, h: window.innerHeight });
@@ -81,10 +103,10 @@ export function CraftApp({ onExit }: { onExit: () => void }) {
     setView({ kind: "game", meta, role, session, run: ++runs.current });
   };
 
-  const joinWorld = async (kind: "online" | "device", room: string) => {
+  const joinWorld = async (kind: LinkKind, room: string, address?: string) => {
     setJoin({ busy: true, error: null });
     try {
-      const { session, welcome } = await NetSession.join(kind, room, settings.playerName.trim() || "Player", settings.skin);
+      const { session, welcome } = await NetSession.join(kind, room, settings.playerName.trim() || "Player", settings.skin, address);
       setJoin({ busy: false, error: null });
       play(guestWorld(welcome, room), "guest", session);
     } catch (err) {
@@ -105,7 +127,7 @@ export function CraftApp({ onExit }: { onExit: () => void }) {
           onSingle={() => setView({ kind: "worlds" })}
           onMulti={() => { setJoin({ busy: false, error: null }); setView({ kind: "multiplayer" }); }}
           onOptions={() => setView({ kind: "options" })}
-          onExit={onExit}
+          onExit={exitApp}
         />
       )}
       {view.kind === "worlds" && (
@@ -131,7 +153,7 @@ export function CraftApp({ onExit }: { onExit: () => void }) {
           onSettings={setSettings}
           busy={join.busy}
           error={join.error}
-          onJoin={(kind, room) => void joinWorld(kind, room)}
+          onJoin={(kind, room, address) => void joinWorld(kind, room, address)}
           onBack={() => setView({ kind: "title" })}
         />
       )}
@@ -150,9 +172,9 @@ export function CraftApp({ onExit }: { onExit: () => void }) {
           saves={saves}
           settings={settings}
           onSettings={setSettings}
-          onStopped={(p) => setLastSave(p)}
+          onStopped={(p) => { finalSave.current = p; setLastSave(p); }}
           onQuit={(message) => setView(view.role === "guest" ? { kind: "title", message } : message ? { kind: "title", message } : { kind: "worlds" })}
-          onExitApp={onExit}
+          onExitApp={exitApp}
         />
       )}
     </div>

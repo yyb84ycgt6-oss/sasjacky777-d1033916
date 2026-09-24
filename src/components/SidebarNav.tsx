@@ -127,7 +127,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Games & Worlds",
     items: [
       { label: "⚔️ Play Game", href: "/play" },
-      { label: "⛏️ BlockCraft", href: "/craft", title: "BlockCraft — Minecraft-style survival and creative, on desktop and mobile, with saves and online play" },
+      { label: "⛏️ CollinSurvivalCraft", href: "/craft", title: "CollinSurvivalCraft (CSC) — Minecraft-style survival and creative, on desktop and mobile, with saves and online play" },
       { label: "🐉 Realm Accord ↗", href: "https://dragon-chaos-wars.lovable.app", title: "Realm Accord — strategy game", external: true },
       { label: "🌐 Horizon Network ↗", href: "https://jadelounge.lovable.app", title: "Horizon Network — social network", external: true },
       { label: "👑 Emperors of the Last Kingdom ↗", href: "https://chaos-dragon-emperor.lovable.app", title: "Emperors of the Last Kingdom — fantasy strategy", external: true },

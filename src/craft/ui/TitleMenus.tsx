@@ -6,21 +6,26 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { randomSeed, seedFromString } from "../engine/rng";
 import type { GameMode } from "../engine/player";
 import type { WorldType } from "../engine/worldgen";
-import { deleteCloudWorld, downloadWorld, listCloudWorlds, uploadWorld, type CloudWorld } from "../game/cloud";
+import { edition, GAME_NAME, GAME_VERSION } from "../edition";
+import { cloudAvailable, deleteCloudWorld, downloadWorld, listCloudWorlds, uploadWorld, type CloudWorld } from "../game/cloud";
 import { newWorldMeta, type SaveStore, type WorldMeta } from "../game/save";
 import { effectiveControls, type Settings } from "../game/settings";
-import { normalizeRoomCode } from "../net/transport";
+import { normalizeLanAddress, normalizeRoomCode, type LinkKind } from "../net/transport";
 import { Button, Cycle, Toggle } from "./common";
 import { MenuFrame } from "./Menus";
 import { textureBackground } from "./icons";
 
 // Original lines; the yellow splash is part of the genre's charm.
 const SPLASHES = [
-  "Now with Jackie!", "Every texture painted by code!", "Plays on your phone!", "Open to friends!", "Saves itself!",
-  "Twenty ticks a second!", "Punch a tree!", "Chunks all the way down!", "Mind the creepers!", "Built in SAS-JACKY!",
-  "Sheep come in sixteen colours!", "Try hardcore!", "Beds skip the night!", "Water finds its level!", "Also try the Eru lab!",
-  "Bone meal works!", "Real caves!", "Diamonds below 16!", "Creative mode flies!", "No downloads!",
+  "Every texture painted by code!", "Plays on your phone!", "Open to friends!", "Saves itself!",
+  "Twenty ticks a second!", "Punch a tree!", "Chunks all the way down!", "Mind the creepers!",
+  "Sheep come in sixteen colours!", "Try hardcore!", "Beds skip the night!", "Water finds its level!",
+  "Bone meal works!", "Real caves!", "Diamonds below 16!", "Creative mode flies!", "Collin approved!",
+  "Survive the night!", "The dragon waits!", "Mind the shulkers!",
 ];
+// Only where they are true: the solo copy has no Jackie, and is itself a download.
+const SPLASHES_APP = ["Now with Jackie!", "Built in SAS-JACKY!", "Also try the Eru lab!", "No downloads!"];
+const SPLASHES_SOLO = ["Works offline!", "No account needed!", "LAN parties!", "Yours to keep!"];
 
 /** The tiled dirt of every menu that is not over a world. */
 export function MenuBackground() {
@@ -30,38 +35,44 @@ export function MenuBackground() {
 
 export function Logo() {
   const stone = useMemo(() => textureBackground("stone", 0), []);
-  const splash = useMemo(() => SPLASHES[Math.floor(Math.random() * SPLASHES.length)], []);
+  const splash = useMemo(() => {
+    const all = [...SPLASHES, ...(edition().kind === "sas-jacky" ? SPLASHES_APP : SPLASHES_SOLO)];
+    return all[Math.floor(Math.random() * all.length)];
+  }, []);
   return (
     <div style={{ position: "relative", textAlign: "center", marginBottom: "calc(var(--u) * 10)" }}>
       <div
-        aria-label="BlockCraft"
+        aria-label={GAME_NAME}
         style={{
-          fontSize: "min(calc(var(--u) * 30), 13vw)", fontWeight: 900, letterSpacing: "0.05em", lineHeight: 1,
+          fontSize: "min(calc(var(--u) * 19), 7.4vw)", fontWeight: 900, letterSpacing: "0.03em", lineHeight: 1,
           backgroundImage: `url(${stone})`, backgroundSize: "calc(var(--u) * 12)", imageRendering: "pixelated",
           WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent",
           WebkitTextStroke: "calc(var(--u) * 0.8) #1b1b1b",
           filter: "drop-shadow(calc(var(--u) * 1.5) calc(var(--u) * 1.5) 0 #000)",
         }}
       >
-        BLOCKCRAFT
+        {GAME_NAME.toUpperCase()}
       </div>
-      <div className="bc-sub" style={{ marginTop: "calc(var(--u) * 2)", color: "#ddd" }}>BROWSER EDITION</div>
+      <div className="bc-sub" style={{ marginTop: "calc(var(--u) * 2)", color: "#ddd" }}>{edition().tagline}</div>
       <div
         style={{
-          position: "absolute", right: "-2%", bottom: "calc(var(--u) * 9)", color: "#ffff00", fontSize: "calc(var(--u) * 7.5)",
-          transform: "rotate(-18deg)", animation: "bc-pulse 0.5s ease-in-out infinite", whiteSpace: "nowrap",
+          // Hung off the logo's last letters rather than over them: the name is long. The tilt
+          // lives here and the pulse on the span inside, since an animated transform replaces a static one.
+          position: "absolute", right: 0, bottom: "calc(var(--u) * 3)", color: "#ffff00", fontSize: "calc(var(--u) * 7.5)",
+          transform: "translateX(40%) rotate(-18deg)", whiteSpace: "nowrap",
           textShadow: "calc(var(--u) * 0.7) calc(var(--u) * 0.7) 0 #3f3f00",
         }}
       >
-        {splash}
+        <span style={{ display: "inline-block", animation: "bc-pulse 0.5s ease-in-out infinite" }}>{splash}</span>
       </div>
     </div>
   );
 }
 
 export function TitleScreen({ onSingle, onMulti, onOptions, onExit, message, settings }: {
-  onSingle: () => void; onMulti: () => void; onOptions: () => void; onExit: () => void; message?: string; settings: Settings;
+  onSingle: () => void; onMulti: () => void; onOptions: () => void; onExit?: () => void; message?: string; settings: Settings;
 }) {
+  const exitLabel = onExit ? edition().exitLabel : null;
   return (
     <>
       <MenuBackground />
@@ -73,14 +84,14 @@ export function TitleScreen({ onSingle, onMulti, onOptions, onExit, message, set
         <div style={{ width: "min(100%, calc(var(--u) * 200))", display: "flex", flexDirection: "column", gap: "calc(var(--u) * 4)" }}>
           <Button wide onClick={onSingle}>Singleplayer</Button>
           <Button wide onClick={onMulti}>Multiplayer</Button>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "calc(var(--u) * 4)" }}>
+          <div style={{ display: "grid", gridTemplateColumns: exitLabel ? "1fr 1fr" : "1fr", gap: "calc(var(--u) * 4)" }}>
             <Button onClick={onOptions}>Options…</Button>
-            <Button onClick={onExit}>Back to Jackie</Button>
+            {exitLabel && <Button onClick={onExit}>{exitLabel}</Button>}
           </div>
         </div>
       </div>
       <div className="absolute bc-shadow" style={{ left: "calc(var(--u) * 2)", bottom: "calc(var(--u) * 2)", fontSize: "calc(var(--u) * 5.5)", color: "#ddd" }}>
-        BlockCraft 1.0 · {effectiveControls(settings) === "mobile" ? "touch controls" : "keyboard & mouse"}
+        {GAME_NAME} {GAME_VERSION} · {effectiveControls(settings) === "mobile" ? "touch controls" : "keyboard & mouse"}
       </div>
       <div className="absolute bc-shadow" style={{ right: "calc(var(--u) * 2)", bottom: "calc(var(--u) * 2)", fontSize: "calc(var(--u) * 5.5)", color: "#ddd", textAlign: "right", maxWidth: "60%" }}>
         An original game inspired by Minecraft. Not affiliated with Mojang or Microsoft.
@@ -145,7 +156,7 @@ export function WorldSelect({ saves, ready, onPlay, onCreate, onBack }: {
     const blob = await saves.exportWorld(w.id);
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `${w.name.replace(/[^\w\- ]/g, "").trim() || "world"}.blockcraft.json`;
+    a.download = `${w.name.replace(/[^\w\- ]/g, "").trim() || "world"}.csc.json`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   });
@@ -266,8 +277,8 @@ export function WorldSelect({ saves, ready, onPlay, onCreate, onBack }: {
           <Button disabled={!sel || busy} onClick={() => setConfirmDelete(true)}>Delete</Button>
           <Button disabled={!sel || busy} onClick={() => sel && void exportWorld(sel)}>Export…</Button>
           <Button disabled={busy} onClick={() => fileRef.current?.click()}>Import…</Button>
-          <Button disabled={!sel || busy} onClick={() => sel && void upload(sel)}>☁ Upload to Cloud</Button>
-          <Button disabled={busy} onClick={() => setCloud(true)}>☁ Cloud Worlds…</Button>
+          {cloudAvailable() && <Button disabled={!sel || busy} onClick={() => sel && void upload(sel)}>☁ Upload to Cloud</Button>}
+          {cloudAvailable() && <Button disabled={busy} onClick={() => setCloud(true)}>☁ Cloud Worlds…</Button>}
           <Button onClick={onBack}>Cancel</Button>
         </div>
         <input
@@ -463,41 +474,63 @@ function uniqueName(base: string, taken: string[]): string {
 }
 
 export function MultiplayerScreen({ settings, onSettings, onJoin, onBack, busy, error }: {
-  settings: Settings; onSettings: (s: Settings) => void; onJoin: (kind: "online" | "device", room: string) => void;
+  settings: Settings; onSettings: (s: Settings) => void; onJoin: (kind: LinkKind, room: string, address?: string) => void;
   onBack: () => void; busy: boolean; error: string | null;
 }) {
+  const e = edition();
+  // Only the links this copy can make: the solo copy has no online server, a desktop window has no tabs.
+  const kinds = ([e.online && "online", e.lanJoin && "lan", e.device && "device"] as const).filter((k): k is LinkKind => !!k);
   const [code, setCode] = useState("");
-  const [kind, setKind] = useState<"online" | "device">("online");
+  const [kind, setKind] = useState<LinkKind>(kinds[0] ?? "device");
+  const [addressText, setAddressText] = useState(() => {
+    try { return localStorage.getItem("blockcraft.lan.address") ?? ""; } catch { return ""; }
+  });
   const room = normalizeRoomCode(code);
+  const address = kind === "lan" ? normalizeLanAddress(addressText) : undefined;
+  const ready = room.length >= 4 && address !== null && !busy;
+  const join = () => {
+    if (!ready) return;
+    if (address) try { localStorage.setItem("blockcraft.lan.address", addressText.trim()); } catch { /* remembered only as a convenience */ }
+    onJoin(kind, room, address);
+  };
+  const LABEL: Record<LinkKind, string> = { online: "Online (any device)", lan: "LAN (same network)", device: "Tabs on this device" };
   return (
     <>
       <MenuBackground />
       <MenuFrame title="Play Multiplayer" width={230} dim={false}>
         <div className="bc-sub" style={{ textAlign: "center", lineHeight: 1.6 }}>
-          A friend opens their world from the game menu (Esc → Open to friends) and reads you the code it shows.
+          A friend opens their world from the game menu (Esc → Open to friends) and reads you the {kind === "lan" ? "address and code" : "code"} it shows.
         </div>
+        {kinds.length > 1 && <Cycle<LinkKind> label="Connect" value={kind} options={kinds} onChange={setKind} format={(v) => LABEL[v]} />}
+        {kind === "lan" && (
+          <label style={{ display: "flex", flexDirection: "column", gap: "calc(var(--u) * 2)" }}>
+            <span className="bc-sub">Host address</span>
+            <input
+              className="bc-input" value={addressText} placeholder="e.g. 192.168.1.20:25580" maxLength={64} autoComplete="off"
+              onChange={(ev) => setAddressText(ev.target.value)}
+              onKeyDown={(ev) => { if (ev.key === "Enter") join(); }}
+            />
+            {addressText.trim() && address === null && <span className="bc-sub" style={{ color: "#ff8080" }}>That is not an address — it looks like 192.168.1.20:25580.</span>}
+          </label>
+        )}
         <label style={{ display: "flex", flexDirection: "column", gap: "calc(var(--u) * 2)" }}>
           <span className="bc-sub">World code</span>
           <input
             className="bc-input" value={code} placeholder="e.g. K7QM3X" maxLength={16} autoCapitalize="characters" autoComplete="off"
             style={{ letterSpacing: "0.2em", textTransform: "uppercase" }}
-            onChange={(e) => setCode(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && room.length >= 4 && !busy) onJoin(kind, room); }}
+            onChange={(ev) => setCode(ev.target.value)}
+            onKeyDown={(ev) => { if (ev.key === "Enter") join(); }}
           />
         </label>
         <label style={{ display: "flex", flexDirection: "column", gap: "calc(var(--u) * 2)" }}>
           <span className="bc-sub">Your name</span>
           <input
             className="bc-input" value={settings.playerName} maxLength={16} placeholder="Steve"
-            onChange={(e) => onSettings({ ...settings, playerName: e.target.value.replace(/[^\w\- ]/g, "").slice(0, 16) })}
+            onChange={(ev) => onSettings({ ...settings, playerName: ev.target.value.replace(/[^\w\- ]/g, "").slice(0, 16) })}
           />
         </label>
-        <Cycle<"online" | "device">
-          label="Connect" value={kind} options={["online", "device"]} onChange={setKind}
-          format={(v) => (v === "online" ? "Online (any device)" : "Tabs on this device")}
-        />
         {error && <div style={{ color: "#ff8080", fontSize: "calc(var(--u) * 6)", textAlign: "center", lineHeight: 1.5 }}>{error}</div>}
-        <Button wide disabled={busy || room.length < 4} onClick={() => onJoin(kind, room)}>{busy ? "Joining…" : "Join World"}</Button>
+        <Button wide disabled={!ready} onClick={join}>{busy ? "Joining…" : "Join World"}</Button>
         <Button wide onClick={onBack}>Back</Button>
       </MenuFrame>
     </>

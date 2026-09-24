@@ -140,7 +140,7 @@ export function Hud({ hud, mobile, crosshair }: { hud: HudState; mobile: boolean
       )}
       {hud.net && (
         <div className="absolute" style={{ right: "calc(var(--u) * 3)", top: mobile ? "calc(var(--u) * 22)" : "calc(var(--u) * 3)", fontSize: "calc(var(--u) * 6)", textAlign: "right", background: "rgba(0,0,0,0.35)", padding: "calc(var(--u) * 1) calc(var(--u) * 3)" }}>
-          <div>{hud.net.role === "host" ? "Hosting" : "Joined"} · {hud.net.kind === "online" ? "online" : "this device"} · room <span style={{ color: "#ffff80" }}>{hud.net.room}</span></div>
+          <div>{hud.net.role === "host" ? "Hosting" : "Joined"} · {hud.net.kind === "online" ? "online" : hud.net.kind === "lan" ? "LAN" : "this device"} · room <span style={{ color: "#ffff80" }}>{hud.net.room}</span></div>
           <div style={{ color: hud.net.status === "connected" ? "#9f9" : "#fc6" }}>{hud.net.players.length} player{hud.net.players.length === 1 ? "" : "s"} · {hud.net.status}</div>
         </div>
       )}

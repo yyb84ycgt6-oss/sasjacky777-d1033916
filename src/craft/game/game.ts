@@ -52,6 +52,8 @@ import { FRAME_EYE } from "../engine/blocks";
 import { hash4 } from "../engine/rng";
 import { Actions } from "./actions";
 import type { ThrowExtra } from "../net/session";
+import type { LinkKind } from "../net/transport";
+import { GAME_SHORT } from "../edition";
 import { runCommand } from "./commands";
 import { SaveStore, type ChunkData, type WorldMeta } from "./save";
 import { effectiveControls, saveSettings, type Settings } from "./settings";
@@ -66,7 +68,7 @@ export type Role = "local" | "host" | "guest";
 export interface NetLink {
   readonly role: "host" | "guest";
   readonly room: string;
-  readonly kind: "online" | "device";
+  readonly kind: LinkKind;
   tick(): void;
   blockChanged(change: BlockChange): void;
   chat(text: string): void;
@@ -2367,7 +2369,7 @@ export class Game {
     const stats = this.renderer.stats();
     const t = this.actions.target?.block;
     return [
-      `BlockCraft — ${this.fps} fps · ${this.role}${this.net ? ` · ${this.net.kind} ${this.net.room}` : ""}`,
+      `${GAME_SHORT} — ${this.fps} fps · ${this.role}${this.net ? ` · ${this.net.kind} ${this.net.room}` : ""}`,
       `XYZ: ${b.x.toFixed(3)} / ${b.y.toFixed(3)} / ${b.z.toFixed(3)}`,
       `Block: ${x} ${y} ${z}   Chunk: ${x >> 4} ${z >> 4}`,
       `Facing: ${facing} (${(((p.yaw * 180) / Math.PI) % 360).toFixed(1)} / ${((p.pitch * 180) / Math.PI).toFixed(1)})`,

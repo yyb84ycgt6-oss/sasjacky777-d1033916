@@ -7,7 +7,7 @@
  * Every call returns a verdict rather than throwing, so a screen can show the
  * sentence and carry on.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { edition, GAME_NAME } from "../edition";
 import type { SaveStore, WorldMeta } from "./save";
 
 /**
@@ -17,7 +17,8 @@ import type { SaveStore, WorldMeta } from "./save";
  * this module and this table, as src/lib/forge/store.ts does for its own.
  */
 type Result<T> = Promise<{ data: T | null; error: { message: string; code?: string } | null }>;
-const db = supabase as unknown as {
+type CloudDb = {
+  auth: { getSession(): Promise<{ data: { session: { user: { id: string } } | null } | null }> };
   from(table: "craft_worlds"): {
     select(columns: string): {
       order(column: string, opts: { ascending: boolean }): Result<CloudRow[]>;
@@ -27,6 +28,23 @@ const db = supabase as unknown as {
     delete(): { eq(column: string, value: string): Result<null> };
   };
 };
+
+/** Why there is no cloud here: the solo copy has no account to file worlds under. */
+export const NO_CLOUD = `Cloud saves live in the SAS-JACKY edition of ${GAME_NAME}, which has an account to keep them under. This copy keeps worlds on this computer — use Export… to carry one to another device.`;
+
+class NoCloud extends Error {}
+
+/** Whether this copy offers cloud saves at all — the world list hides the buttons when it does not. */
+export function cloudAvailable(): boolean {
+  const e = edition();
+  return e.cloud && !!e.online;
+}
+
+function cloudDb(): CloudDb {
+  const e = edition();
+  if (!e.cloud || !e.online) throw new NoCloud(NO_CLOUD);
+  return e.online as unknown as CloudDb;
+}
 
 interface CloudRow {
   id: string;
@@ -77,7 +95,7 @@ export function explainCloudError(message: string, code?: string): string {
 }
 
 async function currentUser(): Promise<string | null> {
-  const { data } = await supabase.auth.getSession();
+  const { data } = await cloudDb().auth.getSession();
   return data?.session?.user?.id ?? null;
 }
 
@@ -86,11 +104,11 @@ const SIGN_IN = "Sign in to keep worlds in the cloud — worlds on this device w
 export async function listCloudWorlds(): Promise<Verdict<CloudWorld[]>> {
   try {
     if (!(await currentUser())) return { ok: false, error: SIGN_IN };
-    const { data, error } = await db.from("craft_worlds").select("id, name, summary, updated_at").order("updated_at", { ascending: false });
+    const { data, error } = await cloudDb().from("craft_worlds").select("id, name, summary, updated_at").order("updated_at", { ascending: false });
     if (error) return { ok: false, error: explainCloudError(error.message, error.code) };
     return { ok: true, value: (data ?? []).map((r) => ({ id: r.id, name: r.name, summary: r.summary, updatedAt: r.updated_at })) };
   } catch (err) {
-    return { ok: false, error: explainCloudError((err as Error).message) };
+    return { ok: false, error: err instanceof NoCloud ? err.message : explainCloudError((err as Error).message) };
   }
 }
 
@@ -107,11 +125,11 @@ export async function uploadWorld(saves: SaveStore, meta: WorldMeta): Promise<Ve
       gameMode: meta.gameMode, hardcore: meta.hardcore, cheats: meta.cheats, day: Math.floor(meta.time / 24000) + 1,
       seed: meta.seed, lastPlayed: meta.lastPlayed, bytes, thumbnail: meta.thumbnail,
     };
-    const { error } = await db.from("craft_worlds").upsert({ id: meta.id, user_id: user, name: meta.name.slice(0, 64), summary, data: text });
+    const { error } = await cloudDb().from("craft_worlds").upsert({ id: meta.id, user_id: user, name: meta.name.slice(0, 64), summary, data: text });
     if (error) return { ok: false, error: explainCloudError(error.message, error.code) };
     return { ok: true, value: { id: meta.id, name: meta.name, summary, updatedAt: new Date().toISOString() } };
   } catch (err) {
-    return { ok: false, error: explainCloudError((err as Error).message) };
+    return { ok: false, error: err instanceof NoCloud ? err.message : explainCloudError((err as Error).message) };
   }
 }
 
@@ -119,22 +137,22 @@ export async function uploadWorld(saves: SaveStore, meta: WorldMeta): Promise<Ve
 export async function downloadWorld(saves: SaveStore, id: string): Promise<Verdict<WorldMeta>> {
   try {
     if (!(await currentUser())) return { ok: false, error: SIGN_IN };
-    const { data, error } = await db.from("craft_worlds").select("data").eq("id", id).maybeSingle();
+    const { data, error } = await cloudDb().from("craft_worlds").select("data").eq("id", id).maybeSingle();
     if (error) return { ok: false, error: explainCloudError(error.message, error.code) };
     if (!data?.data) return { ok: false, error: "That world is no longer in the cloud." };
     return { ok: true, value: await saves.importWorld(data.data, { keepId: true }) };
   } catch (err) {
-    return { ok: false, error: `The cloud copy could not be opened: ${(err as Error).message}` };
+    return { ok: false, error: err instanceof NoCloud ? err.message : `The cloud copy could not be opened: ${(err as Error).message}` };
   }
 }
 
 export async function deleteCloudWorld(id: string): Promise<Verdict<null>> {
   try {
     if (!(await currentUser())) return { ok: false, error: SIGN_IN };
-    const { error } = await db.from("craft_worlds").delete().eq("id", id);
+    const { error } = await cloudDb().from("craft_worlds").delete().eq("id", id);
     if (error) return { ok: false, error: explainCloudError(error.message, error.code) };
     return { ok: true, value: null };
   } catch (err) {
-    return { ok: false, error: explainCloudError((err as Error).message) };
+    return { ok: false, error: err instanceof NoCloud ? err.message : explainCloudError((err as Error).message) };
   }
 }
