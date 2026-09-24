@@ -30,6 +30,9 @@ import { WorldMap } from "./worldMap";
 import { withDeathPoint } from "../engine/waypoints";
 import { graveSpot, packGrave, unpackGrave } from "../engine/graves";
 import { ambientCue } from "../engine/ambience";
+import { POT_SLOTS } from "../engine/cooking";
+import { pickWildlife } from "../engine/wildlife";
+import { dungeonLoot } from "../engine/dungeons";
 import { travelCost, WAYSTONE_NAME_MAX, waystoneKey, waystoneName, type Waystone } from "../engine/waystones";
 import { seasonAt, seasonLabel, seasonTint, snowsHere, warmBiome, type Season } from "../engine/seasons";
 import { MAX_DYNAMIC_LIGHTS } from "../render/materials";
@@ -326,8 +329,10 @@ export class Game {
     const world = new World();
     world.simulates = this.role !== "guest";
     this.world = world;
-    this.generator = createGenerator({ seed: this.meta.seed, type: this.meta.type, dimension: dim });
-    this.pool = new WorkerPool({ kind: "init", settings: { seed: this.meta.seed, type: this.meta.type, dimension: dim }, layers: this.atlas.layers });
+    // Dungeons are part of the terrain, so a guest's generator must be told the host's choice too (its meta carries it).
+    const settings = { seed: this.meta.seed, type: this.meta.type, dimension: dim, dungeons: this.modOn("dungeons") };
+    this.generator = createGenerator(settings);
+    this.pool = new WorkerPool({ kind: "init", settings, layers: this.atlas.layers });
     this.rules = new BlockRules(world, {
       dropItems: (x, y, z, stacks) => { for (const s of stacks) this.dropItem(x, y, z, s); },
       spawnFalling: (x, y, z, id, meta) => this.spawn(new FallingBlock(x, y, z, id, meta)),
@@ -1307,6 +1312,7 @@ export class Game {
       this.settleVillages(cx, cz);
       if (this.generator instanceof Generator) {
         for (const s of this.generator.strongholdsAt(cx, cz)) this.fillChests(cx, cz, s.chests.map(([x, y, z, room]) => [x, y, z, (items) => strongholdLoot(items, hash4(this.meta.seed ^ 0x57, x, y, z), room)]));
+        for (const d of this.generator.dungeonsAt(cx, cz)) this.fillChests(cx, cz, d.chests.map(([x, y, z]) => [x, y, z, (items) => dungeonLoot(items, hash4(this.meta.seed ^ 0xd9, x, y, z), d.kind)]));
       }
     }
     else if (this.dimension === "nether") {
@@ -1695,7 +1701,7 @@ export class Game {
 
   setScreen(screen: Screen | null): void {
     const was = this.screen;
-    if (was && (was.kind === "inventory" || was.kind === "crafting" || was.kind === "enchanting" || was.kind === "anvil" || was.kind === "smithing")) this.returnGrid();
+    if (was && (was.kind === "inventory" || was.kind === "crafting" || was.kind === "enchanting" || was.kind === "anvil" || was.kind === "smithing" || was.kind === "cooking")) this.returnGrid();
     if (this.cursor && (!screen || screen.kind === "pause")) {
       const left = this.player.inventory.add(this.cursor);
       if (left > 0) this.actions.throwStack({ ...this.cursor, count: left });
@@ -1705,6 +1711,7 @@ export class Game {
     else if (screen?.kind === "inventory") this.craftGrid = [null, null, null, null];
     // The enchanting table and the anvil hold their two stacks only while open, like a crafting grid.
     else if (screen?.kind === "enchanting" || screen?.kind === "anvil" || screen?.kind === "smithing") { this.craftGrid = [null, null]; this.anvilName = null; }
+    else if (screen?.kind === "cooking") this.craftGrid = new Array(POT_SLOTS).fill(null);
     if (was?.kind === "chest" && screen?.kind !== "chest") this.sound("chest_close", was.x + 0.5, was.y + 0.5, was.z + 0.5, 0.5);
     if (was?.kind === "backpack" && screen?.kind !== "backpack") this.closeBackpack(was.slot);
     this.screen = screen;
@@ -2611,7 +2618,19 @@ export class Game {
       const group = kind === "enderman" ? 1 + Math.floor(Math.random() * 2) : 1 + Math.floor(Math.random() * 3);
       for (let i = 0; i < group; i++) this.spawn(new Mob(kind, x + 0.5 + (i % 2), y, z + 0.5 + Math.floor(i / 2)));
     } else {
-      if (below !== B.GRASS || (l >> 4) < 9 || !biome.passive.length) return;
+      if (below !== B.GRASS || (l >> 4) < 9) return;
+      // A share of the day's animals are wild ones, where the biome keeps any (engine/wildlife.ts).
+      const wild = this.modOn("wildlife") && Math.random() < 0.4 ? pickWildlife(biome.name, Math.random) : null;
+      if (wild) {
+        const n = wild.min + Math.floor(Math.random() * (wild.max - wild.min + 1));
+        for (let i = 0; i < n; i++) {
+          const m = new Mob(wild.kind, x + 0.5 + (Math.random() - 0.5) * 3, y, z + 0.5 + (Math.random() - 0.5) * 3);
+          if (wild.kind !== "wolf" && Math.random() < 0.15) m.setBaby();
+          this.spawn(m);
+        }
+        return;
+      }
+      if (!biome.passive.length) return;
       const kind = biome.passive[Math.floor(Math.random() * biome.passive.length)] as MobKind;
       if (!MOB_KINDS.includes(kind)) return;
       const group = 2 + Math.floor(Math.random() * 3);

@@ -16,6 +16,7 @@
  * Climate (temperature, humidity) is separate noise and picks the biome.
  */
 import { stampStronghold, strongholdsTouching, type Stronghold } from "./stronghold";
+import { dungeonsTouching, stampDungeon, type Dungeon } from "./dungeons";
 import { B } from "./blocks";
 import { BiomeId, biomeDef, foliageColor, grassColor, waterColor, type BiomeDef, type TreeKind } from "./biomes";
 import { blockIndex, CHUNK_SIZE, CHUNK_VOLUME, DEEPSLATE_LEVEL, SEA_LEVEL, WORLD_HEIGHT } from "./constants";
@@ -32,6 +33,8 @@ export interface GenSettings {
   type: WorldType;
   /** Absent means the overworld (saves and workers from before the Nether). */
   dimension?: Dimension;
+  /** Catacombs and spider caves (engine/dungeons.ts); absent means yes. */
+  dungeons?: boolean;
 }
 
 /** What the game and the workers need from any dimension's generator. */
@@ -80,6 +83,8 @@ const BADLANDS_BANDS = [
 export class Generator implements ChunkGenerator {
   readonly seed: number;
   readonly type: WorldType;
+  /** Catacombs and spider caves (engine/dungeons.ts). */
+  readonly dungeons: boolean;
   private continent: Simplex;
   private erosion: Simplex;
   private ridge: Simplex;
@@ -98,6 +103,7 @@ export class Generator implements ChunkGenerator {
   constructor(settings: GenSettings) {
     this.seed = settings.seed | 0;
     this.type = settings.type;
+    this.dungeons = settings.dungeons !== false;
     const s = this.seed;
     this.continent = new Simplex(hash4(s, 1));
     this.erosion = new Simplex(hash4(s, 2));
@@ -284,6 +290,7 @@ export class Generator implements ChunkGenerator {
     this.decorate(blocks, cx, cz, heights, biomes);
     this.placeFeatures(blocks, meta, cx, cz);
     for (const s of strongholdsTouching(this.seed, cx, cz)) stampStronghold(s, blocks, meta, cx, cz);
+    if (this.dungeons) for (const d of dungeonsTouching(this.seed, cx, cz)) stampDungeon(d, blocks, meta, cx, cz);
     this.placeVillages(blocks, meta, cx, cz);
     this.freeze(blocks, biomes);
     return { blocks, meta, biomes };
@@ -307,6 +314,12 @@ export class Generator implements ChunkGenerator {
   strongholdsAt(cx: number, cz: number): Stronghold[] {
     if (this.type === "flat") return [];
     return strongholdsTouching(this.seed, cx, cz);
+  }
+
+  /** The catacombs and spider caves reaching into a chunk, for the game to fill their chests. */
+  dungeonsAt(cx: number, cz: number): Dungeon[] {
+    if (this.type === "flat" || !this.dungeons) return [];
+    return dungeonsTouching(this.seed, cx, cz);
   }
 
   /** The villages overlapping a chunk, for the game to populate. */

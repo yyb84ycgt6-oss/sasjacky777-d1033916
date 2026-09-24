@@ -79,6 +79,20 @@ function RecipeCard({ r, tick, onPick }: { r: ShownRecipe; tick: number; onPick:
       where = "Smithing table";
       body = <><Cell ids={one(r.base)} tick={0} onPick={onPick} /><span style={{ color: "#555" }}>+</span><Cell ids={one(r.addition)} tick={0} onPick={onPick} /><Arrow />{stack(r.result)}</>;
       break;
+    case "cooking":
+      where = "Cooking pot, over heat";
+      body = (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: `repeat(3, ${u(18)})` }}>
+            {r.ingredients.map((id, i) => <Cell key={i} ids={one(id)} tick={0} onPick={onPick} />)}
+          </div>
+          <span style={{ color: "#555" }}>+</span>
+          <Cell ids={one(r.bowl)} tick={0} onPick={onPick} />
+          <Arrow />
+          {stack(r.result)}
+        </>
+      );
+      break;
     case "fuel":
       where = "Furnace fuel";
       body = <><Cell ids={one(r.item)} tick={0} onPick={onPick} /><span className="bc-label" style={{ fontSize: u(5.5) }}>Smelts {r.items % 1 ? r.items.toFixed(1) : r.items} item{r.items === 1 ? "" : "s"}</span></>;

@@ -106,7 +106,7 @@ export interface BlockDef {
   facing?: "player" | "away" | "wall";
   /** Has an inventory or a screen. */
   interact?: "crafting" | "furnace" | "chest" | "bed" | "door" | "tnt" | "noteblock" | "redstone"
-    | "enchanting" | "anvil" | "brewing" | "cauldron" | "composter" | "bell" | "smithing" | "waystone" | "grave";
+    | "enchanting" | "anvil" | "brewing" | "cauldron" | "composter" | "bell" | "smithing" | "waystone" | "grave" | "cooking";
   flammable?: boolean;
   /** Hidden from the creative inventory (technical blocks). */
   hidden?: boolean;
@@ -1123,6 +1123,12 @@ add(250, "gravestone", "Gravestone", {
   boxes: (m) => ([[1, 0, 2, 15, 2, 14], [3, 2, 6, 13, 13, 10], [5, 13, 6, 11, 15, 10]] as Box[]).map((b) => hFacingBox(b, m & 3)),
   textures: tex("gravestone"),
 });
+// A cooking pot (engine/cooking.ts): an iron pot with handles and a lid, set over heat to cook meals.
+add(251, "cooking_pot", "Cooking Pot", {
+  shape: "boxes", layer: "cutout", opaque: false, hardness: 2, tool: P, harvestTier: 0, material: "metal", interact: "cooking",
+  boxes: () => [[2, 0, 2, 14, 9, 14], [0, 5, 6, 2, 7, 10], [14, 5, 6, 16, 7, 10], [3, 9, 3, 13, 10, 13], [7, 10, 7, 9, 11, 9]],
+  textures: tex("cooking_pot_top", "cooking_pot_side", "cooking_pot_bottom"),
+});
 // A waystone (engine/waystones.ts): a carved pillar on a plinth, its rune glowing faintly.
 add(249, "waystone", "Waystone", {
   shape: "boxes", layer: "cutout", opaque: false, hardness: 5, tool: P, harvestTier: 0, material: "stone", emission: 6,
@@ -1190,7 +1196,7 @@ export const B = {
   QUARTZ_BLOCK: 230, SPAWNER: 231,
   END_STONE: 232, END_STONE_BRICKS: 233, PURPUR_BLOCK: 234, PURPUR_PILLAR: 235, PURPUR_STAIRS: 236, END_ROD: 237,
   CHORUS_PLANT: 238, CHORUS_FLOWER: 239, END_PORTAL_FRAME: 240, END_PORTAL: 241, END_GATEWAY: 242, DRAGON_EGG: 243,
-  IRON_BARS: 244, SHULKER_BOX: 245, DRAGON_HEAD: 246, PURPUR_SLAB: 247, MAGENTA_STAINED_GLASS: 248, WAYSTONE: 249, GRAVESTONE: 250,
+  IRON_BARS: 244, SHULKER_BOX: 245, DRAGON_HEAD: 246, PURPUR_SLAB: 247, MAGENTA_STAINED_GLASS: 248, WAYSTONE: 249, GRAVESTONE: 250, COOKING_POT: 251,
 } as const;
 
 /** Blocks that stand on an axis kept in meta like a log's (0 up, 1 along x, 2 along z). */

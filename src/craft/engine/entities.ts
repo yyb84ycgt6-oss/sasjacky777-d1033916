@@ -23,7 +23,8 @@ export type EntityKind =
   | "pig" | "cow" | "sheep" | "chicken" | "zombie" | "skeleton" | "creeper" | "spider" | "slime" | "villager" | "iron_golem"
   | "zombified_piglin" | "ghast" | "magma_cube" | "blaze" | "wither_skeleton" | "piglin" | "hoglin"
   | "boat" | "minecart" | "tnt_minecart"
-  | "shulker" | "shulker_bullet" | "item_frame" | "firework_rocket";
+  | "shulker" | "shulker_bullet" | "item_frame" | "firework_rocket"
+  | "wolf" | "deer" | "bear";
 
 export interface PlayerRef {
   id: string;

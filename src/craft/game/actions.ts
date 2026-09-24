@@ -21,7 +21,7 @@ import { applyFortune, damageBonus, efficiencyBonus, levelOf, wears } from "../e
 import { AreaCloud, EndCrystal, ItemFrame, PrimedTnt, Projectile, type ProjectileKind } from "../engine/entities";
 import { rocketLife, rocketOf } from "../engine/fireworks";
 import { itemDef, itemId, resolveDrops, type ItemDef, type ItemStack } from "../engine/items";
-import { isArthropod, isUndead, Mob } from "../engine/mobs";
+import { isArthropod, isUndead, Mob, WOLF_FOOD } from "../engine/mobs";
 import { potionOfItem } from "../engine/potions";
 import { isRail, neighboursToReshape, placedShape, railShape, RAIL_EXITS } from "../engine/rails";
 import { Vehicle } from "../engine/vehicles";
@@ -153,7 +153,7 @@ export class Actions {
     if (a.type === "chat") { if (!g.screen) g.setScreen({ kind: "chat", text: a.text ?? "" }); return; }
     if (a.type === "inventory") {
       const k = g.screen?.kind;
-      if (k === "inventory" || k === "crafting" || k === "furnace" || k === "chest" || k === "brewing" || k === "enchanting" || k === "anvil" || k === "smithing" || k === "trade" || k === "backpack") g.setScreen(null);
+      if (k === "inventory" || k === "crafting" || k === "furnace" || k === "chest" || k === "brewing" || k === "enchanting" || k === "anvil" || k === "smithing" || k === "trade" || k === "backpack" || k === "cooking") g.setScreen(null);
       else if (!g.screen && !p.dead && p.gameMode !== "spectator") g.setScreen({ kind: "inventory" });
       return;
     }
@@ -592,15 +592,18 @@ export class Actions {
         g.net?.interact(t.entity.id, name);
         if (name === "bucket" && t.entity.kind === "cow") this.replaceHeld({ id: itemId("milk_bucket"), count: 1 });
         else if (name && t.entity.spec.tempt.includes(name)) this.consumeHeld();
+        // A bone offered to a wild wolf, or meat to a hungry tame one, is eaten whatever the host decides.
+        else if (t.entity.kind === "wolf" && ((name === "bone" && !t.entity.owner) || (name && WOLF_FOOD.has(name) && (t.entity.owner === p.id || t.entity.ownerName === p.name)))) this.consumeHeld();
         // A piglin that is free takes the gold; the host rolls what comes back.
         else if (name === "gold_ingot" && t.entity.kind === "piglin" && t.entity.admiring <= 0 && t.entity.anger <= 0) this.consumeHeld();
         this.swing();
         return;
       }
-      const result = t.entity.interact(g.ctx, name, p.id);
+      const result = t.entity.interact(g.ctx, name, p.id, p.name);
       if (result) {
         this.swing();
-        if (result === "fed" || result === "dyed" || result === "barter") this.consumeHeld();
+        if (result === "fed" || result === "dyed" || result === "barter" || result === "tamed") this.consumeHeld();
+        if (result === "tamed") { g.advance({ kind: "tame" }); g.showActionbar("The wolf is yours. Use it to tell it to sit or follow."); }
         if (result === "sheared") this.wearHeld(1);
         if (result === "milked") this.replaceHeld({ id: itemId("milk_bucket"), count: 1 });
         if (result === "fed") g.particles("heart", t.entity.x, t.entity.y + t.entity.body.height, t.entity.z, 3);
@@ -1113,6 +1116,9 @@ export class Actions {
       case "grave":
         g.useGrave(x, y, z);
         this.swing();
+        return true;
+      case "cooking":
+        g.setScreen({ kind: "cooking", x, y, z });
         return true;
       case "brewing":
         g.containerAt(x, y, z, "brewing");

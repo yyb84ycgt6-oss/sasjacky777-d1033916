@@ -10,6 +10,7 @@ import { allRecipes, allSmelting, fuelTicks, ingredientIds, recipeResult, type R
 import { allItems, itemByName, type ItemStack } from "./items";
 import { isBottle } from "./brewing";
 import { smithingResult } from "./smithing";
+import { COOKING } from "./cooking";
 
 export type ShownRecipe =
   | {
@@ -23,6 +24,7 @@ export type ShownRecipe =
   | { kind: "smelting"; id: string; input: number[]; result: ItemStack; xp: number }
   | { kind: "brewing"; id: string; bottle: number; ingredient: number; result: ItemStack }
   | { kind: "smithing"; id: string; base: number; addition: number; result: ItemStack }
+  | { kind: "cooking"; id: string; ingredients: number[]; bowl: number; result: ItemStack }
   | { kind: "fuel"; id: string; item: number; items: number };
 
 const NOTES: Record<string, string> = {
@@ -94,6 +96,12 @@ function build(): NonNullable<typeof index> {
     add(makes, out.id, v);
     add(uses, d.id, v);
     add(uses, netherite, v);
+  }
+  const bowl = itemByName("bowl").id;
+  for (const c of COOKING) {
+    const v: ShownRecipe = { kind: "cooking", id: `cook:${c.id}`, ingredients: c.ingredients.map((n) => itemByName(n).id), bowl, result: { id: itemByName(c.result).id, count: 1 } };
+    add(makes, v.result.id, v);
+    for (const id of [...v.ingredients, bowl]) add(uses, id, v);
   }
   for (const d of allItems()) {
     const ticks = fuelTicks(d.id);

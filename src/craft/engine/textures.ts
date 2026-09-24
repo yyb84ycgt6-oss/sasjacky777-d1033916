@@ -1180,6 +1180,21 @@ def("magenta_stained_glass", (p) => {
   for (let j = 0; j < 4; j++) p.set(3 + j, 6 - j, hex("#ffe0fa"), 170);
 });
 
+// A cooking pot: dark iron, a riveted band, a copper-bright rim.
+const POT_IRON = hex("#4e4e56");
+def("cooking_pot_side", (p, r) => {
+  noisy(p, r, POT_IRON, 0.08, 4);
+  for (let x = 0; x < TEX; x++) { p.set(x, 4, hex("#8a6a4a")); p.set(x, 5, shade(POT_IRON, 0.7)); }
+  for (const x of [2, 6, 10, 14]) p.set(x, 4, hex("#c8a878"));
+  for (let x = 0; x < TEX; x++) p.set(x, 15, shade(POT_IRON, 0.6));
+});
+def("cooking_pot_top", (p, r) => {
+  noisy(p, r, shade(POT_IRON, 1.15), 0.08, 4);
+  frame(p, hex("#8a6a4a"));
+  rect(p, 7, 7, 8, 8, hex("#c8a878"));
+});
+def("cooking_pot_bottom", (p, r) => noisy(p, r, shade(POT_IRON, 0.7), 0.06, 4));
+
 // A gravestone: weathered, mossy stone with a cross cut into it.
 const GRAVE_STONE = hex("#8a8a8e");
 def("gravestone", (p, r) => {
@@ -2555,6 +2570,11 @@ art("porkchop", "meat", paletteOf("#f2a0a0", { e: hex("#f5e8e0"), w: hex("#fff")
 art("cooked_porkchop", "meat", paletteOf("#c8845a", { e: hex("#e8d8c0"), w: hex("#f5f0e0") }));
 art("beef", "meat", paletteOf("#c9392e", { e: hex("#f5e8e0"), w: hex("#fff") }));
 art("cooked_beef", "meat", paletteOf("#7a4a2a", { e: hex("#d8c8b0"), w: hex("#eee") }));
+for (const [name, color] of [["vegetable_soup", "#c89a3a"], ["beef_stew", "#7a3a1e"], ["chicken_soup", "#e8c878"], ["venison_stew", "#6a2e1a"], ["pumpkin_soup", "#e88a2a"], ["hearty_stew", "#8a4a22"]] as const) {
+  art(name, "stew", { a: hex("#4a3018"), b: hex("#8a6a3a"), c: hex("#a8844e"), d: hex("#6a4e2a"), s: hex(color), m: shade(hex(color), 1.35) });
+}
+art("venison", "meat", paletteOf("#a8322e", { e: hex("#e8d8d0"), w: hex("#fff") }));
+art("cooked_venison", "meat", paletteOf("#6a3a22", { e: hex("#c8b8a0"), w: hex("#e8e0d8") }));
 art("mutton", "meat", paletteOf("#d44a40", { e: hex("#f5e8e0"), w: hex("#fff") }));
 art("cooked_mutton", "meat", paletteOf("#8c5230", { e: hex("#d8c8b0"), w: hex("#eee") }));
 art("chicken", "drumstick", paletteOf("#f2c6b0", { e: hex("#f5e8e0"), w: hex("#fff") }));

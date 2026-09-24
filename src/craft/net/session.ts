@@ -852,7 +852,10 @@ export class NetSession implements NetLink {
     const g = this.game!;
     const [, id, item, stack] = op;
     const e = g.entities.get(id as number);
-    if (e instanceof Mob) e.interact(g.ctx, typeof item === "string" ? item : null, from);
+    if (e instanceof Mob) {
+      const result = e.interact(g.ctx, typeof item === "string" ? item : null, from, g.remote.get(from)?.name);
+      if (result === "tamed") g.net?.advanceRemote?.(from, { kind: "tame" });
+    }
     // The guest has already given up the item it hung; the frame takes the stack it sent.
     if (e instanceof ItemFrame) e.use(g.ctx, sanitizeStack(stack));
     if (e instanceof AreaCloud && item === "glass_bottle") e.bottled();

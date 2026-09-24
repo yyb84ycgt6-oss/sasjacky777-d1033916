@@ -334,6 +334,14 @@ export class GameAudio {
         break;
       }
       case "hoglin": this.tone(out, t, "sawtooth", 110 * p * low, 70 * p * low, 0.4, 0.3, 0.05); this.noiseBurst(out, t, 0.3, "lowpass", 400, 1, 0.3); break;
+      // A wolf barks when hurt, whines as it dies, and pants or yips otherwise.
+      case "wolf":
+        if (what === "hurt") { this.tone(out, t, "sawtooth", 520 * p, 300 * p, 0.12, 0.25); this.noiseBurst(out, t, 0.1, "bandpass", 1200, 2, 0.3); }
+        else if (death) this.tone(out, t, "sine", 900 * p, 400 * p, 0.8, 0.15, 0.05);
+        else for (let i = 0; i < 3; i++) this.noiseBurst(out, t + i * 0.16, 0.08, "bandpass", 900, 1.5, 0.12);
+        break;
+      case "deer": this.tone(out, t, "sawtooth", 700 * p * low, 500 * p * low, 0.25, 0.12, 0.02); break;
+      case "bear": this.tone(out, t, "sawtooth", 85 * p * low, 60 * p * low, 0.9, 0.35, 0.1); this.noiseBurst(out, t, 0.8, "lowpass", 300, 1, 0.3, 0.6); break;
       case "wither_skeleton": for (let i = 0; i < 4; i++) this.noiseBurst(out, t + i * 0.06, 0.04, "bandpass", 1400, 4, 0.5); break;
       // A ghast's long mournful cry; a shriek when hurt; a cough of fire when it spits.
       case "ghast":

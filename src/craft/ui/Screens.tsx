@@ -7,7 +7,7 @@ import { enchantedBook, enchantLabel, ENCHANTMENTS, MAX_SHELVES } from "../engin
 import type { Slot } from "../engine/inventory";
 import type { Game } from "../game/game";
 import {
-  anvilView, brewingView, chestView, clickContainer, smithingView, sortContainer, craftOutput, craftWidth, creativeTake, creativeTrash, dropCursor, enchantItem,
+  anvilView, brewingView, chestView, clickContainer, cookView, smithingView, sortContainer, craftOutput, craftWidth, creativeTake, creativeTrash, dropCursor, enchantItem,
   enchantOffers, fillRecipe, furnaceView, inventoryCounts, makeTrade, tradingWith, type Section,
 } from "../game/containers";
 import { canAfford as canAffordOffer, LEVEL_NAMES, LEVEL_XP } from "../engine/trading";
@@ -479,6 +479,37 @@ export function SmithingScreen({ game, mobile }: { game: Game; mobile: boolean }
           <SlotButton stack={ingot} onHover={onHover} quickMove={quick} ghost={itemId("netherite_ingot")} onClick={(b, sh) => clickContainer(game, "work", 1, b, sh)} />
           <Arrow />
           <SlotButton stack={out} className="bc-result" onHover={onHover} quickMove={quick} onClick={(b, sh) => clickContainer(game, "smithing_out", 0, b, sh)} />
+        </div>
+        {hint && <div className="bc-sub" style={{ textAlign: "center" }}>{hint}</div>}
+        <div className="bc-label">Inventory</div>
+        <PlayerSlots game={game} onHover={onHover} quick={quick} />
+      </Frame>
+      {tip}
+    </>
+  );
+}
+
+/** The cooking pot: six ingredients and a bowl in, a meal out — while there is heat under it. */
+export function CookingScreen({ game, mobile }: { game: Game; mobile: boolean }) {
+  const { tip, onHover } = useTooltip();
+  const [quick, setQuick] = useState(false);
+  const { stack, heated, matched } = cookView(game);
+  const hint = !heated ? "Set the pot over heat: fire, lava, a magma block or a lit furnace." : !matched ? "Put in the ingredients of a meal (the recipe viewer lists them)." : !stack ? "Add a bowl to serve it in." : null;
+  return (
+    <>
+      <Frame game={game} title="Cooking Pot" mobile={mobile} quick={quick} setQuick={setQuick}>
+        <div style={{ display: "flex", alignItems: "center", gap: "calc(var(--u) * 4)", justifyContent: "center" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, var(--slot))" }}>
+            {game.craftGrid.slice(0, 6).map((s, i) => (
+              <SlotButton key={i} stack={s} onHover={onHover} quickMove={quick} onClick={(b, sh) => clickContainer(game, "work", i, b, sh)} />
+            ))}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "calc(var(--u) * 2)" }}>
+            <SlotButton stack={game.craftGrid[6] ?? null} ghost={itemId("bowl")} onHover={onHover} quickMove={quick} onClick={(b, sh) => clickContainer(game, "work", 6, b, sh)} />
+            <span style={{ fontSize: "calc(var(--u) * 9)", filter: heated ? undefined : "grayscale(1) opacity(0.4)" }} title={heated ? "Heated" : "No heat"}>🔥</span>
+          </div>
+          <Arrow progress={stack && heated ? 1 : 0} />
+          <SlotButton stack={stack} className="bc-result" onHover={onHover} quickMove={quick} onClick={(b, sh) => clickContainer(game, "pot_out", 0, b, sh)} />
         </div>
         {hint && <div className="bc-sub" style={{ textAlign: "center" }}>{hint}</div>}
         <div className="bc-label">Inventory</div>

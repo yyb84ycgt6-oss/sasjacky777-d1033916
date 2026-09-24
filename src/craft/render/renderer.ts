@@ -413,6 +413,9 @@ export class WorldRenderer {
           // The dragon noses down in a dive and up in a climb, and folds its wings on its perch.
           bank: e.kind === "ender_dragon" ? Math.max(-0.6, Math.min(0.6, -Math.atan2(e.y - e.prevY, Math.hypot(e.x - e.prevX, e.z - e.prevZ) + 0.05))) : 0,
           attach: e.attach, peek: e.peek, headYaw: e.kind === "shulker" ? e.headYaw : 0,
+          // A wolf sits when told; it holds its tail low when angry (screaming) and wags it when tame (carrying).
+          sitting: e.kind === "wolf" && e.sitting,
+          ...(e.kind === "wolf" ? { screaming: e.anger > 0, carrying: !!e.owner } : {}),
         });
         if (e.kind === "ender_dragon") {
           // It is perched when its phase says so; the flag doubles as "wings folded".
@@ -719,6 +722,8 @@ function skinVariant(e: Mob): number {
   // An enderman's stare, and the block in its arms (drawn with the model, so a new one rebuilds it).
   if (e.kind === "enderman") return (e.scream > 0 ? 1 : 0) | (e.carried << 1);
   if (e.kind === "shulker") return e.shellColor;
+  // A wolf's collar when tame; red eyes when angry.
+  if (e.kind === "wolf") return (e.owner ? 1 : 0) | (e.anger > 0 ? 2 : 0);
   return 0;
 }
 
@@ -728,6 +733,7 @@ function modelScale(e: Mob): number {
     case "ghast": return 4;
     case "ender_dragon": return 4;
     case "hoglin": return 2;
+    case "bear": return 2;
     case "shulker": return 2;
     case "wither_skeleton": return 1.2;
     default: return e.size;

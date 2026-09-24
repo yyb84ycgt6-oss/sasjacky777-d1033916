@@ -25,7 +25,9 @@ import { DRAGON_PHASES, dragonHurt, dragonParts, dragonTick, newDragonState, typ
 export type MobKind =
   | "pig" | "cow" | "sheep" | "chicken" | "zombie" | "skeleton" | "creeper" | "spider" | "slime" | "villager" | "iron_golem"
   | "zombified_piglin" | "ghast" | "magma_cube" | "blaze" | "wither_skeleton" | "piglin" | "hoglin"
-  | "enderman" | "silverfish" | "ender_dragon" | "shulker";
+  | "enderman" | "silverfish" | "ender_dragon" | "shulker"
+  // Wildlife (after Alex's Mobs and Naturalist): wolves to tame, skittish deer, bears best left alone.
+  | "wolf" | "deer" | "bear";
 
 interface MobSpec {
   health: number;
@@ -75,7 +77,14 @@ export const MOB_SPECS: Record<MobKind, MobSpec> = {
   ender_dragon: { health: 200, width: 6, height: 3, speed: 0, hostile: true, attack: 10, tempt: [], burnsInDay: false, followRange: 150, xp: [0, 0], fireImmune: true, flies: true },
   // A box clinging to a block in an End city, which opens to shoot and leaves only by teleporting.
   shulker: { health: 30, width: 1, height: 1, speed: 0, hostile: true, attack: 0, tempt: [], burnsInDay: false, followRange: 16, xp: [5, 5] },
+  // Wild wolves are neutral: they fight back, with their pack. Tamed, a wolf has 20 health (see maxHealth).
+  wolf: { health: 8, width: 0.6, height: 0.85, speed: 0.075, hostile: false, attack: 4, tempt: [], burnsInDay: false, followRange: 16, xp: [1, 3] },
+  deer: { health: 12, width: 0.9, height: 1.5, speed: 0.07, hostile: false, attack: 0, tempt: ["wheat", "apple"], burnsInDay: false, followRange: 10, xp: [1, 3] },
+  bear: { health: 30, width: 1.4, height: 1.4, speed: 0.06, hostile: false, attack: 6, tempt: ["apple"], burnsInDay: false, followRange: 16, xp: [1, 3] },
 };
+
+/** What a tamed wolf eats: any meat, as in the original, and it will breed on it too. */
+export const WOLF_FOOD = new Set(["beef", "cooked_beef", "porkchop", "cooked_porkchop", "chicken", "cooked_chicken", "mutton", "cooked_mutton", "rotten_flesh", "venison", "cooked_venison"]);
 
 export const MOB_KINDS = Object.keys(MOB_SPECS) as MobKind[];
 
@@ -196,6 +205,11 @@ export class Mob extends Entity {
   private peekTo = 0;
   private peekFor = 0;
   shellColor = 0;
+  /** A tamed wolf's owner: the player's id (for the session) and name (to know them again next time). */
+  owner: string | null = null;
+  ownerName: string | null = null;
+  /** A tamed wolf told to stay. */
+  sitting = false;
 
   constructor(kind: MobKind, x: number, y: number, z: number, id?: number) {
     const spec = MOB_SPECS[kind];
@@ -286,6 +300,7 @@ export class Mob extends Entity {
   }
 
   get maxHealth(): number {
+    if (this.kind === "wolf" && this.owner) return 20;
     return this.spec.health * this.size * this.size;
   }
 
@@ -366,6 +381,17 @@ export class Mob extends Entity {
       }
     }
     if (this.kind === "piglin" && attacker && !attacker.startsWith("mob:")) this.anger = 600;
+    // A wolf or a bear turns on whoever struck it — a wild wolf's whole pack with it — but never on its owner.
+    if ((this.kind === "wolf" || this.kind === "bear") && attacker && !attacker.startsWith("mob:") && attacker !== this.owner) {
+      this.targetId = attacker;
+      this.anger = 600;
+      this.sitting = false;
+      if (this.kind === "wolf" && !this.owner) {
+        for (const e of ctx.entitiesNear(this.body.x, this.body.y, this.body.z, 16)) {
+          if (e instanceof Mob && e.kind === "wolf" && !e.owner && !e.dying) { e.targetId = attacker; e.anger = 600; }
+        }
+      }
+    }
     this.health -= amount;
     this.hurtTime = 10;
     this.invulnerable = 10;
@@ -432,6 +458,9 @@ export class Mob extends Entity {
     else if (this.kind === "ghast") this.ghastAi(ctx, move);
     else if (this.kind === "blaze") this.blazeAi(ctx, move);
     else if (this.kind === "enderman") this.endermanAi(ctx, move);
+    else if (this.kind === "wolf") this.wolfAi(ctx, move);
+    else if (this.kind === "bear") this.bearAi(ctx, move);
+    else if (this.kind === "deer") this.deerAi(ctx, move);
     else if (this.spec.hostile) this.hostileAi(ctx, move);
     else this.passiveAi(ctx, move);
 
@@ -598,26 +627,7 @@ export class Mob extends Entity {
       move.speedMul = 1.9;
       return;
     }
-    // Breeding: two animals in love find each other.
-    if (this.love > 0 && !this.baby) {
-      const mate = ctx.entitiesNear(b.x, b.y, b.z, 8).find(
-        (e): e is Mob => e instanceof Mob && e !== this && e.kind === this.kind && e.love > 0 && !e.baby && !e.dying,
-      );
-      if (mate) {
-        this.steer(ctx, move, mate.x, mate.z, false);
-        if (Math.hypot(mate.x - b.x, mate.z - b.z) < 1.5 && this.id < mate.id) {
-          this.love = mate.love = 0;
-          this.loveCooldown = mate.loveCooldown = 6000;
-          const child = new Mob(this.kind, (b.x + mate.x) / 2, b.y, (b.z + mate.z) / 2);
-          child.setBaby();
-          if (this.kind === "sheep") child.woolColor = ctx.random() < 0.5 ? this.woolColor : mate.woolColor;
-          ctx.spawn(child);
-          ctx.spawn(new XpOrb(b.x, b.y + 0.5, b.z, 1 + Math.floor(ctx.random() * 7)));
-          ctx.particles("heart", b.x, b.y + 1, b.z, 6);
-        }
-        return;
-      }
-    }
+    if (this.breed(ctx, move)) return;
     // Following someone holding food.
     const tempts = this.spec.tempt.map((n) => itemByName(n).id);
     const lure = this.nearestPlayer(ctx, 8, (p) => tempts.includes(p.heldItem));
@@ -646,6 +656,113 @@ export class Mob extends Entity {
       ctx.sound("chicken_egg", b.x, b.y, b.z, 0.6);
     }
     if (ctx.random() < 1 / 400) ctx.sound(`${this.kind}_idle`, b.x, b.y + 0.5, b.z, 0.5, this.baby ? 1.5 : 1);
+  }
+
+  /** Breeding: two animals in love find each other; returns whether this one is busy with it. */
+  private breed(ctx: EntityContext, move: { forward: number; jump: boolean; yaw: number; speedMul: number }): boolean {
+    const b = this.body;
+    if (this.love <= 0 || this.baby) return false;
+    const mate = ctx.entitiesNear(b.x, b.y, b.z, 8).find(
+      (e): e is Mob => e instanceof Mob && e !== this && e.kind === this.kind && e.love > 0 && !e.baby && !e.dying,
+    );
+    if (!mate) return false;
+    this.steer(ctx, move, mate.x, mate.z, false);
+    if (Math.hypot(mate.x - b.x, mate.z - b.z) < 1.5 && this.id < mate.id) {
+      this.love = mate.love = 0;
+      this.loveCooldown = mate.loveCooldown = 6000;
+      const child = new Mob(this.kind, (b.x + mate.x) / 2, b.y, (b.z + mate.z) / 2);
+      child.setBaby();
+      if (this.kind === "sheep") child.woolColor = ctx.random() < 0.5 ? this.woolColor : mate.woolColor;
+      // A tamed pair's pup is born to their owner.
+      if (this.owner) { child.owner = this.owner; child.ownerName = this.ownerName; child.health = child.maxHealth; child.persistent = true; }
+      ctx.spawn(child);
+      ctx.spawn(new XpOrb(b.x, b.y + 0.5, b.z, 1 + Math.floor(ctx.random() * 7)));
+      ctx.particles("heart", b.x, b.y + 1, b.z, 6);
+    }
+    return true;
+  }
+
+  /** Chases a player that angered it and bites when close enough. */
+  private chasePlayer(ctx: EntityContext, move: { forward: number; jump: boolean; yaw: number; speedMul: number }, speed: number): boolean {
+    const b = this.body;
+    if (this.anger > 0) this.anger--;
+    if (this.anger <= 0 || !this.targetId) return false;
+    const t = ctx.players().find((p) => p.id === this.targetId && p.targetable);
+    if (!t || Math.hypot(t.x - b.x, t.z - b.z) > this.spec.followRange) { this.anger = 0; return false; }
+    this.steer(ctx, move, t.x, t.z, false);
+    move.speedMul = speed;
+    const reach = (b.width + t.width) / 2 + 0.6;
+    if (Math.hypot(t.x - b.x, t.z - b.z) < reach && Math.abs(t.y - b.y) < 2 && this.attackCooldown <= 0) {
+      this.attackCooldown = 20;
+      const diff = ctx.difficulty;
+      const dmg = diff === 1 ? this.spec.attack / 2 + 1 : diff === 3 ? this.spec.attack * 1.5 : this.spec.attack;
+      if (diff > 0) ctx.hurtPlayer(t.id, dmg, "mob", b.x, b.z, 0.4, this.id);
+    }
+    return true;
+  }
+
+  /**
+   * A wolf. Wild, it roams in a pack, hunts skeletons, and fights back as a
+   * pack. Tamed, it follows its owner — bounding to catch up, and appearing
+   * at their side when left far behind — stays when told to sit, and goes for
+   * whatever its owner strikes or whatever strikes its owner.
+   */
+  private wolfAi(ctx: EntityContext, move: { forward: number; jump: boolean; yaw: number; speedMul: number }): void {
+    const b = this.body;
+    let owner = this.owner ? ctx.players().find((p) => p.id === this.owner) ?? null : null;
+    // Its owner back under a new connection: known again by name.
+    if (this.owner && !owner && this.ownerName && this.age % 40 === 0) {
+      owner = ctx.players().find((p) => p.name === this.ownerName) ?? null;
+      if (owner) this.owner = owner.id;
+    }
+    if (this.chasePlayer(ctx, move, 1.4)) return;
+    if (this.sitting) {
+      if (owner) move.yaw = this.faceTo(owner.x, owner.z);
+      return;
+    }
+    if (this.breed(ctx, move)) return;
+    if (this.age % 20 === 0 && this.targetMob === null) {
+      const prey = ctx.entitiesNear(b.x, b.y, b.z, 16).find((e): e is Mob => e instanceof Mob && e !== this && !e.dying && e.kind !== "creeper" && e.kind !== "wolf" && (
+        e.kind === "skeleton" || (!!this.owner && (e.lastAttacker === this.owner || (e.spec.hostile && e.targetId === this.owner)))
+      ));
+      if (prey) this.targetMob = prey.id;
+    }
+    const t = this.mobTarget(ctx, 24);
+    if (t) { this.fightMob(ctx, move, t, this.spec.attack); move.speedMul = 1.5; return; }
+    if (owner) {
+      const d = Math.hypot(owner.x - b.x, owner.z - b.z);
+      if (d > 24 || Math.abs(owner.y - b.y) > 12) {
+        b.x = owner.x + (ctx.random() - 0.5); b.y = owner.y; b.z = owner.z + (ctx.random() - 0.5);
+        b.vx = b.vy = b.vz = 0; b.fallDistance = 0;
+        return;
+      }
+      if (d > 5) { this.steer(ctx, move, owner.x, owner.z, false); move.speedMul = d > 10 ? 1.7 : 1.2; return; }
+    }
+    this.wanderAi(ctx, move, owner ? 1 / 300 : 1 / 120);
+    if (ctx.random() < 1 / 500) ctx.sound("wolf_idle", b.x, b.y + 0.5, b.z, 0.5, this.baby ? 1.5 : 1);
+  }
+
+  /** A bear keeps to itself and wanders slowly — until struck, when it charges. */
+  private bearAi(ctx: EntityContext, move: { forward: number; jump: boolean; yaw: number; speedMul: number }): void {
+    if (this.chasePlayer(ctx, move, 1.6)) return;
+    this.passiveAi(ctx, move);
+    move.speedMul *= this.panic > 0 ? 1 : 0.7;
+  }
+
+  /**
+   * A deer is skittish: anyone who comes near without sneaking — and without
+   * food in hand — sends it bounding away. Otherwise it grazes like the rest.
+   */
+  private deerAi(ctx: EntityContext, move: { forward: number; jump: boolean; yaw: number; speedMul: number }): void {
+    const b = this.body;
+    const tempts = this.spec.tempt.map((n) => itemByName(n).id);
+    const threat = this.panic <= 0 ? this.nearestPlayer(ctx, 9, (p) => p.targetable && !p.sneaking && !tempts.includes(p.heldItem)) : null;
+    if (threat) {
+      const a = Math.atan2(b.z - threat.z, b.x - threat.x) + (ctx.random() - 0.5) * 0.8;
+      this.wander = { x: b.x + Math.cos(a) * 10, z: b.z + Math.sin(a) * 10, ticks: 40 };
+      this.panic = 30;
+    }
+    this.passiveAi(ctx, move);
   }
 
   private hostileAi(ctx: EntityContext, move: { forward: number; jump: boolean; yaw: number; speedMul: number }): void {
@@ -1267,8 +1384,9 @@ export class Mob extends Entity {
   }
 
   /** Right-click with an item. Returns what happened, so the caller can consume the item. */
-  interact(ctx: EntityContext, itemName: string | null, playerId: string): "fed" | "sheared" | "milked" | "dyed" | "trade" | "refuse" | "barter" | null {
+  interact(ctx: EntityContext, itemName: string | null, playerId: string, playerName?: string): "fed" | "sheared" | "milked" | "dyed" | "trade" | "refuse" | "barter" | "tamed" | "sat" | null {
     if (this.dying) return null;
+    if (this.kind === "wolf") return this.wolfInteract(ctx, itemName, playerId, playerName);
     if (this.kind === "piglin") return itemName === "gold_ingot" && this.takeGold(ctx, playerId) ? "barter" : null;
     if (this.kind === "villager") {
       if (this.profession !== "none" && this.offers.length) return "trade";
@@ -1301,6 +1419,40 @@ export class Mob extends Entity {
       return "milked";
     }
     return null;
+  }
+
+  /**
+   * A bone may tame a wild wolf (one in three); a tamed wolf eats meat to
+   * heal, or to breed at full health; anything else from its owner tells it
+   * to sit, or to get up.
+   */
+  private wolfInteract(ctx: EntityContext, itemName: string | null, playerId: string, playerName?: string): "fed" | "tamed" | "sat" | null {
+    const b = this.body;
+    if (!this.owner) {
+      if (itemName !== "bone" || this.anger > 0) return null;
+      if (ctx.random() < 1 / 3) {
+        this.owner = playerId;
+        this.ownerName = playerName ?? null;
+        this.persistent = true;
+        this.health = this.maxHealth;
+        this.sitting = true;
+        this.targetMob = null;
+        ctx.particles("heart", b.x, b.y + b.height + 0.3, b.z, 7);
+        ctx.sound("wolf_idle", b.x, b.y + 0.5, b.z, 0.8, 1.2);
+        return "tamed";
+      }
+      ctx.particles("smoke", b.x, b.y + b.height + 0.2, b.z, 7);
+      return "fed";
+    }
+    if (this.owner !== playerId) return null;
+    if (itemName && WOLF_FOOD.has(itemName)) {
+      if (this.health < this.maxHealth) { this.heal(4); return "fed"; }
+      if (!this.baby && this.loveCooldown <= 0 && this.love <= 0) { this.love = 600; return "fed"; }
+      return null;
+    }
+    this.sitting = !this.sitting;
+    this.targetMob = null;
+    return "sat";
   }
 
   private die(ctx: EntityContext): void {
@@ -1361,6 +1513,9 @@ export class Mob extends Entity {
       case "ender_dragon": return [];
       // Half the time a shell, and Looting helps.
       case "shulker": return ctx.random() < 0.5 + this.looting * 0.0625 ? it("shulker_shell", 1) : [];
+      case "wolf": return [];
+      case "deer": return [...it(burnt ? "cooked_venison" : "venison", r(1, 3)), ...it("leather", r(0, 2))];
+      case "bear": return [...it("leather", r(1, 3)), ...it("bone", r(0, 2))];
     }
   }
 
@@ -1384,6 +1539,9 @@ export class Mob extends Entity {
         dg: this.dragon ? { p: this.dragon.phase, t: this.dragon.timer, py: this.dragon.podiumY, cr: this.dragon.crystal ?? undefined } : undefined,
         // A shulker's hold, lid and colour; its head turns toward what it watches.
         sk: this.kind === "shulker" ? [this.attach, Math.round(this.peek * 100), this.shellColor, Math.round(this.headYaw * 100)] : undefined,
+        // A wolf's owner, whether it sits, and its anger (red eyes, for drawing).
+        ow: this.owner ?? undefined, on: this.ownerName ?? undefined, si: this.sitting ? 1 : undefined,
+        an: (this.kind === "wolf" || this.kind === "bear") && this.anger > 0 ? 1 : undefined,
       },
     };
   }
@@ -1438,6 +1596,12 @@ export class Mob extends Entity {
       if (typeof c === "number" && c >= 0 && c < 9) this.shellColor = c;
       if (typeof hy === "number") this.headYaw = hy / 100;
     }
+    if (this.kind === "wolf") {
+      this.owner = typeof d.ow === "string" ? d.ow.slice(0, 64) : null;
+      this.ownerName = typeof d.on === "string" ? d.on.slice(0, 16) : null;
+      this.sitting = d.si === 1;
+    }
+    if (this.kind === "wolf" || this.kind === "bear") this.anger = d.an === 1 ? Math.max(this.anger, 20) : 0;
     const h = d.vh as { x?: unknown; z?: unknown } | undefined;
     this.home = h && typeof h.x === "number" && typeof h.z === "number" ? { x: h.x, z: h.z } : null;
   }

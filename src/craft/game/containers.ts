@@ -19,9 +19,10 @@ import {
 import { Mob } from "../engine/mobs";
 import { canAfford } from "../engine/trading";
 import { smithingResult } from "../engine/smithing";
+import { cookingRecipe, cookingResult, heatedBy, POT_BOWL, POT_SLOTS } from "../engine/cooking";
 import type { Game } from "./game";
 
-export type Section = "inv" | "armor" | "offhand" | "grid" | "result" | "chest" | "furnace" | "brewing" | "work" | "anvil_out" | "smithing_out";
+export type Section = "inv" | "armor" | "offhand" | "grid" | "result" | "chest" | "furnace" | "brewing" | "work" | "anvil_out" | "smithing_out" | "pot_out";
 
 function chestOf(game: Game): ChestEntity | null {
   const s = game.screen;
@@ -80,6 +81,7 @@ function accepts(section: Section, index: number, game?: Game): (s: ItemStack) =
   if (section === "furnace" && index === 1) return (s) => fuelTicks(s.id) > 0;
   if (section === "furnace" && index === 2) return () => false;
   if (section === "brewing") return index < 3 ? isBottle : index === 3 ? isBrewingIngredient : isBrewingFuel;
+  if (section === "work" && game?.screen?.kind === "cooking") return (s) => (index === POT_BOWL) === (itemDef(s.id)?.name === "bowl");
   if (section === "work" && game?.screen?.kind === "enchanting") {
     return index === 0 ? (s) => isEnchantable({ ...s, count: 1 }) || itemDef(s.id)?.name === "book" : (s) => s.id === LAPIS();
   }
@@ -175,6 +177,8 @@ function quickMove(game: Game, from: Section, index: number, stack: ItemStack): 
       }
     }
     if (kind === "anvil") return mergeInto(stack, game.craftGrid, [0, 1]);
+    // Bowls to the bowl slot; anything else into the pot.
+    if (kind === "cooking") return itemDef(stack.id)?.name === "bowl" ? mergeInto(stack, game.craftGrid, [POT_BOWL]) : mergeInto(stack, game.craftGrid, range(0, POT_BOWL));
     // Ingots to the ingot slot, a piece of gear to the other.
     if (kind === "smithing") return mergeInto(stack, game.craftGrid, [itemDef(stack.id)?.name === "netherite_ingot" ? 1 : 0]);
     return mergeInto(stack, inv.slots, index < 9 ? range(9, 36) : range(0, 9));
@@ -205,6 +209,7 @@ export function clickContainer(game: Game, section: Section, index: number, butt
 
   if (section === "anvil_out") { takeAnvilResult(game, shift); return; }
   if (section === "smithing_out") { takeSmithingResult(game, shift); return; }
+  if (section === "pot_out") { takeCookResult(game, shift); return; }
 
   if (section === "furnace") {
     const f = furnaceOf(game);
@@ -497,6 +502,36 @@ function takeSmithingResult(game: Game, shift: boolean): void {
   const ingot = game.craftGrid[1];
   game.craftGrid[1] = ingot && ingot.count > 1 ? { ...ingot, count: ingot.count - 1 } : null;
   game.sound("anvil_use", s.x + 0.5, s.y + 0.5, s.z + 0.5, 0.7, 0.8);
+  game.bumpInv();
+}
+
+/** The pot's meal and whether there is heat under it to cook it. */
+export function cookView(game: Game): { stack: ItemStack | null; heated: boolean; matched: boolean } {
+  const s = game.screen;
+  if (s?.kind !== "cooking") return { stack: null, heated: false, matched: false };
+  return {
+    stack: cookingResult(game.craftGrid),
+    heated: heatedBy(game.world.blockAt(s.x, s.y - 1, s.z)),
+    matched: cookingRecipe(game.craftGrid) !== null,
+  };
+}
+
+/** Serves a meal: one of each ingredient and a bowl go, the meal comes out — only with heat under the pot. */
+function takeCookResult(game: Game, shift: boolean): void {
+  const s = game.screen;
+  const { stack, heated } = cookView(game);
+  if (!stack || !heated || s?.kind !== "cooking") return;
+  if (shift) {
+    if (mergeInto(stack, game.player.inventory.slots, [...range(9, 36), ...range(0, 9)])) return;
+  } else if (!game.cursor) game.cursor = stack;
+  else if (sameItem(game.cursor, stack) && game.cursor.count < maxStack(stack.id)) game.cursor = { ...game.cursor, count: game.cursor.count + 1 };
+  else return;
+  for (let i = 0; i < POT_SLOTS; i++) {
+    const g = game.craftGrid[i];
+    if (g) game.craftGrid[i] = g.count > 1 ? { ...g, count: g.count - 1 } : null;
+  }
+  game.sound("splash", s.x + 0.5, s.y + 0.5, s.z + 0.5, 0.35, 1.4);
+  game.particles("smoke", s.x + 0.5, s.y + 0.9, s.z + 0.5, 6);
   game.bumpInv();
 }
 

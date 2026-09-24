@@ -269,6 +269,8 @@ function itemDefOrNull(name: string): boolean {
 shaped("shulker_box", ["S", "C", "S"], { S: "shulker_shell", C: "chest" }, "shulker_box");
 shaped("purpur_slab", ["###"], { "#": "purpur_block" }, "purpur_slab", 6);
 shaped("item_frame", ["SSS", "SLS", "SSS"], { S: "stick", L: "leather" }, "item_frame");
+// A cooking pot: an iron pot with brick handles, a wooden spoon (shovel) to stir it.
+shaped("cooking_pot", ["BSB", "I I", "III"], { B: "brick", S: "wooden_shovel", I: "iron_ingot" }, "cooking_pot");
 // A backpack: leather round a chest, a string strap.
 shaped("backpack", ["LSL", "LCL", "LLL"], { L: "leather", S: "string", C: "chest" }, "backpack");
 // A waystone: a stone-brick pillar on obsidian, an ender pearl at its heart for the travelling.
@@ -479,6 +481,7 @@ const SMELTING: Smelt[] = [
   { input: "cactus", output: "green_dye", xp: 1 },
   { input: "porkchop", output: "cooked_porkchop", xp: 0.35 },
   { input: "beef", output: "cooked_beef", xp: 0.35 },
+  { input: "venison", output: "cooked_venison", xp: 0.35 },
   { input: "chicken", output: "cooked_chicken", xp: 0.35 },
   { input: "mutton", output: "cooked_mutton", xp: 0.35 },
   { input: "potato", output: "baked_potato", xp: 0.35 },

@@ -7,6 +7,7 @@
  * mode, as in the original. An online guest can only run the ones that affect
  * nobody else — the host owns the world.
  */
+import { DUNGEON_REGION, dungeonsInRegion } from "../engine/dungeons";
 import { cityInRegion, CITY_REGION, END_SPAWN, EndGenerator } from "../engine/end";
 import { nearestStronghold } from "../engine/stronghold";
 import { blockByName } from "../engine/blocks";
@@ -45,7 +46,7 @@ const HELP = [
   "/effect <speed|strength|fire_resistance|...> [seconds] [level] | /effect clear",
   "/enchant <enchantment> [level]   (the held item, e.g. /enchant sharpness 5)",
   "/xp add <amount>, /clear, /kill, /seed, /spawnpoint",
-  "/locate village|fortress|stronghold|end_city, /dimension overworld|nether|end",
+  "/locate village|fortress|stronghold|end_city|catacombs|spider_cave, /dimension overworld|nether|end",
   "/difficulty peaceful|easy|normal|hard, /gamerule <rule> <true|false>",
 ];
 
@@ -279,7 +280,19 @@ export function runCommand(game: Game, line: string): Line[] {
         return hit ? [{ text: `The nearest End city is at ${hit.x}, ${hit.y}, ${hit.z} (${Math.round(Math.hypot(hit.x - b.x, hit.z - b.z))} blocks away)` }]
           : [{ text: "No End city within 4000 blocks.", color: ERR }];
       }
-      return [{ text: "Usage: /locate village|fortress|stronghold|end_city", color: ERR }];
+      if (what === "catacombs" || what === "spider_cave") {
+        if (game.dimension !== "overworld" || !(game.generator instanceof Generator) || !game.generator.dungeons || game.meta.type === "flat") {
+          return [{ text: "Dungeons are under the overworld (and not in a flat world, or one that switched them off).", color: ERR }];
+        }
+        const hit = nearestInRegions(b.x, b.z, DUNGEON_REGION, (rx, rz) => {
+          const d = dungeonsInRegion(game.meta.seed, rx, rz).find((x) => x.kind === what);
+          return d ? { x: d.x, y: d.y, z: d.z } : null;
+        });
+        const name = what === "catacombs" ? "catacombs" : "spider cave";
+        return hit ? [{ text: `The nearest ${name} is at ${hit.x}, ${hit.y}, ${hit.z} (${Math.round(Math.hypot(hit.x - b.x, hit.z - b.z))} blocks away)` }]
+          : [{ text: `No ${name} within 4000 blocks.`, color: ERR }];
+      }
+      return [{ text: "Usage: /locate village|fortress|stronghold|end_city|catacombs|spider_cave", color: ERR }];
     }
     case "dimension": {
       const denied = needCheats() ?? needHost();

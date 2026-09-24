@@ -59,6 +59,8 @@ export type Screen =
   | { kind: "poem" }
   /** The world map and its waypoints (M). */
   | { kind: "map" }
+  /** A cooking pot (engine/cooking.ts): six ingredients and a bowl, over heat. */
+  | { kind: "cooking"; x: number; y: number; z: number }
   /** A backpack in the player's inventory slot `slot`, opened. */
   | { kind: "backpack"; slot: number }
   /** A waystone's list of the others this player has found. */

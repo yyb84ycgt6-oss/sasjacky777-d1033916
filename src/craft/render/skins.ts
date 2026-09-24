@@ -329,6 +329,54 @@ export function skin(kind: string, variant = 0): HTMLCanvasElement {
       p.box(0, 34, 3, 5, 3, (_f, _x, y) => (y >= 4 ? hex("#3a2a20") : hide));
       break;
     }
+    case "wolf": {
+      // Grey fur, darker along the back; a paler muzzle; a red collar when tame (variant bit 0), red eyes when angry (bit 1).
+      const fur = hex("#d4cfc8"), back = hex("#a8a198"), light = hex("#ebe6de"), dark = hex("#3a3632");
+      const coat = (face: Face, x: number, y: number): RGB => (face === "top" ? back : (x * 5 + y * 3) % 9 === 0 ? back : fur);
+      const head = p.box(0, 0, 6, 6, 4, coat);
+      const eye: RGB = variant & 2 ? hex("#e02020") : hex("#1e1a18");
+      p.px(head.front.x + 1, head.front.y + 2, eye, 0); p.px(head.front.x + 4, head.front.y + 2, eye, 0);
+      const snout = p.box(0, 10, 3, 3, 4, (face) => (face === "top" ? fur : light));
+      p.px(snout.front.x + 1, snout.front.y, dark, 0);
+      p.box(16, 14, 2, 2, 1, back);
+      const mane = p.box(21, 0, 8, 7, 6, coat);
+      if (variant & 1) for (const face of ["front", "west", "east", "back", "top"] as Face[]) {
+        const r = mane[face];
+        p.fill({ x: r.x, y: r.y + (face === "top" ? r.h - 2 : r.h - 2), w: r.w, h: 2 }, hex("#c02828"), 0.04);
+      }
+      p.box(18, 14, 6, 6, 9, coat);
+      p.box(9, 18, 2, 8, 2, (_f, _x, y) => (y > 5 ? light : back));
+      p.box(0, 18, 2, 8, 2, (_f, _x, y) => (y > 6 ? back : fur));
+      break;
+    }
+    case "deer": {
+      // Warm brown with a pale belly and tail, dark nose and hooves, bone-pale antlers.
+      const hide = hex("#9a6a3e"), dark = hex("#7a5230"), pale = hex("#e8dcc4");
+      const head = p.box(0, 0, 5, 5, 7, (face, x, y) => (face === "front" && y >= 3 ? hex("#b88a5e") : (x + y) % 6 === 0 ? dark : hide));
+      p.px(head.front.x + 1, head.front.y + 1, hex("#1a1410"), 0); p.px(head.front.x + 3, head.front.y + 1, hex("#1a1410"), 0);
+      p.px(head.front.x + 2, head.front.y + 4, hex("#2a1e18"), 0);
+      p.box(40, 0, 1, 7, 1, hex("#e6dcc0"));
+      p.box(46, 0, 3, 1, 1, dark);
+      p.box(54, 0, 2, 3, 1, pale);
+      p.box(0, 18, 8, 8, 14, (face, x, y) => (face === "bottom" ? pale : (x * 3 + y * 7) % 13 === 0 ? dark : hide));
+      p.box(44, 18, 4, 7, 4, (face) => (face === "front" ? pale : hide));
+      p.box(0, 44, 2, 12, 2, (_f, _x, y) => (y > 10 ? hex("#2a2018") : y > 6 ? pale : hide));
+      break;
+    }
+    case "bear": {
+      // Drawn at half size (the model doubles it): dark brown fur, a tan muzzle.
+      const fur = hex("#5a3a22"), deep = hex("#43291a"), tan = hex("#a8845e");
+      const coat = (_f: Face, x: number, y: number): RGB => ((x * 3 + y * 5) % 7 === 0 ? deep : fur);
+      p.box(0, 0, 7, 7, 11, coat);
+      p.box(36, 0, 5, 2, 5, deep);
+      const head = p.box(0, 20, 5, 4, 4, coat);
+      p.px(head.front.x + 1, head.front.y + 1, hex("#101010"), 0); p.px(head.front.x + 3, head.front.y + 1, hex("#101010"), 0);
+      const snout = p.box(20, 20, 3, 2, 2, tan);
+      p.px(snout.front.x + 1, snout.front.y, hex("#1a1210"), 0);
+      p.box(32, 20, 1, 1, 1, deep);
+      p.box(0, 30, 3, 5, 3, (_f, _x, y) => (y >= 4 ? hex("#2a1a10") : fur));
+      break;
+    }
     case "enderman": {
       // Near-black, faintly speckled; purple eyes (a wider, brighter stare while it screams).
       const black = hex("#161616"), speck = hex("#232323");

@@ -20,7 +20,7 @@ import { edition, GAME_NAME } from "../edition";
 import { Button } from "./common";
 import { Hud } from "./Hud";
 import { AdvancementsScreen, ChatInput, DeathScreen, MenuFrame, OptionsScreen, PauseMenu, ShareScreen } from "./Menus";
-import { AnvilScreen, BrewingScreen, ChestScreen, CraftingScreen, EnchantingScreen, FurnaceScreen, InventoryScreen, SmithingScreen, TradeScreen } from "./Screens";
+import { AnvilScreen, BrewingScreen, ChestScreen, CookingScreen, CraftingScreen, EnchantingScreen, FurnaceScreen, InventoryScreen, SmithingScreen, TradeScreen } from "./Screens";
 import { TouchControls } from "./TouchControls";
 import { EndPoem } from "./EndPoem";
 import { Minimap, WaypointLabels, WorldMapScreen } from "./MapView";
@@ -273,6 +273,7 @@ function Overlay({ game, input, settings, onSettings, onQuit, onExitApp }: GameV
       {screen?.kind === "enchanting" && <EnchantingScreen game={game} mobile={mobile} />}
       {screen?.kind === "anvil" && <AnvilScreen game={game} mobile={mobile} />}
       {screen?.kind === "smithing" && <SmithingScreen game={game} mobile={mobile} />}
+      {screen?.kind === "cooking" && <CookingScreen game={game} mobile={mobile} />}
       {screen?.kind === "trade" && <TradeScreen game={game} mobile={mobile} />}
     </>
   );

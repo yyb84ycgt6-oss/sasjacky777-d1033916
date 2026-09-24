@@ -77,6 +77,18 @@ export const MODS: readonly ModFeature[] = [
     id: "ambient_sounds", name: "Ambient Sounds", inspiredBy: "AmbientSounds, Dynamic Surroundings", url: "https://www.curseforge.com/minecraft/mc-mods/ambientsounds",
     description: "Birds in the forest, crickets and owls at night, frogs in the swamp, surf, wind on the peaks, drips in caves, the Nether's moan.", toggle: true,
   },
+  {
+    id: "dungeons", name: "Catacombs & Spider Caves", inspiredBy: "YUNG's Better Dungeons, When Dungeons Arise", url: "https://www.curseforge.com/minecraft/mc-mods/yungs-better-dungeons",
+    description: "Mazes of crypt rooms under the overworld — spawners, bone pillars, grave goods and a ladder shaft to the surface — and web-strung spider caves. /locate catacombs finds one.", toggle: true,
+  },
+  {
+    id: "cooking", name: "Cooking Pot", inspiredBy: "Farmer's Delight", url: "https://www.curseforge.com/minecraft/mc-mods/farmers-delight",
+    description: "An iron pot set over fire, lava or a lit furnace turns vegetables, meat and a bowl into soups and stews worth far more than their parts.", toggle: false,
+  },
+  {
+    id: "wildlife", name: "Wildlife", inspiredBy: "Alex's Mobs, Naturalist", url: "https://www.curseforge.com/minecraft/mc-mods/alexs-mobs",
+    description: "Wolf packs to tame with bones — they sit, follow and fight for you — skittish deer to stalk, and bears best left alone.", toggle: true,
+  },
 ];
 
 /** Whether a feature is on in a world: everything is, unless the world switched it off. */

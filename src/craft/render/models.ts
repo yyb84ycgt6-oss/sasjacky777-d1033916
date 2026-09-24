@@ -168,6 +168,43 @@ const MODELS: Record<string, PartSpec[]> = {
       ] },
     ...legs4([3, 5, 3], [0, 34], 2.5, 5, 4.5),
   ],
+  wolf: [
+    { name: "body", size: [6, 6, 9], uv: [18, 14], pivot: [0, 10, 1.5] },
+    { name: "mane", size: [8, 7, 6], uv: [21, 0], pivot: [0, 10.5, -3] },
+    { name: "head", size: [6, 6, 4], uv: [0, 0], pivot: [0, 11, -6], offset: [0, 0, -2],
+      children: [
+        { name: "snout", size: [3, 3, 4], uv: [0, 10], pivot: [0, -1.5, -4] },
+        { name: "earR", size: [2, 2, 1], uv: [16, 14], pivot: [-2, 4, 0.5] },
+        { name: "earL", size: [2, 2, 1], uv: [16, 14], pivot: [2, 4, 0.5] },
+      ] },
+    { name: "tail", size: [2, 8, 2], uv: [9, 18], pivot: [0, 12, 6], offset: [0, -4, 0], rotation: [0.9, 0, 0] },
+    ...legs4([2, 8, 2], [0, 18], 1.5, 8, 3.5),
+  ],
+  deer: [
+    { name: "body", size: [8, 8, 14], uv: [0, 18], pivot: [0, 16, 0.5] },
+    { name: "neck", size: [4, 7, 4], uv: [44, 18], pivot: [0, 18, -6], offset: [0, 3, 0], rotation: [0.35, 0, 0] },
+    { name: "head", size: [5, 5, 7], uv: [0, 0], pivot: [0, 24, -8], offset: [0, 1, -2],
+      children: [
+        { name: "antlerR", size: [1, 7, 1], uv: [40, 0], pivot: [-2, 3, 1], offset: [0, 3, 0], rotation: [0, 0, 0.45] },
+        { name: "antlerL", size: [1, 7, 1], uv: [40, 0], pivot: [2, 3, 1], offset: [0, 3, 0], rotation: [0, 0, -0.45] },
+        { name: "earR", size: [3, 1, 1], uv: [46, 0], pivot: [-3.5, 2, 1.5] },
+        { name: "earL", size: [3, 1, 1], uv: [46, 0], pivot: [3.5, 2, 1.5] },
+      ] },
+    { name: "tail", size: [2, 3, 1], uv: [54, 0], pivot: [0, 18, 8] },
+    ...legs4([2, 12, 2], [0, 44], 2.5, 12, 5.5),
+  ],
+  // Modelled at half size and drawn at `size: 2`, like the hoglin.
+  bear: [
+    { name: "body", size: [7, 7, 11], uv: [0, 0], pivot: [0, 8.5, 0.5] },
+    { name: "hump", size: [5, 2, 5], uv: [36, 0], pivot: [0, 12.5, -2] },
+    { name: "head", size: [5, 4, 4], uv: [0, 20], pivot: [0, 9.5, -5], offset: [0, 0, -2],
+      children: [
+        { name: "snout", size: [3, 2, 2], uv: [20, 20], pivot: [0, -1, -3] },
+        { name: "earR", size: [1, 1, 1], uv: [32, 20], pivot: [-2, 2.5, 1] },
+        { name: "earL", size: [1, 1, 1], uv: [32, 20], pivot: [2, 2.5, 1] },
+      ] },
+    ...legs4([3, 5, 3], [0, 30], 2, 5, 3.5),
+  ],
   // Vehicles are modelled at half size and drawn at `size: 2`, so their skins fit the 64×64 sheet.
   boat: [
     { name: "bottom", size: [10, 1, 14], uv: [0, 0], pivot: [0, 0.5, 0] },
@@ -502,10 +539,32 @@ export function pose(m: ModelInstance, kind: string, p: PoseInput): void {
         part.position.y = ([17, 11, 5][ring] + Math.sin(p.time * 3 + i + ring) * 0.8) / 16;
       }
       break;
-    case "pig": case "cow": case "sheep": case "creeper": case "hoglin":
+    case "pig": case "cow": case "sheep": case "creeper": case "hoglin": case "deer": case "bear":
       set("legFR", swing); set("legBL", swing);
       set("legFL", -swing); set("legBR", -swing);
+      if (kind === "deer") set("tail", Math.sin(p.time * 5) * 0.2, 0, 0);
       break;
+    case "wolf": {
+      const body = m.parts.get("body"), mane = m.parts.get("mane"), tail = m.parts.get("tail");
+      const hindR = m.parts.get("legBR"), hindL = m.parts.get("legBL");
+      if (p.sitting) {
+        // Haunches down, hind legs folded flat under them, front legs straight, tail on the ground.
+        if (body) { body.rotation.set(-0.75, 0, 0); body.position.set(0, 7.5 / 16, 2.5 / 16); }
+        if (mane) mane.rotation.set(-0.3, 0, 0);
+        for (const leg of [hindR, hindL]) if (leg) { leg.position.y = 1 / 16; leg.position.z = 1.5 / 16; leg.rotation.set(-Math.PI / 2, 0, 0); }
+        set("legFR", 0); set("legFL", 0);
+        if (tail) { tail.rotation.set(1.5, 0, 0); tail.position.y = 3 / 16; }
+      } else {
+        if (body) { body.rotation.set(0, 0, 0); body.position.set(0, 10 / 16, 1.5 / 16); }
+        if (mane) mane.rotation.set(0, 0, 0);
+        for (const leg of [hindR, hindL]) if (leg) { leg.position.y = 8 / 16; leg.position.z = 3.5 / 16; }
+        if (tail) tail.position.y = 12 / 16;
+        set("legFR", swing); set("legBL", swing); set("legFL", -swing); set("legBR", -swing);
+        // Tail up and wagging when tame and near, low when angry.
+        if (tail) tail.rotation.set(p.screaming ? 1.4 : 0.9, Math.sin(p.time * 12) * (p.carrying ? 0.5 : 0.1), 0);
+      }
+      break;
+    }
     case "chicken": {
       set("legR", swing); set("legL", -swing);
       const flap = p.onGround ? 0 : Math.sin(p.time * 30) * 0.8 + 0.8;

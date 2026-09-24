@@ -148,7 +148,7 @@ const FUNCTIONAL = new Set([
   "sea_lantern", "jack_o_lantern", "carved_pumpkin", "note_block", "hay_block", "oak_fence", "glass_pane",
   "enchanting_table", "anvil", "chipped_anvil", "damaged_anvil", "brewing_stand", "cauldron",
   "composter", "lectern", "smoker", "barrel", "fletching_table", "loom", "stonecutter", "smithing_table", "bell",
-  "end_rod", "end_portal_frame", "iron_bars", "waystone",
+  "end_rod", "end_portal_frame", "iron_bars", "waystone", "cooking_pot",
 ]);
 
 for (const def of allBlocks()) {
@@ -231,6 +231,8 @@ food("porkchop", "Raw Porkchop", 3, 1.8);
 food("cooked_porkchop", "Cooked Porkchop", 8, 12.8);
 food("beef", "Raw Beef", 3, 1.8);
 food("cooked_beef", "Steak", 8, 12.8);
+food("venison", "Raw Venison", 3, 1.8);
+food("cooked_venison", "Cooked Venison", 8, 12.8);
 food("chicken", "Raw Chicken", 2, 1.2, { effect: ["hunger", 30, 0.3] });
 food("cooked_chicken", "Cooked Chicken", 6, 7.2);
 food("mutton", "Raw Mutton", 2, 1.2);
@@ -242,6 +244,13 @@ food("melon_slice", "Melon Slice", 2, 1.2);
 food("pumpkin_pie", "Pumpkin Pie", 8, 4.8);
 item("bowl", "Bowl", { fuel: 100 });
 food("mushroom_stew", "Mushroom Stew", 6, 7.2, { remainder: "bowl" }, { maxStack: 1 });
+// Meals from the cooking pot (engine/cooking.ts): more than their parts, and the bowl comes back.
+food("vegetable_soup", "Vegetable Soup", 10, 12, { remainder: "bowl" }, { maxStack: 16 });
+food("beef_stew", "Beef Stew", 12, 14.4, { remainder: "bowl" }, { maxStack: 16 });
+food("chicken_soup", "Chicken Soup", 11, 13, { remainder: "bowl", effect: ["regeneration", 8, 1] }, { maxStack: 16 });
+food("venison_stew", "Venison Stew", 12, 14.4, { remainder: "bowl" }, { maxStack: 16 });
+food("pumpkin_soup", "Pumpkin Soup", 10, 12, { remainder: "bowl" }, { maxStack: 16 });
+food("hearty_stew", "Hearty Stew", 16, 19.2, { remainder: "bowl", effect: ["regeneration", 20, 1] }, { maxStack: 16 });
 
 // ---- functional ------------------------------------------------------------------
 
