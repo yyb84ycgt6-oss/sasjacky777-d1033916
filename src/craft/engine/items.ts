@@ -13,6 +13,7 @@
  */
 import { allBlocks, B, block, type Drop, type ToolType } from "./blocks";
 import { POTIONS } from "./potions";
+import type { Burst, Rocket } from "./fireworks";
 
 export interface ToolInfo {
   type: ToolType;
@@ -404,6 +405,19 @@ item("firework_rocket", "Firework Rocket", { use: "rocket", category: "tools" })
 // Shulkers' shells, which make shulker boxes; and the frame an End ship hangs its elytra in.
 item("shulker_shell", "Shulker Shell");
 item("item_frame", "Item Frame", { use: "item_frame", category: "functional" });
+item("firework_star", "Firework Star");
+// Bottled from the dragon's breath: brewed into a splash potion, it makes it linger.
+item("dragon_breath", "Dragon's Breath", { category: "ingredients" });
+// Thrown, a lingering potion leaves a cloud of itself behind.
+for (const p of POTIONS) {
+  const name = p.key === "water_bottle" ? "Lingering Water Bottle" : `Lingering ${p.displayName}`;
+  item(`lingering_${p.key}`, name, { maxStack: 1, use: "splash", category: "food", icon: `lingering_potion_${p.art}` });
+}
+// Arrows dipped in a lingering potion: a hit carries an eighth of the potion.
+for (const p of POTIONS) {
+  if (!p.effects.length) continue;
+  item(`tipped_arrow_${p.key}`, `Arrow of ${p.displayName.replace(/^Potion of /, "")}`, { category: "combat", icon: `tipped_arrow_${p.art}` });
+}
 
 // ---- lookups -----------------------------------------------------------------------
 
@@ -432,6 +446,10 @@ export interface ItemStack {
   contents?: (ItemStack | null)[];
   /** A shulker box's colour, as BOX_COLORS in blocks.ts (0 or absent: undyed). */
   color?: number;
+  /** A firework star's burst. */
+  burst?: Burst;
+  /** A firework rocket's flight and stars. */
+  fw?: Rocket;
   /** Uses spent, for items with durability. */
   damage?: number;
   /** Enchantments, by name → level (enchanting.ts). */

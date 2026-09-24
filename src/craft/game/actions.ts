@@ -17,7 +17,8 @@ import {
 } from "../engine/blocks";
 import { cropDrops, supported } from "../engine/blockRules";
 import { applyFortune, damageBonus, efficiencyBonus, levelOf, wears } from "../engine/enchanting";
-import { EndCrystal, ItemFrame, PrimedTnt, Projectile, type ProjectileKind } from "../engine/entities";
+import { AreaCloud, EndCrystal, ItemFrame, PrimedTnt, Projectile, type ProjectileKind } from "../engine/entities";
+import { rocketLife, rocketOf } from "../engine/fireworks";
 import { itemDef, itemId, resolveDrops, type ItemDef, type ItemStack } from "../engine/items";
 import { isArthropod, isUndead, Mob } from "../engine/mobs";
 import { potionOfItem } from "../engine/potions";
@@ -97,6 +98,8 @@ function facingOfNormal(face: number): number {
 
 export class Actions {
   target: Target | null = null;
+  /** Which of the dragon's parts the crosshair is on (see Mob.hitParts). */
+  targetPart: string | undefined;
   private mining: { x: number; y: number; z: number; progress: number; ticks: number } | null = null;
   private swingTick = -1;
   private swingPrev = -1;
@@ -208,10 +211,19 @@ export class Actions {
       if (!(e instanceof Mob || e instanceof Vehicle || e instanceof EndCrystal || e instanceof ItemFrame || swattable) || (e instanceof Mob && e.dying)) continue;
       // The vehicle you sit in is not in your way.
       if (e instanceof Vehicle && e.id === p.riding) continue;
-      if (Math.abs(e.x - ox) > 6 + e.body.width / 2 || Math.abs(e.z - oz) > 6 + e.body.width / 2) continue;
+      if (Math.abs(e.x - ox) > 14 + e.body.width / 2 || Math.abs(e.z - oz) > 14 + e.body.width / 2) continue;
+      // The dragon is struck part by part: its head, neck, body, tail or a wing.
+      const parts = e.hitParts();
+      if (parts) {
+        for (const part of parts) {
+          const r = rayBox(ox, oy, oz, d.x, d.y, d.z, part.box, bestT);
+          if (r && r.t < bestT) { bestT = r.t; best = e; this.targetPart = part.name; }
+        }
+        continue;
+      }
       const box = e.box();
       const r = rayBox(ox, oy, oz, d.x, d.y, d.z, { ...box, minX: box.minX - 0.1, maxX: box.maxX + 0.1, minZ: box.minZ - 0.1, maxZ: box.maxZ + 0.1 }, bestT);
-      if (r && r.t < bestT) { bestT = r.t; best = e; }
+      if (r && r.t < bestT) { bestT = r.t; best = e; this.targetPart = undefined; }
     }
     let remote: RemotePlayer | null = null;
     for (const r of g.remote.values()) {
@@ -478,10 +490,12 @@ export class Actions {
     if (t.entity) {
       const e = t.entity;
       if (crit) g.particles("crit", e.x, e.y + e.body.height * 0.7, e.z, 10);
-      if (g.role === "guest") g.net?.attack(e.id, damage, b.x, b.z, knockback, fire, looting);
+      const part = e instanceof Mob && e.kind === "ender_dragon" ? this.targetPart ?? "body" : undefined;
+      if (g.role === "guest") g.net?.attack(e.id, damage, b.x, b.z, knockback, fire, looting, part);
       else if (e instanceof Vehicle || e instanceof EndCrystal || e instanceof ItemFrame || e instanceof Projectile) e.hurt(g.ctx, damage, "player", b.x, b.z, p.id);
       else if (e instanceof Mob) {
         e.looting = looting;
+        e.hurtPart = part as Mob["hurtPart"];
         if (e.hurt(g.ctx, damage, "player", b.x, b.z, p.id, knockback)) {
           if (fire) e.fireTicks = Math.max(e.fireTicks, fire);
           const bane = levelOf(stack, "bane_of_arthropods");
@@ -594,7 +608,7 @@ export class Actions {
       return;
     }
     if (def.use === "bow") {
-      if (!p.survivalLike || p.inventory.count(itemId("arrow")) > 0) this.bow = { ticks: 0 };
+      if (!p.survivalLike || this.nextArrow() !== null) this.bow = { ticks: 0 };
       return;
     }
     if (def.use === "pearl") {
@@ -622,9 +636,12 @@ export class Actions {
       return;
     }
     if (def.use === "rocket") {
-      // A rocket only pushes someone already gliding.
-      if (!p.gliding) { g.showActionbar("Fire a rocket while gliding on elytra"); return; }
-      p.boostTicks = 22 + Math.floor(Math.random() * 12);
+      // Fired into the air, a rocket only pushes someone already gliding; on the ground it goes up from a block.
+      if (!p.gliding) { g.showActionbar("Set a rocket off from a block, or fire it while gliding"); return; }
+      const rocket = rocketOf(p.inventory.held);
+      // The push lasts as long as the rocket's flight; its stars, if any, go off on the glider at the end.
+      p.boostTicks = rocketLife(rocket.flight, Math.random);
+      g.boostBursts = rocket.bursts.length ? rocket : null;
       g.sound("firework_launch", p.body.x, p.body.y, p.body.z, 0.8);
       g.particles("crit", p.body.x, p.body.y, p.body.z, 6);
       if (p.survivalLike) this.consumeHeld();
@@ -686,18 +703,32 @@ export class Actions {
     f = Math.min(1, f);
     const bow = p.inventory.held;
     const power = levelOf(bow, "power");
+    const arrow = this.nextArrow();
+    const tipped = arrow ? p.inventory.slotStack(arrow) : null;
     this.throwProjectile("arrow", f * 3, f, {
       damage: 2 + (power ? power * 0.5 + 0.5 : 0),
       knockback: levelOf(bow, "punch"),
       fire: levelOf(bow, "flame") > 0,
+      // A tipped arrow carries its potion to whatever it strikes.
+      item: tipped && tipped.id !== itemId("arrow") ? tipped.id : 0,
     });
     g.sound("bow", p.body.x, p.body.y + 1.5, p.body.z, 0.8, 1 / (Math.random() * 0.4 + 1.2) + f * 0.5);
     if (p.survivalLike) {
       // Infinity: the arrow is still needed to draw, but never spent.
-      if (!this.infiniteArrows()) p.inventory.remove(itemId("arrow"), 1);
+      // (Infinity spares plain arrows only, as in the original: a tipped one is always spent.)
+      if (arrow && (!this.infiniteArrows() || (tipped && tipped.id !== itemId("arrow")))) p.inventory.takeOne(arrow);
       this.wearHeld(1);
     }
     this.swing();
+  }
+
+  /** The arrow a bow draws: the off hand first, then the hotbar and pack in order — plain or tipped. */
+  private nextArrow(): number | "offhand" | null {
+    const inv = this.game.player.inventory;
+    const isArrow = (id: number | undefined) => id !== undefined && (id === itemId("arrow") || !!itemDef(id)?.name.startsWith("tipped_arrow_"));
+    if (isArrow(inv.offhand?.id)) return "offhand";
+    const i = inv.slots.findIndex((st) => isArrow(st?.id));
+    return i >= 0 ? i : null;
   }
 
   private infiniteArrows(): boolean {
@@ -708,6 +739,18 @@ export class Actions {
   /** A glass bottle dipped in water becomes a water bottle. */
   private fillBottle(): boolean {
     const g = this.game;
+    // The dragon's breath first: stood in its cloud, a bottle takes some of it.
+    const b = g.player.body;
+    for (const e of g.entities.values()) {
+      if (!(e instanceof AreaCloud) || e.potion || e.removed) continue;
+      if (Math.hypot(e.x - b.x, e.z - b.z) > e.radius + 1.5 || Math.abs(e.y - b.y) > 3) continue;
+      if (g.role === "guest") g.net?.interact(e.id, "glass_bottle");
+      else if (!e.bottled()) continue;
+      g.sound("bottle_fill_dragonbreath", b.x, b.y + 1, b.z, 0.8);
+      this.replaceHeld({ id: itemId("dragon_breath"), count: 1 });
+      this.swing();
+      return true;
+    }
     const hit = this.fluidHit();
     if (!hit || g.world.blockAt(hit.x, hit.y, hit.z) !== B.WATER) return false;
     g.sound("bucket_fill", hit.x + 0.5, hit.y + 0.5, hit.z + 0.5, 0.6, 1.4);
@@ -868,6 +911,17 @@ export class Actions {
       return true;
     }
 
+    if (fresh && def.use === "rocket" && !p.gliding) {
+      // Set off from the face that was clicked, a hair out from it.
+      const [dx, dy, dz] = FACE_DIRS[hit.face];
+      const x0 = hit.px + dx * 0.15, y0 = hit.py + dy * 0.15, z0 = hit.pz + dz * 0.15;
+      const rocket = rocketOf(p.inventory.held);
+      if (g.role === "guest") g.net?.launchFirework?.(x0, y0, z0, rocket);
+      else g.launchFirework(x0, y0, z0, rocket, p.id);
+      if (p.survivalLike) this.consumeHeld();
+      this.swing();
+      return true;
+    }
     if (fresh && def.use === "item_frame") {
       // Hung on the face that was clicked, in the cell in front of it.
       const [dx, dy, dz] = FACE_DIRS[hit.face];

@@ -12,7 +12,7 @@ import { B, block, Face, FACE_DIRS, modelBoxes } from "../engine/blocks";
 import { buildAtlas, layerOf } from "../engine/atlas";
 import type { ChunkMesh } from "../engine/mesher";
 import type { Entity } from "../engine/entities";
-import { EndCrystal, ItemEntity, ItemFrame, PrimedTnt, FallingBlock, Projectile, XpOrb } from "../engine/entities";
+import { EndCrystal, FireworkRocket, ItemEntity, ItemFrame, PrimedTnt, FallingBlock, Projectile, XpOrb } from "../engine/entities";
 import { Mob } from "../engine/mobs";
 import { Boat, Vehicle } from "../engine/vehicles";
 import { PROFESSIONS } from "../engine/villages";
@@ -281,6 +281,9 @@ export class WorldRenderer {
       }
       const [nx, ny, nz] = FACE_DIRS[e.face];
       board.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(nx, ny, nz));
+    } else if (e instanceof FireworkRocket) {
+      v.item = new ItemView(this.shared, itemId("firework_rocket"), 1, 0.7);
+      object.add(v.item.root);
     } else if (e instanceof EndCrystal) {
       v.crystal = crystalView();
       object.add(v.crystal.cage, v.crystal.core);
@@ -463,6 +466,8 @@ export class WorldRenderer {
         if (v.mats) { v.mats[0].color.set("#6e4c26").multiplyScalar(shade); v.mats[1].color.set("#b08a52").multiplyScalar(shade); }
         continue;
       }
+      // A rocket leaves a trail of sparks as it climbs.
+      if (e instanceof FireworkRocket && Math.random() < 0.85) this.particles.emit("firework_trail", x, y - 0.15, z, 1, 0, 0.05);
       if (v.item && e instanceof ItemEntity) {
         const [s, b] = this.lightAt(x, y + 0.2, z);
         v.item.setLight(s, b);

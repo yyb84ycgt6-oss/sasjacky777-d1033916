@@ -57,6 +57,39 @@ export const DRAGON_IMMUNE = new Set<number>([
   B.BEDROCK, B.END_STONE, B.OBSIDIAN, B.IRON_BARS, B.END_PORTAL, B.END_PORTAL_FRAME, B.END_GATEWAY,
 ]);
 
+/**
+ * The dragon's body as the original has it: not one box but a head, a neck,
+ * a body, a tail in three and each wing in three, turned with its heading.
+ * Only the head takes a blow in full; the rest take a quarter of it and a
+ * point — so the fight is won by reaching the head, not by peppering a wing.
+ * Each part is a cube (centre and half-width), in world space.
+ */
+export interface DragonPart { name: "head" | "neck" | "body" | "tail" | "wing"; x: number; y: number; z: number; half: number }
+
+const PART_LAYOUT: [DragonPart["name"], number, number, number, number][] = [
+  // name, right, up, back (from the body's centre, in blocks), half-width
+  ["head", 0, 1.9, -5, 0.9], ["neck", 0, 1.7, -3.2, 0.75], ["body", 0, 1.3, -0.8, 1.5], ["body", 0, 1.3, 1.4, 1.5],
+  ["tail", 0, 1.5, 3.4, 0.6], ["tail", 0, 1.5, 4.6, 0.6], ["tail", 0, 1.5, 5.8, 0.6],
+  ["wing", -2.6, 2, -0.6, 0.9], ["wing", -4.4, 2, -0.6, 0.9], ["wing", -6.2, 2, -0.6, 0.9],
+  ["wing", 2.6, 2, -0.6, 0.9], ["wing", 4.4, 2, -0.6, 0.9], ["wing", 6.2, 2, -0.6, 0.9],
+];
+
+export function dragonParts(m: Mob): DragonPart[] {
+  const b = m.body;
+  const sin = Math.sin(m.yaw), cos = Math.cos(m.yaw);
+  // Forward is -z at yaw 0; right is +x.
+  return PART_LAYOUT.map(([name, right, up, back, half]) => ({
+    name, half, y: b.y + up,
+    x: b.x + right * cos + back * sin,
+    z: b.z - right * sin + back * cos,
+  }));
+}
+
+/** What a blow of `amount` does to a part: all of it to the head, a quarter and a point elsewhere. */
+export function partDamage(part: DragonPart["name"] | undefined, amount: number): number {
+  return part === "head" ? amount : amount / 4 + Math.min(amount, 1);
+}
+
 /** Where its head is: five blocks ahead of the body along its heading. */
 export function dragonHead(m: Mob): { x: number; y: number; z: number } {
   const b = m.body;
@@ -69,10 +102,12 @@ const sitting = (s: DragonState) => s.phase === "perch";
  * Damage the dragon actually takes from a hit: arrows glance off it perched,
  * its own crystals' blasts never touch it. Returns 0 to refuse the hit.
  */
-export function dragonHurt(m: Mob, amount: number, source: DamageSource): number {
+export function dragonHurt(m: Mob, amount: number, source: DamageSource, part?: DragonPart["name"]): number {
   const s = m.dragon;
   if (!s || s.phase === "dying") return 0;
   if (sitting(s) && (source === "arrow" || source === "fireball")) return 0;
+  // Blows land on a part; magic (a crystal it drew on going up) reaches it whole.
+  if (source !== "magic" && source !== "void") amount = partDamage(part, amount);
   if (sitting(s)) {
     s.perchDamage += amount;
     // Hurt enough while down, it gets back into the air.

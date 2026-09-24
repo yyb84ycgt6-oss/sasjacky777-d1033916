@@ -73,11 +73,23 @@ export function potionByKey(key: string): PotionDef | undefined {
   return BY_KEY.get(key);
 }
 
-/** The potion an item name is, with whether it is the splash kind; undefined for anything else. */
-export function potionOfItem(name: string): { potion: PotionDef; splash: boolean } | undefined {
-  const splash = name.startsWith("splash_");
-  const potion = BY_KEY.get(splash ? name.slice(7) : name);
-  return potion ? { potion, splash } : undefined;
+/** The forms a potion comes in: drunk, thrown to splash, thrown to linger, or dipped into arrows. */
+export type PotionForm = "drink" | "splash" | "lingering" | "arrow";
+const PREFIXES: [string, PotionForm][] = [["splash_", "splash"], ["lingering_", "lingering"], ["tipped_arrow_", "arrow"]];
+
+/**
+ * The potion an item name is, with its form; undefined for anything else.
+ * `splash` is true for both thrown forms, which burst where they land.
+ */
+export function potionOfItem(name: string): { potion: PotionDef; splash: boolean; form: PotionForm } | undefined {
+  const [prefix, form] = PREFIXES.find(([pre]) => name.startsWith(pre)) ?? ["", "drink" as PotionForm];
+  const potion = BY_KEY.get(name.slice(prefix.length));
+  return potion ? { potion, splash: form === "splash" || form === "lingering", form } : undefined;
+}
+
+/** How long an effect lasts from each form: a splash three quarters, a lingering cloud's touch a quarter, an arrow an eighth. */
+export function formSeconds(seconds: number, form: PotionForm): number {
+  return form === "splash" ? splashSeconds(seconds) : form === "lingering" ? Math.floor(seconds / 4) : form === "arrow" ? Math.floor(seconds / 8) : seconds;
 }
 
 /** Splash potions last three quarters as long as the drink, as in the original. */
@@ -140,12 +152,14 @@ const BREW_MAP = new Map(BREWS.map(([from, ing, to]) => [`${from}|${ing}`, to]))
  */
 export function brewResult(bottle: string, ingredient: string): string | undefined {
   const p = potionOfItem(bottle);
-  if (!p) return undefined;
-  if (ingredient === "gunpowder") return p.splash ? undefined : `splash_${p.potion.key}`;
+  if (!p || p.form === "arrow") return undefined;
+  if (ingredient === "gunpowder") return p.form === "drink" ? `splash_${p.potion.key}` : undefined;
+  // The dragon's breath makes a splash potion linger.
+  if (ingredient === "dragon_breath") return p.form === "splash" ? `lingering_${p.potion.key}` : undefined;
   const to = BREW_MAP.get(`${p.potion.key}|${ingredient}`);
   if (!to) return undefined;
-  return p.splash ? `splash_${to}` : to;
+  return p.form === "drink" ? to : `${p.form}_${to}`;
 }
 
 /** Every ingredient the stand accepts, so the slot can refuse anything else. */
-export const BREWING_INGREDIENTS: ReadonlySet<string> = new Set(["gunpowder", ...BREWS.map(([, i]) => i)]);
+export const BREWING_INGREDIENTS: ReadonlySet<string> = new Set(["gunpowder", "dragon_breath", ...BREWS.map(([, i]) => i)]);

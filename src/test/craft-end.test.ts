@@ -516,10 +516,55 @@ describe("the Ender Dragon", () => {
   it("shrugs off arrows while perched, but not a sword", () => {
     const d = dragonAt(0, 15);
     d.dragon!.phase = "perch";
-    expect(dragonHurt(d, 8, "arrow")).toBe(0);
-    expect(dragonHurt(d, 8, "player")).toBe(8);
+    expect(dragonHurt(d, 8, "arrow", "head")).toBe(0);
+    expect(dragonHurt(d, 8, "player", "head")).toBe(8);
     d.dragon!.phase = "circle";
-    expect(dragonHurt(d, 8, "arrow")).toBe(8);
+    expect(dragonHurt(d, 8, "arrow", "head")).toBe(8);
+  });
+
+  it("takes a blow in full only on its head: a quarter and a point anywhere else", () => {
+    const d = dragonAt(0, 40);
+    expect(dragonHurt(d, 8, "player", "head")).toBe(8);
+    for (const part of ["neck", "body", "tail", "wing", undefined] as const) expect(dragonHurt(d, 8, "player", part)).toBe(3);
+    // A crystal it drew on going up reaches it whole, wherever.
+    expect(dragonHurt(d, 10, "magic", "wing")).toBe(10);
+  });
+
+  it("lays its head, neck, body, tail and wings out along its heading", () => {
+    const d = dragonAt(0, 40);
+    d.yaw = 0;
+    const parts = d.hitParts()!;
+    const head = parts.find((p) => p.name === "head")!.box;
+    // Yaw 0 faces -z: the head is five blocks that way, the tail behind.
+    expect((head.minZ + head.maxZ) / 2).toBeCloseTo(d.z - 5, 1);
+    const tails = parts.filter((p) => p.name === "tail").map((p) => (p.box.minZ + p.box.maxZ) / 2);
+    expect(Math.min(...tails)).toBeGreaterThan(d.z + 2);
+    const wings = parts.filter((p) => p.name === "wing").map((p) => (p.box.minX + p.box.maxX) / 2);
+    expect(Math.max(...wings)).toBeGreaterThan(d.x + 6);
+    expect(Math.min(...wings)).toBeLessThan(d.x - 6);
+    // Turned to face +x, the head follows.
+    d.yaw = -Math.PI / 2;
+    const turned = d.hitParts()!.find((p) => p.name === "head")!.box;
+    expect((turned.minX + turned.maxX) / 2).toBeCloseTo(d.x + 5, 1);
+  });
+
+  it("an arrow that meets its wing does a quarter and a point; one in the eye does it all", () => {
+    const d = dragonAt(0, 40);
+    d.yaw = 0;
+    // From the side of +z moving -z, or (dir -1) from in front moving +z.
+    const shoot = (tx: number, ty: number, tz: number, dir = 1) => {
+      const a = new Projectile("arrow", tx, ty, tz + 6 * dir, 0, 0, -2 * dir, "p1");
+      mobs.push(a);
+      const before = d.health;
+      for (let i = 0; i < 6 && !a.removed && !a.inGround; i++) { a.beginTick(); a.tick(ctx()); }
+      d.invulnerable = 0;
+      return before - d.health;
+    };
+    const wing = d.hitParts()!.filter((p) => p.name === "wing")[2].box;
+    expect(shoot((wing.minX + wing.maxX) / 2, (wing.minY + wing.maxY) / 2, wing.maxZ)).toBeCloseTo(4 / 4 + 1, 0);
+    const head = d.hitParts()!.find((p) => p.name === "head")!.box;
+    // Met head on, from in front, the arrow finds the head before anything else.
+    expect(shoot((head.minX + head.maxX) / 2, (head.minY + head.maxY) / 2, head.minZ, -1)).toBeGreaterThanOrEqual(4);
   });
 
   it("comes down onto the portal's pillar once no crystal is left", () => {
@@ -546,6 +591,7 @@ describe("the Ender Dragon", () => {
 
   it("rises for ten seconds when slain, then is gone and its reward is called for", () => {
     const d = dragonAt(0, 40);
+    d.hurtPart = "head";
     d.hurt(ctx(), 500, "player", 0, 0, "p1");
     tick(100);
     expect(d.removed).toBe(false);

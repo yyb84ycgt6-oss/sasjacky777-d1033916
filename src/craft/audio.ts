@@ -173,7 +173,7 @@ export class GameAudio {
   play(name: string, x: number | null = null, y = 0, z = 0, volume = 1, pitch = 1): void {
     if (!this.ready()) return;
     // The dragon and the End's portals carry across the island; most sounds only a few blocks.
-    const far = name === "explode" || name === "thunder" || name.startsWith("ender_dragon") || name === "end_portal_spawn" || name === "end_gateway_spawn";
+    const far = name === "explode" || name.startsWith("firework_") && name !== "firework_launch" || name === "thunder" || name.startsWith("ender_dragon") || name === "end_portal_spawn" || name === "end_gateway_spawn";
     const out = this.placed(x, y, z, volume, far ? 96 : 16);
     if (!out) return;
     const t = this.ctx!.currentTime;
@@ -265,6 +265,11 @@ export class GameAudio {
         this.tone(out, t + 0.05, "sine", 900 * p, 300 * p, 0.3, 0.12);
         break;
       case "firework_launch": this.noiseBurst(out, t, 0.6, "highpass", 1800, 0.6, 0.5, 1.5); break;
+      // A burst: a sharp crack, a deeper boom for a large ball, and a crackle of little pops for a twinkle.
+      case "firework_blast": this.noiseBurst(out, t, 0.5, "lowpass", 1600, 0.7, 0.9, 0.2); this.tone(out, t, "sine", 160, 60, 0.35, 0.4); break;
+      case "firework_large_blast": this.noiseBurst(out, t, 1.1, "lowpass", 900, 0.7, 1, 0.25); this.tone(out, t, "sine", 90, 35, 0.9, 0.5); break;
+      case "firework_twinkle": for (let i = 0; i < 9; i++) this.noiseBurst(out, t + 0.5 + i * 0.07 + Math.random() * 0.05, 0.03, "highpass", 3500, 1, 0.35); break;
+      case "bottle_fill_dragonbreath": this.noiseBurst(out, t, 0.35, "bandpass", 1500, 1, 0.5, 1.5); this.tone(out, t, "sine", 500, 900, 0.3, 0.12); break;
       case "dragon_fireball_explode": this.noiseBurst(out, t, 1, "lowpass", 700, 0.8, 0.8, 0.3); this.tone(out, t, "sine", 120, 50, 0.8, 0.4); break;
       // Item frames: a wooden tap to hang, a click to turn, a pop as the item comes out.
       case "item_frame_place": case "item_frame_break": this.noiseBurst(out, t, 0.1, "bandpass", 700, 2, 0.6); this.tone(out, t, "sine", 180, 110, 0.1, 0.3); break;

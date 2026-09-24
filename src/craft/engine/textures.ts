@@ -1709,6 +1709,39 @@ const ITEM_TEMPLATES: Record<string, string[]> = {
     "....afffddda....",
     ".....aaaaaa.....",
   ],
+  // A lingering bottle: the splash bottle's round belly under a long, thin neck.
+  lingering: [
+    ".......aa.......",
+    "......acca......",
+    "......aaaa......",
+    ".......gh.......",
+    ".......gh.......",
+    "......agga......",
+    ".....agggga.....",
+    "....affffffa....",
+    "...afwffffffa...",
+    "..afwfffffffda..",
+    "..affffffffdda..",
+    "..afffffffddda..",
+    "...afffffddda...",
+    "....aaaaaaaa....",
+  ],
+  // A ball of gunpowder flecked with the colours of the dyes in it.
+  firework_star: [
+    "................",
+    "......aaaa......",
+    "....aabbbbaa....",
+    "...abbcbrbbba...",
+    "...abrbbbbyba...",
+    "..abbbgbbcbbba..",
+    "..abcbbbbubbba..",
+    "..abbbybbbbrba..",
+    "..abbbbbcbbbba..",
+    "...abubbbbgba...",
+    "...abbbrbbbba...",
+    "....aabbbbaa....",
+    "......aaaa......",
+  ],
   wart: [
     "................",
     "......aa........",
@@ -2527,8 +2560,14 @@ art("glass_bottle", "potion", { ...GLASS, f: hex("#dbe8f4"), w: hex("#ffffff"), 
     seen.add(p.art);
     art(`potion_${p.art}`, "potion", liquid(p.color));
     art(`splash_potion_${p.art}`, "splash", liquid(p.color));
+    art(`lingering_potion_${p.art}`, "lingering", liquid(p.color));
+    // A tipped arrow: the plain arrow with its head dipped in the potion's colour.
+    const tip = hex(p.color);
+    art(`tipped_arrow_${p.art}`, "arrow", { a: shade(tip, 0.55), b: tip, h: H, w: hex("#f0f0f0") });
   }
 }
+art("dragon_breath", "lingering", { ...liquid("#e48ad0"), w: hex("#ffe0f8") });
+art("firework_star", "firework_star", { a: hex("#3a3a3a"), b: hex("#6a6a6a"), c: hex("#9a9a9a"), r: hex("#e04040"), y: hex("#f0d040"), g: hex("#40c060"), u: hex("#4a70e0") });
 art("experience_bottle", "potion", { ...liquid("#8ae03a"), w: hex("#f8f070") });
 art("nether_wart", "wart", paletteOf("#8a1a1e", { c: hex("#c83a3a") }));
 art("blaze_rod", "stick", { a: hex("#8a5a00"), b: hex("#f8c030"), d: hex("#d88a10") });

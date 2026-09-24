@@ -20,7 +20,7 @@ import { DAY_TICKS, SEA_LEVEL, TICK_MS, WORLD_HEIGHT } from "../engine/constants
 import { BlockRules, tickDelay } from "../engine/blockRules";
 import { COOK_TICKS, fuelTicks, smeltResult } from "../engine/crafting";
 import {
-  AreaCloud, bumpEntityIds, EndCrystal, FallingBlock, ItemEntity, ItemFrame, PrimedTnt, Projectile, XpOrb, xpOrbValues,
+  AreaCloud, bumpEntityIds, EndCrystal, FallingBlock, FireworkRocket, ItemEntity, ItemFrame, PrimedTnt, Projectile, XpOrb, xpOrbValues,
   type DamageSource, type Entity, type EntityContext, type EntitySnapshot, type PlayerRef, type ProjectileKind,
 } from "../engine/entities";
 import { blastImpact, explosionBlocks, exposure } from "../engine/explosion";
@@ -46,6 +46,7 @@ import { golemParts, villageLoot } from "../engine/villages";
 import { fortressesTouching, fortressLoot, inFortress, NETHER_LAVA_LEVEL, SPAWNER_MOBS } from "../engine/nether";
 import { planPortal, type PortalAxis } from "../engine/portal";
 import { findEndPortal, inStronghold, nearestStronghold, strongholdLoot } from "../engine/stronghold";
+import { rocketLife, rocketOf, type Rocket } from "../engine/fireworks";
 import { buildGateway, cityLoot, END_SPAWN, EndGenerator, endCitiesTouching, GATEWAY_COUNT, gatewayPosition, type EndCity } from "../engine/end";
 import { EndFight } from "./endFight";
 import { FRAME_EYE } from "../engine/blocks";
@@ -75,7 +76,7 @@ export interface NetLink {
   // guest → host
   requestChunk(cx: number, cz: number): Promise<ChunkData | null>;
   isModified(cx: number, cz: number): boolean;
-  attack(entityId: number, damage: number, fromX: number, fromZ: number, knockback?: number, fire?: number, looting?: number): void;
+  attack(entityId: number, damage: number, fromX: number, fromZ: number, knockback?: number, fire?: number, looting?: number, part?: string): void;
   interact(entityId: number, item: string | null, stack?: ItemStack | null): void;
   drops(x: number, y: number, z: number, stacks: ItemStack[], xp: number): void;
   throwItem(kind: ProjectileKind, x: number, y: number, z: number, vx: number, vy: number, vz: number, extra?: ThrowExtra): void;
@@ -100,6 +101,7 @@ export interface NetLink {
   vehiclePose?(v: Vehicle): void;
   placeVehicle?(kind: string, x: number, y: number, z: number, yaw: number, wood: number): void;
   placeFrame?(face: number, x: number, y: number, z: number): void;
+  launchFirework?(x: number, y: number, z: number, rocket: Rocket): void;
   /** Host: the party moves to another dimension, arriving around x, y, z. */
   dimensionChanged?(dim: Dimension, x: number, y: number, z: number): void;
   /** Host: where it actually landed there (by the portal it came out of), for guests to land beside. */
@@ -196,6 +198,9 @@ export class Game {
   readonly store: Store<Hud>;
   readonly actions: Actions;
   net: NetLink | null = null;
+  /** The stars of the rocket pushing this player's glide, to go off on them when it is spent. */
+  boostBursts: Rocket | null = null;
+  private boostWas = 0;
   /** Where the current dose of levitation began, for the advancement. */
   private levitatedFrom: number | null = null;
 
@@ -494,6 +499,8 @@ export class Game {
     this.dismount();
     this.actions.stopUsing();
     if (this.screen && this.screen.kind !== "death") this.setScreen(null);
+    // Home from the End with the dragon slain: the poem, once, while home loads behind it.
+    const poem = from === "end" && to === "overworld" && this.player.advancements.has("dragon") && !this.player.poemSeen;
     if (this.simulates) {
       const changed: ChunkData[] = [];
       for (const c of this.world.loadedChunks()) if (c.modified) changed.push(this.chunkData(c));
@@ -526,6 +533,10 @@ export class Game {
     this.portalLock = true;
     this.net?.dimensionChanged?.(to, arrival.x, arrival.y, arrival.z);
     this.advance({ kind: "dimension", dimension: to });
+    if (poem) {
+      this.player.poemSeen = true;
+      this.setScreen({ kind: "poem" });
+    }
   }
 
   /** Guest: the host landed here after a change of dimension; come in beside it. */
@@ -917,6 +928,8 @@ export class Game {
     } else if (s.kind === "item_frame") {
       e = new ItemFrame(0, Math.floor(s.x), Math.floor(s.y), Math.floor(s.z), null, 0, s.id);
       e.applySnapshot(s);
+    } else if (s.kind === "firework_rocket") {
+      return;
     } else {
       e = vehicleFromSnapshot(s);
       // Nobody is riding anything when a world opens.
@@ -991,6 +1004,14 @@ export class Game {
     const less: Slot = stack.count > 1 ? { ...stack, count: stack.count - 1 } : null;
     const w = this.world;
     const use = itemDef(stack.id)?.use;
+    if (use === "rocket") {
+      // A dispenser fires a rocket out of its face, flying on the way it points.
+      const rocket = rocketOf(stack);
+      const life = rocketLife(rocket.flight, Math.random);
+      this.spawn(new FireworkRocket(x + 0.5 + dx * 0.7, y + 0.5 + dy * 0.7, z + 0.5 + dz * 0.7, rocket, dx * 0.5, dy * 0.5 || 0.02, dz * 0.5, life));
+      this.sound("firework_launch", x + 0.5, y + 0.5, z + 0.5, 1);
+      return less;
+    }
     if (name === "arrow" || name === "snowball" || name === "egg" || use === "splash" || use === "xp_bottle") {
       const kind: ProjectileKind = use === "splash" ? "potion" : use === "xp_bottle" ? "xp_bottle" : (name as ProjectileKind);
       const speed = name === "arrow" ? 1.1 : kind === "potion" || kind === "xp_bottle" ? 0.6 : 0.9;
@@ -1551,6 +1572,13 @@ export class Game {
     this.sound("glass_break", x, y, z, 0.8);
     this.particles("potion", x, y, z, 24, potion ? parseInt(potion.potion.color.slice(1), 16) : 0x385dc6);
     if (!potion) return;
+    // A lingering potion leaves a cloud of itself where it broke, for half a minute.
+    if (potion.form === "lingering") {
+      const cloud = new AreaCloud(x, Math.floor(y + 0.2), z, 3, 600, owner);
+      cloud.potion = potion.potion.key;
+      this.spawn(cloud);
+      return;
+    }
     const effects = potion.potion.effects;
     const strength = (ex: number, ey: number, ez: number, hit: boolean) => {
       if (hit) return 1;
@@ -1977,6 +2005,15 @@ export class Game {
         if (b.x >= c.x0 && b.x <= c.x1 + 1 && b.z >= c.z0 && b.z <= c.z1 + 1 && b.y >= c.y - 2) this.advance({ kind: "city" });
       }
     }
+    // A rocket with stars, spent while gliding, bursts on the glider.
+    if (this.boostWas > 0 && this.player.boostTicks === 0 && this.boostBursts) {
+      const b = this.player.body;
+      const r = new FireworkRocket(b.x, b.y + 0.9, b.z, this.boostBursts, 0, 0, 0, 0, this.player.id);
+      if (this.role === "guest") this.net?.launchFirework?.(b.x, b.y + 0.9, b.z, { ...this.boostBursts, flight: 0 });
+      else this.spawn(r);
+      this.boostBursts = null;
+    }
+    this.boostWas = this.player.boostTicks;
     // Great View From Up Here: fifty blocks up on one dose of levitation.
     if (this.player.hasEffect("levitation")) {
       this.levitatedFrom ??= this.player.body.y;
@@ -2133,6 +2170,12 @@ export class Game {
     b.x = v.x; b.y = v.riderY(); b.z = v.z;
     // A boat turns its rider with it.
     if (v instanceof Boat) this.player.yaw += v.yaw - v.prevYaw;
+  }
+
+  /** Sets a rocket off from (x, y, z), straight up (the host's half of firing one). */
+  launchFirework(x: number, y: number, z: number, rocket: Rocket, owner: string | null): void {
+    this.spawn(FireworkRocket.launch(x, y, z, rocket, Math.random, owner));
+    this.sound("firework_launch", x, y, z, 1);
   }
 
   /** Hangs an item frame on a face of a block (the host's half); false when the spot is taken or unsupported. */

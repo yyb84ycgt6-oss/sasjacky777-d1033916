@@ -9,6 +9,7 @@
  */
 import { B } from "./blocks";
 import { enchantDef } from "./enchanting";
+import { sanitizeBurst, sanitizeRocket } from "./fireworks";
 import { itemDef, maxStack, type ItemStack } from "./items";
 
 export type Slot = ItemStack | null;
@@ -23,7 +24,8 @@ function sameEnchants(a: ItemStack, b: ItemStack): boolean {
 export function sameItem(a: Slot, b: Slot): boolean {
   return !!a && !!b && a.id === b.id && (a.damage ?? 0) === (b.damage ?? 0)
     && (a.name ?? "") === (b.name ?? "") && (a.repair ?? 0) === (b.repair ?? 0) && sameEnchants(a, b)
-    && (a.color ?? 0) === (b.color ?? 0) && sameContents(a, b);
+    && (a.color ?? 0) === (b.color ?? 0) && sameContents(a, b)
+    && JSON.stringify(a.burst ?? null) === JSON.stringify(b.burst ?? null) && JSON.stringify(a.fw ?? null) === JSON.stringify(b.fw ?? null);
 }
 
 function sameContents(a: ItemStack, b: ItemStack): boolean {
@@ -80,6 +82,20 @@ export class Inventory {
   }
 
   /** Removes `count` of an item from anywhere. Returns false (and removes nothing) if there is not enough. */
+  /** A slot's stack by index, or the off hand. */
+  slotStack(slot: number | "offhand"): Slot {
+    return slot === "offhand" ? this.offhand : this.slots[slot] ?? null;
+  }
+
+  /** Takes one item from a slot (or the off hand). */
+  takeOne(slot: number | "offhand"): void {
+    const s = this.slotStack(slot);
+    if (!s) return;
+    const left = s.count > 1 ? { ...s, count: s.count - 1 } : null;
+    if (slot === "offhand") this.offhand = left;
+    else this.slots[slot] = left;
+  }
+
   remove(id: number, count: number): boolean {
     if (this.count(id) < count) return false;
     let left = count;
@@ -182,6 +198,8 @@ export function sanitizeStack(value: unknown): Slot {
   if (typeof s.name === "string" && s.name.trim()) out.name = s.name.slice(0, 35);
   if (typeof s.repair === "number" && s.repair > 0) out.repair = Math.min(63, Math.floor(s.repair));
   if (typeof s.color === "number" && s.color > 0 && s.color < 9) out.color = Math.floor(s.color);
+  if (s.burst) { const b = sanitizeBurst(s.burst); if (b) out.burst = b; }
+  if (s.fw) { const r = sanitizeRocket(s.fw); if (r) out.fw = r; }
   // A box's contents, one level deep: a box inside a box is refused here as it is in the slots.
   if (s.id === B.SHULKER_BOX && Array.isArray(s.contents)) {
     const items = s.contents.slice(0, 27).map((c) => {

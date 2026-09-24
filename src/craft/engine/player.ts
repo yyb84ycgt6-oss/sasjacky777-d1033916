@@ -88,6 +88,8 @@ export class Player {
   score = 0;
   /** Advancement ids earned in this world; kept with the player so a guest's travel in the host's save. */
   advancements = new Set<string>();
+  /** Whether this player has been shown the poem after the dragon (once, the first time home). */
+  poemSeen = false;
   gameMode: GameMode = "survival";
   flying = false;
   spawn: { x: number; y: number; z: number } | null = null;
@@ -541,7 +543,7 @@ export class Player {
       saturation: this.saturation, exhaustion: this.exhaustion, air: this.air, xpLevel: this.xpLevel, xpPoints: this.xpPoints,
       gameMode: this.gameMode, flying: this.flying, spawn: this.spawn, inventory: this.inventory.toJSON(), effects: this.effects,
       fireTicks: this.fireTicks, dead: this.dead, score: this.score, advancements: [...this.advancements],
-      enchantSeed: this.enchantSeed,
+      enchantSeed: this.enchantSeed, poem: this.poemSeen || undefined,
     };
   }
 
@@ -555,6 +557,7 @@ export class Player {
     this.saturation = num(s.saturation, 5); this.exhaustion = num(s.exhaustion, 0);
     this.air = num(s.air, 300); this.xpLevel = num(s.xpLevel, 0); this.xpPoints = num(s.xpPoints, 0); this.score = num(s.score, 0);
     this.advancements = new Set(Array.isArray(s.advancements) ? s.advancements.filter((a): a is string => typeof a === "string") : []);
+    this.poemSeen = s.poem === true;
     this.setGameMode(s.gameMode ?? "survival");
     this.flying = !!s.flying && this.canFly;
     this.spawn = s.spawn ?? null;
@@ -578,4 +581,6 @@ export interface PlayerSave {
   score?: number;
   advancements?: string[];
   enchantSeed?: number;
+  /** The poem after the dragon has been shown to this player. */
+  poem?: boolean;
 }

@@ -15,12 +15,12 @@ import {
   type DamageSource, type EntityContext, type EntityKind, type EntitySnapshot, type PlayerRef,
 } from "./entities";
 import { itemByName, type ItemStack, type StatusEffect } from "./items";
-import { moveBody, senseEnvironment, travel } from "./physics";
+import { moveBody, senseEnvironment, travel, type AABB } from "./physics";
 import { raycastBlocks } from "./raycast";
 import { hashFloat, Rng } from "./rng";
 import { levelForXp, offersForLevel, sanitizeOffer, type Offer } from "./trading";
 import { JOB_BLOCKS, professionForBlock, PROFESSIONS, type Profession } from "./villages";
-import { DRAGON_PHASES, dragonHurt, dragonTick, newDragonState, type DragonState } from "./dragon";
+import { DRAGON_PHASES, dragonHurt, dragonParts, dragonTick, newDragonState, type DragonPart, type DragonState } from "./dragon";
 
 export type MobKind =
   | "pig" | "cow" | "sheep" | "chicken" | "zombie" | "skeleton" | "creeper" | "spider" | "slime" | "villager" | "iron_golem"
@@ -188,6 +188,8 @@ export class Mob extends Entity {
   scream = 0;
   /** The dragon's fight: its phase, where it is flying, the crystal it draws on. */
   dragon: DragonState | null = null;
+  /** The dragon's part the next blow lands on (set by whatever aims the blow); unset means the body. */
+  hurtPart: DragonPart["name"] | undefined;
   /** Shulkers: the Face of its box that holds to a block; how far its lid is open (0-1) and where it is going; its colour. */
   attach: number = Face.Down;
   peek = 0;
@@ -214,6 +216,15 @@ export class Mob extends Entity {
     }
     // A shulker is part of the city it guards: it never wanders off or despawns.
     if (kind === "shulker") { this.persistent = true; this.yaw = 0; }
+  }
+
+  /** Separate boxes a blow can land on (the dragon's head, wings, tail…), or null for the one body box. */
+  hitParts(): { name: string; box: AABB }[] | null {
+    if (this.kind !== "ender_dragon") return null;
+    return dragonParts(this).map((p) => ({
+      name: p.name,
+      box: { minX: p.x - p.half, minY: p.y - p.half, minZ: p.z - p.half, maxX: p.x + p.half, maxY: p.y + p.half, maxZ: p.z + p.half },
+    }));
   }
 
   /** Slimes come in sizes 1, 2 and 4: the box, the health and the bite all scale with it. */
@@ -324,7 +335,8 @@ export class Mob extends Entity {
     if (this.dying || this.removed) return false;
     if (this.invulnerable > 0 && source !== "void") return false;
     if (this.kind === "ender_dragon") {
-      const dealt = dragonHurt(this, amount, source);
+      const dealt = dragonHurt(this, amount, source, this.hurtPart);
+      this.hurtPart = undefined;
       if (dealt <= 0) return false;
       amount = dealt;
       knockback = -1;

@@ -7,7 +7,8 @@ import { enchantLabel, enchantsOf, isEnchanted } from "../engine/enchanting";
 import type { Slot } from "../engine/inventory";
 import { BOX_COLORS } from "../engine/blocks";
 import { displayName, itemDef } from "../engine/items";
-import { potionOfItem } from "../engine/potions";
+import { formSeconds, potionOfItem } from "../engine/potions";
+import { burstLines } from "../engine/fireworks";
 
 const EFFECT_NAMES: Record<string, string> = {
   speed: "Speed", slowness: "Slowness", strength: "Strength", weakness: "Weakness", instant_health: "Instant Health",
@@ -40,12 +41,17 @@ export function tooltipLines(stack: Slot): TipLine[] {
   for (const [name, level] of enchantsOf(stack)) lines.push({ text: enchantLabel(name, level), color: "#aaaaaa", small: true });
   const potion = potionOfItem(def.name);
   if (potion) {
-    const splash = potion.splash ? 0.75 : 1;
     if (!potion.potion.effects.length) lines.push({ text: "No Effects", color: "#aaaaaa", small: true });
     for (const e of potion.potion.effects) {
-      const time = e.seconds > 0 ? ` (${clock(Math.floor(e.seconds * splash))})` : "";
+      const time = e.seconds > 0 ? ` (${clock(formSeconds(e.seconds, potion.form))})` : "";
       lines.push({ text: `${effectName(e.effect, e.amp)}${time}`, color: HARMFUL.has(e.effect) ? "#ff5555" : "#5555ff", small: true });
     }
+  }
+  // Fireworks say what they will do: a star its burst, a rocket its flight and every star in it.
+  if (stack.burst) for (const l of burstLines(stack.burst)) lines.push({ text: l, color: "#aaaaaa", small: true });
+  if (def.name === "firework_rocket") {
+    lines.push({ text: `Flight Duration: ${stack.fw?.flight ?? 1}`, color: "#aaaaaa", small: true });
+    for (const b of stack.fw?.bursts ?? []) for (const [i, l] of burstLines(b).entries()) lines.push({ text: `${i ? "  " : "• "}${l}`, color: "#aaaaaa", small: true });
   }
   if (def.tool && def.damage > 1) lines.push({ text: `${def.damage} Attack Damage`, color: "#9fd0ff", small: true });
   if (def.armor) lines.push({ text: `+${def.armor.points} Armor`, color: "#9fd0ff", small: true });

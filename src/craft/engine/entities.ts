@@ -10,6 +10,8 @@
  */
 import { block, B, FACE_DIRS, Face } from "./blocks";
 import { sameItem, sanitizeStack } from "./inventory";
+import { burstDamage, burstParticle, rocketLife, sanitizeRocket, type Rocket } from "./fireworks";
+import { formSeconds, potionByKey, potionOfItem } from "./potions";
 import { itemByName, itemDef, maxStack, type ItemStack, type StatusEffect } from "./items";
 import { bodyBox, moveBody, newBody, senseEnvironment, type AABB, type Body } from "./physics";
 import { raycastBlocks, rayBox } from "./raycast";
@@ -21,7 +23,7 @@ export type EntityKind =
   | "pig" | "cow" | "sheep" | "chicken" | "zombie" | "skeleton" | "creeper" | "spider" | "slime" | "villager" | "iron_golem"
   | "zombified_piglin" | "ghast" | "magma_cube" | "blaze" | "wither_skeleton" | "piglin" | "hoglin"
   | "boat" | "minecart" | "tnt_minecart"
-  | "shulker" | "shulker_bullet" | "item_frame";
+  | "shulker" | "shulker_bullet" | "item_frame" | "firework_rocket";
 
 export interface PlayerRef {
   id: string;
@@ -138,6 +140,11 @@ export abstract class Entity {
 
   box(): AABB {
     return bodyBox(this.body);
+  }
+
+  /** Separate boxes a blow can land on, for an entity bigger than one box (the dragon); null to use box(). */
+  hitParts(): { name: string; box: AABB }[] | null {
+    return null;
   }
 
   beginTick(): void {
@@ -445,7 +452,7 @@ export class Projectile extends Entity {
       if (this.pickup && this.groundTicks > 5) {
         for (const p of ctx.players()) {
           if (Math.hypot(p.x - b.x, p.y + 0.5 - b.y, p.z - b.z) < 1.2) {
-            if (ctx.givePlayer(p.id, { id: ARROW_ITEM(), count: 1 }) === 0) {
+            if (ctx.givePlayer(p.id, { id: this.item || ARROW_ITEM(), count: 1 }) === 0) {
               ctx.sound("pop", b.x, b.y, b.z, 0.25, 1.6);
               this.removed = true;
             }
@@ -457,9 +464,19 @@ export class Projectile extends Entity {
     const speed = Math.hypot(b.vx, b.vy, b.vz);
     // Entities along this tick's path.
     let hitEntity: Entity | null = null, hitPlayer: PlayerRef | null = null, best = 1;
-    for (const e of ctx.entitiesNear(b.x, b.y, b.z, speed + 2)) {
+    let hitPart: string | undefined;
+    // Wide enough to take in a dragon's wingtip, seven blocks from its middle.
+    for (const e of ctx.entitiesNear(b.x, b.y, b.z, speed + 8)) {
       if (e === this || e.kind === "item" || e.kind === "xp" || e instanceof Projectile || `mob:${e.id}` === this.owner) continue;
       if (this.age < 3 && e.kind === "tnt") continue;
+      const parts = e.hitParts();
+      if (parts) {
+        for (const part of parts) {
+          const r = rayBox(b.x, b.y, b.z, b.vx, b.vy, b.vz, grow(part.box, 0.3), 1);
+          if (r && r.t < best) { best = r.t; hitEntity = e; hitPlayer = null; hitPart = part.name; }
+        }
+        continue;
+      }
       const box = e.box();
       const r = rayBox(b.x, b.y, b.z, b.vx, b.vy, b.vz, grow(box, 0.3), 1);
       if (r && r.t < best) { best = r.t; hitEntity = e; hitPlayer = null; }
@@ -480,6 +497,7 @@ export class Projectile extends Entity {
     if (blockHit && this.kind === "dragon_fireball" && !block(ctx.world.blockAt(blockHit.x, blockHit.y, blockHit.z)).solid) blockHit = null;
     const blockT = blockHit ? blockHit.distance / Math.max(speed, 1e-6) : 2;
     if ((hitEntity || hitPlayer) && best < blockT) {
+      if (hitEntity && hitPart) (hitEntity as Entity & { hurtPart?: string }).hurtPart = hitPart;
       // Snowballs sting blazes, and only blazes.
       const dmg = this.kind === "arrow" ? Math.ceil(speed * this.damage) : isFireball(this.kind) ? this.damage
         : this.kind === "snowball" && hitEntity?.kind === "blaze" ? 3 : this.kind === "ender_pearl" ? 0.001 : 0;
@@ -520,6 +538,8 @@ export class Projectile extends Entity {
           }
         }
         if (hitPlayer && dmg > 0) ctx.hurtPlayer(hitPlayer.id, dmg, "arrow", b.x - nx, b.z - nz, 0.4 + this.knockback * 0.5);
+        // A tipped arrow's potion goes in with it, an eighth as long as the drink.
+        if (this.kind === "arrow" && this.item) this.tip(ctx, hitEntity, hitPlayer);
       }
       this.impact(ctx, hitEntity ?? hitPlayer);
       return;
@@ -554,6 +574,18 @@ export class Projectile extends Entity {
     b.vx *= drag; b.vy = b.vy * drag - (this.kind === "arrow" ? 0.05 : 0.03); b.vz *= drag;
     this.faceVelocity();
     if (this.age > 1200 || b.y < -64) this.removed = true;
+  }
+
+  private tip(ctx: EntityContext, entity: Entity | null, player: PlayerRef | null): void {
+    const def = itemDef(this.item);
+    const potion = def ? potionOfItem(def.name) : undefined;
+    if (!potion) return;
+    const attacker = this.owner && !this.owner.startsWith("mob:") ? this.owner : undefined;
+    for (const fx of potion.potion.effects) {
+      const seconds = formSeconds(fx.seconds, "arrow");
+      if (player) ctx.effectPlayer?.(player.id, fx.effect, seconds, fx.amp);
+      (entity as (Entity & { applyEffect?: (c: EntityContext, k: StatusEffect, s: number, a: number, by?: string) => void }) | null)?.applyEffect?.(ctx, fx.effect, seconds, fx.amp, attacker);
+    }
   }
 
   private impact(ctx: EntityContext, struck: Entity | PlayerRef | null = null): void {
@@ -689,42 +721,66 @@ export class PrimedTnt extends Entity {
 export class AreaCloud extends Entity {
   readonly kind = "area_cloud" as const;
   private lastHit = new Map<string, number>();
+  /**
+   * A lingering potion's cloud holds that potion (its key) and shrinks as it
+   * is breathed in; without one it is the dragon's breath, which harms, spreads,
+   * and can be bottled.
+   */
+  potion: string | null = null;
 
   constructor(x: number, y: number, z: number, public radius: number, public duration: number, public owner: string | null, id?: number) {
     super(x, y, z, radius * 2, 0.5, id);
   }
 
+  /** A glass bottle filled at the dragon's breath takes a little of the cloud with it. */
+  bottled(): boolean {
+    if (this.potion || this.removed || this.radius < 0.5) return false;
+    this.radius -= 0.5;
+    if (this.radius < 0.5) this.removed = true;
+    return true;
+  }
+
   tick(ctx: EntityContext): void {
     const b = this.body;
-    this.radius += 4 / 600;
-    if (this.age >= this.duration) { this.removed = true; return; }
+    const def = this.potion ? potionByKey(this.potion) : undefined;
+    this.radius += def ? -3 / this.duration : 4 / 600;
+    if (this.age >= this.duration || this.radius < 0.5) { this.removed = true; return; }
     if (this.age % 3 === 0) {
       const a = ctx.random() * Math.PI * 2, r = Math.sqrt(ctx.random()) * this.radius;
-      ctx.particles("dragon_breath", b.x + Math.cos(a) * r, b.y + 0.2, b.z + Math.sin(a) * r, 2);
+      if (def) ctx.particles("potion", b.x + Math.cos(a) * r, b.y + 0.2, b.z + Math.sin(a) * r, 2, parseInt(def.color.slice(1), 16));
+      else ctx.particles("dragon_breath", b.x + Math.cos(a) * r, b.y + 0.2, b.z + Math.sin(a) * r, 2);
     }
     if (this.age % 5 !== 0) return;
     const inside = (x: number, y: number, z: number) => Math.hypot(x - b.x, z - b.z) <= this.radius && y > b.y - 1.5 && y < b.y + 1.5;
+    const attacker = this.owner && !this.owner.startsWith("mob:") ? this.owner : undefined;
     for (const p of ctx.players()) {
       if (!p.targetable || !inside(p.x, p.y, p.z)) continue;
       // Once a second for each victim, as the original's reapplication delay.
       if (ctx.tick - (this.lastHit.get(p.id) ?? -100) < 20) continue;
       this.lastHit.set(p.id, ctx.tick);
-      ctx.effectPlayer?.(p.id, "instant_damage", 0, 0);
+      if (!def) { ctx.effectPlayer?.(p.id, "instant_damage", 0, 0); continue; }
+      for (const e of def.effects) ctx.effectPlayer?.(p.id, e.effect, formSeconds(e.seconds, "lingering"), e.amp);
+      this.radius -= 0.5;
     }
     for (const e of ctx.entitiesNear(b.x, b.y, b.z, this.radius + 1)) {
       if (e === this || e.kind === "ender_dragon" || e.kind === "item" || e.kind === "xp" || e instanceof Projectile || e instanceof AreaCloud) continue;
       if (!inside(e.x, e.y, e.z) || ctx.tick - (this.lastHit.get(`e${e.id}`) ?? -100) < 20) continue;
       this.lastHit.set(`e${e.id}`, ctx.tick);
-      e.hurt(ctx, 6, "magic", b.x, b.z, this.owner ?? undefined);
+      if (!def) { e.hurt(ctx, 6, "magic", b.x, b.z, this.owner ?? undefined); continue; }
+      const affect = (e as Entity & { applyEffect?: (c: EntityContext, k: StatusEffect, s: number, a: number, by?: string) => void }).applyEffect;
+      if (!affect) continue;
+      for (const fx of def.effects) affect.call(e, ctx, fx.effect, formSeconds(fx.seconds, "lingering"), fx.amp, attacker);
+      this.radius -= 0.5;
     }
   }
 
   snapshot(): EntitySnapshot {
-    return { ...super.snapshot(), data: { r: round(this.radius), d: this.duration } };
+    return { ...super.snapshot(), data: { r: round(this.radius), d: this.duration, p: this.potion ?? undefined } };
   }
   applySnapshot(s: EntitySnapshot): void {
     super.applySnapshot(s);
     if (typeof s.data?.r === "number") this.radius = s.data.r;
+    this.potion = typeof s.data?.p === "string" && potionByKey(s.data.p) ? s.data.p : null;
   }
 }
 
@@ -857,5 +913,71 @@ export class ItemFrame extends Entity {
     this.item = sanitizeStack(d.it);
     this.turn = typeof d.t === "number" ? ((Math.floor(d.t) % 8) + 8) % 8 : 0;
     this.place();
+  }
+}
+
+// ---- fireworks ----------------------------------------------------------------------------
+
+/**
+ * A firework rocket in flight: it climbs faster and faster (drifting as it
+ * goes if fired straight up, or along its heading from a dispenser) and at
+ * the end of its flight bursts — every star at once, and a blast that hurts
+ * what stands within five blocks if it carried any.
+ */
+export class FireworkRocket extends Entity {
+  readonly kind = "firework_rocket" as const;
+  life: number;
+
+  constructor(x: number, y: number, z: number, public rocket: Rocket, vx: number, vy: number, vz: number, life?: number, public owner: string | null = null, id?: number) {
+    super(x, y, z, 0.25, 0.25, id);
+    this.body.vx = vx; this.body.vy = vy; this.body.vz = vz;
+    this.life = life ?? 10 * (rocket.flight + 1) + 6;
+  }
+
+  /** Fired from a block at (x, y, z): straight up, with the original's small random lean. */
+  static launch(x: number, y: number, z: number, rocket: Rocket, random: () => number, owner: string | null): FireworkRocket {
+    return new FireworkRocket(x, y, z, rocket, (random() - 0.5) * 0.046, 0.05, (random() - 0.5) * 0.046, rocketLife(rocket.flight, random), owner);
+  }
+
+  tick(ctx: EntityContext): void {
+    const b = this.body;
+    b.vx *= 1.15; b.vz *= 1.15; b.vy += 0.04;
+    // Capped, so a dispenser's sideways shot does not outrun its own chunk.
+    const speed = Math.hypot(b.vx, b.vy, b.vz);
+    if (speed > 2) { b.vx *= 2 / speed; b.vy *= 2 / speed; b.vz *= 2 / speed; }
+    const hit = raycastBlocks(ctx.world, b.x, b.y, b.z, b.vx, b.vy, b.vz, Math.hypot(b.vx, b.vy, b.vz));
+    if (hit) { b.x = hit.px; b.y = hit.py; b.z = hit.pz; this.burst(ctx); return; }
+    b.x += b.vx; b.y += b.vy; b.z += b.vz;
+    if (this.age >= this.life || b.y > 400) this.burst(ctx);
+  }
+
+  burst(ctx: EntityContext): void {
+    if (this.removed) return;
+    this.removed = true;
+    const b = this.body;
+    const r = this.rocket;
+    if (!r.bursts.length) { ctx.particles("poof", b.x, b.y, b.z, 4); return; }
+    for (const s of r.bursts) ctx.particles(burstParticle(s), b.x, b.y, b.z, 1);
+    const large = r.bursts.some((s) => s.shape === "large");
+    ctx.sound(large ? "firework_large_blast" : "firework_blast", b.x, b.y, b.z, 3);
+    if (r.bursts.some((s) => s.twinkle)) ctx.sound("firework_twinkle", b.x, b.y, b.z, 3);
+    for (const p of ctx.players()) {
+      const dmg = burstDamage(r, Math.hypot(p.x - b.x, p.y + p.height / 2 - b.y, p.z - b.z));
+      if (dmg > 0 && p.targetable) ctx.hurtPlayer(p.id, dmg, "explosion", b.x, b.z, 0.2);
+    }
+    for (const e of ctx.entitiesNear(b.x, b.y, b.z, 6)) {
+      if (e === this || e.kind === "item" || e.kind === "xp" || e instanceof Projectile || e instanceof FireworkRocket) continue;
+      const dmg = burstDamage(r, Math.hypot(e.x - b.x, e.y + e.body.height / 2 - b.y, e.z - b.z));
+      if (dmg > 0) e.hurt(ctx, dmg, "explosion", b.x, b.z, this.owner ?? undefined);
+    }
+  }
+
+  snapshot(): EntitySnapshot {
+    return { ...super.snapshot(), data: { fw: this.rocket, l: this.life } };
+  }
+  applySnapshot(s: EntitySnapshot): void {
+    super.applySnapshot(s);
+    this.rocket = sanitizeRocket(s.data?.fw) ?? this.rocket;
+    if (typeof s.data?.l === "number") this.life = s.data.l;
   }
 }

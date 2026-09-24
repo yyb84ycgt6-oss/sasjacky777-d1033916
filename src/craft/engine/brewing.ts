@@ -28,7 +28,9 @@ export function isBrewingFuel(s: ItemStack): boolean {
 
 /** Bottle slots take potions and water bottles (anything the stand could work on) and hold one each. */
 export function isBottle(s: ItemStack): boolean {
-  return !!potionOfItem(nameOf(s)) || nameOf(s) === "glass_bottle";
+  const p = potionOfItem(nameOf(s));
+  // A tipped arrow is a potion's form too, but not one a stand holds.
+  return (!!p && p.form !== "arrow") || nameOf(s) === "glass_bottle";
 }
 
 /** Whether the ingredient would change any bottle. */

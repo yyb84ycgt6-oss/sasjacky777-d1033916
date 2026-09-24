@@ -19,10 +19,11 @@
 import type { BlockEntity } from "../engine/chunk";
 import { chunkKey } from "../engine/constants";
 import {
-  AreaCloud, EndCrystal, Entity, FallingBlock, isProjectileKind, ItemEntity, ItemFrame, PrimedTnt, Projectile, XpOrb,
+  AreaCloud, EndCrystal, Entity, FallingBlock, FireworkRocket, isProjectileKind, ItemEntity, ItemFrame, PrimedTnt, Projectile, XpOrb,
   type DamageSource, type EntitySnapshot, type ProjectileKind,
 } from "../engine/entities";
 import { itemDef, type ItemStack, type StatusEffect } from "../engine/items";
+import { sanitizeRocket, type Rocket } from "../engine/fireworks";
 import { sanitizeStack } from "../engine/inventory";
 import { Mob, isMobKind } from "../engine/mobs";
 import { isVehicleKind, Vehicle, vehicleFromSnapshot } from "../engine/vehicles";
@@ -361,8 +362,8 @@ export class NetSession implements NetLink {
   }
 
   // Guest → host actions.
-  attack(entityId: number, damage: number, fx: number, fz: number, knockback = 0, fire = 0, looting = 0): void {
-    this.push(["at", entityId, r2(damage), r2(fx), r2(fz), r2(knockback), fire, looting]);
+  attack(entityId: number, damage: number, fx: number, fz: number, knockback = 0, fire = 0, looting = 0, part?: string): void {
+    this.push(["at", entityId, r2(damage), r2(fx), r2(fz), r2(knockback), fire, looting, part]);
   }
   /** `stack` goes along when the whole stack matters (hung in an item frame, enchantments and all). */
   interact(entityId: number, item: string | null, stack?: ItemStack | null): void { this.push(["in", entityId, item, stack ?? undefined]); }
@@ -390,6 +391,9 @@ export class NetSession implements NetLink {
   vehiclePose(v: Vehicle): void {
     const b = v.body;
     this.push(["vp", v.id, r3(b.x), r3(b.y), r3(b.z), r3(v.yaw), r3(b.vx), r3(b.vy), r3(b.vz)]);
+  }
+  launchFirework(x: number, y: number, z: number, rocket: Rocket): void {
+    this.push(["fw", r3(x), r3(y), r3(z), rocket]);
   }
   placeFrame(face: number, x: number, y: number, z: number): void {
     this.push(["pf", face, x, y, z]);
@@ -644,6 +648,7 @@ export class NetSession implements NetLink {
         case "vp": if (this.role === "host") this.onVehiclePose(from, op); break;
         case "pv": if (this.role === "host") this.onPlaceVehicle(from, op); break;
         case "pf": if (this.role === "host") this.onPlaceFrame(from, op); break;
+        case "fw": if (this.role === "host") this.onFirework(from, op); break;
         case "tp": if (op[1] === this.myId && fromHost) this.onTeleport(op[2]); break;
         case "ec":
           // A guest's end crystal, set on a block near them.
@@ -810,12 +815,14 @@ export class NetSession implements NetLink {
 
   private onAttack(from: string, op: Op): void {
     const g = this.game!;
-    const [, id, dmg, fx, fz, kb, fire, looting] = op;
+    const [, id, dmg, fx, fz, kb, fire, looting, part] = op;
     if (!finite(id, dmg, fx, fz)) return;
     const e = g.entities.get(id as number);
     if (e instanceof Vehicle || e instanceof EndCrystal || e instanceof ItemFrame || e instanceof Projectile) { e.hurt(g.ctx, Math.min(40, dmg as number), "player", fx as number, fz as number, from); return; }
     if (e instanceof Mob) {
       e.looting = int(looting) ? Math.max(0, Math.min(3, looting as number)) : 0;
+      // Which of the dragon's parts the guest's blow landed on; anything unrecognised counts as the body.
+      if (e.kind === "ender_dragon") e.hurtPart = part === "head" || part === "neck" || part === "tail" || part === "wing" ? part : "body";
       const took = e.hurt(g.ctx, Math.min(40, dmg as number), "player", fx as number, fz as number, from, Math.min(2, Math.max(0, Number(kb) || 0)));
       // Fire Aspect from a guest's sword: the host owns the mob, so it lights it here.
       if (took && finite(fire) && (fire as number) > 0) e.fireTicks = Math.max(e.fireTicks, Math.min(200, fire as number));
@@ -829,6 +836,7 @@ export class NetSession implements NetLink {
     if (e instanceof Mob) e.interact(g.ctx, typeof item === "string" ? item : null, from);
     // The guest has already given up the item it hung; the frame takes the stack it sent.
     if (e instanceof ItemFrame) e.use(g.ctx, sanitizeStack(stack));
+    if (e instanceof AreaCloud && item === "glass_bottle") e.bottled();
   }
 
   private onDrops(op: Op): void {
@@ -885,6 +893,18 @@ export class NetSession implements NetLink {
     const r = g.remote.get(from);
     if (r && Math.hypot(r.x - (x as number), r.y - (y as number), r.z - (z as number)) > 8) return;
     g.placeVehicle(kind, x as number, y as number, z as number, yaw as number, int(wood) ? (wood as number) : 0);
+  }
+
+  private onFirework(from: string, op: Op): void {
+    const g = this.game!;
+    const [, x, y, z, raw] = op;
+    const rocket = sanitizeRocket(raw);
+    if (!finite(x, y, z) || !rocket) return;
+    const r = g.remote.get(from);
+    if (r && Math.hypot(r.x - (x as number), r.y - (y as number), r.z - (z as number)) > 8) return;
+    // flight 0: a glider's spent rocket, bursting where they are.
+    if ((raw as { flight?: unknown }).flight === 0) g.spawn(new FireworkRocket(x as number, y as number, z as number, rocket, 0, 0, 0, 0, from));
+    else g.launchFirework(x as number, y as number, z as number, rocket, from);
   }
 
   private onPlaceFrame(from: string, op: Op): void {
@@ -944,6 +964,7 @@ export function entityFromSnapshot(s: EntitySnapshot): Entity | null {
   else if (s.kind === "end_crystal") e = new EndCrystal(s.x, s.y, s.z, s.data?.b !== 0, s.id);
   else if (s.kind === "area_cloud") e = new AreaCloud(s.x, s.y, s.z, Number(s.data?.r ?? 3), Number(s.data?.d ?? 600), null, s.id);
   else if (s.kind === "item_frame") e = new ItemFrame(Face.North, Math.floor(s.x), Math.floor(s.y), Math.floor(s.z), null, 0, s.id);
+  else if (s.kind === "firework_rocket") e = new FireworkRocket(s.x, s.y, s.z, { flight: 1, bursts: [] }, 0, 0, 0, 1000, null, s.id);
   if (e) {
     e.applySnapshot(s);
     e.prevX = e.x; e.prevY = e.y; e.prevZ = e.z;

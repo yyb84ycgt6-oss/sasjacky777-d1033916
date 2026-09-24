@@ -53,7 +53,9 @@ export type Screen =
   | { kind: "options" }
   | { kind: "share" }
   | { kind: "death" }
-  | { kind: "advancements" };
+  | { kind: "advancements" }
+  /** The poem and credits, the first time home from the End after the dragon. */
+  | { kind: "poem" };
 
 export interface ChatLine {
   id: number;

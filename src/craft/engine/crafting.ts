@@ -12,6 +12,8 @@
  */
 import { B, WOOL_COLORS } from "./blocks";
 import { DYES, itemByName, itemDef, TIERS, type ItemStack } from "./items";
+import { fadeFromGrid, rocketFromGrid, starFromGrid } from "./fireworks";
+import { POTIONS } from "./potions";
 import type { Slot } from "./inventory";
 
 type Ingredient = string;
@@ -30,6 +32,8 @@ export interface Recipe {
    * something over from an ingredient (a dyed shulker box keeps its contents).
    */
   special?: (grid: Slot[]) => ItemStack | null;
+  /** For recipes no fixed list can describe (a star of any dyes, a rocket of any stars): whether the grid makes it. */
+  matches?: (grid: Slot[]) => boolean;
 }
 
 const TAGS: Record<string, string[]> = {
@@ -39,6 +43,7 @@ const TAGS: Record<string, string[]> = {
   coals: ["coal", "charcoal"],
   wool: WOOL_COLORS.map((c) => `${c}_wool`),
   dye: DYES.map((d) => `${d}_dye`),
+  lingering_effect: POTIONS.filter((p) => p.effects.length).map((p) => `lingering_${p.key}`),
 };
 
 /** The item ids an ingredient accepts. */
@@ -198,7 +203,27 @@ shaped("purpur_pillar", ["#", "#"], { "#": "purpur_block" }, "purpur_pillar", 2)
 shaped("purpur_stairs", ["#  ", "## ", "###"], { "#": "purpur_block" }, "purpur_stairs", 4);
 shaped("end_rod", ["B", "P"], { B: "blaze_rod", P: "popped_chorus_fruit" }, "end_rod", 4);
 shaped("iron_bars", ["III", "III"], { I: "iron_ingot" }, "iron_bars", 16);
-shapeless("firework_rocket", ["paper", "gunpowder"], "firework_rocket", 3);
+// Fireworks: what goes in decides what comes out, so each is matched by the grid itself (fireworks.ts).
+RECIPES.push({
+  id: "firework_rocket", ingredients: ["paper", "gunpowder"], result: { item: "firework_rocket", count: 3 }, small: true,
+  matches: (grid) => rocketFromGrid(grid) !== null, special: rocketFromGrid,
+});
+RECIPES.push({
+  id: "firework_star", ingredients: ["gunpowder", "#dye"], result: { item: "firework_star", count: 1 }, small: true,
+  matches: (grid) => starFromGrid(grid) !== null, special: starFromGrid,
+});
+RECIPES.push({
+  id: "firework_star_fade", ingredients: ["firework_star", "#dye"], result: { item: "firework_star", count: 1 }, small: true,
+  matches: (grid) => fadeFromGrid(grid) !== null, special: fadeFromGrid,
+});
+// Eight arrows round a lingering potion: eight arrows of it.
+RECIPES.push({
+  id: "tipped_arrow", pattern: ["AAA", "APA", "AAA"], key: { A: "arrow", P: "#lingering_effect" }, result: { item: "arrow", count: 8 }, small: false,
+  special: (grid) => {
+    const potion = grid.map((g) => (g ? itemDef(g.id)?.name ?? "" : "")).find((n) => n.startsWith("lingering_"));
+    return potion ? { id: itemByName(`tipped_arrow_${potion.slice("lingering_".length)}`).id, count: 8 } : null;
+  },
+});
 
 // Village work stations
 shaped("composter", ["S S", "S S", "SSS"], { S: "oak_slab" }, "composter");
@@ -319,6 +344,10 @@ export function matchRecipe(grid: Slot[], width: number): Recipe | null {
   const small = width === 2;
   for (const r of RECIPES) {
     if (small && !r.small) continue;
+    if (r.matches) {
+      if (r.matches(grid)) return r;
+      continue;
+    }
     if (r.pattern) {
       if (matchesShaped(r, rows, false) || matchesShaped(r, rows, true)) return r;
     } else if (matchesShapeless(r, grid)) return r;

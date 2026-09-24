@@ -22,6 +22,7 @@ import { Hud } from "./Hud";
 import { AdvancementsScreen, ChatInput, DeathScreen, MenuFrame, OptionsScreen, PauseMenu, ShareScreen } from "./Menus";
 import { AnvilScreen, BrewingScreen, ChestScreen, CraftingScreen, EnchantingScreen, FurnaceScreen, InventoryScreen, SmithingScreen, TradeScreen } from "./Screens";
 import { TouchControls } from "./TouchControls";
+import { EndPoem } from "./EndPoem";
 
 export interface GameViewProps {
   meta: WorldMeta;
@@ -221,6 +222,7 @@ function Overlay({ game, input, settings, onSettings, onQuit, onExitApp }: GameV
           quitLabel={guest ? "Disconnect" : "Save and quit to title"}
         />
       )}
+      {screen?.kind === "poem" && <EndPoem name={game.player.name} onDone={() => game.setScreen(null)} />}
       {screen?.kind === "advancements" && (
         <AdvancementsScreen earned={game.player.advancements} onBack={() => game.setScreen({ kind: "pause" })} />
       )}
@@ -240,7 +242,8 @@ function Overlay({ game, input, settings, onSettings, onQuit, onExitApp }: GameV
         />
       )}
       {screen?.kind === "chat" && (
-        <ChatInput initial={screen.text} onSubmit={(t) => game.submitChat(t)} onClose={() => game.setScreen(null)} />
+        // Closing the chat closes only the chat: a command may have opened a screen of its own (the poem, going home).
+        <ChatInput initial={screen.text} onSubmit={(t) => game.submitChat(t)} onClose={() => { if (game.screen?.kind === "chat") game.setScreen(null); }} />
       )}
       {screen?.kind === "death" && (
         <DeathScreen
