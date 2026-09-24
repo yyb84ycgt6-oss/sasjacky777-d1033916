@@ -25,6 +25,7 @@ import { TouchControls } from "./TouchControls";
 import { EndPoem } from "./EndPoem";
 import { Minimap, WaypointLabels, WorldMapScreen } from "./MapView";
 import { WaystoneScreen } from "./WaystoneScreen";
+import { ModsScreen } from "./ModsScreen";
 
 export interface GameViewProps {
   meta: WorldMeta;
@@ -224,11 +225,19 @@ function Overlay({ game, input, settings, onSettings, onQuit, onExitApp }: GameV
           onOptions={() => game.setScreen({ kind: "options" })}
           onShare={() => game.setScreen({ kind: "share" })}
           onAdvancements={() => game.setScreen({ kind: "advancements" })}
+          onMods={() => game.setScreen({ kind: "mods" })}
           onQuit={() => quit()}
           onExitApp={onExitApp && (() => { leaving.current = true; onExitApp(); })}
           canShare={!guest}
           shareLabel={guest ? "Joined a friend" : net ? "Playing together…" : "Open to friends"}
           quitLabel={guest ? "Disconnect" : "Save and quit to title"}
+        />
+      )}
+      {screen?.kind === "mods" && (
+        <ModsScreen
+          disabled={game.meta.disabledMods ?? []}
+          onChange={guest ? undefined : (next) => game.setDisabledMods(next)}
+          onBack={() => game.setScreen({ kind: "pause" })}
         />
       )}
       {screen?.kind === "waystone" && <WaystoneScreen game={game} x={screen.x} y={screen.y} z={screen.z} />}

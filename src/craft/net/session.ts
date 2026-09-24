@@ -405,6 +405,7 @@ export class NetSession implements NetLink {
     this.push(["pf", face, x, y, z]);
   }
   waystonesChanged(): void { if (this.role === "host") this.push(["wz", this.game?.meta.waystones ?? {}]); }
+  modsChanged(): void { if (this.role === "host") this.push(["md", this.game?.meta.disabledMods ?? []]); }
   registerWaystone(x: number, y: number, z: number): void { if (this.role === "guest") this.push(["wr", x, y, z]); }
   renameWaystone(key: string, name: string): void { if (this.role === "guest") this.push(["wn", key, name]); }
   placeGrave(x: number, y: number, z: number, items: (ItemStack | null)[], owner: string, yaw: number): void {
@@ -663,6 +664,12 @@ export class NetSession implements NetLink {
         case "pv": if (this.role === "host") this.onPlaceVehicle(from, op); break;
         case "pf": if (this.role === "host") this.onPlaceFrame(from, op); break;
         case "wz": if (this.role === "guest" && fromHost) g.meta.waystones = sanitizeWaystones(op[1]); break;
+        case "md":
+          if (this.role === "guest" && fromHost && Array.isArray(op[1])) {
+            g.meta.disabledMods = (op[1] as unknown[]).filter((m): m is string => typeof m === "string").slice(0, 64);
+            g.store.set({ minimap: g.modOn("minimap") });
+          }
+          break;
         case "wr": if (this.role === "host") this.onRegisterWaystone(from, op); break;
         case "gr": if (this.role === "host") this.onGuestGrave(from, op); break;
         case "gc": if (this.role === "host") this.onCollectGrave(from, op); break;

@@ -18,8 +18,8 @@ export function MenuFrame({ title, children, width = 200, dim = true }: { title?
   );
 }
 
-export function PauseMenu({ onResume, onOptions, onShare, onAdvancements, onQuit, onExitApp, shareLabel, canShare, quitLabel }: {
-  onResume: () => void; onOptions: () => void; onShare: () => void; onAdvancements: () => void; onQuit: () => void; onExitApp?: () => void;
+export function PauseMenu({ onResume, onOptions, onShare, onAdvancements, onMods, onQuit, onExitApp, shareLabel, canShare, quitLabel }: {
+  onResume: () => void; onOptions: () => void; onShare: () => void; onAdvancements: () => void; onMods: () => void; onQuit: () => void; onExitApp?: () => void;
   shareLabel: string; canShare: boolean; quitLabel: string;
 }) {
   const exitLabel = onExitApp ? edition().exitLabel : null;
@@ -30,7 +30,10 @@ export function PauseMenu({ onResume, onOptions, onShare, onAdvancements, onQuit
         <Button onClick={onAdvancements}>Advancements</Button>
         <Button onClick={onShare} disabled={!canShare}>{shareLabel}</Button>
       </div>
-      <Button wide onClick={onOptions}>Options…</Button>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "calc(var(--u) * 4)" }}>
+        <Button onClick={onOptions}>Options…</Button>
+        <Button onClick={onMods}>Mods…</Button>
+      </div>
       <Button wide onClick={onQuit}>{quitLabel}</Button>
       {exitLabel && <Button wide onClick={onExitApp}>{exitLabel}</Button>}
     </MenuFrame>

@@ -57,6 +57,8 @@ export type Screen =
   | { kind: "advancements" }
   /** The poem and credits, the first time home from the End after the dragon. */
   | { kind: "poem" }
+  /** The features borrowed from mods, with their switches and credits. */
+  | { kind: "mods" }
   /** The world map and its waypoints (M). */
   | { kind: "map" }
   /** A cooking pot (engine/cooking.ts): six ingredients and a bowl, over heat. */

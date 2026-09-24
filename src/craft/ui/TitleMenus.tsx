@@ -3,6 +3,8 @@
  * world creation and joining a friend.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
+import { MODS, modEnabled } from "../engine/mods";
+import { ModsList } from "./ModsScreen";
 import { randomSeed, seedFromString } from "../engine/rng";
 import type { GameMode } from "../engine/player";
 import type { WorldType } from "../engine/worldgen";
@@ -400,6 +402,8 @@ export function CreateWorld({ saves, existing, onCreate, onBack }: {
   const [seedText, setSeedText] = useState("");
   const [cheats, setCheats] = useState(false);
   const [more, setMore] = useState(false);
+  const [mods, setMods] = useState(false);
+  const [disabledMods, setDisabledMods] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -422,6 +426,7 @@ export function CreateWorld({ saves, existing, onCreate, onBack }: {
         seed, seedText: text || String(seed), type, gameMode,
         difficulty: hardcore ? 3 : difficulty, hardcore, cheats: hardcore ? false : cheats,
       });
+      if (disabledMods.length) meta.disabledMods = [...disabledMods];
       await saves.putWorld(meta);
       onCreate(meta);
     } catch (err) {
@@ -458,6 +463,8 @@ export function CreateWorld({ saves, existing, onCreate, onBack }: {
             <Cycle<WorldType> label="World Type" value={type} options={WORLD_TYPES} onChange={setType} format={(v) => TYPE_LABEL[v]} />
           </>
         )}
+        <Button wide onClick={() => setMods(!mods)}>{mods ? "Hide Mods" : `Mods… (${MODS.filter((m) => modEnabled(disabledMods, m.id)).length} of ${MODS.length} on)`}</Button>
+        {mods && <ModsList disabled={disabledMods} onChange={setDisabledMods} />}
         {error && <div style={{ color: "#ff8080", fontSize: "calc(var(--u) * 6)", textAlign: "center" }}>{error}</div>}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "calc(var(--u) * 4)" }}>
           <Button disabled={busy} onClick={() => void create()}>Create New World</Button>

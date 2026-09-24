@@ -604,7 +604,9 @@ describe("the Ender Dragon", () => {
 
 // ---- elytra ------------------------------------------------------------------------------------------
 
-describe("elytra", () => {
+// Each of these flies a player for hundreds of ticks over generated terrain: three and a half seconds
+// alone, and past vitest's five-second default when the machine is busy. A timeout is not a result.
+describe("elytra", { timeout: 20000 }, () => {
   const glider = (damage = 0) => {
     const p = new Player("p1", "Alex", 0.5, 100, 0.5);
     p.inventory.armor[1] = { id: itemId("elytra"), count: 1, damage };

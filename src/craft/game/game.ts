@@ -121,6 +121,8 @@ export interface NetLink {
   teleportRemote?(id: string, to: Arrival): void;
   /** Guest → host: set an end crystal on the block at x, y, z. */
   placeCrystal?(x: number, y: number, z: number): void;
+  /** Host → guests: the world's mod switches changed. */
+  modsChanged?(): void;
   /** Host → guests: the world's waystones changed (one found, named or broken). */
   waystonesChanged?(): void;
   /** Guest → host: a waystone the world did not know of yet, found at x, y, z. */
@@ -2446,6 +2448,15 @@ export class Game {
       if (c) this.worldMap.paintChunk(this.dimension, c);
       if (++n >= 6) break;
     }
+  }
+
+  /** The host (or a single player) switches mod-inspired features for this world; guests are told. */
+  setDisabledMods(list: string[]): void {
+    if (this.role === "guest") return;
+    this.meta.disabledMods = [...new Set(list)];
+    this.net?.modsChanged?.();
+    this.bumpInv();
+    this.store.set({ minimap: this.modOn("minimap") });
   }
 
   /** Whether a mod-inspired feature (engine/mods.ts) is on in this world. */
