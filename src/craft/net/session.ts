@@ -17,6 +17,7 @@
  * occasional large chunk transfer split into parts.
  */
 import type { BlockEntity } from "../engine/chunk";
+import { GAME_NAME } from "../edition";
 import { chunkKey } from "../engine/constants";
 import {
   AreaCloud, EndCrystal, Entity, FallingBlock, FireworkRocket, isProjectileKind, ItemEntity, ItemFrame, PrimedTnt, Projectile, XpOrb,
@@ -24,6 +25,7 @@ import {
 } from "../engine/entities";
 import { itemDef, type ItemStack, type StatusEffect } from "../engine/items";
 import { sanitizeRocket, type Rocket } from "../engine/fireworks";
+import { sanitizeWaystones, type Waystone } from "../engine/waystones";
 import { sanitizeStack } from "../engine/inventory";
 import { Mob, isMobKind } from "../engine/mobs";
 import { isVehicleKind, Vehicle, vehicleFromSnapshot } from "../engine/vehicles";
@@ -59,6 +61,10 @@ export interface Welcome {
   hostName: string;
   /** The dimension the host, and so the party, is in. */
   dimension: Dimension;
+  /** The host's mod-inspired features switched off (engine/mods.ts), so a guest's seasons and map agree with the host's. */
+  disabledMods?: string[];
+  /** The world's waystones (engine/waystones.ts). */
+  waystones?: Record<string, Waystone>;
 }
 
 // 2: dimensions (the "dm" and "mk" ops, and the welcome's dimension).
@@ -398,6 +404,9 @@ export class NetSession implements NetLink {
   placeFrame(face: number, x: number, y: number, z: number): void {
     this.push(["pf", face, x, y, z]);
   }
+  waystonesChanged(): void { if (this.role === "host") this.push(["wz", this.game?.meta.waystones ?? {}]); }
+  registerWaystone(x: number, y: number, z: number): void { if (this.role === "guest") this.push(["wr", x, y, z]); }
+  renameWaystone(key: string, name: string): void { if (this.role === "guest") this.push(["wn", key, name]); }
   placeVehicle(kind: string, x: number, y: number, z: number, yaw: number, wood: number): void {
     this.push(["pv", kind, r3(x), r3(y), r3(z), r3(yaw), wood]);
   }
@@ -460,7 +469,7 @@ export class NetSession implements NetLink {
     const g = this.game;
     if (!g) return;
     if (m.v !== PROTOCOL) {
-      this.send({ t: "refuse", to: m.from, reason: "The host is running a different version of BlockCraft. Both players should reload the page." });
+      this.send({ t: "refuse", to: m.from, reason: `The host is running a different version of ${GAME_NAME}. Both players should reload the page (or update the app).` });
       return;
     }
     const name = String(m.name ?? "Player").slice(0, 16) || "Player";
@@ -475,7 +484,8 @@ export class NetSession implements NetLink {
       player: saved && (saved.dimension ?? "overworld") !== g.dimension
         ? { ...saved, x: g.player.body.x + 1, y: g.player.body.y, z: g.player.body.z }
         : saved,
-      hostId: this.myId, hostName: g.player.name, dimension: g.dimension,
+      hostId: this.myId, hostName: g.player.name, dimension: g.dimension, disabledMods: g.meta.disabledMods ?? [],
+      waystones: g.meta.waystones ?? {},
     };
     this.send({ t: "welcome", to: m.from, w });
     if (!g.remote.has(m.from)) {
@@ -648,6 +658,9 @@ export class NetSession implements NetLink {
         case "vp": if (this.role === "host") this.onVehiclePose(from, op); break;
         case "pv": if (this.role === "host") this.onPlaceVehicle(from, op); break;
         case "pf": if (this.role === "host") this.onPlaceFrame(from, op); break;
+        case "wz": if (this.role === "guest" && fromHost) g.meta.waystones = sanitizeWaystones(op[1]); break;
+        case "wr": if (this.role === "host") this.onRegisterWaystone(from, op); break;
+        case "wn": if (this.role === "host" && typeof op[1] === "string" && typeof op[2] === "string") g.renameWaystone(op[1], op[2]); break;
         case "fw": if (this.role === "host") this.onFirework(from, op); break;
         case "tp": if (op[1] === this.myId && fromHost) this.onTeleport(op[2]); break;
         case "ec":
@@ -905,6 +918,16 @@ export class NetSession implements NetLink {
     // flight 0: a glider's spent rocket, bursting where they are.
     if ((raw as { flight?: unknown }).flight === 0) g.spawn(new FireworkRocket(x as number, y as number, z as number, rocket, 0, 0, 0, 0, from));
     else g.launchFirework(x as number, y as number, z as number, rocket, from);
+  }
+
+  /** A guest found a waystone the world did not list: the host checks it is there, near them, and lists it. */
+  private onRegisterWaystone(from: string, op: Op): void {
+    const g = this.game!;
+    const [, x, y, z] = op;
+    if (!int(x) || !int(y) || !int(z)) return;
+    const r = g.remote.get(from);
+    if (r && Math.hypot(r.x - (x as number), r.y - (y as number), r.z - (z as number)) > 8) return;
+    g.addWaystone(x as number, y as number, z as number);
   }
 
   private onPlaceFrame(from: string, op: Op): void {

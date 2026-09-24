@@ -25,7 +25,7 @@ export type Trigger =
   | { kind: "brew" }
   | { kind: "dimension"; dimension: Dimension }
   /** Something that happened once, named: the dragon slain, a stronghold found, a gateway taken. */
-  | { kind: "event"; event: "dragon" | "stronghold" | "gateway" | "city" | "levitate" };
+  | { kind: "event"; event: "dragon" | "stronghold" | "gateway" | "city" | "levitate" | "waystone" };
 
 export interface Advancement {
   id: string;
@@ -78,6 +78,7 @@ export const ADVANCEMENTS: readonly Advancement[] = [
   { id: "city", title: "The City at the End of the Game", description: "Walk into an End city", icon: "purpur_block", trigger: { kind: "event", event: "city" } },
   { id: "levitate", title: "Great View From Up Here", description: "Float fifty blocks up on a shulker's levitation", icon: "shulker_shell", trigger: { kind: "event", event: "levitate" } },
   { id: "box", title: "Pack It Up", description: "Make a shulker box", icon: "shulker_box", trigger: has("shulker_box") },
+  { id: "waystone", title: "Well Travelled", description: "Travel from one waystone to another", icon: "waystone", trigger: { kind: "event", event: "waystone" } },
 ];
 
 export function advancement(id: string): Advancement | undefined {
@@ -106,7 +107,7 @@ export interface PlayerState {
 export type AdvancementEvent =
   | { kind: "kill"; hostile: boolean } | { kind: "sleep" } | { kind: "eat" } | { kind: "enchant" } | { kind: "brew" }
   | { kind: "dimension"; dimension: Dimension } | { kind: "dragon" } | { kind: "stronghold" } | { kind: "gateway" }
-  | { kind: "city" } | { kind: "levitate" };
+  | { kind: "city" } | { kind: "levitate" } | { kind: "waystone" };
 
 /**
  * Which not-yet-earned advancements the player has now earned: from their

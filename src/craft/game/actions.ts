@@ -154,6 +154,11 @@ export class Actions {
       else if (!g.screen && !p.dead && p.gameMode !== "spectator") g.setScreen({ kind: "inventory" });
       return;
     }
+    if (a.type === "map") {
+      if (g.screen?.kind === "map") g.setScreen(null);
+      else if (!g.screen && !p.dead && g.modOn("minimap")) g.setScreen({ kind: "map" });
+      return;
+    }
     if (g.screen) return;
     switch (a.type) {
       case "hotbar":
@@ -1063,6 +1068,9 @@ export class Actions {
         return true;
       case "smithing":
         g.setScreen({ kind: "smithing", x, y, z });
+        return true;
+      case "waystone":
+        g.useWaystone(x, y, z);
         return true;
       case "brewing":
         g.containerAt(x, y, z, "brewing");

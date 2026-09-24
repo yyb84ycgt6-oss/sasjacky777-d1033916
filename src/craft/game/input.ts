@@ -108,7 +108,14 @@ export class DesktopInput {
   }
 
   private keyDown(e: KeyboardEvent): void {
-    if (this.typing(e)) return;
+    if (this.typing(e)) {
+      // Escape still backs out of a screen from inside its search or name box; the chat box closes itself.
+      if (e.code === "Escape" && this.game.screen && this.game.screen.kind !== "chat") {
+        e.preventDefault();
+        this.game.controls.actions.push({ type: "close" });
+      }
+      return;
+    }
     const g = this.game;
     const a = g.controls.actions;
     g.audio.unlock();
@@ -121,6 +128,11 @@ export class DesktopInput {
     }
     if (e.code === "KeyE" && g.screen && g.screen.kind !== "chat" && g.screen.kind !== "pause" && g.screen.kind !== "options" && g.screen.kind !== "death" && g.screen.kind !== "share") {
       a.push({ type: "inventory" });
+      e.preventDefault();
+      return;
+    }
+    if (e.code === "KeyM" && g.screen?.kind === "map") {
+      a.push({ type: "map" });
       e.preventDefault();
       return;
     }
@@ -141,6 +153,7 @@ export class DesktopInput {
     this.apply();
     switch (e.code) {
       case "KeyE": a.push({ type: "inventory" }); this.exitLock(); break;
+      case "KeyM": if (g.modOn("minimap")) { a.push({ type: "map" }); this.exitLock(); } break;
       case "KeyQ": a.push({ type: "drop", all: e.ctrlKey || e.metaKey }); break;
       case "KeyT": case "Enter": a.push({ type: "chat" }); this.exitLock(); e.preventDefault(); break;
       case "Slash": a.push({ type: "chat", text: "/" }); this.exitLock(); e.preventDefault(); break;

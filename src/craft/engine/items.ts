@@ -146,7 +146,7 @@ const FUNCTIONAL = new Set([
   "sea_lantern", "jack_o_lantern", "carved_pumpkin", "note_block", "hay_block", "oak_fence", "glass_pane",
   "enchanting_table", "anvil", "chipped_anvil", "damaged_anvil", "brewing_stand", "cauldron",
   "composter", "lectern", "smoker", "barrel", "fletching_table", "loom", "stonecutter", "smithing_table", "bell",
-  "end_rod", "end_portal_frame", "iron_bars",
+  "end_rod", "end_portal_frame", "iron_bars", "waystone",
 ]);
 
 for (const def of allBlocks()) {
@@ -420,6 +420,15 @@ for (const p of POTIONS) {
 }
 
 // ---- lookups -----------------------------------------------------------------------
+
+const GLOWING_ITEMS: Record<string, number> = { lava_bucket: 15, blaze_rod: 10, glowstone_dust: 8, magma_cream: 6 };
+/** How brightly an item lights its surroundings when held or dropped: its block's glow, or its own. */
+export function itemLight(id: number): number {
+  const def = ITEMS[id];
+  if (!def) return 0;
+  if (def.places !== undefined) return block(def.places).emission;
+  return GLOWING_ITEMS[def.name] ?? 0;
+}
 
 export function itemDef(id: number): ItemDef | undefined {
   return ITEMS[id];

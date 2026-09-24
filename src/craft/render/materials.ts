@@ -60,7 +60,19 @@ export interface SharedUniforms {
   uNightVision: { value: number };
   /** A floor under all light: the Nether's and the End's dim glow where no sky reaches. */
   uAmbient: { value: number };
+  /**
+   * Light that moves: a torch in hand, a burning mob, a blaze, a rocket — as
+   * (x, y, z, level). It lights blocks per fragment as block light would,
+   * without a chunk being remeshed, which is what keeps it smooth.
+   */
+  uDynLights: { value: THREE.Vector4[] };
+  uDynCount: { value: number };
+  /** The season's colour over grass and leaves (rgb) and how strongly (a). */
+  uSeason: { value: THREE.Vector4 };
 }
+
+/** How many moving lights the chunk shader takes at once: the nearest, chosen each frame. */
+export const MAX_DYNAMIC_LIGHTS = 8;
 
 export function createSharedUniforms(): SharedUniforms {
   return {
@@ -74,6 +86,9 @@ export function createSharedUniforms(): SharedUniforms {
     uWave: { value: 1 },
     uNightVision: { value: 0 },
     uAmbient: { value: 0 },
+    uDynLights: { value: Array.from({ length: MAX_DYNAMIC_LIGHTS }, () => new THREE.Vector4()) },
+    uDynCount: { value: 0 },
+    uSeason: { value: new THREE.Vector4(1, 1, 1, 0) },
   };
 }
 
@@ -94,6 +109,7 @@ out vec2 vLight;
 out float vShade;
 out vec4 vTint;
 out float vDist;
+out vec3 vWorld;
 void main() {
   vec3 p = position;
   int flags = int(aLight.w + 0.5);
@@ -114,6 +130,7 @@ void main() {
   vTint = vec4(aColor.rgb / 255.0, aColor.a);
   vec4 mv = modelViewMatrix * vec4(p, 1.0);
   vDist = length(mv.xyz);
+  vWorld = (modelMatrix * vec4(p, 1.0)).xyz;
   gl_Position = projectionMatrix * mv;
 }`;
 
@@ -149,14 +166,31 @@ in vec2 vLight;
 in float vShade;
 in vec4 vTint;
 in float vDist;
+in vec3 vWorld;
+uniform vec4 uDynLights[${MAX_DYNAMIC_LIGHTS}];
+uniform int uDynCount;
+uniform vec4 uSeason;
 out vec4 outColor;
 ${LIGHTING}
 void main() {
   vec4 tex = texture(uAtlas, vUv);
   if (uAlphaTest > 0.0 && tex.a < uAlphaTest) discard;
   float tintAmount = vTint.a < 0.5 ? 0.0 : (vTint.a < 1.5 ? 1.0 : 1.0 - tex.a);
-  vec3 col = tex.rgb * mix(vec3(1.0), vTint.rgb, tintAmount);
-  col = applyLight(col, vLight.x, vLight.y, vShade);
+  vec3 tint = vTint.rgb;
+  // The season turns grass and leaves (not water, which is drawn in the translucent pass).
+  if (uSeason.a > 0.0 && uTranslucent < 0.5) {
+    float lum = dot(tint, vec3(0.3, 0.59, 0.11));
+    tint = mix(tint, uSeason.rgb * (0.55 + lum), uSeason.a);
+  }
+  vec3 col = tex.rgb * mix(vec3(1.0), tint, tintAmount);
+  // Moving light falls off a level a block, as block light does.
+  float blk = vLight.y;
+  for (int i = 0; i < ${MAX_DYNAMIC_LIGHTS}; i++) {
+    if (i >= uDynCount) break;
+    vec4 L = uDynLights[i];
+    blk = max(blk, clamp((L.w - distance(vWorld, L.xyz)) / 15.0, 0.0, 1.0));
+  }
+  col = applyLight(col, vLight.x, blk, vShade);
   float fog = smoothstep(uFogNear, uFogFar, vDist);
   col = mix(col, uFogColor, fog);
   outColor = vec4(col, uTranslucent > 0.5 ? tex.a : 1.0);

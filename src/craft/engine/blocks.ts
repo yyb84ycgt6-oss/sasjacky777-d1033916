@@ -106,7 +106,7 @@ export interface BlockDef {
   facing?: "player" | "away" | "wall";
   /** Has an inventory or a screen. */
   interact?: "crafting" | "furnace" | "chest" | "bed" | "door" | "tnt" | "noteblock" | "redstone"
-    | "enchanting" | "anvil" | "brewing" | "cauldron" | "composter" | "bell" | "smithing";
+    | "enchanting" | "anvil" | "brewing" | "cauldron" | "composter" | "bell" | "smithing" | "waystone";
   flammable?: boolean;
   /** Hidden from the creative inventory (technical blocks). */
   hidden?: boolean;
@@ -1115,6 +1115,13 @@ add(247, "purpur_slab", "Purpur Slab", {
 add(248, "magenta_stained_glass", "Magenta Stained Glass", {
   layer: "translucent", opaque: false, hardness: 0.3, material: "glass", drops: [],
 });
+// A waystone (engine/waystones.ts): a carved pillar on a plinth, its rune glowing faintly.
+add(249, "waystone", "Waystone", {
+  shape: "boxes", layer: "cutout", opaque: false, hardness: 5, tool: P, harvestTier: 0, material: "stone", emission: 6,
+  boxes: () => [[1, 0, 1, 15, 3, 15], [3, 3, 3, 13, 14, 13], [4, 14, 4, 12, 16, 12]],
+  textures: tex("waystone_top", "waystone_side"), interact: "waystone",
+  boxTexture: (_m, box, face) => (box === 0 ? "waystone_base" : face === Face.Up || face === Face.Down ? "waystone_top" : "waystone_side"),
+});
 
 export const BLOCK_COUNT = BLOCKS.length;
 
@@ -1175,7 +1182,7 @@ export const B = {
   QUARTZ_BLOCK: 230, SPAWNER: 231,
   END_STONE: 232, END_STONE_BRICKS: 233, PURPUR_BLOCK: 234, PURPUR_PILLAR: 235, PURPUR_STAIRS: 236, END_ROD: 237,
   CHORUS_PLANT: 238, CHORUS_FLOWER: 239, END_PORTAL_FRAME: 240, END_PORTAL: 241, END_GATEWAY: 242, DRAGON_EGG: 243,
-  IRON_BARS: 244, SHULKER_BOX: 245, DRAGON_HEAD: 246, PURPUR_SLAB: 247, MAGENTA_STAINED_GLASS: 248,
+  IRON_BARS: 244, SHULKER_BOX: 245, DRAGON_HEAD: 246, PURPUR_SLAB: 247, MAGENTA_STAINED_GLASS: 248, WAYSTONE: 249,
 } as const;
 
 /** Blocks that stand on an axis kept in meta like a log's (0 up, 1 along x, 2 along z). */

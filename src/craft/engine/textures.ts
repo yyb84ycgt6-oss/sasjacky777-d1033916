@@ -1180,6 +1180,24 @@ def("magenta_stained_glass", (p) => {
   for (let j = 0; j < 4; j++) p.set(3 + j, 6 - j, hex("#ffe0fa"), 170);
 });
 
+// A waystone: dark carved stone, its rune a thin line of blue light.
+const WAYSTONE_STONE = hex("#56565f");
+const RUNE = hex("#7fe3ff");
+def("waystone_base", (p, r) => { bricksPattern(p, r, hex("#6a6a72"), hex("#45454c"), 8, 16); });
+def("waystone_side", (p, r) => {
+  noisy(p, r, WAYSTONE_STONE, 0.1, 4);
+  frame(p, shade(WAYSTONE_STONE, 0.75));
+  // The rune: a stem with three branches, down the middle of the pillar's face.
+  for (let y = 4; y <= 12; y++) p.set(7, y, RUNE);
+  for (const [x, y] of [[6, 5], [5, 6], [8, 7], [9, 8], [6, 9], [5, 10], [8, 11], [9, 12]]) p.set(x, y, RUNE);
+  for (let y = 4; y <= 12; y++) p.set(8, y, shade(RUNE, 0.55));
+});
+def("waystone_top", (p, r) => {
+  noisy(p, r, WAYSTONE_STONE, 0.1, 4);
+  frame(p, shade(WAYSTONE_STONE, 0.75));
+  frame16(p, 6, 6, 9, 9, RUNE);
+});
+
 // Water and lava are animated: ANIM_FRAMES consecutive layers, painted from a
 // looping path through 3D noise so the last frame flows into the first.
 const WATER_NOISE = new Simplex(4242);

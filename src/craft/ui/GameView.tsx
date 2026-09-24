@@ -23,6 +23,8 @@ import { AdvancementsScreen, ChatInput, DeathScreen, MenuFrame, OptionsScreen, P
 import { AnvilScreen, BrewingScreen, ChestScreen, CraftingScreen, EnchantingScreen, FurnaceScreen, InventoryScreen, SmithingScreen, TradeScreen } from "./Screens";
 import { TouchControls } from "./TouchControls";
 import { EndPoem } from "./EndPoem";
+import { Minimap, WaypointLabels, WorldMapScreen } from "./MapView";
+import { WaystoneScreen } from "./WaystoneScreen";
 
 export interface GameViewProps {
   meta: WorldMeta;
@@ -189,6 +191,12 @@ function Overlay({ game, input, settings, onSettings, onQuit, onExitApp }: GameV
 
   return (
     <>
+      {hud.minimap && !hud.hudHidden && !hud.loading && (!screen || screen.kind === "chat") && (
+        <>
+          <WaypointLabels game={game} />
+          <Minimap game={game} />
+        </>
+      )}
       <Hud hud={hud} mobile={mobile} crosshair={!mobile || settings.touchMode === "buttons"} />
 
       {!mobile && !screen && !locked && !hud.loading && !hud.dead && (
@@ -206,6 +214,7 @@ function Overlay({ game, input, settings, onSettings, onQuit, onExitApp }: GameV
           onPause={() => game.setScreen({ kind: "pause" })}
           onChat={() => game.controls.actions.push({ type: "chat" })}
           onInventory={() => game.controls.actions.push({ type: "inventory" })}
+          onMap={hud.minimap ? () => game.controls.actions.push({ type: "map" }) : undefined}
         />
       )}
 
@@ -222,6 +231,8 @@ function Overlay({ game, input, settings, onSettings, onQuit, onExitApp }: GameV
           quitLabel={guest ? "Disconnect" : "Save and quit to title"}
         />
       )}
+      {screen?.kind === "waystone" && <WaystoneScreen game={game} x={screen.x} y={screen.y} z={screen.z} />}
+      {screen?.kind === "map" && <WorldMapScreen game={game} mobile={mobile} onClose={() => game.setScreen(null)} />}
       {screen?.kind === "poem" && <EndPoem name={game.player.name} onDone={() => game.setScreen(null)} />}
       {screen?.kind === "advancements" && (
         <AdvancementsScreen earned={game.player.advancements} onBack={() => game.setScreen({ kind: "pause" })} />

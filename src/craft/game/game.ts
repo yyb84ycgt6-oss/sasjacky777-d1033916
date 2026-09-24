@@ -24,7 +24,13 @@ import {
   type DamageSource, type Entity, type EntityContext, type EntitySnapshot, type PlayerRef, type ProjectileKind,
 } from "../engine/entities";
 import { blastImpact, explosionBlocks, exposure } from "../engine/explosion";
-import { itemDef, itemId, maxStack, resolveDrops, type ItemStack, type StatusEffect } from "../engine/items";
+import { itemDef, itemId, itemLight, maxStack, resolveDrops, type ItemStack, type StatusEffect } from "../engine/items";
+import { modEnabled } from "../engine/mods";
+import { WorldMap } from "./worldMap";
+import { withDeathPoint } from "../engine/waypoints";
+import { travelCost, WAYSTONE_NAME_MAX, waystoneKey, waystoneName, type Waystone } from "../engine/waystones";
+import { seasonAt, seasonLabel, seasonTint, snowsHere, warmBiome, type Season } from "../engine/seasons";
+import { MAX_DYNAMIC_LIGHTS } from "../render/materials";
 import { isSlimeChunk, Mob, MOB_KINDS, type MobKind } from "../engine/mobs";
 import { groundBlock } from "../engine/physics";
 import { Player, type PlayerEvent } from "../engine/player";
@@ -110,6 +116,12 @@ export interface NetLink {
   teleportRemote?(id: string, to: Arrival): void;
   /** Guest → host: set an end crystal on the block at x, y, z. */
   placeCrystal?(x: number, y: number, z: number): void;
+  /** Host → guests: the world's waystones changed (one found, named or broken). */
+  waystonesChanged?(): void;
+  /** Guest → host: a waystone the world did not know of yet, found at x, y, z. */
+  registerWaystone?(x: number, y: number, z: number): void;
+  /** Guest → host: a waystone's new name. */
+  renameWaystone?(key: string, name: string): void;
   /** Guest: settles once the host has said which chunks of the new dimension it changed. */
   readonly keysReady?: Promise<void> | null;
   /** Guest: the host's connection id. */
@@ -121,10 +133,10 @@ export interface NetLink {
 export type Arrival =
   /** Through a portal: into the recorded one at x,y,z when `known`, else a new one built near there. */
   | { kind: "portal"; x: number; y: number; z: number; axis: PortalAxis; known: boolean }
-  /** Respawning: at the world spawn or a bed, on the ground. */
-  | { kind: "spawn"; x: number; y: number; z: number }
-  /** Exactly here (a guest following the host); `wait` until the host has said where it landed. */
-  | { kind: "exact"; x: number; y: number; z: number; wait?: number }
+  /** Respawning: at the world spawn or a bed, on the ground. `solo`: a trip of one player's own (the map), not the party's. */
+  | { kind: "spawn"; x: number; y: number; z: number; solo?: boolean }
+  /** Exactly here (a guest following the host, a waypoint, a waystone); `wait` until the host has said where it landed. */
+  | { kind: "exact"; x: number; y: number; z: number; wait?: number; solo?: boolean }
   /** Into the End: onto the obsidian platform, built fresh (and cleared) each time, as in the original. */
   | { kind: "platform"; x: number; y: number; z: number }
   /** Through a gateway: on top of gateway `index`'s cage by the main island (`inner`), or on the ground under its far end. */
@@ -253,6 +265,8 @@ export class Game {
   onFatal: ((message: string) => void) | null = null;
   readonly ctx: EntityContext;
   readonly endFight = new EndFight(this);
+  /** Everywhere this world's players have been, for the minimap and the world map (M). */
+  readonly worldMap = new WorldMap();
 
   constructor(opts: GameOptions) {
     this.meta = opts.meta;
@@ -287,6 +301,10 @@ export class Game {
     this.actions = new Actions(this);
 
     if (this.saves.problem) this.message(this.saves.problem, "#ffcc55");
+    // A guest's map is for the visit: the world, and so its saved map, is the host's.
+    if (this.role !== "guest") {
+      void this.saves.maps.load(this.meta.id).then((regions) => this.worldMap.merge(regions)).catch(() => {});
+    }
   }
 
   /**
@@ -311,6 +329,7 @@ export class Game {
       igniteTnt: (x, y, z) => { this.spawn(new PrimedTnt(x + 0.5, y, z + 0.5, 80)); this.sound("fuse", x + 0.5, y + 0.5, z + 0.5); },
       portalLit: (x, y, z, axis) => this.recordPortal(this.dimension, x, y, z, axis),
       fireSpreads: () => this.meta.rules.doFireTick !== false,
+      season: () => (this.world === world ? this.season() : null),
     }, { lavaFast: info.lavaFast, portals: dim !== "end" });
     this.redstone = new Redstone(world, this.redstoneContext());
     const streamer = new Streamer(
@@ -322,6 +341,7 @@ export class Game {
         // A chunk the old dimension asked for, arriving after the player left it.
         if (this.world !== world) return;
         this.net?.chunkLoaded?.(chunk.cx, chunk.cz, fromSave);
+        if (this.modOn("minimap")) this.worldMap.paintChunk(dim, chunk);
         if (this.simulates) this.redstone.onChunkLoaded(chunk);
         if (this.simulates && !fromSave) this.settleStructures(chunk.cx, chunk.cz);
       },
@@ -1243,7 +1263,8 @@ export class Game {
 
   private onBlockChange(c: BlockChange): void {
     const chunk = this.world.chunkAt(c.x, c.z);
-    if (chunk) this.dirtySave.add(chunk.id);
+    if (chunk) { this.dirtySave.add(chunk.id); this.mapDirty.add(chunk.id); }
+    if (this.simulates && c.prevId === B.WAYSTONE && c.id !== B.WAYSTONE) this.waystoneBroken(c.x, c.y, c.z);
     if (c.cause !== "remote") this.net?.blockChanged(c);
     if (this.simulates && isLog(c.prevId) && c.id !== c.prevId) this.rules.logRemoved(c.x, c.y, c.z);
     // A pumpkin set on a T of iron blocks may wake a golem; checked after the change settles.
@@ -1743,7 +1764,7 @@ export class Game {
     if (this.arrival) {
       if (!this.settleArrival(this.arrival)) return false;
       // A gateway moves only whoever stepped in it; the party follows only a change of dimension.
-      const alone = this.arrival.kind === "gateway";
+      const alone = this.arrival.kind === "gateway" || ("solo" in this.arrival && this.arrival.solo === true);
       this.arrival = null;
       this.spawnPlaced = true;
       if (this.net?.role === "host" && !alone) {
@@ -1875,7 +1896,10 @@ export class Game {
     const eyeBlock = this.world.blockAt(Math.floor(ix), Math.floor(eye), Math.floor(iz));
     const heldId = p.inventory.held?.id ?? null;
     const lightAt = this.world.getLight(Math.floor(ix), Math.floor(eye), Math.floor(iz));
-    const [sky, blockLight] = lightAt < 0 ? [1, 0] : [(lightAt >> 4) / 15, (lightAt & 15) / 15];
+    const [sky, worldBlock] = lightAt < 0 ? [1, 0] : [(lightAt >> 4) / 15, (lightAt & 15) / 15];
+    // The hand holding a torch is lit by it, as the cave around it is (dynamic lights).
+    const held = this.modOn("dynamic_lights") ? Math.max(itemLight(p.inventory.held?.id ?? -1), itemLight(p.inventory.offhand?.id ?? -1)) : 0;
+    const blockLight = Math.max(worldBlock, held / 15);
     const biome = biomeDef(this.world.chunkAt(Math.floor(b.x), Math.floor(b.z))?.biomes[((Math.floor(b.z) & 15) << 4) | (Math.floor(b.x) & 15)] ?? 7);
 
     const local: RemotePlayerView = {
@@ -1914,7 +1938,7 @@ export class Game {
       rain: info.hasSky ? this.rain : 0,
       thunder: info.hasSky ? this.thunder : 0,
       lightning: this.lightning,
-      snowing: info.hasSky && biome.snowy,
+      snowing: info.hasSky && snowsHere(this.season(), biome.id, !!biome.snowy),
       renderDistance: this.settings.renderDistance,
       underwater: eyeBlock === B.WATER,
       inLava: eyeBlock === B.LAVA,
@@ -1934,6 +1958,8 @@ export class Game {
       clouds: this.settings.clouds,
       wave: this.settings.graphics === "fancy",
       dimension: info.hasSky ? undefined : { fog: biome.fog ?? 0x330808, ambient: info.ambient, sky: info.skyLight, open: info.open },
+      dynamicLights: this.dynamicLights(ix, eye, iz),
+      season: this.season() ? seasonTint(this.time, warmBiome(biome.id)) : undefined,
     });
     this.lightning = 0;
     this.audio.setListener(ix, eye, iz, p.yaw);
@@ -1997,6 +2023,7 @@ export class Game {
       void this.saveNow().catch((e: Error) => this.message(`Autosave failed: ${e.message}`, "#ff6666"));
     }
     if (this.tickCount % 20 === 0) this.audio.tickMusic(1, !this.isNight());
+    if (this.tickCount % 20 === 11) this.repaintMap();
     if (this.tickCount % 10 === 0) this.advance();
     // The City at the End of the Game: inside a city's bounds, above its island.
     if (this.tickCount % 20 === 7 && this.dimension === "end" && this.generator instanceof EndGenerator && !this.player.advancements.has("city")) {
@@ -2034,6 +2061,7 @@ export class Game {
         case "death":
           this.message(ev.message, "#ff8888");
           this.net?.chat(`\u0000death:${ev.message}`);
+          if (this.modOn("minimap")) p.waypoints = withDeathPoint(p.waypoints, p.body.x, p.body.y, p.body.z, this.dimension);
           this.onDeath();
           break;
         case "land":
@@ -2176,6 +2204,169 @@ export class Game {
   launchFirework(x: number, y: number, z: number, rocket: Rocket, owner: string | null): void {
     this.spawn(FireworkRocket.launch(x, y, z, rocket, Math.random, owner));
     this.sound("firework_launch", x, y, z, 1);
+  }
+
+  // ---- waystones -----------------------------------------------------------------------------
+
+  /** Every waystone in this world (engine/waystones.ts). */
+  get waystones(): Record<string, Waystone> {
+    return (this.meta.waystones ??= {});
+  }
+
+  /**
+   * A waystone at x, y, z joins the world's list, under a name of its own,
+   * unless it is already on it. The host's list is the one that counts; a
+   * guest adds it to its own copy at once, so its screen is not empty while
+   * the host's answer is on its way.
+   */
+  addWaystone(x: number, y: number, z: number): Waystone | null {
+    if (this.world.blockAt(x, y, z) !== B.WAYSTONE) return null;
+    const key = waystoneKey(this.dimension, x, y, z);
+    let w = this.waystones[key];
+    if (!w) {
+      w = { name: waystoneName(x, y, z), x, y, z, dim: this.dimension };
+      this.waystones[key] = w;
+      if (this.role === "guest") this.net?.registerWaystone?.(x, y, z);
+      else this.net?.waystonesChanged?.();
+    }
+    return w;
+  }
+
+  /** Using a waystone: it wakes for this player (the first time), and its list of destinations opens. */
+  useWaystone(x: number, y: number, z: number): void {
+    if (!this.modOn("waystones")) { this.message("Waystones are switched off in this world.", "#ffcc55"); return; }
+    const w = this.addWaystone(x, y, z);
+    if (!w) return;
+    const key = waystoneKey(this.dimension, x, y, z);
+    if (!this.player.waystones.has(key)) {
+      this.player.waystones.add(key);
+      this.message(`Waystone found: ${w.name}`, "#55ffff");
+      this.sound("levelup", x + 0.5, y + 0.5, z + 0.5, 0.6, 1.6);
+      this.particles("portal", x + 0.5, y + 1, z + 0.5, 30);
+    }
+    this.setScreen({ kind: "waystone", x, y, z });
+  }
+
+  renameWaystone(key: string, name: string): void {
+    const w = this.waystones[key];
+    const clean = name.trim().slice(0, WAYSTONE_NAME_MAX);
+    if (!w || !clean || clean === w.name) return;
+    w.name = clean;
+    if (this.role === "guest") this.net?.renameWaystone?.(key, clean);
+    else this.net?.waystonesChanged?.();
+  }
+
+  /**
+   * Travels from the waystone at `from` to the one at `to`: both must stand,
+   * be in this dimension, and `to` must have been found by this player. Costs
+   * experience levels (engine/waystones.ts travelCost). Says why when it cannot.
+   */
+  travelByWaystone(from: string, to: string): boolean {
+    const p = this.player;
+    const a = this.waystones[from], b = this.waystones[to];
+    if (!a || !b || from === to) return false;
+    if (b.dim !== this.dimension) { this.message(`${b.name} is in another dimension; waystones only reach within one.`, "#ff8888"); return false; }
+    if (!p.waystones.has(to)) return false;
+    if (this.world.isLoaded(b.x, b.z) && this.world.blockAt(b.x, b.y, b.z) !== B.WAYSTONE) {
+      delete this.waystones[to];
+      if (this.role !== "guest") this.net?.waystonesChanged?.();
+      this.message(`${b.name} is gone — someone broke it.`, "#ff8888");
+      return false;
+    }
+    const cost = travelCost(a, b, p.gameMode === "creative" || p.gameMode === "spectator");
+    if (p.xpLevel < cost) { this.message(`That trip costs ${cost} level${cost === 1 ? "" : "s"} of experience; you have ${p.xpLevel}.`, "#ff8888"); return false; }
+    p.xpLevel -= cost;
+    const bb = p.body;
+    this.particles("portal", bb.x, bb.y + 1, bb.z, 40);
+    this.sound("chorus_fruit_teleport", bb.x, bb.y, bb.z, 0.8);
+    this.setScreen(null);
+    this.travelTo(b.x + 0.5, b.y, b.z + 0.5);
+    this.sound("chorus_fruit_teleport", null, 0, 0, 0.8);
+    this.advance({ kind: "waystone" });
+    return true;
+  }
+
+  /** Host: a waystone was broken, so it leaves the world's list. */
+  private waystoneBroken(x: number, y: number, z: number): void {
+    const key = waystoneKey(this.dimension, x, y, z);
+    if (!this.waystones[key]) return;
+    delete this.waystones[key];
+    this.net?.waystonesChanged?.();
+  }
+
+  /** Cheats: the world allows them, or the player is in creative. */
+  cheatsAllowed(): boolean {
+    return this.meta.cheats || this.player.gameMode === "creative";
+  }
+
+  /**
+   * Moves the player within this dimension — to a waypoint, a waystone, a
+   * spot on the map — and lands them once the ground there has loaded: beside
+   * `y` when it is known, else on the surface. Only this player goes.
+   */
+  travelTo(x: number, y: number | null, z: number): void {
+    const p = this.player, b = p.body;
+    b.x = x; b.z = z; b.y = y ?? WORLD_HEIGHT - 2;
+    b.vx = b.vy = b.vz = 0;
+    b.fallDistance = 0;
+    p.prevX = b.x; p.prevY = b.y; p.prevZ = b.z;
+    this.arrival = y === null ? { kind: "spawn", x, y: b.y, z, solo: true } : { kind: "exact", x, y, z, solo: true };
+    this.spawnPlaced = false;
+    this.loadingSince = performance.now();
+  }
+
+  /** Chunks edited since they were last painted onto the map, a few repainted each second. */
+  private readonly mapDirty = new Set<number>();
+
+  private repaintMap(): void {
+    if (!this.modOn("minimap")) { this.mapDirty.clear(); return; }
+    let n = 0;
+    for (const id of this.mapDirty) {
+      this.mapDirty.delete(id);
+      const c = this.world.chunks.get(id);
+      if (c) this.worldMap.paintChunk(this.dimension, c);
+      if (++n >= 6) break;
+    }
+  }
+
+  /** Whether a mod-inspired feature (engine/mods.ts) is on in this world. */
+  modOn(id: string): boolean {
+    return modEnabled(this.meta.disabledMods, id);
+  }
+
+  /** The overworld's season, or null where there are none (other dimensions, or the world switched them off). */
+  season(): Season | null {
+    return this.dimension === "overworld" && this.modOn("seasons") ? seasonAt(this.time).season : null;
+  }
+
+  /**
+   * The moving lights near the camera, nearest first: what the player and
+   * others hold, dropped glowing items, burning mobs, blazes, magma cubes,
+   * rockets and fireballs — as [x, y, z, level].
+   */
+  dynamicLights(cx: number, cy: number, cz: number): [number, number, number, number][] {
+    if (!this.modOn("dynamic_lights")) return [];
+    const out: [number, number, number, number][] = [];
+    const p = this.player;
+    const held = Math.max(itemLight(p.inventory.held?.id ?? -1), itemLight(p.inventory.offhand?.id ?? -1));
+    if (held > 0 && !p.dead) out.push([p.body.x, p.body.y + 1.2, p.body.z, held]);
+    for (const r of this.remote.values()) {
+      const l = r.held !== null ? itemLight(r.held) : 0;
+      if (l > 0 && !r.dead) out.push([r.x, r.y + 1.2, r.z, l]);
+    }
+    for (const e of this.entities.values()) {
+      if (e.removed) continue;
+      let l = 0;
+      if (e instanceof ItemEntity) l = itemLight(e.stack.id) - 1;
+      else if (e instanceof FireworkRocket) l = 12;
+      else if (e instanceof Projectile) l = e.kind === "fireball" || e.kind === "dragon_fireball" ? 13 : e.kind === "small_fireball" ? 11 : e.fire ? 8 : 0;
+      else if (e instanceof Mob) l = e.kind === "blaze" ? 10 : e.kind === "magma_cube" ? 8 : e.fireTicks > 0 ? 12 : 0;
+      else if (e instanceof PrimedTnt) l = 8;
+      if (l > 0) out.push([e.x, e.y + e.body.height / 2, e.z, l]);
+    }
+    if (out.length <= MAX_DYNAMIC_LIGHTS) return out;
+    const d = (a: number[]) => (a[0] - cx) ** 2 + (a[1] - cy) ** 2 + (a[2] - cz) ** 2;
+    return out.sort((a, b) => d(a) - d(b)).slice(0, MAX_DYNAMIC_LIGHTS);
   }
 
   /** Hangs an item frame on a face of a block (the host's half); false when the spot is taken or unsupported. */
@@ -2399,6 +2590,8 @@ export class Game {
       meta.dimension = this.dimension;
       meta.entities = this.persistentEntities();
       await this.saves.putWorld(meta);
+      // The map is kept apart from the world (mapStore.ts): failing to keep it costs the map, never the save.
+      await this.saves.maps.save(meta.id, this.worldMap.takeDirty()).catch(() => {});
     } finally {
       this.savingNow = false;
       this.store.set({ saving: false });
@@ -2480,6 +2673,7 @@ export class Game {
       perspective: this.perspective,
       toasts: this.toasts.filter((t) => performance.now() - t.at < 5000),
       boss: this.endFight.bossBar(),
+      minimap: this.modOn("minimap"),
     };
   }
 
@@ -2498,7 +2692,7 @@ export class Game {
       `Block: ${x} ${y} ${z}   Chunk: ${x >> 4} ${z >> 4}`,
       `Facing: ${facing} (${(((p.yaw * 180) / Math.PI) % 360).toFixed(1)} / ${((p.pitch * 180) / Math.PI).toFixed(1)})`,
       `Biome: ${biome}`,
-      `Light: ${l < 0 ? "?" : `${l >> 4} sky, ${l & 15} block`}   Day ${Math.floor(this.time / DAY_TICKS)}, time ${this.time % DAY_TICKS}`,
+      `Light: ${l < 0 ? "?" : `${l >> 4} sky, ${l & 15} block`}   Day ${Math.floor(this.time / DAY_TICKS)}, time ${this.time % DAY_TICKS}${this.season() ? `   ${seasonLabel(this.time)}` : ""}`,
       `Chunks: ${this.world.chunks.size} loaded, ${stats.chunks} drawn, ${this.streamer.busy} in flight (${this.pool.mode})`,
       `Draw: ${stats.calls} calls, ${(stats.triangles / 1000).toFixed(0)}k tris, ${(stats.quads / 1000).toFixed(0)}k quads`,
       `Entities: ${this.entities.size}   Players: ${1 + this.remote.size}`,

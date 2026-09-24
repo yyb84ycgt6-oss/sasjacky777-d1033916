@@ -18,7 +18,9 @@ import type { EntitySnapshot } from "../engine/entities";
 import type { GameMode, PlayerSave } from "../engine/player";
 import type { WorldType } from "../engine/worldgen";
 import type { Dimension } from "../engine/dimension";
+import type { Waystone } from "../engine/waystones";
 import { GAME_NAME } from "../edition";
+import { MapStore } from "./mapStore";
 
 export interface GameRules {
   keepInventory: boolean;
@@ -73,6 +75,10 @@ export interface WorldMeta {
    * been saved, does not people its city a second time.
    */
   spawned?: string[];
+  /** Mod-inspired features switched off for this world (engine/mods.ts ids); everything else is on. */
+  disabledMods?: string[];
+  /** Every waystone in the world, by key (engine/waystones.ts). Who has found which is on each player. */
+  waystones?: Record<string, Waystone>;
   /** The dimension the player (online, the host) is in; absent is the overworld. */
   dimension?: Dimension;
   /** Entities of the dimensions not loaded, waiting for someone to come back. */
@@ -160,6 +166,8 @@ function done(tx: IDBTransaction): Promise<void> {
 
 export class SaveStore {
   private db: Promise<IDBDatabase> | null = null;
+  /** The world maps, kept in a database of their own (mapStore.ts says why). */
+  readonly maps = new MapStore();
   private memoryWorlds = new Map<string, WorldMeta>();
   private memoryChunks = new Map<string, StoredChunk>();
   persistent = true;
@@ -228,6 +236,7 @@ export class SaveStore {
   }
 
   async deleteWorld(id: string): Promise<void> {
+    await this.maps.deleteWorld(id);
     const w = await this.store("worlds", "readwrite");
     if (!w) {
       this.memoryWorlds.delete(id);

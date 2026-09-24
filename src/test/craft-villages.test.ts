@@ -111,11 +111,13 @@ describe("building a village", () => {
     }
   });
 
-  it("stocks the square with a bell and a well of water", () => {
+  it("stocks the square with a bell, a well of water and a waystone clear of the roads", () => {
     const v = firstVillage(plains, 2);
     const blocks = built(v, plains);
     expect(blocks.get(`${v.x - 2},${v.y + 1},${v.z - 2}`)?.[0]).toBe(B.BELL);
     expect(blocks.get(`${v.x},${v.y},${v.z}`)?.[0]).toBe(B.WATER);
+    expect(blocks.get(`${v.x + 3},${v.y + 1},${v.z + 3}`)?.[0]).toBe(B.WAYSTONE);
+    expect(v.roads.some(([x, z]) => x === v.x + 3 && z === v.z + 3)).toBe(false);
   });
 
   it("gives a library its shelves", () => {

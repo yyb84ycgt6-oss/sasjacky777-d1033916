@@ -17,8 +17,8 @@ import type { Game } from "../game/game";
 interface Stick { id: number; ox: number; oy: number; x: number; y: number }
 interface Look { id: number; x: number; y: number; sx: number; sy: number; t: number; moved: boolean; holdTimer: ReturnType<typeof setTimeout> | null; mining: boolean }
 
-export function TouchControls({ game, onPause, onChat, onInventory }: {
-  game: Game; onPause: () => void; onChat: () => void; onInventory: () => void;
+export function TouchControls({ game, onPause, onChat, onInventory, onMap }: {
+  game: Game; onPause: () => void; onChat: () => void; onInventory: () => void; onMap?: () => void;
 }) {
   const s = game.settings;
   const [stick, setStick] = useState<Stick | null>(null);
@@ -214,6 +214,7 @@ export function TouchControls({ game, onPause, onChat, onInventory }: {
           ["⏸", onPause, "Pause"],
           ["💬", onChat, "Chat"],
           ["🎒", onInventory, "Inventory"],
+          ...(onMap ? [["🗺", onMap, "Map"]] : []),
           ["👁", () => game.controls.actions.push({ type: "perspective" }), "Camera"],
           ["⬇", () => game.controls.actions.push({ type: "drop", all: false }), "Drop one"],
         ].map(([label, fn, title]) => (

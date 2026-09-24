@@ -269,6 +269,8 @@ function itemDefOrNull(name: string): boolean {
 shaped("shulker_box", ["S", "C", "S"], { S: "shulker_shell", C: "chest" }, "shulker_box");
 shaped("purpur_slab", ["###"], { "#": "purpur_block" }, "purpur_slab", 6);
 shaped("item_frame", ["SSS", "SLS", "SSS"], { S: "stick", L: "leather" }, "item_frame");
+// A waystone: a stone-brick pillar on obsidian, an ender pearl at its heart for the travelling.
+shaped("waystone", [" B ", "BPB", "OOO"], { B: "stone_bricks", P: "ender_pearl", O: "obsidian" }, "waystone");
 // A box and a dye: the same box, same contents, new colour.
 RECIPES.push({
   id: "shulker_box_dyed", ingredients: ["shulker_box", "#dye"], result: { item: "shulker_box", count: 1 }, small: true,
@@ -489,6 +491,11 @@ const SMELTING: Smelt[] = [
   { input: "ancient_debris", output: "netherite_scrap", xp: 2 },
   { input: "chorus_fruit", output: "popped_chorus_fruit", xp: 0.1 },
 ].filter((s) => itemDefOrNull(s.output) && (s.input.startsWith("#") || itemDefOrNull(s.input)));
+
+/** Every smelting recipe, for the recipe viewer. */
+export function allSmelting(): readonly Smelt[] {
+  return SMELTING;
+}
 
 export function smeltResult(id: number): Smelt | null {
   for (const s of SMELTING) if (ingredientIds(s.input).includes(id)) return s;

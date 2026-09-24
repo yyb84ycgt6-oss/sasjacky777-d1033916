@@ -32,6 +32,7 @@ export type GameAction =
   | { type: "hideHud" }
   | { type: "screenshot" }
   | { type: "toggleFly" }
+  | { type: "map" }
   | { type: "close" };
 
 export function emptyControls(): Controls {
@@ -55,7 +56,11 @@ export type Screen =
   | { kind: "death" }
   | { kind: "advancements" }
   /** The poem and credits, the first time home from the End after the dragon. */
-  | { kind: "poem" };
+  | { kind: "poem" }
+  /** The world map and its waypoints (M). */
+  | { kind: "map" }
+  /** A waystone's list of the others this player has found. */
+  | { kind: "waystone"; x: number; y: number; z: number };
 
 export interface ChatLine {
   id: number;
@@ -109,4 +114,6 @@ export interface Hud {
   toasts: { id: string; title: string; icon: string; at: number }[];
   /** A boss in range (the dragon): its name and health, 0..1. */
   boss: { name: string; health: number } | null;
+  /** The minimap is showing in the top right corner, so what usually sits there moves down. */
+  minimap: boolean;
 }

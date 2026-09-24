@@ -4,6 +4,7 @@ import { glyph, textureBackground } from "./icons";
 import { ItemIcon, StackView } from "./common";
 import { clock, effectName } from "./itemText";
 import { itemId } from "../engine/items";
+import { MINIMAP_ROOM } from "./MapView";
 
 function Row({ full, max, icon, half, empty, reverse, shake }: {
   full: number; max: number; icon: string; half: string; empty: string; reverse?: boolean; shake?: boolean;
@@ -30,6 +31,8 @@ export function Hud({ hud, mobile, crosshair }: { hud: HudState; mobile: boolean
   const heldNameVisible = hud.heldName && now - hud.heldNameAt < 2200;
 
   if (hud.hudHidden) return null;
+  // Room under the minimap (MapView.tsx), which takes the top right corner when it is on.
+  const corner = hud.minimap ? MINIMAP_ROOM : 0;
   return (
     <div className="absolute inset-0 pointer-events-none bc-shadow">
       {hurtFlash && <div className="absolute inset-0" style={{ boxShadow: "inset 0 0 120px 40px rgba(200,0,0,0.45)" }} />}
@@ -69,7 +72,7 @@ export function Hud({ hud, mobile, crosshair }: { hud: HudState; mobile: boolean
       )}
 
       {hud.effects.length > 0 && !hud.screen && (
-        <div className="absolute flex flex-col items-end" style={{ right: "calc(var(--u) * 3)", top: mobile ? "calc(var(--u) * 26)" : "calc(var(--u) * 3)", gap: "calc(var(--u) * 1)" }}>
+        <div className="absolute flex flex-col items-end" style={{ right: "calc(var(--u) * 3)", top: `calc(var(--u) * ${(mobile ? 26 : 3) + corner + (hud.net ? 18 : 0)})`, gap: "calc(var(--u) * 1)" }}>
           {hud.effects.map((e) => (
             <div key={e.kind} style={{ background: "rgba(0,0,0,0.45)", padding: "calc(var(--u) * 1) calc(var(--u) * 3)", fontSize: "calc(var(--u) * 5.5)" }}>
               {effectName(e.kind, e.amp)} <span style={{ color: e.seconds <= 10 ? "#ff8080" : "#c0c0c0" }}>{clock(e.seconds)}</span>
@@ -139,7 +142,7 @@ export function Hud({ hud, mobile, crosshair }: { hud: HudState; mobile: boolean
         </div>
       )}
       {hud.net && (
-        <div className="absolute" style={{ right: "calc(var(--u) * 3)", top: mobile ? "calc(var(--u) * 22)" : "calc(var(--u) * 3)", fontSize: "calc(var(--u) * 6)", textAlign: "right", background: "rgba(0,0,0,0.35)", padding: "calc(var(--u) * 1) calc(var(--u) * 3)" }}>
+        <div className="absolute" style={{ right: "calc(var(--u) * 3)", top: `calc(var(--u) * ${(mobile ? 22 : 3) + corner})`, fontSize: "calc(var(--u) * 6)", textAlign: "right", background: "rgba(0,0,0,0.35)", padding: "calc(var(--u) * 1) calc(var(--u) * 3)" }}>
           <div>{hud.net.role === "host" ? "Hosting" : "Joined"} · {hud.net.kind === "online" ? "online" : hud.net.kind === "lan" ? "LAN" : "this device"} · room <span style={{ color: "#ffff80" }}>{hud.net.room}</span></div>
           <div style={{ color: hud.net.status === "connected" ? "#9f9" : "#fc6" }}>{hud.net.players.length} player{hud.net.players.length === 1 ? "" : "s"} · {hud.net.status}</div>
         </div>

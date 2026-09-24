@@ -336,6 +336,8 @@ function buildWell(v: Village, t: Terrain, m: Materials, set: Stamp): void {
   }
   // The bell that calls the village, in a corner of the square, clear of the roads.
   set(v.x - 2, y + 1, v.z - 2, B.BELL, 1);
+  // And in the opposite corner, the village's waystone (engine/waystones.ts), for travellers to wake.
+  set(v.x + 3, y + 1, v.z + 3, B.WAYSTONE);
 }
 
 function clearAndFound(h: House, t: Terrain, m: Materials, set: Stamp, clearTo: number): void {

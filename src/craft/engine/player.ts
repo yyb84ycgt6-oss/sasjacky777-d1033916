@@ -13,6 +13,7 @@ import { Inventory } from "./inventory";
 import { itemDef, type FoodInfo, type ItemStack, type StatusEffect } from "./items";
 import { glide, newBody, senseEnvironment, travel, type Body, type BlockReader } from "./physics";
 import type { DamageSource } from "./entities";
+import { sanitizeWaypoints, type Waypoint } from "./waypoints";
 
 export type GameMode = "survival" | "creative" | "adventure" | "spectator";
 
@@ -90,6 +91,10 @@ export class Player {
   advancements = new Set<string>();
   /** Whether this player has been shown the poem after the dragon (once, the first time home). */
   poemSeen = false;
+  /** Places this player marked (engine/waypoints.ts). */
+  waypoints: Waypoint[] = [];
+  /** The waystones this player has found and so may travel to, by their key ("dim:x,y,z"). */
+  waystones = new Set<string>();
   gameMode: GameMode = "survival";
   flying = false;
   spawn: { x: number; y: number; z: number } | null = null;
@@ -544,6 +549,8 @@ export class Player {
       gameMode: this.gameMode, flying: this.flying, spawn: this.spawn, inventory: this.inventory.toJSON(), effects: this.effects,
       fireTicks: this.fireTicks, dead: this.dead, score: this.score, advancements: [...this.advancements],
       enchantSeed: this.enchantSeed, poem: this.poemSeen || undefined,
+      waypoints: this.waypoints.length ? this.waypoints : undefined,
+      waystones: this.waystones.size ? [...this.waystones] : undefined,
     };
   }
 
@@ -558,6 +565,8 @@ export class Player {
     this.air = num(s.air, 300); this.xpLevel = num(s.xpLevel, 0); this.xpPoints = num(s.xpPoints, 0); this.score = num(s.score, 0);
     this.advancements = new Set(Array.isArray(s.advancements) ? s.advancements.filter((a): a is string => typeof a === "string") : []);
     this.poemSeen = s.poem === true;
+    this.waypoints = sanitizeWaypoints(s.waypoints);
+    this.waystones = new Set(Array.isArray(s.waystones) ? s.waystones.filter((k): k is string => typeof k === "string").slice(0, 256) : []);
     this.setGameMode(s.gameMode ?? "survival");
     this.flying = !!s.flying && this.canFly;
     this.spawn = s.spawn ?? null;
@@ -583,4 +592,6 @@ export interface PlayerSave {
   enchantSeed?: number;
   /** The poem after the dragon has been shown to this player. */
   poem?: boolean;
+  waypoints?: Waypoint[];
+  waystones?: string[];
 }

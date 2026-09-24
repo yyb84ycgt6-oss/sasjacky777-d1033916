@@ -13,6 +13,7 @@ import {
 import { canAfford as canAffordOffer, LEVEL_NAMES, LEVEL_XP } from "../engine/trading";
 import { boxRegions, skin } from "../render/skins";
 import { Button, CursorStack, ItemIcon, SlotButton, StackView, useTooltip } from "./common";
+import { RecipeViewer } from "./RecipeViewer";
 
 function Grid({ slots, cols, section, game, offset = 0, onHover, quick }: {
   slots: Slot[]; cols: number; section: Section; game: Game; offset?: number; onHover: (s: Slot, x: number, y: number) => void; quick: boolean;
@@ -37,10 +38,16 @@ function PlayerSlots({ game, onHover, quick }: { game: Game; onHover: (s: Slot, 
   );
 }
 
+/** Whether the recipe viewer is open, remembered from screen to screen for the session; open by default where there is room. */
+let viewerPref: boolean | null = null;
+
 /** The shared frame: a centred panel, a click-outside-to-drop backdrop, tooltip and cursor stack. */
 function Frame({ game, title, children, side, mobile, quick, setQuick }: {
   game: Game; title: string; children: ReactNode; side?: ReactNode; mobile: boolean; quick: boolean; setQuick: (v: boolean) => void;
 }) {
+  const viewerAllowed = game.modOn("recipe_viewer");
+  const [viewer, setViewerState] = useState(() => viewerPref ?? !mobile);
+  const setViewer = (v: boolean) => { viewerPref = v; setViewerState(v); };
   return (
     <div className="absolute inset-0 flex items-center justify-center pointer-events-auto"
       onMouseDown={(e) => { if (e.target === e.currentTarget) dropCursor(game, e.button === 2); }}
@@ -56,11 +63,17 @@ function Frame({ game, title, children, side, mobile, quick, setQuick }: {
                 <button type="button" className="bc-btn" style={{ minHeight: "calc(var(--u) * 12)", fontSize: "calc(var(--u) * 5.5)", background: quick ? "#5c6ea8" : undefined }}
                   onClick={() => setQuick(!quick)}>⇅ Quick move</button>
               )}
+              {viewerAllowed && (
+                <button type="button" className="bc-btn" title="Recipe viewer" aria-label="Recipe viewer"
+                  style={{ minHeight: "calc(var(--u) * 12)", fontSize: "calc(var(--u) * 5.5)", background: viewer ? "#5c6ea8" : undefined }}
+                  onClick={() => setViewer(!viewer)}>🔎 Items</button>
+              )}
               <button type="button" className="bc-btn" style={{ minHeight: "calc(var(--u) * 12)", fontSize: "calc(var(--u) * 6)" }} onClick={() => game.setScreen(null)} aria-label="Close">✕</button>
             </span>
           </div>
           {children}
         </div>
+        {viewerAllowed && viewer && <RecipeViewer />}
       </div>
       <CursorStack stack={game.cursor} />
     </div>

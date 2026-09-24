@@ -9,6 +9,7 @@ import { SaveStore, type WorldMeta } from "../game/save";
 import { loadSettings, saveSettings, type Settings } from "../game/settings";
 import { NetSession, type Welcome } from "../net/session";
 import type { LinkKind } from "../net/transport";
+import { sanitizeWaystones } from "../engine/waystones";
 import { guiUnit } from "./common";
 import { GameView } from "./GameView";
 import { OptionsScreen } from "./Menus";
@@ -49,6 +50,8 @@ function guestWorld(w: Welcome, room: string): WorldMeta {
     players: {},
     entities: [],
     dimension: w.dimension,
+    disabledMods: Array.isArray(w.disabledMods) ? w.disabledMods.filter((m): m is string => typeof m === "string") : [],
+    waystones: sanitizeWaystones(w.waystones),
     version: 1,
   };
 }

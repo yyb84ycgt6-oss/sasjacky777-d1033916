@@ -78,6 +78,10 @@ export interface FrameState {
    */
   /** Outside the overworld: the fog colour, the light floor, how much open sky lights, and whether it is open void (the End) or a cavern. */
   dimension?: { fog: number; ambient: number; sky?: number; open?: boolean };
+  /** Lights that move (see materials.ts uDynLights), as [x, y, z, level], nearest first. */
+  dynamicLights?: [number, number, number, number][];
+  /** The season's tint over grass and leaves: [r, g, b, amount]. */
+  season?: [number, number, number, number];
 }
 
 const WATER_FOG = col("#1f4f9a");
@@ -233,10 +237,15 @@ export class WorldRenderer {
     this.selection.geometry.setDrawRange(0, i / 3);
   }
 
+  /** This frame's moving lights, so entities are lit by the torch in a player's hand as the blocks are. */
+  private dyn: [number, number, number, number][] = [];
+
   private lightAt(x: number, y: number, z: number): [number, number] {
     const l = this.world.getLight(Math.floor(x), Math.floor(y), Math.floor(z));
-    if (l < 0) return [1, 0];
-    return [(l >> 4) / 15, (l & 15) / 15];
+    let blk = l < 0 ? 0 : (l & 15) / 15;
+    for (const [lx, ly, lz, level] of this.dyn) blk = Math.max(blk, Math.min(1, Math.max(0, (level - Math.hypot(x - lx, y - ly, z - lz)) / 15)));
+    if (l < 0) return [1, blk];
+    return [(l >> 4) / 15, blk];
   }
 
   private brightness(x: number, y: number, z: number): number {
@@ -594,6 +603,11 @@ export class WorldRenderer {
     u.uAmbient.value = dim ? dim.ambient : 0;
     u.uNightVision.value = frame.nightVision ? 0.9 : 0;
     u.uWave.value = frame.wave ? 1 : 0;
+    this.dyn = frame.dynamicLights ?? [];
+    this.dyn.forEach(([x, y, z, level], i) => u.uDynLights.value[i].set(x, y, z, level));
+    u.uDynCount.value = this.dyn.length;
+    const season = frame.season ?? [1, 1, 1, 0];
+    u.uSeason.value.set(season[0], season[1], season[2], season[3]);
 
     // Camera.
     const c = frame.camera;

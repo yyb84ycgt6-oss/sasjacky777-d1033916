@@ -13,6 +13,7 @@ import {
 } from "./blocks";
 import { findPortalFrame, portalHolds, type PortalAxis } from "./portal";
 import { biomeDef } from "./biomes";
+import { cropGrowth, saplingGrowth, snowsHere, type Season } from "./seasons";
 import { blockIndex, WORLD_HEIGHT } from "./constants";
 import { itemByName, resolveDrops, type ItemStack } from "./items";
 import { Rng } from "./rng";
@@ -31,6 +32,8 @@ export interface RuleContext {
   portalLit?(x: number, y: number, z: number, axis: PortalAxis): void;
   /** Whether fire spreads and burns out (the doFireTick rule). */
   fireSpreads?(): boolean;
+  /** The season, when this world keeps them (engine/seasons.ts); null or absent for none. */
+  season?(): Season | null;
 }
 
 export interface DimensionRules {
@@ -563,16 +566,19 @@ export class BlockRules {
   private randomTick(x: number, y: number, z: number, id: number, biome: number): void {
     const world = this.world;
     const rand = this.ctx.random;
+    const season = this.ctx.season?.() ?? null;
     if (isCrop(id)) {
       const age = world.getMeta(x, y, z);
       if (age < CROP_MAX_AGE[id] && this.light(x, y + 1, z) >= 9) {
         const wet = world.getMeta(x, y - 1, z) > 0;
-        if (rand() < (wet ? 1 / 3 : 1 / 6)) world.setMeta(x, y, z, age + 1);
+        const pace = season ? cropGrowth(season, this.roofed(x, y, z)) : 1;
+        if (rand() < (wet ? 1 / 3 : 1 / 6) * pace) world.setMeta(x, y, z, age + 1);
       }
       return;
     }
     if (isSapling(id)) {
-      if (this.light(x, y + 1, z) >= 9 && rand() < 1 / 7) this.growTree(x, y, z, id);
+      const pace = season ? saplingGrowth(season, this.roofed(x, y, z)) : 1;
+      if (this.light(x, y + 1, z) >= 9 && rand() < pace / 7) this.growTree(x, y, z, id);
       return;
     }
     // Nether wart grows in the dark, slowly: about one stage in ten ticks it is given.
@@ -610,7 +616,13 @@ export class BlockRules {
       case B.ICE: case B.SNOW: {
         const l = world.getLight(x, y, z);
         const blockLight = Math.max(l & 15, ...[[0, 1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]].map(([dx, dy, dz]) => world.getLight(x + dx, y + dy, z + dz) & 15));
-        if (blockLight > 11) world.setBlock(x, y, z, id === B.ICE ? B.WATER : B.AIR);
+        if (blockLight > 11) { world.setBlock(x, y, z, id === B.ICE ? B.WATER : B.AIR); return; }
+        // Spring and summer thaw what winter left, where it is not always cold:
+        // the open-sky snow and ice only, so an igloo or an ice road under a roof keeps.
+        if ((season === "spring" || season === "summer") && !biomeDef(biome).snowy && rand() < 0.2) {
+          const top = id === B.SNOW ? y : y + 1;
+          if (world.seesSky(x, top, z)) world.setBlock(x, y, z, id === B.ICE ? B.WATER : B.AIR);
+        }
         return;
       }
       case B.FARMLAND: {
@@ -624,8 +636,9 @@ export class BlockRules {
         return;
       }
     }
-    // Snow settles and water freezes in cold biomes when it snows.
-    if (biomeDef(biome).snowy && this.ctx.isRaining() && rand() < 0.1) {
+    // Snow settles and water freezes in cold biomes when it snows — and in
+    // winter, everywhere it is not hot.
+    if (snowsHere(season, biome, !!biomeDef(biome).snowy) && this.ctx.isRaining() && rand() < 0.1) {
       const top = world.topSolid(x, z);
       if (top >= 0 && world.seesSky(x, top + 1, z)) {
         const t = world.blockAt(x, top, z);
@@ -633,6 +646,15 @@ export class BlockRules {
         else if (block(t).opaque && world.blockAt(x, top + 1, z) === 0) world.setBlock(x, top + 1, z, B.SNOW);
       }
     }
+  }
+
+  /** A roof of anything within sixteen blocks overhead — glass included: a greenhouse, to the seasons. */
+  private roofed(x: number, y: number, z: number): boolean {
+    for (let dy = 1; dy <= 16 && y + dy < WORLD_HEIGHT; dy++) {
+      const id = this.world.blockAt(x, y + dy, z);
+      if (id !== B.AIR && block(id).solid) return true;
+    }
+    return false;
   }
 
   private waterNear(x: number, y: number, z: number): boolean {
