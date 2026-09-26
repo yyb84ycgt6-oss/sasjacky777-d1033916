@@ -28,6 +28,7 @@ import { Weather } from "./weather";
 import { blockGeometry, itemModel, spriteGeometry } from "./itemModels";
 import { GAME_NAME } from "../edition";
 import { CREATURES, isDino } from "../engine/creatures";
+import { isInfectedMob } from "../engine/infected";
 
 export interface RemotePlayerView {
   id: string;
@@ -85,6 +86,8 @@ export interface FrameState {
   dynamicLights?: [number, number, number, number][];
   /** The season's tint over grass and leaves: [r, g, b, amount]. */
   season?: [number, number, number, number];
+  /** A blood moon: the sky and the fog run red. */
+  bloodMoon?: boolean;
   /** A mode's world border (a square of half-width `radius`), drawn as a striped wall when near. */
   border?: { x: number; z: number; radius: number } | null;
 }
@@ -427,7 +430,8 @@ export class WorldRenderer {
           flash: e.kind === "creeper" && e.fuse > 0 && Math.floor(this.time * 8) % 2 === 0,
           woolColor: e.woolColor, sheared: e.sheared, onGround: e.body.onGround,
           // A piglin holds out the gold it is admiring.
-          armsForward: e.kind === "zombie" || (e.kind === "skeleton" && e.targetId !== null) || (e.kind === "piglin" && e.admiring > 0),
+          armsForward: e.kind === "zombie" || (e.kind === "skeleton" && e.targetId !== null) || (e.kind === "piglin" && e.admiring > 0)
+            || ((e.kind === "infected" || e.kind === "brute" || e.kind === "bloater") && e.targetId !== null),
           size: modelScale(e), squish: e.squish,
           swing: e.kind === "iron_golem" ? Math.max(0, e.attackCooldown - 12) / 8 : 0,
           screaming: e.kind === "enderman" && e.scream > 0, carrying: e.kind === "enderman" && e.carried > 0,
@@ -676,6 +680,8 @@ export class WorldRenderer {
     if (frame.underwater) { fogColor = WATER_FOG.clone().multiplyScalar(0.3 + sky.daylight * 0.7); near = 2; far = 24; }
     if (frame.inLava) { fogColor = LAVA_FOG.clone(); near = 0.2; far = 2.5; }
     if (frame.blind) { fogColor = new THREE.Color(0.02, 0.02, 0.02); near = 1; far = 6; }
+    // A blood moon: the night's haze turns red, and closes in a little.
+    else if (frame.bloodMoon && !frame.underwater && !frame.inLava) { fogColor = fogColor.clone().lerp(new THREE.Color(0.45, 0.02, 0.02), 0.75); near *= 0.6; far *= 0.8; }
     if (frame.rain > 0 && !frame.underwater) { near *= 1 - frame.rain * 0.4; }
     u.uFogColor.value.copy(fogColor);
     u.uFogNear.value = near;
@@ -818,6 +824,7 @@ function skinVariant(e: Mob): number {
   if (e.kind === "wolf") return (e.owner ? 1 : 0) | (e.anger > 0 ? 2 : 0);
   if (e.kind === "tribute") return e.id % 24;
   if (isDino(e.kind)) return e.id % 4;
+  if (isInfectedMob(e.kind)) return e.id % 8;
   return 0;
 }
 
@@ -830,6 +837,8 @@ function modelScale(e: Mob): number {
     case "bear": return 2;
     case "shulker": return 2;
     case "wither_skeleton": return 1.2;
+    case "brute": return 1.35;
+    case "bloater": return 1.15;
     default: return isDino(e.kind) ? CREATURES[e.kind].scale : e.size;
   }
 }

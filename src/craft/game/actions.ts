@@ -23,6 +23,7 @@ import { rocketLife, rocketOf } from "../engine/fireworks";
 import { itemDef, itemId, resolveDrops, type ItemDef, type ItemStack } from "../engine/items";
 import { isArthropod, isUndead, Mob, WOLF_FOOD } from "../engine/mobs";
 import { attackPower, canRide, dinoWouldTake } from "../engine/dinoAi";
+import { gunOf, stray, tracePellet, type Gun, type Shootable } from "../engine/guns";
 import { CREATURES, foodPoints, isDino, TORPOR } from "../engine/creatures";
 import { potionOfItem } from "../engine/potions";
 import { isRail, neighboursToReshape, placedShape, railShape, RAIL_EXITS } from "../engine/rails";
@@ -119,6 +120,8 @@ export class Actions {
   private attackPrev = false;
   private pearlCooldown = 0;
   private usePrev = false;
+  /** Ticks until the held gun can fire again. */
+  private gunCooldown = 0;
   private creativeCooldown = 0;
   private eating: { ticks: number; slot: number; id: number } | null = null;
   private bow: { ticks: number } | null = null;
@@ -288,6 +291,7 @@ export class Actions {
     } else this.mining = null;
     this.attackPrev = attack;
 
+    if (this.gunCooldown > 0) this.gunCooldown--;
     // Use.
     if (this.eating) {
       if (!use || p.inventory.selected !== this.eating.slot || p.inventory.held?.id !== this.eating.id) this.eating = null;
@@ -575,6 +579,13 @@ export class Actions {
     const def = held ? itemDef(held.id) : undefined;
     const t = this.target;
 
+    // A gun fires (and an automatic keeps firing while held); it never does anything else.
+    if (def?.use === "gun") {
+      const gun = gunOf(def.name);
+      if (gun && (fresh || gun.auto)) this.fireGun(gun);
+      return;
+    }
+
     if (t?.entity instanceof Vehicle && fresh && !p.sneaking) {
       g.mount(t.entity);
       this.swing();
@@ -772,6 +783,71 @@ export class Actions {
     proj.fire = !!extra.fire;
     proj.item = extra.item ?? 0;
     g.spawn(proj);
+  }
+
+  /**
+   * A shot: a round from the inventory (none in creative), pellets traced
+   * from the eye to the first body or wall, double to the head, a kick of
+   * recoil, and a noise the infected hear.
+   */
+  private fireGun(gun: Gun): void {
+    const g = this.game;
+    const p = g.player;
+    if (this.gunCooldown > 0) return;
+    const ammo = itemId(gun.ammo);
+    const slot = p.inventory.slots.findIndex((s) => s?.id === ammo);
+    const free = !p.survivalLike;
+    if (!free && slot < 0) {
+      this.gunCooldown = 8;
+      g.sound("gun_empty", null, 0, 0, 0.6);
+      g.showActionbar(`Out of ${itemDef(ammo)?.displayName ?? gun.ammo}.`);
+      return;
+    }
+    this.gunCooldown = gun.cooldown;
+    if (!free) {
+      const s = p.inventory.slots[slot]!;
+      p.inventory.slots[slot] = s.count > 1 ? { ...s, count: s.count - 1 } : null;
+      g.bumpInv();
+    }
+    const b = p.body;
+    const ox = b.x, oy = b.y + b.eyeHeight, oz = b.z;
+    const d = this.dir;
+    type Body = { mob?: Mob; remote?: RemotePlayer };
+    const bodies: Shootable<Body>[] = [];
+    for (const e of g.entities.values()) {
+      if (!(e instanceof Mob) || e.dying || e.id === p.riding) continue;
+      if (Math.abs(e.x - ox) > gun.range + 4 || Math.abs(e.z - oz) > gun.range + 4) continue;
+      bodies.push({ target: { mob: e }, box: e.box() });
+    }
+    for (const r of g.remote.values()) {
+      if (r.dead) continue;
+      const h = r.sneaking ? 1.5 : 1.8;
+      bodies.push({ target: { remote: r }, box: { minX: r.x - 0.35, minY: r.y, minZ: r.z - 0.35, maxX: r.x + 0.35, maxY: r.y + h, maxZ: r.z + 0.35 } });
+    }
+    // Every pellet that finds the same body adds to one blow: a blow per pellet would meet the
+    // invulnerability each hit leaves, and a shotgun would do a pistol's work.
+    const blows = new Map<Body, number>();
+    for (let i = 0; i < gun.pellets; i++) {
+      const [dx, dy, dz] = stray(d.x, d.y, d.z, gun.spread, Math.random);
+      const { hit, block: wall } = tracePellet(g.world, ox, oy, oz, dx, dy, dz, gun.range, bodies);
+      if (hit) {
+        blows.set(hit.target, (blows.get(hit.target) ?? 0) + gun.damage * (hit.headshot ? 2 : 1));
+        g.particles("crit", ox + dx * hit.distance, hit.y, oz + dz * hit.distance, hit.headshot ? 6 : 3);
+      } else if (wall) {
+        g.particles("block", wall.px, wall.py, wall.pz, 4, g.world.blockAt(wall.x, wall.y, wall.z));
+      }
+    }
+    for (const [{ mob: m, remote: r }, dmg] of blows) {
+      if (m) {
+        if (g.role === "guest") g.net?.attack(m.id, dmg, ox, oz, 0.1, 0, 0);
+        else { m.invulnerable = 0; m.hurt(g.ctx, dmg, "arrow", ox, oz, p.id, 0.1); }
+      } else if (r) g.net?.hurtRemote(r.id, dmg, "arrow", ox, oz, 0.2);
+    }
+    g.particles("smoke", ox + d.x * 0.8, oy - 0.15 + d.y * 0.8, oz + d.z * 0.8, 3);
+    g.sound(gun.sound, b.x, b.y + 1.5, b.z, 1, 0.95 + Math.random() * 0.1);
+    p.pitch = Math.min(Math.PI / 2 - 0.01, p.pitch + gun.recoil);
+    g.makeNoise(b.x, b.y, b.z, gun.noise, p.id);
+    this.swing();
   }
 
   private releaseBow(): void {

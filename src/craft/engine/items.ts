@@ -68,6 +68,8 @@ export type ItemUse =
   | "item_frame"
   /** Treats a wound (engine/vitals.ts): a bandage stops bleeding, a splint sets a leg, antibiotics end sickness. */
   | "treat"
+  /** Fires (engine/guns.ts), spending a round of its ammunition. */
+  | "gun"
   /** Opened in the hand: a satchel of 27 slots carried with you. */
   | "backpack";
 
@@ -455,6 +457,17 @@ item("splint", "Splint", { use: "treat", category: "tools" });
 item("antibiotics", "Antibiotics", { use: "treat", category: "tools" });
 item("water_canteen", "Canteen of Water", { maxStack: 1, use: "drink", category: "food" });
 item("canteen", "Empty Canteen", { maxStack: 1, use: "bottle", category: "tools" });
+// Dead Zone and the zombie modes: firearms and their rounds, and what a survivor scavenges.
+item("pistol", "Pistol", { maxStack: 1, use: "gun", damage: 3, category: "combat" });
+item("hunting_rifle", "Hunting Rifle", { maxStack: 1, use: "gun", damage: 4, category: "combat" });
+item("assault_rifle", "Assault Rifle", { maxStack: 1, use: "gun", damage: 4, category: "combat" });
+item("shotgun", "Shotgun", { maxStack: 1, use: "gun", damage: 4, category: "combat" });
+item("pistol_ammo", "Pistol Rounds", { category: "combat" });
+item("rifle_ammo", "Rifle Rounds", { category: "combat" });
+item("shotgun_shells", "Shotgun Shells", { category: "combat" });
+food("canned_beans", "Canned Beans", 6, 7.2);
+item("soda_can", "Can of Soda", { maxStack: 16, use: "drink", category: "food" });
+item("baseball_bat", "Baseball Bat", { maxStack: 1, damage: 6, attackSpeed: 1.2, category: "combat" });
 
 // ---- lookups -----------------------------------------------------------------------
 

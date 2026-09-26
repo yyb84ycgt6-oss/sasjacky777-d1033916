@@ -26,7 +26,8 @@ export type EntityKind =
   | "boat" | "minecart" | "tnt_minecart"
   | "shulker" | "shulker_bullet" | "item_frame" | "firework_rocket"
   | "wolf" | "deer" | "bear" | "tribute"
-  | "dodo" | "dilo" | "parasaur" | "raptor" | "trike" | "stego" | "rex" | "bronto" | "ptero" | "gigantoraptor";
+  | "dodo" | "dilo" | "parasaur" | "raptor" | "trike" | "stego" | "rex" | "bronto" | "ptero" | "gigantoraptor"
+  | "infected" | "runner" | "brute" | "spitter" | "screamer" | "bloater";
 
 export interface PlayerRef {
   id: string;
@@ -99,6 +100,8 @@ export interface EntityContext {
   readonly raining?: boolean;
   /** Primal's rules, where the world plays them (Ascended tames faster). */
   readonly primal?: "evolved" | "ascended";
+  /** A blood moon is up: every infected digs through whatever is in its way. */
+  readonly bloodMoon?: boolean;
 }
 
 let nextEntityId = 1;

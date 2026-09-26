@@ -100,6 +100,7 @@ export function sanitizeModeTell(v: unknown): ModeTell {
   if (typeof t.frozen === "boolean") out.frozen = t.frozen;
   if (finite(t.maxHealth)) out.maxHealth = Math.max(1, Math.min(20, t.maxHealth as number));
   if (t.reset === true) out.reset = true;
+  if (typeof t.bloodMoon === "boolean") out.bloodMoon = t.bloodMoon;
   return out;
 }
 
@@ -430,6 +431,7 @@ export class NetSession implements NetLink {
   giveRemote(id: string, stack: ItemStack): void { this.push(["gv", id, stack]); }
   advanceRemote(id: string, event: AdvancementEvent): void { this.push(["av", id, event]); }
   pushRemote(id: string, dx: number, dy: number, dz: number): void { this.push(["pu", id, dx, dy, dz]); }
+  noise(x: number, y: number, z: number, radius: number): void { if (this.role === "guest") this.push(["nz", r2(x), r2(y), r2(z), r2(radius)]); }
   teleportRemote(id: string, to: Arrival): void { this.push(["tp", id, to]); }
   placeCrystal(x: number, y: number, z: number): void { this.push(["ec", x, y, z]); }
   mount(entityId: number, on: boolean): void { if (this.role === "guest") this.push(["mo", entityId, on ? 1 : 0]); }
@@ -685,6 +687,10 @@ export class NetSession implements NetLink {
           }
           break;
         case "xp": if (op[1] === this.myId && finite(op[2])) g.collectXp(op[2] as number); break;
+        case "nz":
+          // A guest's gunshot: the host's infected hear it — not from further than a rifle carries.
+          if (this.role === "host" && finite(op[1], op[2], op[3], op[4])) g.makeNoise(op[1] as number, op[2] as number, op[3] as number, Math.min(96, op[4] as number), from);
+          break;
         case "pu":
           // Shoved by a piston on the host.
           if (op[1] === this.myId && fromHost && finite(op[2], op[3], op[4])) {

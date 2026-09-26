@@ -281,6 +281,15 @@ shapeless("kibble_beef", ["egg", "cooked_beef", "mejoberry", "mejoberry", "wheat
 shaped("saddle", ["LLL", "LSL"], { L: "leather", S: "string" }, "saddle");
 shaped("heavy_saddle", ["LLL", "ISI"], { L: "leather", I: "iron_ingot", S: "string" }, "heavy_saddle");
 shaped("flyer_saddle", ["LLL", "FSF"], { L: "leather", F: "feather", S: "string" }, "flyer_saddle");
+
+// Dead Zone: first aid from what a survivor finds, and rounds for the guns they find.
+shapeless("bandage", ["white_wool", "string"], "bandage", 3);
+shapeless("bandage_paper", ["paper", "paper", "string"], "bandage", 2);
+shapeless("splint", ["stick", "stick", "string"], "splint");
+shapeless("pistol_ammo", ["iron_nugget", "iron_nugget", "gunpowder"], "pistol_ammo", 8);
+shapeless("rifle_ammo", ["iron_ingot", "gunpowder", "gunpowder"], "rifle_ammo", 6);
+shapeless("shotgun_shells", ["iron_nugget", "gunpowder", "paper"], "shotgun_shells", 4);
+shapeless("canteen", ["leather", "iron_ingot"], "canteen");
 // A cooking pot: an iron pot with brick handles, a wooden spoon (shovel) to stir it.
 shaped("cooking_pot", ["BSB", "I I", "III"], { B: "brick", S: "wooden_shovel", I: "iron_ingot" }, "cooking_pot");
 // A backpack: leather round a chest, a string strap.

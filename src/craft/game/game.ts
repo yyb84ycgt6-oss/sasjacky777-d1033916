@@ -45,7 +45,7 @@ import { canLearn, engramFor, ENGRAMS, type Engram } from "../engine/engrams";
 import { BREAK_FALL, SICKNESS_TICKS, sicknessChance, statusLine, vitalsSecond, waterFrom, type VitalsRules } from "../engine/vitals";
 import { CREATURES, maxTorpor } from "../engine/creatures";
 import { favouriteFoods } from "../engine/dinoAi";
-import { isInfected } from "../engine/infected";
+import { isInfected, pickInfected } from "../engine/infected";
 import { groundBlock } from "../engine/physics";
 import { Player, type PlayerEvent } from "../engine/player";
 import { Generator, type ChunkGenerator } from "../engine/worldgen";
@@ -130,6 +130,8 @@ export interface NetLink {
   teleportRemote?(id: string, to: Arrival): void;
   /** Guest → host: set an end crystal on the block at x, y, z. */
   placeCrystal?(x: number, y: number, z: number): void;
+  /** Guest → host: a noise the infected should hear (a gunshot). */
+  noise?(x: number, y: number, z: number, radius: number): void;
   /** Host → guests: the world's mod switches changed. */
   modsChanged?(): void;
   /** Host → guests: the world's waystones changed (one found, named or broken). */
@@ -208,6 +210,8 @@ const MAX_HOSTILE = 14;
 const MAX_PASSIVE = 10;
 /** Primal's creatures per player: enough that the wilds feel alive, few enough to keep a phone smooth. */
 const MAX_FAUNA = 16;
+/** Dead Zone's infected per player: a real threat, but not a wall of them. */
+const MAX_INFECTED = 18;
 /** Warmth a block gives off, 0..1, for body temperature (engine/vitals.ts). */
 const HEAT: Record<number, number> = {
   [B.FIRE]: 1, [B.SOUL_FIRE]: 0.8, [B.LAVA]: 1, [B.LIT_FURNACE]: 0.8, [B.MAGMA_BLOCK]: 0.5,
@@ -1210,6 +1214,7 @@ export class Game {
       get mobGriefing() { return game.meta.rules.mobGriefing; },
       get raining() { return DIMENSION_INFO[game.dimension].hasSky && game.rain > 0.5; },
       get primal() { return modeDef(game.meta.mode?.id)?.primal; },
+      get bloodMoon() { return game.bloodMoon; },
     };
   }
 
@@ -1256,6 +1261,7 @@ export class Game {
   /** `fire` leaves flames among the rubble (a bed in the Nether, a ghast's fireball). */
   explode(x: number, y: number, z: number, power: number, cause: Entity | null, fire = false): void {
     if (!this.simulates) return;
+    this.makeNoise(x, y, z, 24 + power * 8, null);
     this.sound("explode", x, y, z, 1, 0.9 + Math.random() * 0.2);
     this.particles("explosion", x, y, z, 24, 0, false);
     this.net?.effect("explosion", [round2(x), round2(y), round2(z), power]);
@@ -2036,6 +2042,7 @@ export class Game {
       dimension: info.hasSky ? undefined : { fog: biome.fog ?? 0x330808, ambient: info.ambient, sky: info.skyLight, open: info.open },
       dynamicLights: this.dynamicLights(ix, eye, iz),
       season: this.season() ? seasonTint(this.time, warmBiome(biome.id)) : undefined,
+      bloodMoon: this.bloodMoon && this.dimension === "overworld",
       border: this.dimension === "overworld" ? this.border : null,
     });
     this.lightning = 0;
@@ -2107,6 +2114,8 @@ export class Game {
     if (this.tickCount % 20 === 11) this.repaintMap();
     if (this.tickCount % 20 === 13 && this.modOn("ambient_sounds")) this.ambience();
     if (this.tickCount % 20 === 17) this.tickVitals();
+    // Running is loud where the infected roam: they hear it from a few blocks off.
+    if (this.tickCount % 20 === 3 && p.sprinting && !p.dead && modeDef(this.meta.mode?.id)?.fauna === "infected") this.makeNoise(b.x, b.y, b.z, 10, p.id);
     this.borderTick();
     if (p.health > this.maxHealth) p.health = this.maxHealth;
     if (this.simulates && this.mode) {
@@ -2499,10 +2508,10 @@ export class Game {
     if (JSON.stringify(mine) !== JSON.stringify(this.objectiveNow)) { this.objectiveNow = mine; this.store.set({ objective: mine }); }
     for (const r of this.remote.values()) {
       const obj = this.mode.objective(r.id);
-      const key = JSON.stringify([obj, this.border, this.frozen, this.maxHealth]);
+      const key = JSON.stringify([obj, this.border, this.frozen, this.maxHealth, this.bloodMoon]);
       if (this.objectiveSent.get(r.id) === key) continue;
       this.objectiveSent.set(r.id, key);
-      this.modeTell(r.id, { obj, border: this.border, frozen: this.frozen, maxHealth: this.maxHealth });
+      this.modeTell(r.id, { obj, border: this.border, frozen: this.frozen, maxHealth: this.maxHealth, bloodMoon: this.bloodMoon });
     }
   }
 
@@ -2534,6 +2543,7 @@ export class Game {
     if (t.border !== undefined) this.border = t.border;
     if (t.frozen !== undefined) this.frozen = t.frozen;
     if (t.maxHealth !== undefined) this.maxHealth = t.maxHealth;
+    if (t.bloodMoon !== undefined) this.bloodMoon = t.bloodMoon;
   }
 
   /** Changes the world's border (host); guests hear it with their next scoreboard. */
@@ -2623,7 +2633,7 @@ export class Game {
 
   /** Whether this world has strongholds: real terrain, and not superflat. */
   hasStrongholds(): boolean {
-    return this.meta.type !== "flat" && (!this.meta.map || this.meta.map === "sg_arena" || this.meta.map === "primal_island");
+    return this.meta.type !== "flat" && (!this.meta.map || this.meta.map === "sg_arena" || this.meta.map === "primal_island" || this.meta.map === "dead_zone");
   }
 
   // ---- vitals (engine/vitals.ts) ------------------------------------------------------------
@@ -2731,6 +2741,43 @@ export class Game {
       if (modeDef(this.meta.mode?.id)?.primal === "ascended") parts.push(`Eats ${favouriteFoods(e.kind).join(", ")}`);
     }
     return parts.filter(Boolean).join(" · ");
+  }
+
+  // ---- the infected (Dead Zone) ------------------------------------------------------------
+
+  /** A blood moon is up (the Blood Moon mode): the infected dig, and the sky runs red. */
+  bloodMoon = false;
+
+  /**
+   * Something loud at x, y, z — a gunshot, an explosion, a sprint — that the
+   * infected within `radius` hear: they turn toward whoever made it, and
+   * track them for a while without needing to see them. A guest's noise goes
+   * to the host, whose infected they are.
+   */
+  makeNoise(x: number, y: number, z: number, radius: number, by: string | null): void {
+    if (!this.simulates) { this.net?.noise?.(x, y, z, radius); return; }
+    const who = by ?? this.playerRefs().sort((a, b) => Math.hypot(a.x - x, a.z - z) - Math.hypot(b.x - x, b.z - z))[0]?.id ?? null;
+    if (!who) return;
+    for (const e of this.entities.values()) {
+      if (!(e instanceof Mob) || !e.infected || e.dying) continue;
+      if (Math.hypot(e.x - x, e.y - y, e.z - z) > radius) continue;
+      if (!e.targetId || e.alert <= 0) e.targetId = who;
+      e.alert = Math.max(e.alert, 300);
+    }
+  }
+
+  /** Dead Zone: a group of the infected, day or night, out of sight but not far. */
+  private trySpawnInfected(origin: PlayerRef): void {
+    const a = Math.random() * Math.PI * 2, r = 24 + Math.random() * 28;
+    const x = Math.floor(origin.x + Math.cos(a) * r), z = Math.floor(origin.z + Math.sin(a) * r);
+    if (!this.world.chunkAt(x, z)) return;
+    const top = this.world.topSolid(x, z);
+    if (top < 1 || !block(this.world.blockAt(x, top, z)).solid || isFluid(this.world.blockAt(x, top + 1, z))) return;
+    if (block(this.world.blockAt(x, top + 1, z)).solid || block(this.world.blockAt(x, top + 2, z)).solid) return;
+    // Fewer by day than by night, as the dark brings them out.
+    if (!this.isNight() && Math.random() < 0.4) return;
+    const n = 1 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < n; i++) this.spawn(new Mob(pickInfected(Math.random), x + 0.5 + (Math.random() - 0.5) * 3, top + 1, z + 0.5 + (Math.random() - 0.5) * 3));
   }
 
   /** Whether this world asks for engrams (Primal). */
@@ -2931,6 +2978,12 @@ export class Game {
       } else passive++;
     }
     const origin = refs[Math.floor(Math.random() * refs.length)];
+    // A Dead Zone world's monsters are the infected, by day as by night; its animals are the usual.
+    if (modeDef(this.meta.mode?.id)?.fauna === "infected" && this.dimension === "overworld") {
+      if (this.meta.difficulty > 0 && hostile < MAX_INFECTED * refs.length) for (let attempt = 0; attempt < 3; attempt++) this.trySpawnInfected(origin);
+      if (passive < MAX_PASSIVE * refs.length && (this.tickCount % 400 === 0 || this.tickCount < 200)) for (let attempt = 0; attempt < 4; attempt++) this.trySpawn(origin, false);
+      return;
+    }
     // A Primal world's wilds hold its creatures, not the overworld's usual night monsters and farm animals.
     if (modeDef(this.meta.mode?.id)?.fauna === "primal" && this.dimension === "overworld") {
       if (fauna < MAX_FAUNA * refs.length) for (let attempt = 0; attempt < 3; attempt++) this.trySpawnCreatures(origin);

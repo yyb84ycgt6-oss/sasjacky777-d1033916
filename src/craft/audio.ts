@@ -281,6 +281,14 @@ export class GameAudio {
       case "horn": this.tone(out, t, "sawtooth", 110, 116, 1.6, 0.25, 0.3); this.tone(out, t, "sawtooth", 165, 172, 1.6, 0.12, 0.3); break;
       case "cannon": this.noiseBurst(out, t, 1.4, "lowpass", 260, 0.7, 1, 0.1); this.tone(out, t, "sine", 70, 28, 1.2, 0.6); break;
       case "countdown": this.tone(out, t, "square", 880 * p, 880 * p, 0.12, 0.12); break;
+      // Gunfire: a sharp crack over a thump, heavier for the rifle and the shotgun.
+      case "gun_pistol": this.noiseBurst(out, t, 0.18, "highpass", 1200, 0.7, 0.9, 0.3); this.tone(out, t, "sine", 180, 60, 0.12, 0.6); break;
+      case "gun_rifle": this.noiseBurst(out, t, 0.5, "lowpass", 3000, 0.6, 1, 0.5); this.tone(out, t, "sine", 120, 40, 0.3, 0.8); break;
+      case "gun_assault": this.noiseBurst(out, t, 0.14, "highpass", 900, 0.7, 0.8, 0.3); this.tone(out, t, "sine", 150, 60, 0.1, 0.5); break;
+      case "gun_shotgun": this.noiseBurst(out, t, 0.6, "lowpass", 2200, 0.5, 1, 0.4); this.tone(out, t, "sine", 90, 35, 0.35, 0.9); break;
+      case "gun_empty": this.tone(out, t, "square", 1800, 1700, 0.03, 0.15); break;
+      case "zombie_break": this.noiseBurst(out, t, 0.15, "bandpass", 500, 1.5, 0.5); this.tone(out, t, "sine", 120, 80, 0.12, 0.3); break;
+      case "purchase": [523, 659, 784].forEach((f, i) => this.tone(out, t + i * 0.06, "square", f, f, 0.1, 0.1)); break;
       default:
         this.mob(name, out, t, p);
     }
@@ -363,6 +371,22 @@ export class GameAudio {
       case "bronto": this.tone(out, t, "sine", 65 * p * low, 45 * p * low, 2, 0.5, 0.4); this.tone(out, t + 0.1, "sawtooth", 90 * p * low, 70 * p * low, 1.6, 0.12, 0.4); break;
       case "ptero": this.tone(out, t, "square", 1250 * p * low, 900 * p * low, 0.3, 0.1); this.tone(out, t + 0.12, "square", 1100 * p * low, 800 * p * low, 0.25, 0.08); break;
       case "gigantoraptor": this.tone(out, t, "sawtooth", 320 * p * low, 200 * p * low, 0.7, 0.22, 0.1); this.noiseBurst(out, t, 0.4, "bandpass", 900, 1.5, 0.2); break;
+      // The infected: groans and gurgles; a runner's rasp; a brute's roar; a screamer's shriek; a bloater's wet pop.
+      case "infected": this.tone(out, t, "sawtooth", 130 * p * low, 90 * p * low, 0.8, 0.28, 0.2); this.noiseBurst(out, t, 0.7, "lowpass", 600, 1, 0.22); break;
+      case "runner": this.tone(out, t, "sawtooth", 260 * p * low, 180 * p * low, 0.4, 0.22, 0.05); this.noiseBurst(out, t, 0.35, "bandpass", 1600, 1.2, 0.3); break;
+      case "brute": this.tone(out, t, "sawtooth", 80 * p * low, 55 * p * low, 1.1, 0.45, 0.2); this.noiseBurst(out, t, 1, "lowpass", 400, 0.8, 0.4); break;
+      case "spitter":
+        if (what === "spit") { this.noiseBurst(out, t, 0.3, "bandpass", 2200, 1.4, 0.5); break; }
+        this.tone(out, t, "sawtooth", 180 * p * low, 140 * p * low, 0.6, 0.2, 0.1); this.noiseBurst(out, t, 0.5, "bandpass", 1200, 3, 0.3);
+        break;
+      case "screamer":
+        if (what === "scream") { this.tone(out, t, "sawtooth", 900, 1500, 1.4, 0.35, 0.2); this.tone(out, t, "square", 1300, 2000, 1.3, 0.12, 0.2); break; }
+        this.tone(out, t, "sawtooth", 500 * p * low, 380 * p * low, 0.5, 0.2, 0.1);
+        break;
+      case "bloater":
+        if (what === "burst") { this.noiseBurst(out, t, 0.8, "lowpass", 500, 0.7, 0.9, 0.3); this.tone(out, t, "sine", 90, 40, 0.5, 0.5); break; }
+        this.tone(out, t, "sawtooth", 95 * p * low, 70 * p * low, 1, 0.3, 0.2); this.noiseBurst(out, t, 0.9, "bandpass", 300, 2, 0.3);
+        break;
       // A tribute is only a person: a grunt when struck, a cry when they fall, nothing idle.
       case "tribute":
         if (what === "hurt") { this.tone(out, t, "triangle", 250 * p, 150 * p, 0.18, 0.4); this.noiseBurst(out, t, 0.08, "lowpass", 800, 1, 0.25); }

@@ -90,6 +90,8 @@ export interface ModeTell {
   maxHealth?: number;
   /** A new round: empty hands, full health and food, no effects. */
   reset?: boolean;
+  /** A blood moon is up (or has set). */
+  bloodMoon?: boolean;
 }
 
 export interface ChatLine {

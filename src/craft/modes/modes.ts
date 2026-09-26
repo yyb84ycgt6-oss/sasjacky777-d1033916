@@ -126,6 +126,32 @@ export const MODES: readonly ModeDef[] = [
     fauna: "primal", primal: "evolved", vitals: { thirst: true },
     description: "Primal's creatures on ordinary terrain, no engrams to learn: tame and ride at your own pace in a world with villages and the End.",
     goal: "Ride something with wings." },
+
+  // ---- zombies ----------------------------------------------------------------------------------
+  { id: "dead_zone", name: "Dead Zone", category: "zombie", icon: "pistol", gameMode: "survival", map: "dead_zone", difficulty: 2,
+    fauna: "infected", vitals: { thirst: true, temperature: true, wounds: true }, multiplayer: true,
+    inspiredBy: "DayZ (Bohemia Interactive, 2018; the Arma 2 mod, 2012)",
+    description: "Fresh spawn with nothing. Abandoned towns, a hospital, a military base; the infected hear every shot. Thirst, cold, bleeding, fever and broken bones. Helicopters come down with crates in the wreck.",
+    goal: "Last as many days as you can." },
+  { id: "zombie_rounds", name: "Zombie Rounds", category: "zombie", icon: "shotgun", gameMode: "survival", map: "zombie_bunker", difficulty: 2, multiplayer: true,
+    rules: { doMobSpawning: false, doDaylightCycle: false, doWeatherCycle: false, keepInventory: true },
+    inspiredBy: "Call of Duty's zombies (Treyarch, 2008 on)",
+    description: "The bunker, round after round. Earn points for kills and for boarding up windows; spend them on guns on the walls, the mystery box, Tough Skin and the doors to the other rooms. Grab the power-ups.",
+    goal: "Reach round 20." },
+  { id: "blood_moon", name: "Blood Moon", category: "zombie", icon: "redstone", gameMode: "survival", difficulty: 2,
+    fauna: "infected", vitals: { thirst: true, wounds: true }, multiplayer: true,
+    inspiredBy: "7 Days to Die (The Fun Pimps, 2013)",
+    description: "An open world with the infected in it. Loot, build, fortify — every seventh night the moon turns red and a horde hunts you down, digging through whatever you hide behind.",
+    goal: "Survive four blood moons." },
+  { id: "infection", name: "Infection", category: "zombie", icon: "rotten_flesh", gameMode: "survival", map: "colosseum", difficulty: 2, multiplayer: true,
+    rules: { doMobSpawning: false, doDaylightCycle: false, doWeatherCycle: false, keepInventory: true },
+    inspiredBy: "Infection game types (Halo, and many servers' zombie tag)",
+    description: "Survivors against the infected in the colosseum: whoever falls rises infected. Alone, hold out against the stream through the gates.",
+    goal: "Be a survivor when the five minutes are up." },
+  { id: "outbreak", name: "Outbreak", category: "zombie", icon: "baseball_bat", gameMode: "survival", difficulty: 2, fauna: "infected", multiplayer: true,
+    inspiredBy: "Zombie survival sandboxes (Project Zomboid, State of Decay)",
+    description: "An ordinary world, overrun: the infected by day and by night in place of the usual monsters. No thirst or wounds — just survive and build.",
+    goal: "Make a fortress that holds." },
 ];
 
 export function modeDef(id: string | undefined): ModeDef | undefined {

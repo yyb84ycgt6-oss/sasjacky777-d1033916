@@ -255,6 +255,8 @@ const MODELS: Record<string, PartSpec[]> = {
   player: [...HUMANOID(false), ...WINGS],
   zombie: HUMANOID(false),
   tribute: HUMANOID(false),
+  // Dead Zone's infected: people, still, in shape.
+  infected: HUMANOID(false), runner: HUMANOID(false), brute: HUMANOID(false), spitter: HUMANOID(false), screamer: HUMANOID(false), bloater: HUMANOID(false),
   skeleton: HUMANOID(true),
   pig: [
     { name: "body", size: [10, 8, 16], uv: [0, 16], pivot: [0, 10, 0] },
@@ -503,7 +505,8 @@ export function pose(m: ModelInstance, kind: string, p: PoseInput): void {
       for (let i = 0; i < 3; i++) set(`neck${i}`, Math.sin(p.time * 1.2 + i) * 0.05, 0, 0);
       break;
     }
-    case "player": case "zombie": case "skeleton": case "piglin": case "zombified_piglin": case "wither_skeleton": case "tribute": {
+    case "player": case "zombie": case "skeleton": case "piglin": case "zombified_piglin": case "wither_skeleton": case "tribute":
+    case "infected": case "runner": case "brute": case "spitter": case "screamer": case "bloater": {
       const sneak = p.sneaking ? 0.5 : 0;
       const body = m.parts.get("body");
       if (body) body.rotation.x = sneak;

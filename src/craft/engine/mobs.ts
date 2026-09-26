@@ -24,6 +24,8 @@ import { DRAGON_PHASES, dragonHurt, dragonParts, dragonTick, newDragonState, typ
 import { addTorpor, dinoAi, dinoHurt, dinoInteract, dinoLoot, dinoTick } from "./dinoAi";
 import { CREATURES, isDino, levelScale, maxTorpor, wildLevel } from "./creatures";
 import type { DriveInput } from "./vehicles";
+import { isInfectedMob } from "./infected";
+import { burst, infectedAfter, infectedAi } from "./infectedAi";
 
 export type MobKind =
   | "pig" | "cow" | "sheep" | "chicken" | "zombie" | "skeleton" | "creeper" | "spider" | "slime" | "villager" | "iron_golem"
@@ -34,7 +36,9 @@ export type MobKind =
   // Game modes: the Survival Games' other tributes.
   | "tribute"
   // Primal's creatures (engine/creatures.ts, engine/dinoAi.ts).
-  | "dodo" | "dilo" | "parasaur" | "raptor" | "trike" | "stego" | "rex" | "bronto" | "ptero" | "gigantoraptor";
+  | "dodo" | "dilo" | "parasaur" | "raptor" | "trike" | "stego" | "rex" | "bronto" | "ptero" | "gigantoraptor"
+  // Dead Zone's infected (engine/infected.ts, engine/infectedAi.ts).
+  | "infected" | "runner" | "brute" | "spitter" | "screamer" | "bloater";
 
 interface MobSpec {
   health: number;
@@ -102,6 +106,13 @@ export const MOB_SPECS: Record<MobKind, MobSpec> = {
   bronto: { health: 200, width: 2.8, height: 5.2, speed: 0.048, hostile: false, attack: 14, tempt: [], burnsInDay: false, followRange: 20, xp: [30, 40] },
   ptero: { health: 22, width: 1.4, height: 1.0, speed: 0.07, hostile: false, attack: 3, tempt: [], burnsInDay: false, followRange: 16, xp: [6, 10], flies: true },
   gigantoraptor: { health: 80, width: 1.2, height: 3.4, speed: 0.1, hostile: false, attack: 11, tempt: [], burnsInDay: false, followRange: 28, xp: [20, 28] },
+  // Dead Zone. None burns in daylight; speeds are walking pace, and they run once they have a target.
+  infected: { health: 20, width: 0.6, height: 1.95, speed: 0.05, hostile: true, attack: 3, tempt: [], burnsInDay: false, followRange: 28, xp: [5, 5] },
+  runner: { health: 16, width: 0.6, height: 1.95, speed: 0.06, hostile: true, attack: 3, tempt: [], burnsInDay: false, followRange: 32, xp: [6, 6] },
+  brute: { health: 70, width: 0.8, height: 2.6, speed: 0.05, hostile: true, attack: 9, tempt: [], burnsInDay: false, followRange: 24, xp: [15, 15] },
+  spitter: { health: 18, width: 0.6, height: 1.95, speed: 0.05, hostile: true, attack: 2, tempt: [], burnsInDay: false, followRange: 24, xp: [8, 8] },
+  screamer: { health: 16, width: 0.6, height: 1.95, speed: 0.055, hostile: true, attack: 2, tempt: [], burnsInDay: false, followRange: 32, xp: [8, 8] },
+  bloater: { health: 26, width: 0.8, height: 2.2, speed: 0.04, hostile: true, attack: 3, tempt: [], burnsInDay: false, followRange: 20, xp: [8, 8] },
 };
 
 /** What a tamed wolf eats: any meat, as in the original, and it will breed on it too. */
@@ -249,6 +260,9 @@ export class Mob extends Entity {
   /** The player riding it (a saddled, tamed creature), and their keys this tick. */
   rider: string | null = null;
   input: DriveInput = { forward: 0, strafe: 0, yaw: 0 };
+  /** The infected: ticks left of chasing a noise it heard (no sight needed), and the block it is battering through. */
+  alert = 0;
+  dig: { x: number; y: number; z: number; progress: number } | null = null;
 
   constructor(kind: MobKind, x: number, y: number, z: number, id?: number) {
     const spec = MOB_SPECS[kind];
@@ -345,6 +359,16 @@ export class Mob extends Entity {
     return e instanceof Mob ? e : null;
   }
 
+  /** One of Dead Zone's infected. */
+  get infected(): boolean {
+    return isInfectedMob(this.kind);
+  }
+
+  /** A new mob of this game's making, for code that must not import this module (a screamer's call). */
+  summon(kind: MobKind, x: number, y: number, z: number): Mob {
+    return new Mob(kind, x, y, z);
+  }
+
   /** Torpor from a tranquilizer, a club or a fist (Primal's creatures only). */
   addTorpor(ctx: EntityContext, amount: number, by?: string): void {
     addTorpor(this, ctx, amount, by);
@@ -357,6 +381,8 @@ export class Mob extends Entity {
 
   get maxHealth(): number {
     if (this.kind === "wolf" && this.owner) return 20;
+    // A zombie round's infected are tougher each round (their level is the round).
+    if (isInfectedMob(this.kind) && this.level > 1) return Math.round(this.spec.health * (1 + (this.level - 1) * 0.2));
     if (isDino(this.kind)) return Math.round(this.spec.health * levelScale(this.level));
     return this.spec.health * this.size * this.size;
   }
@@ -523,6 +549,7 @@ export class Mob extends Entity {
     else if (this.kind === "deer") this.deerAi(ctx, move);
     else if (this.kind === "tribute" && !this.hunting) this.tributeAi(ctx, move);
     else if (isDino(this.kind)) dinoAi(this, ctx, move);
+    else if (isInfectedMob(this.kind)) { if (!infectedAi(this, ctx, move)) this.hostileAi(ctx, move); infectedAfter(this, ctx, move); }
     else if (this.spec.hostile) this.hostileAi(ctx, move);
     else this.passiveAi(ctx, move);
 
@@ -833,7 +860,7 @@ export class Mob extends Entity {
     this.passiveAi(ctx, move);
   }
 
-  private hostileAi(ctx: EntityContext, move: { forward: number; jump: boolean; yaw: number; speedMul: number }): void {
+  hostileAi(ctx: EntityContext, move: { forward: number; jump: boolean; yaw: number; speedMul: number }): void {
     const b = this.body;
     if (this.anger > 0) this.anger--;
     // Neutral until provoked: a zombified piglin only fights whoever angered it (or its fellows).
@@ -845,13 +872,15 @@ export class Mob extends Entity {
     const passiveNow = this.kind === "spider" && bright && this.lastAttacker === null;
     if (this.age % 20 === 0 && !passiveNow) {
       const current = this.targetId ? ctx.players().find((p) => p.id === this.targetId) : null;
-      const range = this.hunting ? 128 : this.spec.followRange;
+      // Sent hunting by a mode, or alerted by a noise, it needs no sight of anyone and looks far.
+      const tracking = this.hunting || this.alert > 0;
+      const range = tracking ? 128 : this.spec.followRange;
       if (!current || !current.targetable || Math.hypot(current.x - b.x, current.z - b.z) > range) {
-        const candidate = this.nearestPlayer(ctx, this.hunting ? range : range * (this.kind === "zombie" ? 0.5 : 1), eligible);
-        this.targetId = candidate && (this.hunting || this.canSee(ctx, candidate)) ? candidate.id : null;
+        const candidate = this.nearestPlayer(ctx, tracking ? range : range * (this.kind === "zombie" ? 0.5 : 1), eligible);
+        this.targetId = candidate && (tracking || this.canSee(ctx, candidate)) ? candidate.id : null;
       }
     }
-    if (passiveNow && this.lastAttacker === null && !this.hunting) this.targetId = null;
+    if (passiveNow && this.lastAttacker === null && !this.hunting && this.alert <= 0) this.targetId = null;
     if (neutral) this.targetId = null;
     const target = this.targetId ? ctx.players().find((p) => p.id === this.targetId) ?? null : null;
     if ((!target || !target.targetable) && this.kind === "zombie" && this.huntVillager(ctx, move)) return;
@@ -1200,8 +1229,8 @@ export class Mob extends Entity {
     const s = this.effectLevel("strength"), w = this.effectLevel("weakness");
     base = Math.max(0, base + (s >= 0 ? 3 * (s + 1) : 0) - (w >= 0 ? 4 * (w + 1) : 0));
     const dmg = diff === 1 ? Math.min(base, base / 2 + 1) : diff === 3 ? base * 1.5 : base;
-    // A hoglin tosses its victim; the attacker's id lets Thorns answer back.
-    const kb = this.kind === "hoglin" ? 1.2 : 0.4;
+    // A hoglin (or a brute) tosses its victim; the attacker's id lets Thorns answer back.
+    const kb = this.kind === "hoglin" ? 1.2 : this.kind === "brute" ? 1.5 : 0.4;
     // A blaze's touch burns like its fireballs, setting its victim alight.
     const source = this.kind === "blaze" ? "fireball" : "mob";
     if (diff > 0 && dmg > 0) ctx.hurtPlayer(target.id, dmg, source, this.body.x, this.body.z, kb, this.id);
@@ -1528,6 +1557,7 @@ export class Mob extends Entity {
   private die(ctx: EntityContext): void {
     this.removed = true;
     const b = this.body;
+    if (this.kind === "bloater") burst(this, ctx);
     ctx.particles("poof", b.x, b.y + b.height / 2, b.z, 12);
     if (this.baby) return;
     // A slime bigger than the smallest comes apart into two to four of half its size.
@@ -1588,6 +1618,11 @@ export class Mob extends Entity {
       case "deer": return [...it(burnt ? "cooked_venison" : "venison", r(1, 3)), ...it("leather", r(0, 2))];
       case "bear": return [...it("leather", r(1, 3)), ...it("bone", r(0, 2))];
       case "tribute": return [...it("bread", r(0, 2)), ...it("arrow", r(0, 4)), ...(ctx.random() < 0.3 ? it("stone_sword", 1) : [])];
+      // The infected were people once: now and then something from their pockets.
+      case "infected": case "runner": case "screamer": case "spitter":
+        return [...it("rotten_flesh", r(0, 1)), ...(ctx.random() < 0.08 ? it(["bandage", "pistol_ammo", "canned_beans", "soda_can"][Math.floor(ctx.random() * 4)], 1) : [])];
+      case "brute": return [...it("rotten_flesh", r(1, 3)), ...it("iron_nugget", r(0, 3)), ...(ctx.random() < 0.2 ? it("rifle_ammo", r(2, 5)) : [])];
+      case "bloater": return it("gunpowder", r(0, 2));
       default: return isDino(this.kind) ? dinoLoot(this, ctx) : [];
     }
   }
@@ -1616,6 +1651,8 @@ export class Mob extends Entity {
         ow: this.owner ?? undefined, on: this.ownerName ?? undefined, si: this.sitting ? 1 : undefined,
         an: (this.kind === "wolf" || this.kind === "bear") && this.anger > 0 ? 1 : undefined,
         hu: this.hunting ? 1 : undefined,
+        // A tougher round's infected keep their round.
+        il: isInfectedMob(this.kind) && this.level > 1 ? this.level : undefined,
         // A creature's level, torpor, sleep, tame and saddle, and who rides it.
         ...(isDino(this.kind) ? {
           dl: this.level, tp: Math.round(this.torpor * 10) / 10, ko: this.unconscious ? 1 : undefined, tm: this.taming > 0 ? Math.round(this.taming * 1000) / 1000 : undefined,
@@ -1682,6 +1719,7 @@ export class Mob extends Entity {
     }
     if (this.kind === "wolf" || this.kind === "bear") this.anger = d.an === 1 ? Math.max(this.anger, 20) : 0;
     this.hunting = d.hu === 1;
+    if (isInfectedMob(this.kind) && typeof d.il === "number" && d.il >= 1 && d.il <= 1000) this.level = Math.floor(d.il);
     if (isDino(this.kind)) {
       if (typeof d.dl === "number" && d.dl >= 1 && d.dl <= 1000) this.level = Math.floor(d.dl);
       this.torpor = typeof d.tp === "number" && d.tp >= 0 ? Math.min(d.tp, maxTorpor(this.kind as keyof typeof CREATURES, this.level) * 1.5) : 0;

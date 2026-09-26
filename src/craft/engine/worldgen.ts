@@ -96,6 +96,8 @@ export class Generator implements ChunkGenerator {
   readonly lucky: boolean;
   /** Primal's island: the land ringed by ocean. */
   readonly island: boolean;
+  /** No villages: the Island is wild, and the Dead Zone's towns are its own (abandoned). */
+  readonly noVillages: boolean;
   /** Primal's berry bushes in the undergrowth. */
   readonly berries: boolean;
   private continent: Simplex;
@@ -119,6 +121,7 @@ export class Generator implements ChunkGenerator {
     this.dungeons = settings.dungeons !== false;
     this.lucky = settings.lucky === true;
     this.island = settings.map === "primal_island";
+    this.noVillages = this.island || settings.map === "dead_zone";
     this.berries = settings.berries === true || this.island;
     const s = this.seed;
     this.continent = new Simplex(hash4(s, 1));
@@ -342,8 +345,8 @@ export class Generator implements ChunkGenerator {
 
   /** The villages overlapping a chunk, for the game to populate. */
   villagesAt(cx: number, cz: number): ReturnType<typeof villagesTouching> {
-    // The Island is wild: nobody lives there but what you tame.
-    if (this.type === "flat" || this.island) return [];
+    // The Island is wild: nobody lives there but what you tame; the Dead Zone's people are gone.
+    if (this.type === "flat" || this.noVillages) return [];
     return villagesTouching(this, this.seed, cx, cz);
   }
 

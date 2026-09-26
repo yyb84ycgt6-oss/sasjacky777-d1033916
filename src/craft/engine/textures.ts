@@ -2527,6 +2527,82 @@ const ITEM_TEMPLATES: Record<string, string[]> = {
     "....abbbbbda....",
     ".....aaaaaa.....",
   ],
+  pistol: [
+    "................", "................", "................",
+    "..aaaaaaaaaaa...",
+    "..abbbbbbbbbcd..",
+    "..addddddddddd..",
+    "......adkda.....",
+    ".....adhha......",
+    ".....ahhha......",
+    "....ahhha.......",
+    "....aaaa........",
+  ],
+  rifle: [
+    "................", "................", "................", "................",
+    ".......aaa......",
+    "aaaaaaaabbaaaa..",
+    "abbbbbbbbbbbbhhh",
+    "adddddddkddhhhhh",
+    ".......adkahhhh.",
+    "........a..hhh..",
+  ],
+  assault: [
+    "................", "................", "................",
+    "......aaaa......",
+    ".aaaaaabbaaaaaa.",
+    "abbbbbbbbbbbbbba",
+    "adddddkdddddddda",
+    ".....adkaaddd...",
+    ".....add..addd..",
+    ".....aa....aad..",
+  ],
+  shotgun: [
+    "................", "................", "................", "................",
+    "................",
+    "aaaaaaaaaaahhhh.",
+    "abbbbbbbbbbhhhhh",
+    "aaaaaaaaakahhhhh",
+    "........akhhhh..",
+    ".........a.hh...",
+  ],
+  ammo: [
+    "................", "................", "................",
+    "...c...c...c....",
+    "..cbc.cbc.cbc...",
+    "..cbc.cbc.cbc...",
+    "..aaa.aaa.aaa...",
+    "..aaa.aaa.aaa...",
+    "..aaa.aaa.aaa...",
+    "..ddd.ddd.ddd...",
+  ],
+  can: [
+    "................", "................",
+    ".....aaaaaa.....",
+    "....abbbbbba....",
+    "....acccccca....",
+    "....abbbbbba....",
+    "....awwwwwwa....",
+    "....awwwwwwa....",
+    "....abbbbbba....",
+    "....acccccca....",
+    ".....aaaaaa.....",
+  ],
+  bat: [
+    "................",
+    "............aa..",
+    "...........abba.",
+    "..........abbba.",
+    ".........abbba..",
+    "........abbba...",
+    ".......abbba....",
+    "......abbba.....",
+    ".....abba.......",
+    "....hha.........",
+    "...hha..........",
+    "..hha...........",
+    "..hh............",
+  ],
   roll: [
     "................", "................", "................",
     "....aaaaaaa.....",
@@ -2735,6 +2811,17 @@ art("heavy_saddle", "saddle", paletteOf("#5a3a22", { w: hex("#3a3a3a"), k: hex("
 art("flyer_saddle", "saddle", paletteOf("#b8844a", { w: hex("#f0f0f0"), k: hex("#9a9a9a") }));
 art("raw_meat", "meat", paletteOf("#b8302a", { e: hex("#f0e0d8"), w: hex("#fff") }));
 art("cooked_meat", "meat", paletteOf("#74442a", { e: hex("#d0c0a8"), w: hex("#e8e0d8") }));
+// Dead Zone's firearms, rounds and scavenged food.
+art("pistol", "pistol", { a: hex("#1a1a1c"), b: hex("#4a4a50"), c: hex("#6a6a72"), d: hex("#2e2e32"), k: hex("#101010"), h: hex("#3a2a1e") });
+art("hunting_rifle", "rifle", { a: hex("#1a1a1c"), b: hex("#4a4a50"), d: hex("#2e2e32"), k: hex("#101010"), h: hex("#7a4a26") });
+art("assault_rifle", "assault", { a: hex("#141416"), b: hex("#3a3a40"), d: hex("#24242a"), k: hex("#0a0a0a") });
+art("shotgun", "shotgun", { a: hex("#1a1a1c"), b: hex("#5a5a60"), k: hex("#101010"), h: hex("#8a5a2e") });
+art("pistol_ammo", "ammo", { a: hex("#b8902a"), b: hex("#8a6a4a"), c: hex("#6a4a2a"), d: hex("#7a5a1a") });
+art("rifle_ammo", "ammo", { a: hex("#c8a030"), b: hex("#9a7a52"), c: hex("#5a3a1a"), d: hex("#8a6a1a") });
+art("shotgun_shells", "ammo", { a: hex("#b82a2a"), b: hex("#d8b050"), c: hex("#a88a3a"), d: hex("#c8a030") });
+art("canned_beans", "can", { a: hex("#6a6a6a"), b: hex("#b8b8b8"), c: hex("#8a8a8a"), w: hex("#c8502a") });
+art("soda_can", "can", { a: hex("#6a1a1a"), b: hex("#d8d8d8"), c: hex("#a8a8a8"), w: hex("#c82a2a") });
+art("baseball_bat", "bat", { a: hex("#6a4a26"), b: hex("#c8a06a"), h: hex("#2a2a2a") });
 // Dead Zone's first aid and water.
 art("bandage", "roll", paletteOf("#e8e4dc", { c: hex("#c8c0b0"), d: hex("#a8a090") }));
 art("splint", "splint", { h: H, w: hex("#e8e4dc") });

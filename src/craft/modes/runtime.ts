@@ -10,7 +10,7 @@
 import type { Game } from "../game/game";
 import type { Objective } from "../game/types";
 import type { BlockChange } from "../engine/world";
-import { itemByName, type ItemStack } from "../engine/items";
+import { itemByName, type ItemStack, type StatusEffect } from "../engine/items";
 import type { GameMode } from "../engine/player";
 import { mapLayout, type MapLayout } from "../engine/maps";
 import { Generator } from "../engine/worldgen";
@@ -27,6 +27,8 @@ export interface ModePlayer {
   local: boolean;
   dead: boolean;
   spectating: boolean;
+  /** Crouched: how a player buys from a pad in the zombie bunker. */
+  sneaking: boolean;
 }
 
 export abstract class ModeRuntime {
@@ -97,8 +99,8 @@ export abstract class ModeRuntime {
   /** Everyone playing, here first. */
   players(): ModePlayer[] {
     const g = this.game, p = g.player, b = p.body;
-    const out: ModePlayer[] = [{ id: p.id, name: p.name, x: b.x, y: b.y, z: b.z, local: true, dead: p.dead, spectating: p.gameMode === "spectator" }];
-    for (const r of g.remote.values()) out.push({ id: r.id, name: r.name, x: r.x, y: r.y, z: r.z, local: false, dead: r.dead, spectating: r.gameMode === "spectator" });
+    const out: ModePlayer[] = [{ id: p.id, name: p.name, x: b.x, y: b.y, z: b.z, local: true, dead: p.dead, spectating: p.gameMode === "spectator", sneaking: p.sneaking }];
+    for (const r of g.remote.values()) out.push({ id: r.id, name: r.name, x: r.x, y: r.y, z: r.z, local: false, dead: r.dead, spectating: r.gameMode === "spectator", sneaking: r.sneaking });
     return out;
   }
 
@@ -144,6 +146,12 @@ export abstract class ModeRuntime {
   setGameMode(id: string, mode: GameMode): void {
     if (this.isLocal(id)) { this.game.player.setGameMode(mode); this.game.bumpInv(); }
     else this.game.modeTell(id, { gm: mode });
+  }
+
+  /** A status effect on a player, here or online. */
+  effect(id: string, effect: StatusEffect, seconds: number, amp: number): void {
+    if (this.isLocal(id)) this.game.player.applyEffect(effect, seconds, amp);
+    else this.game.net?.effectRemote?.(id, effect, seconds, amp);
   }
 
   /** Empties a player's hands and heals them for a new round. */

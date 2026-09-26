@@ -14,3 +14,5 @@ import "./tntrun";
 import "./survivalGames";
 import "./challenges";
 import "./primal";
+import "./deadzone";
+import "./zombies";

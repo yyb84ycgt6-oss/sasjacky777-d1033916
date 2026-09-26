@@ -117,6 +117,7 @@ export function waterFrom(item: string): number {
   switch (item) {
     case "water_bottle": case "potion_water_bottle": return 8;
     case "water_canteen": return 12;
+    case "soda_can": return 6;
     case "milk_bucket": return 6;
     case "melon_slice": return 3;
     case "mejoberry": return 2;

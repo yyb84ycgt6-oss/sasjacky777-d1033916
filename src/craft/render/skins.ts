@@ -150,6 +150,32 @@ function paintDino(p: SkinPainter, kind: string, variant: number): void {
   }
 }
 
+/**
+ * The infected: grey-green skin, clothes torn and darkened with old blood,
+ * eyes gone pale — each kind with a tell: a runner lean and pale, a brute
+ * blotched and bare-chested, a spitter's jaw green with acid, a screamer's
+ * long hair, a bloater's swollen yellow skin.
+ */
+function paintInfected(p: SkinPainter, kind: string, variant: number): void {
+  const r = new Rng(variant * 104729 + kind.length);
+  const pick = <T,>(a: T[]): T => a[r.int(a.length)];
+  const skinTone = kind === "bloater" ? "#8a9a4a" : kind === "runner" ? "#a8b0a0" : kind === "spitter" ? "#6a8a4a" : pick(["#7a8a6a", "#6a7a5e", "#8a8a72"]);
+  const shirt = kind === "brute" ? skinTone : pick(["#4a5a6a", "#6a4a3a", "#3a4a3a", "#5a5a5a", "#6a2a2a", "#2a3a5a"]);
+  const pants = pick(["#2a2a3a", "#3a3026", "#2a3a2a", "#4a4a4a"]);
+  const hair = kind === "screamer" ? "#d8d8d0" : pick(["#2a2218", "#1a1a1a", "#4a3a2a", "#6a6a60"]);
+  humanoid(p, hex(skinTone), hex(hair), hex(shirt), hex(pants), hex("#2a2420"), [230, 230, 200]);
+  const blood: RGB = [110, 20, 16];
+  // Old blood and tears: dark splashes over the shirt and trousers, a stain at the mouth.
+  for (let i = 0; i < 26; i++) {
+    const [u, v, w, h] = r.next() < 0.6 ? [16, 20, 24, 12] : [0, 20, 16, 12];
+    p.px(u + r.int(w), v + r.int(h), r.next() < 0.7 ? blood : hex(skinTone), 0.1);
+  }
+  p.px(12, 14, blood, 0); p.px(11, 14, blood, 0);
+  if (kind === "spitter") for (let x = 10; x < 14; x++) p.px(x, 14, [120, 200, 40], 0);
+  if (kind === "screamer") for (let y = 8; y < 16; y++) { p.px(8, y, hex(hair), 0); p.px(15, y, hex(hair), 0); }
+  if (kind === "bloater") for (let i = 0; i < 30; i++) p.px(16 + r.int(24), 20 + r.int(12), [200, 190, 90], 0.15);
+}
+
 const cache = new Map<string, HTMLCanvasElement>();
 
 export function skin(kind: string, variant = 0): HTMLCanvasElement {
@@ -500,6 +526,10 @@ export function skin(kind: string, variant = 0): HTMLCanvasElement {
     case "trike": case "stego": case "bronto": case "ptero":
       paintDino(p, kind, variant);
       break;
+    case "infected": case "runner": case "brute": case "spitter": case "screamer": case "bloater": {
+      paintInfected(p, kind, variant);
+      break;
+    }
     case "tribute": {
       // Every tribute dressed differently: their district's colours, their own skin and hair.
       const r = new Rng(variant * 7919 + 13);
