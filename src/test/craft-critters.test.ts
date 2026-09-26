@@ -7,6 +7,11 @@ import {
 } from "@/craft/engine/critters";
 import { CRITTER_COLORS, CRITTER_MODELS, critterBoxes } from "@/craft/render/critterModels";
 import { CATEGORY_ORDER, MODES, modeDef } from "@/craft/modes/modes";
+import { mapLayout } from "@/craft/engine/maps";
+import { Generator } from "@/craft/engine/worldgen";
+import { BADGES, regionTrainers, rivalStarter, towerTrainer, trainerById, trainerTeam } from "@/craft/engine/trainers";
+import { parseCritterOp } from "@/craft/game/critterPlay";
+import { safariPoints } from "@/craft/modes/critterModes";
 import { activeOf, damageRoll, evolveAfter, foeChoice, newBattle, openingEvents, runTurn, stageMult } from "@/craft/engine/battle";
 
 /** A random source that always says the same thing: the dice loaded one way. */
@@ -303,5 +308,80 @@ describe("the critter modes", () => {
     const ids = MODES.filter((m) => m.category === "critter").map((m) => m.id);
     expect(ids).toEqual(["critter_quest", "critter_craft", "critter_nuzlocke", "critter_safari", "battle_spire"]);
     for (const id of ids) expect(modeDef(id)?.fauna).toBe("critters");
+  });
+});
+
+describe("trainers", () => {
+  it("gives the rival the starter that beats the player's", () => {
+    expect(rivalStarter("emberkit")).toBe("axolittle");
+    expect(rivalStarter("axolittle")).toBe("sproutling");
+    expect(rivalStarter("sproutling")).toBe("emberkit");
+    expect(trainerById("rival3", "sproutling")!.team.at(-1)![0]).toBe("pyrolion");
+  });
+
+  it("builds every trainer's team from critters that exist, and four gym leaders with the four badges", () => {
+    for (const t of regionTrainers()) for (const [s, l] of t.team) { expect(SPECIES[s], `${t.id} ${s}`).toBeDefined(); expect(l).toBeGreaterThan(0); }
+    expect(regionTrainers().filter((t) => t.badge).map((t) => t.badge)).toEqual([...BADGES]);
+  });
+
+  it("reads a wanderer's id back into the same trainer every time, so host and guests agree", () => {
+    const a = trainerById("w:12345:14:Forest")!, b = trainerById("w:12345:14:Forest")!;
+    expect(a).toEqual(b);
+    expect(trainerTeam(a).map((c) => c.species)).toEqual(trainerTeam(b).map((c) => c.species));
+    expect(trainerById("nobody")).toBeNull();
+  });
+
+  it("sends the Spire Master every seventh challenger, stronger than the rest", () => {
+    expect(towerTrainer(7, 1).cls).toBe("tycoon");
+    expect(towerTrainer(6, 1).cls).toBe("tower");
+    expect(towerTrainer(7, 1).team[0][1]).toBeGreaterThan(towerTrainer(6, 1).team[0][1]);
+  });
+});
+
+describe("the critter maps", () => {
+  const gen = (map: "critter_region" | "safari_park" | "battle_spire", seed: number) => new Generator({ seed, type: "default", dimension: "overworld", map });
+
+  it("stands every one of the region's trainers somewhere on the road, with the Champion at the League and a legend on the summit", () => {
+    for (const seed of [3, 42]) {
+      const l = mapLayout("critter_region", seed, gen("critter_region", seed));
+      const ids = new Set((l.npcs ?? []).map((n) => n.id));
+      for (const t of regionTrainers()) expect(ids.has(t.id), `${t.id} (seed ${seed})`).toBe(true);
+      expect(ids.has("professor")).toBe(true);
+      expect(l.legend).toBeDefined();
+      const names = (l.areas ?? []).map((a) => a.name);
+      for (const n of ["Home Town", "Route 1", "Granite Town", "Victory Road", "the League"]) expect(names).toContain(n);
+      // Towns are quiet: no wild critter comes into them.
+      expect(l.areas!.find((a) => a.name === "Home Town")!.quiet).toBe(true);
+    }
+  });
+
+  it("lays the safari's corners over lands this world has critters for, and gives the spire its pad", () => {
+    const biomes = new Set(BIOMES.map((b) => b.name));
+    const safari = mapLayout("safari_park", 5, gen("safari_park", 5));
+    for (const a of safari.areas ?? []) { expect(biomes.has(a.biome!), a.name).toBe(true); expect(pickWild(a.biome!, 10, Math.random), a.name).not.toBeNull(); }
+    const spire = mapLayout("battle_spire", 1, gen("battle_spire", 1));
+    expect(spire.pads).toHaveLength(2);
+  });
+});
+
+describe("a guest's critter messages", () => {
+  it("are taken only in the shape expected, with every number finite and every name short", () => {
+    expect(parseCritterOp(["claim", 7, 1.5, -2])).toEqual(["claim", 7, 1.5, -2]);
+    expect(parseCritterOp(["claim", "7", 1, 2])).toBeNull();
+    expect(parseCritterOp(["end", 3, "exploded"])).toBeNull();
+    expect(parseCritterOp(["out", "mine", "u1", "emberkit", 500, 1, 0, 64, 0, null, null, 1])).toEqual(["out", "mine", "u1", "emberkit", 100, 1, 0, 64, 0, NaN, NaN, 1]);
+    expect(parseCritterOp(["out", "boss", "u1", "emberkit", 5, 0, 0, 64, 0, 0, 0, 0])).toBeNull();
+    expect(parseCritterOp(["out", "mine", "u1", "x".repeat(200), 5, 0, 0, 64, 0, 0, 0, 0])).toBeNull();
+    expect(parseCritterOp(["score", "chirplet"])).toEqual(["score", "chirplet"]);
+    expect(parseCritterOp("claim")).toBeNull();
+  });
+});
+
+describe("the park's score", () => {
+  it("counts a rare critter for more than a common one, and a legend most", () => {
+    expect(safariPoints("nibbit")).toBe(1);
+    expect(safariPoints("frostpaw")).toBe(3);
+    expect(safariPoints("scalekin")).toBe(8);
+    expect(safariPoints("glaciarch")).toBeGreaterThan(safariPoints("scalekin"));
   });
 });

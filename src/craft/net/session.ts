@@ -112,7 +112,9 @@ export function sanitizeModeTell(v: unknown): ModeTell {
 //    "gc", "md" and "fw" ops, and the welcome's disabledMods and waystones).
 // 4: game modes and map packs, Primal creatures and riding, the infected, guns, vitals and blood moons
 //    (the "nz" op, and the tell's reset and bloodMoon) — a guest on 3 would see none of it.
-const PROTOCOL = 4;
+// 5: critters, their trainers and the critter maps (the "ck" op, and the critter and trainer mob kinds) — a guest on 4
+//    would see neither, and the world's new healing station block would be a block it has never heard of.
+const PROTOCOL = 5;
 const FLUSH_TICKS = 2;
 const ENTITY_TICKS = 4;
 const ENV_TICKS = 40;
