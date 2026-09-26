@@ -39,7 +39,13 @@ import { createRuntime, modeDef, type ModeRuntime } from "../modes";
 import { travelCost, WAYSTONE_NAME_MAX, waystoneKey, waystoneName, type Waystone } from "../engine/waystones";
 import { seasonAt, seasonLabel, seasonTint, snowsHere, warmBiome, type Season } from "../engine/seasons";
 import { MAX_DYNAMIC_LIGHTS } from "../render/materials";
-import { isSlimeChunk, Mob, MOB_KINDS, type MobKind } from "../engine/mobs";
+import { isSlimeChunk, Mob, MOB_KINDS, MOB_SPECS, type MobKind } from "../engine/mobs";
+import { isDino, pickCreatures } from "../engine/creatures";
+import { canLearn, engramFor, ENGRAMS, type Engram } from "../engine/engrams";
+import { BREAK_FALL, SICKNESS_TICKS, sicknessChance, statusLine, vitalsSecond, waterFrom, type VitalsRules } from "../engine/vitals";
+import { CREATURES, maxTorpor } from "../engine/creatures";
+import { favouriteFoods } from "../engine/dinoAi";
+import { isInfected } from "../engine/infected";
 import { groundBlock } from "../engine/physics";
 import { Player, type PlayerEvent } from "../engine/player";
 import { Generator, type ChunkGenerator } from "../engine/worldgen";
@@ -90,7 +96,7 @@ export interface NetLink {
   // guest → host
   requestChunk(cx: number, cz: number): Promise<ChunkData | null>;
   isModified(cx: number, cz: number): boolean;
-  attack(entityId: number, damage: number, fromX: number, fromZ: number, knockback?: number, fire?: number, looting?: number, part?: string): void;
+  attack(entityId: number, damage: number, fromX: number, fromZ: number, knockback?: number, fire?: number, looting?: number, part?: string, torpor?: number): void;
   interact(entityId: number, item: string | null, stack?: ItemStack | null): void;
   drops(x: number, y: number, z: number, stacks: ItemStack[], xp: number): void;
   throwItem(kind: ProjectileKind, x: number, y: number, z: number, vx: number, vy: number, vz: number, extra?: ThrowExtra): void;
@@ -112,7 +118,7 @@ export interface NetLink {
   mount?(entityId: number, on: boolean): void;
   /** Guest → host: a trade was made with a villager (the host owns its experience and stock). */
   trade?(entityId: number, offer: number): void;
-  vehiclePose?(v: Vehicle): void;
+  vehiclePose?(v: Vehicle | Mob): void;
   placeVehicle?(kind: string, x: number, y: number, z: number, yaw: number, wood: number): void;
   placeFrame?(face: number, x: number, y: number, z: number): void;
   launchFirework?(x: number, y: number, z: number, rocket: Rocket): void;
@@ -200,6 +206,13 @@ export interface GameOptions {
 const AUTOSAVE_TICKS = 600;
 const MAX_HOSTILE = 14;
 const MAX_PASSIVE = 10;
+/** Primal's creatures per player: enough that the wilds feel alive, few enough to keep a phone smooth. */
+const MAX_FAUNA = 16;
+/** Warmth a block gives off, 0..1, for body temperature (engine/vitals.ts). */
+const HEAT: Record<number, number> = {
+  [B.FIRE]: 1, [B.SOUL_FIRE]: 0.8, [B.LAVA]: 1, [B.LIT_FURNACE]: 0.8, [B.MAGMA_BLOCK]: 0.5,
+  [B.TORCH]: 0.35, [B.LANTERN]: 0.35, [B.JACK_O_LANTERN]: 0.25,
+};
 /** Slots in a backpack: a chest's worth. */
 const BACKPACK_SLOTS = 27;
 
@@ -351,7 +364,8 @@ export class Game {
     world.simulates = this.role !== "guest";
     this.world = world;
     // Dungeons are part of the terrain, so a guest's generator must be told the host's choice too (its meta carries it).
-    const settings = { seed: this.meta.seed, type: this.meta.type, dimension: dim, dungeons: this.modOn("dungeons"), map: this.meta.map, lucky: !!modeDef(this.meta.mode?.id)?.lucky };
+    const settings = { seed: this.meta.seed, type: this.meta.type, dimension: dim, dungeons: this.modOn("dungeons"), map: this.meta.map, lucky: !!modeDef(this.meta.mode?.id)?.lucky,
+      berries: modeDef(this.meta.mode?.id)?.fauna === "primal" };
     this.generator = createGenerator(settings);
     this.pool = new WorkerPool({ kind: "init", settings, layers: this.atlas.layers });
     this.rules = new BlockRules(world, {
@@ -982,6 +996,8 @@ export class Game {
     } else if (s.kind === "item_frame") {
       e = new ItemFrame(0, Math.floor(s.x), Math.floor(s.y), Math.floor(s.z), null, 0, s.id);
       e.applySnapshot(s);
+      // Nobody is riding anything when a world opens, creatures included.
+      if (e instanceof Mob) e.rider = null;
     } else if (s.kind === "firework_rocket") {
       return;
     } else {
@@ -1193,6 +1209,7 @@ export class Game {
       dragonDefeated: () => this.endFight.defeated(),
       get mobGriefing() { return game.meta.rules.mobGriefing; },
       get raining() { return DIMENSION_INFO[game.dimension].hasSky && game.rain > 0.5; },
+      get primal() { return modeDef(game.meta.mode?.id)?.primal; },
     };
   }
 
@@ -1584,6 +1601,7 @@ export class Game {
   hurtLocal(amount: number, source: DamageSource, fx?: number, fz?: number, kb = 0, attacker?: number): void {
     if (!this.meta.rules.doFallDamage && source === "fall") return;
     const dealt = this.player.hurt(amount, source, fx, fz, kb);
+    if (dealt > 0) this.wound(amount, source, attacker);
     // A fireball's heat stays: the player burns for a few seconds after the hit.
     if (source === "fireball" && dealt > 0 && !this.player.hasEffect("fire_resistance")) this.player.fireTicks = Math.max(this.player.fireTicks, 100);
     if (dealt > 0 || kb > 0) {
@@ -2000,6 +2018,7 @@ export class Game {
       underwater: eyeBlock === B.WATER,
       inLava: eyeBlock === B.LAVA,
       nightVision: p.hasEffect("night_vision"),
+      blind: p.hasEffect("blindness"),
       // Re-iterable, so a screenshot can draw the same frame again.
       entities: { [Symbol.iterator]: () => this.entities.values() },
       localPlayer: local,
@@ -2047,7 +2066,10 @@ export class Game {
       // Sneak climbs out; everything else steers.
       if (!inputBlocked && c.sneak) this.dismount();
       else {
-        vehicle.input = { forward: inputBlocked ? 0 : c.forward, strafe: inputBlocked ? 0 : c.strafe, yaw: p.yaw };
+        vehicle.input = {
+          forward: inputBlocked ? 0 : c.forward, strafe: inputBlocked ? 0 : c.strafe, yaw: p.yaw,
+          jump: !inputBlocked && c.jump, pitch: p.pitch,
+        };
         p.tickRiding(this.world, rules);
       }
     } else if (!frozen) {
@@ -2084,6 +2106,7 @@ export class Game {
     if (this.tickCount % 20 === 0) this.audio.tickMusic(1, !this.isNight());
     if (this.tickCount % 20 === 11) this.repaintMap();
     if (this.tickCount % 20 === 13 && this.modOn("ambient_sounds")) this.ambience();
+    if (this.tickCount % 20 === 17) this.tickVitals();
     this.borderTick();
     if (p.health > this.maxHealth) p.health = this.maxHealth;
     if (this.simulates && this.mode) {
@@ -2209,12 +2232,12 @@ export class Game {
       // The dragon flies over chunks nobody has loaded; everything else waits for its ground.
       if (!world.isLoaded(Math.floor(e.x), Math.floor(e.z)) && e.kind !== "ender_dragon") continue;
       // A guest drives the vehicle they ride and reports where it went.
-      if (e instanceof Vehicle && e.rider && e.rider !== this.player.id && this.remote.has(e.rider)) continue;
+      if ((e instanceof Vehicle || e instanceof Mob) && e.rider && e.rider !== this.player.id && this.remote.has(e.rider)) continue;
       e.tick(ctx);
     }
     // A vehicle whose rider left the game is free again.
     for (const e of this.entities.values()) {
-      if (e instanceof Vehicle && e.rider && e.rider !== this.player.id && !this.remote.has(e.rider)) e.rider = null;
+      if ((e instanceof Vehicle || e instanceof Mob) && e.rider && e.rider !== this.player.id && !this.remote.has(e.rider)) e.rider = null;
     }
     for (const [id, e] of this.entities) if (e.removed) this.entities.delete(id);
 
@@ -2226,19 +2249,20 @@ export class Game {
   }
 
   /** The vehicle this player rides, or null — letting go of one that vanished or was taken. */
-  ridden(): Vehicle | null {
+  ridden(): Vehicle | Mob | null {
     const p = this.player;
     if (p.riding === null) return null;
     const v = this.entities.get(p.riding);
-    if (!(v instanceof Vehicle) || v.removed || p.dead || (v.rider !== null && v.rider !== p.id) || (v.rider === null && this.simulates)) {
+    const mount = v instanceof Vehicle || (v instanceof Mob && v.saddled && !v.dying && !v.unconscious);
+    if (!mount || v.removed || p.dead || (v.rider !== null && v.rider !== p.id) || (v.rider === null && this.simulates)) {
       this.dismount();
       return null;
     }
     return v;
   }
 
-  /** Climbs into a vehicle: at once here, and on the host too when this is a guest. */
-  mount(v: Vehicle): void {
+  /** Climbs into a vehicle, or onto a saddled creature: at once here, and on the host too when this is a guest. */
+  mount(v: Vehicle | Mob): void {
     const p = this.player;
     if (v.rider && v.rider !== p.id) return;
     if (p.riding !== null) this.dismount();
@@ -2255,7 +2279,7 @@ export class Game {
     if (p.riding === null) return;
     const v = this.entities.get(p.riding);
     p.riding = null;
-    if (!(v instanceof Vehicle)) return;
+    if (!(v instanceof Vehicle || v instanceof Mob)) return;
     if (v.rider === p.id) v.rider = null;
     this.net?.mount?.(v.id, false);
     const b = p.body;
@@ -2599,7 +2623,139 @@ export class Game {
 
   /** Whether this world has strongholds: real terrain, and not superflat. */
   hasStrongholds(): boolean {
-    return this.meta.type !== "flat" && (!this.meta.map || this.meta.map === "sg_arena");
+    return this.meta.type !== "flat" && (!this.meta.map || this.meta.map === "sg_arena" || this.meta.map === "primal_island");
+  }
+
+  // ---- vitals (engine/vitals.ts) ------------------------------------------------------------
+
+  /** Which vitals this world keeps, or null for none. */
+  vitalsRules(): VitalsRules | null {
+    const v = modeDef(this.meta.mode?.id)?.vitals;
+    return v && (v.thirst || v.temperature || v.wounds) ? v : null;
+  }
+
+  /** Once a second: thirst, temperature, bleeding, sickness, a broken leg — for this player, here or online. */
+  private tickVitals(): void {
+    const rules = this.vitalsRules();
+    const p = this.player;
+    if (!rules || p.dead || !p.survivalLike) return;
+    const b = p.body, fx = Math.floor(b.x), fy = Math.floor(b.y), fz = Math.floor(b.z);
+    const biome = biomeDef(this.world.chunkAt(fx, fz)?.biomes[((fz & 15) << 4) | (fx & 15)] ?? 7);
+    // Warmth nearby: the strongest source within four blocks, fading with distance.
+    let heat = 0;
+    for (let dy = -2; dy <= 2; dy++) for (let dz = -3; dz <= 3; dz++) for (let dx = -3; dx <= 3; dx++) {
+      const s = HEAT[this.world.blockAt(fx + dx, fy + dy, fz + dz)];
+      if (s) heat = Math.max(heat, s * (1 - Math.hypot(dx, dy, dz) / 4.5));
+    }
+    const insulation = Math.min(1, p.inventory.armor.reduce((t, a) => t + (!a ? 0 : itemDef(a.id)?.armor?.material === "leather" ? 0.25 : 0.12), 0));
+    const second = ++this.vitalSecond;
+    const events = vitalsSecond(p.vitals, rules, {
+      biome: biome.name, dimension: this.dimension, night: this.isNight(), raining: this.rain > 0.5 && this.world.seesSky(fx, fy + 2, fz),
+      inWater: b.inWater, y: b.y, heat, insulation, sprinting: p.sprinting,
+    }, second);
+    for (const e of events) {
+      if (e.kind === "hurt") this.hurtLocal(e.amount, e.cause);
+      else if (e.kind === "hunger") p.addExhaustion(4 * e.amount);
+      else if (e.kind === "message") this.message(e.text, "#aaffaa");
+      else if (e.kind === "cough") { this.sound("hurt", null, 0, 0, 0.5, 0.6); this.showActionbar("You cough. You feel feverish."); }
+    }
+    if (rules.wounds && p.vitals.broken) p.applyEffect("slowness", 3, 1);
+    if (rules.temperature && second % 30 === 0) {
+      if (p.vitals.temp < 35.2) this.showActionbar("You are freezing — find warmth, or wear hide.");
+      else if (p.vitals.temp > 39.3) this.showActionbar("You are overheating — find shade and water.");
+    }
+    if (rules.thirst && p.vitals.water < 4 && second % 30 === 15) this.showActionbar("You are parched — drink from water, or fill a bottle.");
+  }
+  private vitalSecond = 0;
+
+  /** Something was drunk: water back, and with wounds kept, a chance a pond made you ill. */
+  drank(item: string, water = waterFrom(item)): void {
+    const rules = this.vitalsRules();
+    if (!rules) return;
+    const v = this.player.vitals;
+    if (rules.thirst) v.water = Math.min(20, v.water + water);
+    if (rules.wounds && Math.random() < sicknessChance(item) && !v.sick) { v.sick = SICKNESS_TICKS; this.message("That water was bad. You feel sick.", "#ffaa55"); }
+  }
+
+  /** Something was eaten: juicy food quenches a little; raw or rotten may make you ill. */
+  ate(item: string): void {
+    const rules = this.vitalsRules();
+    if (!rules) return;
+    const v = this.player.vitals;
+    if (rules.thirst) v.water = Math.min(20, v.water + waterFrom(item));
+    if (rules.wounds && Math.random() < sicknessChance(item) && !v.sick) { v.sick = SICKNESS_TICKS; this.message("Your stomach turns. You feel sick — antibiotics would help.", "#ffaa55"); }
+  }
+
+  /** A bandage, a splint or antibiotics used on yourself. Returns whether it did anything (and so is used up). */
+  treat(item: string): boolean {
+    const v = this.player.vitals;
+    const done = (text: string) => { this.message(text, "#aaffaa"); this.sound("item_frame_add", null, 0, 0, 0.6, 1.2); return true; };
+    if (item === "bandage") return v.bleeding ? ((v.bleeding = 0), done("The bleeding stops.")) : (this.showActionbar("You are not bleeding."), false);
+    if (item === "splint") return v.broken ? ((v.broken = false), (this.player.effects = this.player.effects.filter((e) => e.kind !== "slowness")), done("Your leg is set.")) : (this.showActionbar("Nothing is broken."), false);
+    if (item === "antibiotics") return v.sick ? ((v.sick = 0), done("The fever breaks.")) : (this.showActionbar("You are not sick."), false);
+    return false;
+  }
+
+  /** A hit or a fall, with wounds kept: a cut that bleeds, a bite that infects, a leg that breaks. */
+  private wound(amount: number, source: DamageSource, attacker?: number): void {
+    const rules = this.vitalsRules();
+    const p = this.player;
+    if (!rules?.wounds || !p.survivalLike || p.dead) return;
+    const v = p.vitals;
+    if (source === "fall" && amount >= BREAK_FALL - 3 && !v.broken) {
+      v.broken = true;
+      this.message("You broke your leg. A splint (two sticks and string) will set it.", "#ff8888");
+    }
+    if (source === "mob" || source === "arrow" || source === "player") {
+      const mob = attacker !== undefined ? this.entities.get(attacker) : undefined;
+      const infected = mob instanceof Mob && isInfected(mob.kind);
+      if (Math.random() < (infected ? 0.35 : 0.18) && v.bleeding < 3) {
+        v.bleeding++;
+        this.message("You're bleeding! A bandage will stop it.", "#ff5555");
+      }
+      if (infected && !v.sick && Math.random() < 0.08) { v.sick = SICKNESS_TICKS; this.message("The bite burns. You feel feverish — antibiotics would help.", "#ffaa55"); }
+    }
+  }
+
+  /** What the crosshair rests on, if it is one of Primal's creatures: for the line under the crosshair. */
+  private inspectLine(): string | null {
+    const e = this.actions?.targetEntity();
+    if (!(e instanceof Mob) || !isDino(e.kind) || e.dying) return null;
+    const c = CREATURES[e.kind];
+    const parts = [`${c.name} · Lv ${e.level}`];
+    if (e.owner) parts.push(e.ownerName ? `${e.ownerName}'s` : "Tamed", e.saddled ? "Saddled" : c.saddle ? "No saddle" : "", e.sitting ? "Waiting" : "Following");
+    else {
+      parts.push(`Torpor ${Math.round(e.torpor)}/${Math.round(maxTorpor(e.kind, e.level))}`);
+      if (e.unconscious) parts.push(`Taming ${Math.floor(e.taming * 100)}%`, `Effectiveness ${Math.round(e.tameEffect * 100)}%`);
+      // Ascended tells you what a creature likes; Evolved leaves you to find out.
+      if (modeDef(this.meta.mode?.id)?.primal === "ascended") parts.push(`Eats ${favouriteFoods(e.kind).join(", ")}`);
+    }
+    return parts.filter(Boolean).join(" · ");
+  }
+
+  /** Whether this world asks for engrams (Primal). */
+  engramsOn(): boolean {
+    return !!modeDef(this.meta.mode?.id)?.engrams;
+  }
+
+  /** The engram an item's recipe waits on for this player, or null when they may make it. */
+  engramLocking(item: string): Engram | null {
+    if (!this.engramsOn() || this.player.gameMode === "creative") return null;
+    const e = engramFor(item);
+    return e && !this.player.engrams.has(e.id) ? e : null;
+  }
+
+  /** Learns an engram, if this player's level and points allow; says why not otherwise. */
+  learnEngram(id: string): string | null {
+    const e = ENGRAMS.find((x) => x.id === id);
+    if (!e) return "No such engram.";
+    const ok = canLearn(e, this.player.xpLevel, this.player.engrams);
+    if (ok !== true) return ok;
+    this.player.engrams.add(e.id);
+    this.sound("levelup", null, 0, 0, 0.5, 1.4);
+    this.message(`Learned the ${e.name} engram.`, "#55ffff");
+    this.bumpInv();
+    return null;
   }
 
   /** Cheats: the world allows them, or the player is in creative. */
@@ -2755,10 +2911,18 @@ export class Game {
   private spawnMobs(): void {
     const refs = this.playerRefs();
     if (!refs.length || !this.meta.rules.doMobSpawning) return;
-    let hostile = 0, passive = 0;
+    let hostile = 0, passive = 0, fauna = 0;
     for (const e of this.entities.values()) {
       // Villagers and golems belong to their village: they neither count against animals nor despawn.
       if (!(e instanceof Mob) || e.kind === "villager" || e.kind === "iron_golem" || e.kind === "ender_dragon") continue;
+      // Primal's creatures roam far: a wild one goes only once nobody is anywhere near (or, a hunter, in peaceful).
+      if (isDino(e.kind)) {
+        fauna++;
+        if (e.persistent) continue;
+        const nearest = Math.min(...refs.map((r) => Math.hypot(r.x - e.x, r.z - e.z)));
+        if (nearest > 112 || (this.meta.difficulty === 0 && e.spec.hostile)) e.removed = true;
+        continue;
+      }
       if (e.spec.hostile) {
         hostile++;
         // Despawn monsters nobody is near; peaceful removes them all.
@@ -2767,6 +2931,11 @@ export class Game {
       } else passive++;
     }
     const origin = refs[Math.floor(Math.random() * refs.length)];
+    // A Primal world's wilds hold its creatures, not the overworld's usual night monsters and farm animals.
+    if (modeDef(this.meta.mode?.id)?.fauna === "primal" && this.dimension === "overworld") {
+      if (fauna < MAX_FAUNA * refs.length) for (let attempt = 0; attempt < 3; attempt++) this.trySpawnCreatures(origin);
+      return;
+    }
     if (this.dimension !== "overworld") {
       // Elsewhere, spawning ignores light and follows each biome's list; there are no animals.
       if (hostile < (MAX_HOSTILE + 6) * refs.length) for (let attempt = 0; attempt < 3; attempt++) this.trySpawnElsewhere(origin);
@@ -2777,6 +2946,29 @@ export class Game {
     }
     if (passive < MAX_PASSIVE * refs.length && (this.tickCount % 400 === 0 || this.tickCount < 200)) {
       for (let attempt = 0; attempt < 4; attempt++) this.trySpawn(origin, false);
+    }
+  }
+
+  /** Primal: a group of the biome's creatures, out of sight but not far, on open ground (flyers above it). */
+  private trySpawnCreatures(origin: PlayerRef): void {
+    const a = Math.random() * Math.PI * 2, r = 28 + Math.random() * 36;
+    const x = Math.floor(origin.x + Math.cos(a) * r), z = Math.floor(origin.z + Math.sin(a) * r);
+    const chunk = this.world.chunkAt(x, z);
+    if (!chunk) return;
+    const top = this.world.topSolid(x, z);
+    if (top < 1) return;
+    const below = this.world.blockAt(x, top, z);
+    if (!block(below).solid || isFluid(this.world.blockAt(x, top + 1, z))) return;
+    const biome = biomeDef(chunk.biomes[((z & 15) << 4) | (x & 15)]);
+    const pick = pickCreatures(biome.name, Math.random, modeDef(this.meta.mode?.id)?.primal === "ascended");
+    if (!pick) return;
+    const flyer = MOB_SPECS[pick.kind].flies;
+    for (let i = 0; i < pick.count; i++) {
+      const m = new Mob(pick.kind, x + 0.5 + (Math.random() - 0.5) * 4, top + 1 + (flyer ? 10 + i * 2 : 0), z + 0.5 + (Math.random() - 0.5) * 4);
+      // A group shares a rough level, as a pack or a herd does.
+      if (i > 0) m.level = Math.max(5, m.level);
+      m.health = m.maxHealth;
+      this.spawn(m);
     }
   }
 
@@ -3004,6 +3196,9 @@ export class Game {
       toasts: this.toasts.filter((t) => performance.now() - t.at < 5000),
       boss: this.endFight.bossBar(),
       objective: this.objectiveNow,
+      water: this.vitalsRules()?.thirst ? p.vitals.water : null,
+      vitals: this.vitalsRules() ? statusLine(p.vitals, this.vitalsRules()!) : [],
+      inspect: this.inspectLine(),
       minimap: this.modOn("minimap"),
     };
   }

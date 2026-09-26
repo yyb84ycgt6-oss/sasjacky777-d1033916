@@ -11,7 +11,7 @@
  */
 import * as THREE from "three";
 import {
-  B, block, CLOCKWISE_FACING, collisionBoxes, CROP_MAX_AGE, Face, FACE_DIRS, FACE_OF_FACING, FACING_DIRS, isButton, isCrop, isDoor, isFluid, isLeaves, isPillar,
+  B, block, CLOCKWISE_FACING, collisionBoxes, CROP_MAX_AGE, Face, FACE_DIRS, FACE_OF_FACING, FACING_DIRS, isBerryBush, isButton, isCrop, isDoor, isFluid, isLeaves, isPillar,
   isRedstoneTorch, isSlab, isStairs, isTrapdoor, OPPOSITE_FACE, OPPOSITE_FACING, FRAME_EYE,
   type BlockDef,
 } from "../engine/blocks";
@@ -22,6 +22,8 @@ import { AreaCloud, EndCrystal, ItemFrame, PrimedTnt, Projectile, type Projectil
 import { rocketLife, rocketOf } from "../engine/fireworks";
 import { itemDef, itemId, resolveDrops, type ItemDef, type ItemStack } from "../engine/items";
 import { isArthropod, isUndead, Mob, WOLF_FOOD } from "../engine/mobs";
+import { attackPower, canRide, dinoWouldTake } from "../engine/dinoAi";
+import { CREATURES, foodPoints, isDino, TORPOR } from "../engine/creatures";
 import { potionOfItem } from "../engine/potions";
 import { isRail, neighboursToReshape, placedShape, railShape, RAIL_EXITS } from "../engine/rails";
 import { Vehicle } from "../engine/vehicles";
@@ -101,6 +103,11 @@ function facingOfNormal(face: number): number {
 
 export class Actions {
   target: Target | null = null;
+
+  /** The entity under the crosshair, if any (Primal's creature readout). */
+  targetEntity(): Entity | null {
+    return this.target?.entity ?? null;
+  }
   /** Which of the dragon's parts the crosshair is on (see Mob.hitParts). */
   targetPart: string | undefined;
   private mining: { x: number; y: number; z: number; progress: number; ticks: number } | null = null;
@@ -210,15 +217,17 @@ export class Actions {
     }
     const d = this.dir;
     const reach = p.gameMode === "creative" ? 5 : 4.5;
-    const entityReach = p.gameMode === "creative" ? 5 : 3;
+    // Astride a creature, you strike with it: from its back, as far as its bite reaches.
+    const mount = g.ridden();
+    const entityReach = p.gameMode === "creative" ? 5 : mount instanceof Mob ? 3.5 + mount.body.width : 3;
     const hit = p.gameMode === "spectator" ? null : raycastBlocks(g.world, ox, oy, oz, d.x, d.y, d.z, reach);
     let best: Entity | null = null, bestT = Math.min(entityReach, hit ? hit.distance : Infinity);
     for (const e of g.entities.values()) {
       // Also what can be struck out of the air (a ghast's fireball, a shulker's bullet) and item frames.
       const swattable = e instanceof Projectile && (e.kind === "fireball" || e.kind === "shulker_bullet");
       if (!(e instanceof Mob || e instanceof Vehicle || e instanceof EndCrystal || e instanceof ItemFrame || swattable) || (e instanceof Mob && e.dying)) continue;
-      // The vehicle you sit in is not in your way.
-      if (e instanceof Vehicle && e.id === p.riding) continue;
+      // The vehicle (or creature) you sit on is not in your way.
+      if (e.id === p.riding) continue;
       if (Math.abs(e.x - ox) > 14 + e.body.width / 2 || Math.abs(e.z - oz) > 14 + e.body.width / 2) continue;
       // The dragon is struck part by part: its head, neck, body, tail or a wing.
       const parts = e.hitParts();
@@ -516,6 +525,11 @@ export class Actions {
     const bonus = damageBonus(stack, kind ? { undead: isUndead(kind), arthropod: isArthropod(kind) } : null);
     // Strength and Weakness shift the base; the enchantment bonus scales with the swing, as in the original.
     let damage = Math.max(0, (held?.damage ?? 1) + p.meleeBonus) * (0.2 + strength * strength * 0.8) + bonus * strength;
+    // Riding a creature, its bite is the blow.
+    const mount = g.ridden();
+    if (mount instanceof Mob && isDino(mount.kind)) damage = attackPower(mount) * (0.4 + strength * 0.6);
+    // A club (or a bare fist) knocks out as much as it hurts: Primal's creatures carry torpor.
+    const torpor = mount ? 0 : (held?.name === "wooden_club" ? TORPOR.club : held ? 0 : TORPOR.fist) * (0.2 + strength * strength * 0.8);
     const crit = strength > 0.9 && p.body.fallDistance > 0 && !p.body.onGround && !p.body.inWater && !p.body.onLadder;
     if (crit) damage *= 1.5;
     const knockback = levelOf(stack, "knockback") * 0.5;
@@ -529,12 +543,13 @@ export class Actions {
       const e = t.entity;
       if (crit) g.particles("crit", e.x, e.y + e.body.height * 0.7, e.z, 10);
       const part = e instanceof Mob && e.kind === "ender_dragon" ? this.targetPart ?? "body" : undefined;
-      if (g.role === "guest") g.net?.attack(e.id, damage, b.x, b.z, knockback, fire, looting, part);
+      if (g.role === "guest") g.net?.attack(e.id, damage, b.x, b.z, knockback, fire, looting, part, torpor);
       else if (e instanceof Vehicle || e instanceof EndCrystal || e instanceof ItemFrame || e instanceof Projectile) e.hurt(g.ctx, damage, "player", b.x, b.z, p.id);
       else if (e instanceof Mob) {
         e.looting = looting;
         e.hurtPart = part as Mob["hurtPart"];
         if (e.hurt(g.ctx, damage, "player", b.x, b.z, p.id, knockback)) {
+          if (torpor) e.addTorpor(g.ctx, torpor, p.id);
           if (fire) e.fireTicks = Math.max(e.fireTicks, fire);
           const bane = levelOf(stack, "bane_of_arthropods");
           if (bane && isArthropod(e.kind)) e.applyEffect(g.ctx, "slowness", 1 + Math.random() * 0.5 * bane, 3);
@@ -586,6 +601,14 @@ export class Actions {
       return;
     }
 
+    // A saddled creature of yours: climb on (unless you are feeding it while it is hurt; sneak to tell it to wait).
+    if (t?.entity instanceof Mob && fresh && !p.sneaking && canRide(t.entity, p.id, p.name)
+      && !(def && isDino(t.entity.kind) && foodPoints(t.entity.kind, def.name) > 0 && t.entity.health < t.entity.maxHealth)) {
+      g.mount(t.entity);
+      this.swing();
+      return;
+    }
+
     if (t?.entity instanceof Mob && fresh) {
       const name = def?.name ?? null;
       if (g.role === "guest") {
@@ -596,14 +619,22 @@ export class Actions {
         else if (t.entity.kind === "wolf" && ((name === "bone" && !t.entity.owner) || (name && WOLF_FOOD.has(name) && (t.entity.owner === p.id || t.entity.ownerName === p.name)))) this.consumeHeld();
         // A piglin that is free takes the gold; the host rolls what comes back.
         else if (name === "gold_ingot" && t.entity.kind === "piglin" && t.entity.admiring <= 0 && t.entity.anger <= 0) this.consumeHeld();
+        // A creature takes what it would take on the host: a saddle, a narcotic or food while it sleeps, food while hurt.
+        else if (name && dinoWouldTake(t.entity, name, p.id, p.name)) this.consumeHeld();
         this.swing();
         return;
       }
       const result = t.entity.interact(g.ctx, name, p.id, p.name);
       if (result) {
         this.swing();
-        if (result === "fed" || result === "dyed" || result === "barter" || result === "tamed") this.consumeHeld();
-        if (result === "tamed") { g.advance({ kind: "tame" }); g.showActionbar("The wolf is yours. Use it to tell it to sit or follow."); }
+        if (result === "fed" || result === "dyed" || result === "barter" || result === "tamed" || result === "saddled") this.consumeHeld();
+        if (result === "tamed") {
+          g.advance({ kind: "tame" });
+          const what = isDino(t.entity.kind) ? `${CREATURES[t.entity.kind].name} (level ${t.entity.level})` : "wolf";
+          g.showActionbar(`The ${what} is yours. Use it to tell it to wait or follow${isDino(t.entity.kind) && CREATURES[t.entity.kind].saddle ? "; saddle it to ride" : ""}.`);
+        }
+        if (result === "saddled") g.showActionbar("Saddled. Use it to climb on; sneak to get off.");
+        if (result === "sat" && isDino(t.entity.kind)) g.showActionbar(t.entity.sitting ? "Waiting here." : "Following you.");
         if (result === "sheared") this.wearHeld(1);
         if (result === "milked") this.replaceHeld({ id: itemId("milk_bucket"), count: 1 });
         if (result === "fed") g.particles("heart", t.entity.x, t.entity.y + t.entity.body.height, t.entity.z, 3);
@@ -618,6 +649,7 @@ export class Actions {
       if (def.use === "bucket") { this.fillBucket(); return; }
       if (def.use === "water_bucket" || def.use === "lava_bucket") { this.emptyBucketAtFluid(def); return; }
     }
+    if (!def && fresh && g.vitalsRules()?.thirst && p.survivalLike && this.drinkFromWater()) return;
     if (!def || !fresh) return;
     this.useInAir(def);
   }
@@ -627,6 +659,11 @@ export class Actions {
     const p = g.player;
     if (def.food) {
       if (p.canEat(def.food)) this.eating = { ticks: 0, slot: p.inventory.selected, id: def.id };
+      return;
+    }
+    if (def.use === "treat") {
+      if (g.treat(def.name) && p.survivalLike) this.consumeHeld();
+      this.swing();
       return;
     }
     if (def.use === "milk_bucket" || def.use === "drink") {
@@ -799,7 +836,20 @@ export class Actions {
     const hit = this.fluidHit();
     if (!hit || g.world.blockAt(hit.x, hit.y, hit.z) !== B.WATER) return false;
     g.sound("bucket_fill", hit.x + 0.5, hit.y + 0.5, hit.z + 0.5, 0.6, 1.4);
-    this.replaceHeld({ id: itemId("water_bottle"), count: 1 });
+    // A canteen holds more than a bottle, and fills to a canteen.
+    this.replaceHeld({ id: itemId(this.game.player.inventory.held?.id === itemId("canteen") ? "water_canteen" : "water_bottle"), count: 1 });
+    this.swing();
+    return true;
+  }
+
+  /** With thirst kept, an empty hand at a pond drinks from it (and, with wounds kept, may make you ill). */
+  private drinkFromWater(): boolean {
+    const g = this.game;
+    const hit = this.fluidHit();
+    if (!hit || g.world.blockAt(hit.x, hit.y, hit.z) !== B.WATER) return false;
+    const b = g.player.body;
+    g.sound("drink", b.x, b.y + 1.4, b.z, 0.6, 1);
+    g.drank("pond_water", 3);
     this.swing();
     return true;
   }
@@ -876,16 +926,19 @@ export class Actions {
     const def = itemDef(held.id);
     if (def?.use === "milk_bucket") {
       p.effects = [];
+      g.drank("milk_bucket");
       if (p.survivalLike) this.replaceHeld({ id: itemId("bucket"), count: 1 });
       return;
     }
     if (def?.use === "drink") {
       const potion = potionOfItem(def.name);
       for (const fx of potion?.potion.effects ?? []) p.applyEffect(fx.effect, fx.seconds, fx.amp);
-      if (p.survivalLike) this.replaceHeld({ id: itemId("glass_bottle"), count: 1 });
+      g.drank(def.name);
+      if (p.survivalLike) this.replaceHeld({ id: itemId(def.name === "water_canteen" ? "canteen" : "glass_bottle"), count: 1 });
       g.bumpInv();
       return;
     }
+    if (def) g.ate(def.name);
     p.eat(held, Math.random);
     if (p.survivalLike) {
       const remainder = def?.food?.remainder;
@@ -932,6 +985,15 @@ export class Actions {
       if (this.interactBlock(x, y, z, id, meta, def)) return true;
     }
     if (fresh && !p.sneaking && p.gameMode !== "adventure" && g.modOn("right_click_harvest") && this.harvestCrop(x, y, z, id, meta)) return true;
+    // A berry bush in fruit gives up its berries to a hand, and grows more.
+    if (fresh && !p.sneaking && isBerryBush(id) && (meta & 1) === 0 && p.gameMode !== "spectator") {
+      g.world.setBlock(x, y, z, id, meta | 1, "player");
+      const berry = itemId(id === B.MEJOBERRY_BUSH ? "mejoberry" : "narcoberry");
+      g.dropItem(x + 0.5, y + 0.5, z + 0.5, { id: berry, count: 2 + Math.floor(Math.random() * 3) });
+      g.blockSound(block(id).material, "break", x + 0.5, y + 0.5, z + 0.5, false);
+      this.swing();
+      return true;
+    }
     if (fresh && id === B.DRAGON_EGG && !p.sneaking) {
       g.teleportEgg(x, y, z);
       this.swing();

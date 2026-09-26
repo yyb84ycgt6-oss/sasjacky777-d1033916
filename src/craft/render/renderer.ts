@@ -27,6 +27,7 @@ import { Sky, skyState } from "./sky";
 import { Weather } from "./weather";
 import { blockGeometry, itemModel, spriteGeometry } from "./itemModels";
 import { GAME_NAME } from "../edition";
+import { CREATURES, isDino } from "../engine/creatures";
 
 export interface RemotePlayerView {
   id: string;
@@ -63,6 +64,8 @@ export interface FrameState {
   underwater: boolean;
   inLava: boolean;
   nightVision: boolean;
+  /** Blinded: a dark fog a few blocks out. */
+  blind?: boolean;
   entities: Iterable<Entity>;
   localPlayer: RemotePlayerView;
   remotePlayers: RemotePlayerView[];
@@ -96,6 +99,8 @@ interface EntityView {
   item?: ItemView;
   lit?: THREE.RawShaderMaterial;
   nameTag?: THREE.Sprite;
+  /** What a creature's tag says, so it is redrawn only when that changes. */
+  tagText?: string;
   /** The skin a mob's model was built with, so a change (a villager's new trade) rebuilds it. */
   variant?: number;
   /** An end crystal's spinning cage and its beam to the dragon. */
@@ -370,10 +375,22 @@ export class WorldRenderer {
     return v;
   }
 
+  /** A tamed creature's name, level and owner, floating over it. */
+  private creatureTag(v: EntityView, e: Mob, x: number, y: number, z: number): void {
+    const text = e.owner ? `${CREATURES[e.kind as keyof typeof CREATURES].name} · Lv ${e.level}${e.ownerName ? ` · ${e.ownerName}` : ""}` : "";
+    if (text !== v.tagText) {
+      if (v.nameTag) { this.scene.remove(v.nameTag); v.nameTag.material.map?.dispose(); v.nameTag.material.dispose(); v.nameTag = undefined; }
+      v.tagText = text;
+      if (text) { v.nameTag = nameTag(text); this.scene.add(v.nameTag); }
+    }
+    if (v.nameTag) v.nameTag.position.set(x, y + e.body.height + 0.6, z);
+  }
+
   private dropView(id: number): void {
     const v = this.views.get(id);
     if (!v) return;
     this.scene.remove(v.object);
+    if (v.nameTag && v.entity) { this.scene.remove(v.nameTag); v.nameTag.material.map?.dispose(); v.nameTag.material.dispose(); }
     v.item?.dispose();
     v.lit?.dispose();
     v.model?.material.dispose();
@@ -420,7 +437,10 @@ export class WorldRenderer {
           // A wolf sits when told; it holds its tail low when angry (screaming) and wags it when tame (carrying).
           sitting: e.kind === "wolf" && e.sitting,
           ...(e.kind === "wolf" ? { screaming: e.anger > 0, carrying: !!e.owner } : {}),
+          // A creature bites as its cooldown restarts; lies down when knocked out; shows its saddle.
+          ...(isDino(e.kind) ? { swing: Math.max(0, e.attackCooldown - 14) / 6, saddled: e.saddled, asleep: e.unconscious } : {}),
         });
+        if (isDino(e.kind)) this.creatureTag(v, e, x, y, z);
         if (e.kind === "ender_dragon") {
           // It is perched when its phase says so; the flag doubles as "wings folded".
           if (e.dragon?.phase === "perch") pose(v.model, e.kind, { x, y, z, yaw, pitch: 0, walk, speed, light: bright, hurt: e.hurtTime > 0, death: 0, time: this.time, swing: 0, size: 4, onGround: true });
@@ -655,6 +675,7 @@ export class WorldRenderer {
     let near = closeFog ? Math.min(renderFar * 0.3, 40) : renderFar * 0.72, far = closeFog ? Math.min(renderFar * 0.95, 110) : renderFar * 0.98;
     if (frame.underwater) { fogColor = WATER_FOG.clone().multiplyScalar(0.3 + sky.daylight * 0.7); near = 2; far = 24; }
     if (frame.inLava) { fogColor = LAVA_FOG.clone(); near = 0.2; far = 2.5; }
+    if (frame.blind) { fogColor = new THREE.Color(0.02, 0.02, 0.02); near = 1; far = 6; }
     if (frame.rain > 0 && !frame.underwater) { near *= 1 - frame.rain * 0.4; }
     u.uFogColor.value.copy(fogColor);
     u.uFogNear.value = near;
@@ -796,6 +817,7 @@ function skinVariant(e: Mob): number {
   // A wolf's collar when tame; red eyes when angry.
   if (e.kind === "wolf") return (e.owner ? 1 : 0) | (e.anger > 0 ? 2 : 0);
   if (e.kind === "tribute") return e.id % 24;
+  if (isDino(e.kind)) return e.id % 4;
   return 0;
 }
 
@@ -808,7 +830,7 @@ function modelScale(e: Mob): number {
     case "bear": return 2;
     case "shulker": return 2;
     case "wither_skeleton": return 1.2;
-    default: return e.size;
+    default: return isDino(e.kind) ? CREATURES[e.kind].scale : e.size;
   }
 }
 

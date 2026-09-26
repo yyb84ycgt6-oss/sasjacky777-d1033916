@@ -11,6 +11,7 @@ import { WOOL_COLORS } from "../engine/blocks";
 import { boxRegions, skin, type Face } from "./skins";
 import { col, createLitBlockMaterial, createSpriteMaterial, type SharedUniforms } from "./materials";
 import { itemModel } from "./itemModels";
+import { DINO_MODELS } from "./dinoModels";
 
 const FACE_ORDER: Face[] = ["east", "west", "top", "bottom", "back", "front"];
 
@@ -249,6 +250,8 @@ const MODELS: Record<string, PartSpec[]> = {
     { name: "armR", size: [4, 30, 6], uv: [32, 23], pivot: [-11, 36, 0], offset: [0, -13, 0] },
     { name: "armL", size: [4, 30, 6], uv: [32, 23], pivot: [11, 36, 0], offset: [0, -13, 0] },
   ],
+  // Primal's creatures (render/dinoModels.ts), their skins packed to fit.
+  ...DINO_MODELS,
   player: [...HUMANOID(false), ...WINGS],
   zombie: HUMANOID(false),
   tribute: HUMANOID(false),
@@ -344,6 +347,8 @@ export function buildModel(kind: string, variant = 0): ModelInstance {
     const pivot = new THREE.Group();
     pivot.position.set(spec.pivot[0] / 16, spec.pivot[1] / 16, spec.pivot[2] / 16);
     if (spec.rotation) pivot.rotation.set(...spec.rotation);
+    // Kept so a pose can move a part from where the model holds it, not from zero (a creature's tilted neck).
+    pivot.userData.base = spec.rotation ?? [0, 0, 0];
     const gkey = `${spec.size}:${spec.uv}:${spec.inflate ?? 0}`;
     let g = geometryCache.get(gkey);
     if (!g) { g = boxGeometry(spec.size[0], spec.size[1], spec.size[2], spec.uv[0], spec.uv[1], spec.inflate); geometryCache.set(gkey, g); }
@@ -400,6 +405,9 @@ export interface PoseInput {
   attach?: number;
   peek?: number;
   headYaw?: number;
+  /** Primal: wearing a saddle; knocked out (lying on its side). */
+  saddled?: boolean;
+  asleep?: boolean;
 }
 
 /** Turns a shulker so the side it holds by faces its block: [x, z] rotations by the Face (E W U D S N). */
@@ -454,6 +462,8 @@ export function pose(m: ModelInstance, kind: string, p: PoseInput): void {
     // Spread in a shallow V behind the shoulders.
     wingR.rotation.set(0.15, 0, 0.35); wingL.rotation.set(0.15, 0, -0.35);
   }
+
+  if (DINO_MODELS[kind]) { poseDino(m, p, swing, r); return; }
 
   switch (kind) {
     case "enderman": {
@@ -583,6 +593,45 @@ export function pose(m: ModelInstance, kind: string, p: PoseInput): void {
       }
       break;
     }
+  }
+}
+
+/**
+ * Primal's creatures: legs stride, tails and necks sway, a jaw opens to bite,
+ * wings beat aloft and fold on the ground; a creature knocked out lies on its
+ * side; the saddle shows when one is on.
+ */
+function poseDino(m: ModelInstance, p: PoseInput, swing: number, r: THREE.Object3D): void {
+  const turn = (name: string, x = 0, y = 0, z = 0) => {
+    const part = m.parts.get(name);
+    if (!part) return;
+    const [bx, by, bz] = (part.userData.base as [number, number, number] | undefined) ?? [0, 0, 0];
+    part.rotation.set(bx + x, by + y, bz + z);
+  };
+  const saddle = m.parts.get("saddle");
+  if (saddle) saddle.visible = !!p.saddled;
+  if (p.asleep) r.rotation.z = Math.PI / 2;
+  const still = p.asleep ? 0 : 1;
+  const s = swing * still;
+  if (m.parts.has("legFR")) {
+    turn("legFR", s); turn("legBL", s); turn("legFL", -s); turn("legBR", -s);
+  } else {
+    turn("legR", s); turn("legL", -s);
+  }
+  turn("armR", -s * 0.4); turn("armL", s * 0.4);
+  const sway = Math.sin(p.time * 2) * 0.12 * still;
+  turn("tail", 0, sway + s * 0.08, 0);
+  turn("tailTip", 0, sway * 1.5, 0);
+  const bite = p.swing > 0 ? Math.sin(Math.min(1, p.swing) * Math.PI) : 0;
+  turn("jaw", bite * 0.6);
+  turn("head", p.pitch * 0.5 - bite * 0.15 + Math.sin(p.time * 1.3) * 0.03 * still, 0, 0);
+  turn("neck", Math.sin(p.time * 0.9) * 0.05 * still);
+  // Aloft, wings beat; on the ground, they fold down along the body.
+  const flap = p.onGround || p.asleep ? 0.9 : Math.sin(p.time * 6) * 0.6;
+  if (m.parts.has("wingR")) {
+    const wide = (m.parts.get("wingR") as THREE.Object3D).children.length > 0 && Math.abs(((m.parts.get("wingR")!.children[0] as THREE.Mesh).position.x)) > 0.2;
+    if (wide) { turn("wingR", 0, 0, -flap); turn("wingL", 0, 0, flap); }
+    else { turn("wingR", 0, 0, 0.1 + (p.onGround ? 0 : Math.abs(flap) * 0.4)); turn("wingL", 0, 0, -0.1 - (p.onGround ? 0 : Math.abs(flap) * 0.4)); }
   }
 }
 

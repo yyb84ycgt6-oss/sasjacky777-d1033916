@@ -762,6 +762,25 @@ def("fern", (p, r) => {
     }
   }
 });
+/** A low leafy bush for Primal's berries: a mound of leaves, with fruit dotted through it unless picked bare. */
+function berryBush(p: Pixels, rng: Rng, berry: C | null): void {
+  p.clear();
+  const leaf = [hex("#2f6b22"), hex("#3c8a2c"), hex("#4f9e36"), hex("#27561c")];
+  for (let y = 4; y < 16; y++) {
+    const half = Math.min(7, Math.round(2 + (y - 4) * 0.8));
+    for (let x = 8 - half; x < 8 + half; x++) if (rng.next() < 0.82) p.set(x, y, leaf[rng.int(leaf.length)]);
+  }
+  for (const [x, y] of [[7, 15], [8, 14], [6, 13], [9, 13]]) p.set(x, y, hex("#5a3a1e"));
+  if (!berry) return;
+  for (let i = 0; i < 9; i++) {
+    const x = 3 + rng.int(10), y = 6 + rng.int(8);
+    p.set(x, y, berry); p.set(x + 1, y, shade(berry, 0.75)); p.set(x, y + 1, shade(berry, 0.6));
+  }
+}
+def("mejoberry_bush", (p, r) => berryBush(p, r, hex("#c0203a")));
+def("mejoberry_bush_bare", (p, r) => berryBush(p, r, null));
+def("narcoberry_bush", (p, r) => berryBush(p, r, hex("#3a2a6a")));
+def("narcoberry_bush_bare", (p, r) => berryBush(p, r, null));
 def("dead_bush", (p, r) => {
   p.clear();
   const c = hex("#6b4a23");
@@ -2508,6 +2527,120 @@ const ITEM_TEMPLATES: Record<string, string[]> = {
     "....abbbbbda....",
     ".....aaaaaa.....",
   ],
+  roll: [
+    "................", "................", "................",
+    "....aaaaaaa.....",
+    "...abbbbbbba....",
+    "..abcccbbbbba...",
+    "..abcacbbbbbad..",
+    "..abcccbbbbbad..",
+    "...abbbbbbbad...",
+    "....aaaaaaadbbb.",
+    "..........abbbb.",
+    "..........aaaa..",
+  ],
+  splint: [
+    "................",
+    "..........hh....",
+    ".........hhh....",
+    "........hwh.....",
+    ".......hww......",
+    "......hwwh......",
+    ".....hwwh.......",
+    "....wwhh........",
+    "...hwh..........",
+    "..hhh...........",
+    "..hh............",
+  ],
+  pills: [
+    "................",
+    "......aaaa......",
+    ".....abbbba.....",
+    "......aaaa......",
+    ".....awwwwa.....",
+    ".....awcwwa.....",
+    ".....acccca.....",
+    ".....acccca.....",
+    ".....awwwwa.....",
+    ".....awwwwa.....",
+    "......aaaa......",
+  ],
+  canteen: [
+    "................",
+    "......aa........",
+    ".....abba.......",
+    "....aabbaa......",
+    "...abbbbbba.....",
+    "..abccbbbbba....",
+    "..abcbbbbbba....",
+    "..abbbbbbbba....",
+    "..abbbbbbbda....",
+    "...abbbbbda.....",
+    "....aaaaaa......",
+  ],
+  berries: [
+    "................", "................", "................",
+    ".......g........",
+    "......gg........",
+    ".....aba.aba....",
+    "....abcbaabcb...",
+    "....abbbaabbb...",
+    "...abaaabaaa....",
+    "..abcbaabcba....",
+    "..abbbaabbba....",
+    "...aaa..aaa.....",
+  ],
+  vial: [
+    "................",
+    "......hhhh......",
+    ".......aa.......",
+    ".......aa.......",
+    "......abba......",
+    ".....abccba.....",
+    ".....abbbba.....",
+    ".....abbbba.....",
+    ".....abbbda.....",
+    ".....abbdda.....",
+    "......aaaa......",
+  ],
+  club: [
+    "................",
+    "..........aaa...",
+    ".........abcba..",
+    "........abcbbda.",
+    "........abbbdda.",
+    ".........adddaa.",
+    "........hha.....",
+    ".......hhh......",
+    "......hhh.......",
+    ".....hhh........",
+    "....hhh.........",
+    "...hhh..........",
+    "..hhh...........",
+    "..hh............",
+  ],
+  kibble: [
+    "................", "................", "................", "................",
+    "......ab........",
+    "...ab.bc..ab....",
+    "...bc.....bc....",
+    ".......ab.......",
+    "..ab...bc...ab..",
+    "..bc.ab.....bc..",
+    ".....bc.ab......",
+    "........bc......",
+  ],
+  saddle: [
+    "................", "................", "................",
+    "......aaaa......",
+    "....aabbbbaa....",
+    "...abbccccbba...",
+    "..abbbbbbbbbba..",
+    "..abddddddddba..",
+    "...a.w....w.a...",
+    ".....w....w.....",
+    ".....k....k.....",
+  ],
   flesh: [
     "................", "................", "................", "................",
     ".....aaaaa......",
@@ -2590,6 +2723,24 @@ art("cooked_mutton", "meat", paletteOf("#8c5230", { e: hex("#d8c8b0"), w: hex("#
 art("chicken", "drumstick", paletteOf("#f2c6b0", { e: hex("#f5e8e0"), w: hex("#fff") }));
 art("cooked_chicken", "drumstick", paletteOf("#c88a4a", { e: hex("#e8d8c0"), w: hex("#f5f0e0") }));
 art("rotten_flesh", "flesh", paletteOf("#8a6a3a", { d: hex("#5a7a3a") }));
+// Primal.
+art("mejoberry", "berries", paletteOf("#c0203a", { g: hex("#3c8a2c") }));
+art("narcoberry", "berries", paletteOf("#46307a", { g: hex("#3c8a2c") }));
+art("narcotic", "vial", paletteOf("#7a4ab8", { h: hex("#8a6536") }));
+art("tranq_arrow", "arrow", { a: shade(hex("#6a3ab0"), 0.55), b: hex("#8a5ad0"), h: H, w: hex("#f0f0f0") });
+art("wooden_club", "club", { a: HD, b: HL, c: shade(HL, 1.2), d: H, h: H });
+art("kibble", "kibble", paletteOf("#b88a4a"));
+art("saddle", "saddle", paletteOf("#8f5a33", { w: hex("#3a2a1a"), k: hex("#9a9a9a") }));
+art("heavy_saddle", "saddle", paletteOf("#5a3a22", { w: hex("#3a3a3a"), k: hex("#d8d8d8") }));
+art("flyer_saddle", "saddle", paletteOf("#b8844a", { w: hex("#f0f0f0"), k: hex("#9a9a9a") }));
+art("raw_meat", "meat", paletteOf("#b8302a", { e: hex("#f0e0d8"), w: hex("#fff") }));
+art("cooked_meat", "meat", paletteOf("#74442a", { e: hex("#d0c0a8"), w: hex("#e8e0d8") }));
+// Dead Zone's first aid and water.
+art("bandage", "roll", paletteOf("#e8e4dc", { c: hex("#c8c0b0"), d: hex("#a8a090") }));
+art("splint", "splint", { h: H, w: hex("#e8e4dc") });
+art("antibiotics", "pills", { a: hex("#3a3a3a"), b: hex("#d83a3a"), w: hex("#f0f0f0"), c: hex("#4aa84a") });
+art("canteen", "canteen", paletteOf("#5a6a3a", { c: shade(hex("#5a6a3a"), 1.4) }));
+art("water_canteen", "canteen", paletteOf("#5a6a3a", { c: hex("#6ab0f0") }));
 art("bread", "bread", paletteOf("#b8843a"));
 art("carrot", "carrot", paletteOf("#ef8a1c", { g: hex("#4c9a2a") }));
 art("potato", "potato", paletteOf("#c8a254"));

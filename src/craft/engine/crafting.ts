@@ -271,6 +271,16 @@ shaped("purpur_slab", ["###"], { "#": "purpur_block" }, "purpur_slab", 6);
 shaped("item_frame", ["SSS", "SLS", "SSS"], { S: "stick", L: "leather" }, "item_frame");
 // A lucky block: gold round a dropper, as the mod has it.
 shaped("lucky_block", ["GGG", "GDG", "GGG"], { G: "gold_ingot", D: "dropper" }, "lucky_block");
+
+// Primal (after ARK): the kit for knocking a creature out, keeping it under, taming it and riding it.
+shapeless("narcotic", ["narcoberry", "narcoberry", "narcoberry", "narcoberry", "narcoberry", "rotten_flesh"], "narcotic");
+shapeless("tranq_arrow", ["arrow", "arrow", "narcotic"], "tranq_arrow", 2);
+shaped("wooden_club", ["L", "L", "S"], { L: "#logs", S: "stick" }, "wooden_club");
+shapeless("kibble", ["egg", "cooked_meat", "mejoberry", "mejoberry", "wheat"], "kibble", 2);
+shapeless("kibble_beef", ["egg", "cooked_beef", "mejoberry", "mejoberry", "wheat"], "kibble", 2);
+shaped("saddle", ["LLL", "LSL"], { L: "leather", S: "string" }, "saddle");
+shaped("heavy_saddle", ["LLL", "ISI"], { L: "leather", I: "iron_ingot", S: "string" }, "heavy_saddle");
+shaped("flyer_saddle", ["LLL", "FSF"], { L: "leather", F: "feather", S: "string" }, "flyer_saddle");
 // A cooking pot: an iron pot with brick handles, a wooden spoon (shovel) to stir it.
 shaped("cooking_pot", ["BSB", "I I", "III"], { B: "brick", S: "wooden_shovel", I: "iron_ingot" }, "cooking_pot");
 // A backpack: leather round a chest, a string strap.
@@ -484,6 +494,7 @@ const SMELTING: Smelt[] = [
   { input: "porkchop", output: "cooked_porkchop", xp: 0.35 },
   { input: "beef", output: "cooked_beef", xp: 0.35 },
   { input: "venison", output: "cooked_venison", xp: 0.35 },
+  { input: "raw_meat", output: "cooked_meat", xp: 0.35 },
   { input: "chicken", output: "cooked_chicken", xp: 0.35 },
   { input: "mutton", output: "cooked_mutton", xp: 0.35 },
   { input: "potato", output: "baked_potato", xp: 0.35 },

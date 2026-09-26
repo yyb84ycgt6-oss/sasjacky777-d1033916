@@ -31,6 +31,8 @@ import type { ModeState } from "../modes/modes";
 import type { ModeTell } from "../game/types";
 import { sanitizeStack } from "../engine/inventory";
 import { Mob, isMobKind } from "../engine/mobs";
+import { TORPOR } from "../engine/creatures";
+import { canRide } from "../engine/dinoAi";
 import { isVehicleKind, Vehicle, vehicleFromSnapshot } from "../engine/vehicles";
 import { B, block, Face } from "../engine/blocks";
 import type { PlayerSave } from "../engine/player";
@@ -406,8 +408,8 @@ export class NetSession implements NetLink {
   }
 
   // Guest → host actions.
-  attack(entityId: number, damage: number, fx: number, fz: number, knockback = 0, fire = 0, looting = 0, part?: string): void {
-    this.push(["at", entityId, r2(damage), r2(fx), r2(fz), r2(knockback), fire, looting, part]);
+  attack(entityId: number, damage: number, fx: number, fz: number, knockback = 0, fire = 0, looting = 0, part?: string, torpor = 0): void {
+    this.push(["at", entityId, r2(damage), r2(fx), r2(fz), r2(knockback), fire, looting, part, r2(torpor)]);
   }
   /** `stack` goes along when the whole stack matters (hung in an item frame, enchantments and all). */
   interact(entityId: number, item: string | null, stack?: ItemStack | null): void { this.push(["in", entityId, item, stack ?? undefined]); }
@@ -432,7 +434,7 @@ export class NetSession implements NetLink {
   placeCrystal(x: number, y: number, z: number): void { this.push(["ec", x, y, z]); }
   mount(entityId: number, on: boolean): void { if (this.role === "guest") this.push(["mo", entityId, on ? 1 : 0]); }
   trade(entityId: number, offer: number): void { this.push(["tr", entityId, offer]); }
-  vehiclePose(v: Vehicle): void {
+  vehiclePose(v: Vehicle | Mob): void {
     const b = v.body;
     this.push(["vp", v.id, r3(b.x), r3(b.y), r3(b.z), r3(v.yaw), r3(b.vx), r3(b.vy), r3(b.vz)]);
   }
@@ -851,7 +853,7 @@ export class NetSession implements NetLink {
         if (!created) continue;
         e = created;
         g.entities.set(e.id, e);
-      } else if (e instanceof Vehicle && g.player.riding === e.id) {
+      } else if ((e instanceof Vehicle || e instanceof Mob) && g.player.riding === e.id) {
         // This guest drives it: keep its own motion, and only hear who the host says is riding.
         const rider = s.data?.r;
         if (typeof rider === "string" && rider !== g.player.id) g.dismount();
@@ -886,7 +888,7 @@ export class NetSession implements NetLink {
 
   private onAttack(from: string, op: Op): void {
     const g = this.game!;
-    const [, id, dmg, fx, fz, kb, fire, looting, part] = op;
+    const [, id, dmg, fx, fz, kb, fire, looting, part, torpor] = op;
     if (!finite(id, dmg, fx, fz)) return;
     const e = g.entities.get(id as number);
     if (e instanceof Vehicle || e instanceof EndCrystal || e instanceof ItemFrame || e instanceof Projectile) { e.hurt(g.ctx, Math.min(40, dmg as number), "player", fx as number, fz as number, from); return; }
@@ -897,6 +899,8 @@ export class NetSession implements NetLink {
       const took = e.hurt(g.ctx, Math.min(40, dmg as number), "player", fx as number, fz as number, from, Math.min(2, Math.max(0, Number(kb) || 0)));
       // Fire Aspect from a guest's sword: the host owns the mob, so it lights it here.
       if (took && finite(fire) && (fire as number) > 0) e.fireTicks = Math.max(e.fireTicks, Math.min(200, fire as number));
+      // A guest's club or fist: torpor, no more than a club gives.
+      if (took && finite(torpor) && (torpor as number) > 0) e.addTorpor(g.ctx, Math.min(TORPOR.club, torpor as number), from);
     }
   }
 
@@ -928,7 +932,14 @@ export class NetSession implements NetLink {
 
   private onMount(from: string, op: Op): void {
     const [, id, on] = op;
-    const v = this.game!.entities.get(id as number);
+    const g = this.game!;
+    const v = g.entities.get(id as number);
+    // A creature carries only its owner, and only saddled and awake.
+    if (v instanceof Mob) {
+      if (on === 1 && canRide(v, from, g.remote.get(from)?.name)) v.rider = from;
+      else if (on === 0 && v.rider === from) v.rider = null;
+      return;
+    }
     if (!(v instanceof Vehicle)) return;
     // First come, first seated; a guest can only climb out of their own seat.
     if (on === 1 && (v.rider === null || v.rider === from)) v.rider = from;
@@ -951,7 +962,7 @@ export class NetSession implements NetLink {
   private onVehiclePose(from: string, op: Op): void {
     const [, id, x, y, z, yaw, vx, vy, vz] = op;
     const v = this.game!.entities.get(id as number);
-    if (!(v instanceof Vehicle) || v.rider !== from || !finite(x, y, z, yaw, vx, vy, vz)) return;
+    if (!(v instanceof Vehicle || v instanceof Mob) || v.rider !== from || !finite(x, y, z, yaw, vx, vy, vz)) return;
     const b = v.body;
     // A rider reports where their vehicle went; a jump further than a fast cart could go is not believed.
     if (Math.hypot((x as number) - b.x, (z as number) - b.z) > 4) return;

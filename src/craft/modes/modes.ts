@@ -44,6 +44,14 @@ export interface ModeDef {
   lucky?: boolean;
   /** Good with friends; playable alone (bots or a score to beat) either way. */
   multiplayer?: boolean;
+  /** Who roams the wilds instead of the overworld's usual mobs: Primal's creatures, or the infected. */
+  fauna?: "primal" | "infected";
+  /** Primal's rules: Evolved's, or Ascended's gentler taming and wider roster. */
+  primal?: "evolved" | "ascended";
+  /** Survival beyond hunger: thirst, body temperature, and wounds (bleeding, sickness, broken bones). */
+  vitals?: { thirst?: boolean; temperature?: boolean; wounds?: boolean };
+  /** Recipes past the stone age are learned, a level at a time (engine/engrams.ts). */
+  engrams?: boolean;
 }
 
 /** A world's mode and what it has kept track of: counters, times, bests. */
@@ -102,6 +110,22 @@ export const MODES: readonly ModeDef[] = [
     description: "Survival with a single heart. Everything is lethal.", goal: "Slay the Ender Dragon on one heart." },
   { id: "lucky_skyblock", name: "Lucky SkyBlock", category: "challenge", icon: "lucky_block", gameMode: "survival", map: "skyblock", lucky: true,
     description: "SkyBlock, but your chest holds lucky blocks instead of seeds.", goal: "Build an island from luck alone." },
+
+  // ---- primal (after ARK: Survival Evolved and Ascended) ------------------------------------
+  { id: "primal_evolved", name: "Primal: Survival Evolved", category: "primal", icon: "wooden_club", gameMode: "survival", map: "primal_island", difficulty: 2,
+    fauna: "primal", primal: "evolved", vitals: { thirst: true, temperature: true }, engrams: true, multiplayer: true,
+    inspiredBy: "ARK: Survival Evolved (Studio Wildcard, 2017)",
+    description: "Wake on the Island's beach with nothing. Dodos, raptors, trikes, a rex. Knock them out, feed them, tame them, saddle and ride them. Learn engrams as you level; mind your water and warmth; supply drops fall from the sky.",
+    goal: "Tame a rex." },
+  { id: "primal_ascended", name: "Primal: Survival Ascended", category: "primal", icon: "saddle", gameMode: "survival", map: "primal_island", difficulty: 2,
+    fauna: "primal", primal: "ascended", vitals: { thirst: true, temperature: true }, engrams: true, multiplayer: true,
+    inspiredBy: "ARK: Survival Ascended (Studio Wildcard, 2023)",
+    description: "The Island, remade: taming goes faster, every creature tells you what it eats, and the great feathered Gigantoraptor walks the plains.",
+    goal: "Tame a rex and a gigantoraptor." },
+  { id: "primal_wilds", name: "Primal Wilds", category: "primal", icon: "raw_meat", gameMode: "survival",
+    fauna: "primal", primal: "evolved", vitals: { thirst: true },
+    description: "Primal's creatures on ordinary terrain, no engrams to learn: tame and ride at your own pace in a world with villages and the End.",
+    goal: "Ride something with wings." },
 ];
 
 export function modeDef(id: string | undefined): ModeDef | undefined {

@@ -16,6 +16,7 @@ import { itemByName, itemDef, maxStack, type ItemStack, type StatusEffect } from
 import { bodyBox, moveBody, newBody, senseEnvironment, type AABB, type Body } from "./physics";
 import { raycastBlocks, rayBox } from "./raycast";
 import type { World } from "./world";
+import { TORPOR } from "./creatures";
 
 export type EntityKind =
   | "item" | "xp" | "arrow" | "snowball" | "egg" | "potion" | "xp_bottle" | "fireball" | "small_fireball" | "falling_block" | "tnt"
@@ -24,7 +25,8 @@ export type EntityKind =
   | "zombified_piglin" | "ghast" | "magma_cube" | "blaze" | "wither_skeleton" | "piglin" | "hoglin"
   | "boat" | "minecart" | "tnt_minecart"
   | "shulker" | "shulker_bullet" | "item_frame" | "firework_rocket"
-  | "wolf" | "deer" | "bear" | "tribute";
+  | "wolf" | "deer" | "bear" | "tribute"
+  | "dodo" | "dilo" | "parasaur" | "raptor" | "trike" | "stego" | "rex" | "bronto" | "ptero" | "gigantoraptor";
 
 export interface PlayerRef {
   id: string;
@@ -51,7 +53,9 @@ export type DamageSource = "mob" | "arrow" | "explosion" | "fall" | "fire" | "la
   /** The wither effect; and a blaze's or ghast's fireball, which also sets its target alight. */
   | "wither" | "fireball"
   /** Gliding into a wall too fast. */
-  | "fly_into_wall";
+  | "fly_into_wall"
+  /** The vitals some modes keep (engine/vitals.ts). */
+  | "thirst" | "cold" | "heat" | "bleeding" | "sickness";
 
 export interface EntityContext {
   world: World;
@@ -93,6 +97,8 @@ export interface EntityContext {
   readonly mobGriefing?: boolean;
   /** Rain is falling (overworld only), which endermen flee. */
   readonly raining?: boolean;
+  /** Primal's rules, where the world plays them (Ascended tames faster). */
+  readonly primal?: "evolved" | "ascended";
 }
 
 let nextEntityId = 1;
@@ -589,6 +595,13 @@ export class Projectile extends Entity {
 
   private tip(ctx: EntityContext, entity: Entity | null, player: PlayerRef | null): void {
     const def = itemDef(this.item);
+    // A tranquilizer arrow carries a dose of torpor, and slows a player it strikes.
+    if (def?.name === "tranq_arrow") {
+      const by = this.owner && !this.owner.startsWith("mob:") ? this.owner : undefined;
+      (entity as (Entity & { addTorpor?: (c: EntityContext, n: number, by?: string) => void }) | null)?.addTorpor?.(ctx, TORPOR.tranq, by);
+      if (player) ctx.effectPlayer?.(player.id, "slowness", 6, 1);
+      return;
+    }
     const potion = def ? potionOfItem(def.name) : undefined;
     if (!potion) return;
     const attacker = this.owner && !this.owner.startsWith("mob:") ? this.owner : undefined;

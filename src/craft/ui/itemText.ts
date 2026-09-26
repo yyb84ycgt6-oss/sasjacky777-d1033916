@@ -14,9 +14,9 @@ const EFFECT_NAMES: Record<string, string> = {
   speed: "Speed", slowness: "Slowness", strength: "Strength", weakness: "Weakness", instant_health: "Instant Health",
   instant_damage: "Instant Damage", poison: "Poison", regeneration: "Regeneration", fire_resistance: "Fire Resistance",
   night_vision: "Night Vision", invisibility: "Invisibility", water_breathing: "Water Breathing", hunger: "Hunger", absorption: "Absorption",
-  wither: "Wither", levitation: "Levitation",
+  wither: "Wither", levitation: "Levitation", blindness: "Blindness",
 };
-const HARMFUL = new Set(["slowness", "weakness", "instant_damage", "poison", "hunger", "wither", "levitation"]);
+const HARMFUL = new Set(["slowness", "weakness", "instant_damage", "poison", "hunger", "wither", "levitation", "blindness"]);
 const ROMAN = ["", "", " II", " III", " IV", " V"];
 export const effectName = (kind: string, amp = 0): string => `${EFFECT_NAMES[kind] ?? kind}${ROMAN[amp + 1] ?? ` ${amp + 1}`}`;
 export const clock = (seconds: number): string => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;

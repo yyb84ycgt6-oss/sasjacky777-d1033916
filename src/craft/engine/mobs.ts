@@ -21,6 +21,9 @@ import { hashFloat, Rng } from "./rng";
 import { levelForXp, offersForLevel, sanitizeOffer, type Offer } from "./trading";
 import { JOB_BLOCKS, professionForBlock, PROFESSIONS, type Profession } from "./villages";
 import { DRAGON_PHASES, dragonHurt, dragonParts, dragonTick, newDragonState, type DragonPart, type DragonState } from "./dragon";
+import { addTorpor, dinoAi, dinoHurt, dinoInteract, dinoLoot, dinoTick } from "./dinoAi";
+import { CREATURES, isDino, levelScale, maxTorpor, wildLevel } from "./creatures";
+import type { DriveInput } from "./vehicles";
 
 export type MobKind =
   | "pig" | "cow" | "sheep" | "chicken" | "zombie" | "skeleton" | "creeper" | "spider" | "slime" | "villager" | "iron_golem"
@@ -29,7 +32,9 @@ export type MobKind =
   // Wildlife (after Alex's Mobs and Naturalist): wolves to tame, skittish deer, bears best left alone.
   | "wolf" | "deer" | "bear"
   // Game modes: the Survival Games' other tributes.
-  | "tribute";
+  | "tribute"
+  // Primal's creatures (engine/creatures.ts, engine/dinoAi.ts).
+  | "dodo" | "dilo" | "parasaur" | "raptor" | "trike" | "stego" | "rex" | "bronto" | "ptero" | "gigantoraptor";
 
 interface MobSpec {
   health: number;
@@ -85,6 +90,18 @@ export const MOB_SPECS: Record<MobKind, MobSpec> = {
   bear: { health: 30, width: 1.4, height: 1.4, speed: 0.06, hostile: false, attack: 6, tempt: ["apple"], burnsInDay: false, followRange: 16, xp: [1, 3] },
   // Roams the arena and fights back when struck; a mode sends the bold ones hunting.
   tribute: { health: 20, width: 0.6, height: 1.8, speed: 0.07, hostile: true, attack: 4, tempt: [], burnsInDay: false, followRange: 20, xp: [5, 5] },
+  // Primal. Health and bite are at level 1; a creature's level scales both (creatures.ts). The hunters count as
+  // hostile — they despawn far from everyone and never come in peaceful — and the rest do not.
+  dodo: { health: 8, width: 0.6, height: 0.8, speed: 0.05, hostile: false, attack: 0, tempt: ["mejoberry"], burnsInDay: false, followRange: 10, xp: [1, 3] },
+  dilo: { health: 14, width: 0.6, height: 1.1, speed: 0.08, hostile: true, attack: 3, tempt: [], burnsInDay: false, followRange: 16, xp: [5, 8] },
+  parasaur: { health: 30, width: 1.0, height: 2.2, speed: 0.085, hostile: false, attack: 3, tempt: [], burnsInDay: false, followRange: 16, xp: [4, 8] },
+  raptor: { health: 26, width: 0.8, height: 1.4, speed: 0.1, hostile: true, attack: 5, tempt: [], burnsInDay: false, followRange: 24, xp: [8, 12] },
+  trike: { health: 60, width: 1.8, height: 1.9, speed: 0.065, hostile: false, attack: 8, tempt: [], burnsInDay: false, followRange: 16, xp: [10, 15] },
+  stego: { health: 80, width: 2.2, height: 2.4, speed: 0.058, hostile: false, attack: 10, tempt: [], burnsInDay: false, followRange: 16, xp: [12, 18] },
+  rex: { health: 130, width: 2.4, height: 3.6, speed: 0.088, hostile: true, attack: 15, tempt: [], burnsInDay: false, followRange: 32, xp: [30, 40] },
+  bronto: { health: 200, width: 2.8, height: 5.2, speed: 0.048, hostile: false, attack: 14, tempt: [], burnsInDay: false, followRange: 20, xp: [30, 40] },
+  ptero: { health: 22, width: 1.4, height: 1.0, speed: 0.07, hostile: false, attack: 3, tempt: [], burnsInDay: false, followRange: 16, xp: [6, 10], flies: true },
+  gigantoraptor: { health: 80, width: 1.2, height: 3.4, speed: 0.1, hostile: false, attack: 11, tempt: [], burnsInDay: false, followRange: 28, xp: [20, 28] },
 };
 
 /** What a tamed wolf eats: any meat, as in the original, and it will breed on it too. */
@@ -158,7 +175,7 @@ export class Mob extends Entity {
   woolColor = 0;
   eggTimer = 6000;
   targetId: string | null = null;
-  private wander: { x: number; z: number; ticks: number } | null = null;
+  wander: { x: number; z: number; ticks: number } | null = null;
   private lookTimer = 0;
   private strafe = 1;
   private shootCooldown = 20;
@@ -192,7 +209,7 @@ export class Mob extends Entity {
   admiring = 0;
   private admirer: string | null = null;
   /** Flyers: where they are heading. */
-  private flyTo: { x: number; y: number; z: number } | null = null;
+  flyTo: { x: number; y: number; z: number } | null = null;
   /** Blazes: shots left in the current burst. */
   private burst = 0;
   /** Endermen: the block carried in its arms (0 for none). */
@@ -220,6 +237,18 @@ export class Mob extends Entity {
    * past its follow range.
    */
   hunting = false;
+  // Primal's creatures: level, torpor and whether it has dropped, how a tame is going, and the saddle.
+  level = 1;
+  torpor = 0;
+  unconscious = false;
+  /** Taming progress, 0 to 1. */
+  taming = 0;
+  /** How well the tame is going: every blow while it sleeps costs some. */
+  tameEffect = 1;
+  saddled = false;
+  /** The player riding it (a saddled, tamed creature), and their keys this tick. */
+  rider: string | null = null;
+  input: DriveInput = { forward: 0, strafe: 0, yaw: 0 };
 
   constructor(kind: MobKind, x: number, y: number, z: number, id?: number) {
     const spec = MOB_SPECS[kind];
@@ -240,6 +269,8 @@ export class Mob extends Entity {
     }
     // A shulker is part of the city it guards: it never wanders off or despawns.
     if (kind === "shulker") { this.persistent = true; this.yaw = 0; }
+    // A wild creature is not kept (the wilds make more); a tame one is.
+    if (isDino(kind)) { this.level = wildLevel(Math.random); this.health = this.maxHealth; this.persistent = false; }
   }
 
   /** Separate boxes a blow can land on (the dragon's head, wings, tail…), or null for the one body box. */
@@ -309,8 +340,24 @@ export class Mob extends Entity {
     return this.deathTime > 0;
   }
 
+  /** This one as a Mob, for code that must not import this module (dinoAi.ts). */
+  asMob(e: Entity): Mob | null {
+    return e instanceof Mob ? e : null;
+  }
+
+  /** Torpor from a tranquilizer, a club or a fist (Primal's creatures only). */
+  addTorpor(ctx: EntityContext, amount: number, by?: string): void {
+    addTorpor(this, ctx, amount, by);
+  }
+
+  /** Where a rider's feet go: on its back. */
+  riderY(): number {
+    return this.body.y + this.body.height * 0.82;
+  }
+
   get maxHealth(): number {
     if (this.kind === "wolf" && this.owner) return 20;
+    if (isDino(this.kind)) return Math.round(this.spec.health * levelScale(this.level));
     return this.spec.health * this.size * this.size;
   }
 
@@ -402,6 +449,7 @@ export class Mob extends Entity {
         }
       }
     }
+    if (isDino(this.kind)) dinoHurt(this, attacker);
     this.health -= amount;
     this.hurtTime = 10;
     this.invulnerable = 10;
@@ -412,7 +460,8 @@ export class Mob extends Entity {
     // Knockback away from the source.
     const dx = this.body.x - fromX, dz = this.body.z - fromZ;
     const d = Math.hypot(dx, dz) || 1;
-    if (knockback >= 0 && source !== "fire" && source !== "drown" && source !== "fall" && source !== "starve" && source !== "magic" && this.kind !== "iron_golem" && this.kind !== "shulker") {
+    if (knockback >= 0 && source !== "fire" && source !== "drown" && source !== "fall" && source !== "starve" && source !== "magic" && this.kind !== "iron_golem" && this.kind !== "shulker"
+      && !(isDino(this.kind) && this.spec.health >= 60)) {
       this.body.vx = this.body.vx / 2 + (dx / d) * (0.4 + knockback);
       this.body.vz = this.body.vz / 2 + (dz / d) * (0.4 + knockback);
       if (this.body.onGround) this.body.vy = Math.min(0.4, this.body.vy / 2 + 0.4);
@@ -456,6 +505,7 @@ export class Mob extends Entity {
 
     this.tickEffects(ctx);
     if (this.dying) return;
+    if (isDino(this.kind) && dinoTick(this, ctx)) return;
     if (this.kind === "shulker") {
       this.shulkerAi(ctx);
       this.environment(ctx);
@@ -472,6 +522,7 @@ export class Mob extends Entity {
     else if (this.kind === "bear") this.bearAi(ctx, move);
     else if (this.kind === "deer") this.deerAi(ctx, move);
     else if (this.kind === "tribute" && !this.hunting) this.tributeAi(ctx, move);
+    else if (isDino(this.kind)) dinoAi(this, ctx, move);
     else if (this.spec.hostile) this.hostileAi(ctx, move);
     else this.passiveAi(ctx, move);
 
@@ -517,7 +568,7 @@ export class Mob extends Entity {
     if (b.y < -64) this.removed = true;
   }
 
-  private environment(ctx: EntityContext): void {
+  environment(ctx: EntityContext): void {
     const b = this.body;
     if (this.spec.fireImmune) this.fireTicks = 0;
     else if (b.inLava) {
@@ -554,12 +605,12 @@ export class Mob extends Entity {
     if (ctx.world.blockAt(Math.floor(b.x), Math.floor(b.y), Math.floor(b.z)) === B.CACTUS && this.age % 10 === 0) this.hurt(ctx, 1, "cactus", b.x, b.z);
   }
 
-  private faceTo(x: number, z: number): number {
+  faceTo(x: number, z: number): number {
     return Math.atan2(-(x - this.body.x), -(z - this.body.z));
   }
 
   /** Walks toward a point; jumps up single steps; refuses cliffs when merely wandering. */
-  private steer(ctx: EntityContext, move: { forward: number; jump: boolean; yaw: number }, x: number, z: number, careful: boolean): void {
+  steer(ctx: EntityContext, move: { forward: number; jump: boolean; yaw: number }, x: number, z: number, careful: boolean): void {
     const b = this.body;
     move.yaw = this.faceTo(x, z);
     move.forward = 1;
@@ -585,7 +636,7 @@ export class Mob extends Entity {
     }
   }
 
-  private nearestPlayer(ctx: EntityContext, range: number, filter: (p: PlayerRef) => boolean): PlayerRef | null {
+  nearestPlayer(ctx: EntityContext, range: number, filter: (p: PlayerRef) => boolean): PlayerRef | null {
     let best: PlayerRef | null = null, bestD = range;
     for (const p of ctx.players()) {
       if (!filter(p)) continue;
@@ -597,7 +648,7 @@ export class Mob extends Entity {
     return best;
   }
 
-  private canSee(ctx: EntityContext, p: PlayerRef): boolean {
+  canSee(ctx: EntityContext, p: PlayerRef): boolean {
     const b = this.body;
     const ex = b.x, ey = b.y + b.height * 0.85, ez = b.z;
     const tx = p.x, ty = p.y + p.height * 0.9, tz = p.z;
@@ -606,7 +657,7 @@ export class Mob extends Entity {
     return !hit || !block(ctx.world.blockAt(hit.x, hit.y, hit.z)).opaque;
   }
 
-  private wanderAi(ctx: EntityContext, move: { forward: number; jump: boolean; yaw: number; speedMul: number }, chance: number): void {
+  wanderAi(ctx: EntityContext, move: { forward: number; jump: boolean; yaw: number; speedMul: number }, chance: number): void {
     const b = this.body;
     if (!this.wander && ctx.random() < chance) {
       const a = ctx.random() * Math.PI * 2, r = 3 + ctx.random() * 7;
@@ -625,7 +676,7 @@ export class Mob extends Entity {
     }
   }
 
-  private passiveAi(ctx: EntityContext, move: { forward: number; jump: boolean; yaw: number; speedMul: number }): void {
+  passiveAi(ctx: EntityContext, move: { forward: number; jump: boolean; yaw: number; speedMul: number }): void {
     const b = this.body;
     if (this.panic > 0) {
       this.panic--;
@@ -670,7 +721,7 @@ export class Mob extends Entity {
   }
 
   /** Breeding: two animals in love find each other; returns whether this one is busy with it. */
-  private breed(ctx: EntityContext, move: { forward: number; jump: boolean; yaw: number; speedMul: number }): boolean {
+  breed(ctx: EntityContext, move: { forward: number; jump: boolean; yaw: number; speedMul: number }): boolean {
     const b = this.body;
     if (this.love <= 0 || this.baby) return false;
     const mate = ctx.entitiesNear(b.x, b.y, b.z, 8).find(
@@ -694,7 +745,7 @@ export class Mob extends Entity {
   }
 
   /** Chases a player that angered it and bites when close enough. */
-  private chasePlayer(ctx: EntityContext, move: { forward: number; jump: boolean; yaw: number; speedMul: number }, speed: number): boolean {
+  chasePlayer(ctx: EntityContext, move: { forward: number; jump: boolean; yaw: number; speedMul: number }, speed: number): boolean {
     const b = this.body;
     if (this.anger > 0) this.anger--;
     if (this.anger <= 0 || !this.targetId) return false;
@@ -863,7 +914,7 @@ export class Mob extends Entity {
   }
 
   /** The mob a fighter is after, if it is still there to fight. */
-  private mobTarget(ctx: EntityContext, range: number): Mob | null {
+  mobTarget(ctx: EntityContext, range: number): Mob | null {
     if (this.targetMob === null) return null;
     const b = this.body;
     const t = ctx.entitiesNear(b.x, b.y, b.z, range).find((e): e is Mob => e instanceof Mob && e.id === this.targetMob);
@@ -872,7 +923,7 @@ export class Mob extends Entity {
   }
 
   /** Walks up to another mob and strikes it. */
-  private fightMob(ctx: EntityContext, move: { forward: number; jump: boolean; yaw: number; speedMul: number }, t: Mob, damage: number, launch = 0): void {
+  fightMob(ctx: EntityContext, move: { forward: number; jump: boolean; yaw: number; speedMul: number }, t: Mob, damage: number, launch = 0): void {
     const b = this.body;
     this.steer(ctx, move, t.x, t.z, false);
     const reach = (b.width + t.body.width) / 2 + 0.7;
@@ -1144,7 +1195,7 @@ export class Mob extends Entity {
   }
 
   /** Melee damage scaled by difficulty the way the original does it. */
-  private bite(ctx: EntityContext, target: PlayerRef, base: number): void {
+  bite(ctx: EntityContext, target: PlayerRef, base: number): void {
     const diff = ctx.difficulty;
     const s = this.effectLevel("strength"), w = this.effectLevel("weakness");
     base = Math.max(0, base + (s >= 0 ? 3 * (s + 1) : 0) - (w >= 0 ? 4 * (w + 1) : 0));
@@ -1203,7 +1254,7 @@ export class Mob extends Entity {
   }
 
   /** Picks a point within reach of home or target for a flyer to head to. */
-  private pickFlyTo(ctx: EntityContext, cx: number, cy: number, cz: number, spread: number): void {
+  pickFlyTo(ctx: EntityContext, cx: number, cy: number, cz: number, spread: number): void {
     this.flyTo = {
       x: cx + (ctx.random() - 0.5) * 2 * spread,
       y: Math.max(4, Math.min(120, cy + (ctx.random() - 0.5) * spread)),
@@ -1211,7 +1262,7 @@ export class Mob extends Entity {
     };
   }
 
-  private flyToward(x: number, y: number, z: number, accel: number, max: number): void {
+  flyToward(x: number, y: number, z: number, accel: number, max: number): void {
     const b = this.body;
     const dx = x - b.x, dy = y - (b.y + b.height / 2), dz = z - b.z;
     const d = Math.hypot(dx, dy, dz);
@@ -1402,9 +1453,10 @@ export class Mob extends Entity {
   }
 
   /** Right-click with an item. Returns what happened, so the caller can consume the item. */
-  interact(ctx: EntityContext, itemName: string | null, playerId: string, playerName?: string): "fed" | "sheared" | "milked" | "dyed" | "trade" | "refuse" | "barter" | "tamed" | "sat" | null {
+  interact(ctx: EntityContext, itemName: string | null, playerId: string, playerName?: string): "fed" | "sheared" | "milked" | "dyed" | "trade" | "refuse" | "barter" | "tamed" | "sat" | "saddled" | null {
     if (this.dying) return null;
     if (this.kind === "wolf") return this.wolfInteract(ctx, itemName, playerId, playerName);
+    if (isDino(this.kind)) return dinoInteract(this, ctx, itemName, playerId, playerName);
     if (this.kind === "piglin") return itemName === "gold_ingot" && this.takeGold(ctx, playerId) ? "barter" : null;
     if (this.kind === "villager") {
       if (this.profession !== "none" && this.offers.length) return "trade";
@@ -1536,6 +1588,7 @@ export class Mob extends Entity {
       case "deer": return [...it(burnt ? "cooked_venison" : "venison", r(1, 3)), ...it("leather", r(0, 2))];
       case "bear": return [...it("leather", r(1, 3)), ...it("bone", r(0, 2))];
       case "tribute": return [...it("bread", r(0, 2)), ...it("arrow", r(0, 4)), ...(ctx.random() < 0.3 ? it("stone_sword", 1) : [])];
+      default: return isDino(this.kind) ? dinoLoot(this, ctx) : [];
     }
   }
 
@@ -1563,6 +1616,11 @@ export class Mob extends Entity {
         ow: this.owner ?? undefined, on: this.ownerName ?? undefined, si: this.sitting ? 1 : undefined,
         an: (this.kind === "wolf" || this.kind === "bear") && this.anger > 0 ? 1 : undefined,
         hu: this.hunting ? 1 : undefined,
+        // A creature's level, torpor, sleep, tame and saddle, and who rides it.
+        ...(isDino(this.kind) ? {
+          dl: this.level, tp: Math.round(this.torpor * 10) / 10, ko: this.unconscious ? 1 : undefined, tm: this.taming > 0 ? Math.round(this.taming * 1000) / 1000 : undefined,
+          te: this.tameEffect < 1 ? Math.round(this.tameEffect * 100) / 100 : undefined, sd: this.saddled ? 1 : undefined, r: this.rider ?? undefined,
+        } : {}),
       },
     };
   }
@@ -1624,6 +1682,18 @@ export class Mob extends Entity {
     }
     if (this.kind === "wolf" || this.kind === "bear") this.anger = d.an === 1 ? Math.max(this.anger, 20) : 0;
     this.hunting = d.hu === 1;
+    if (isDino(this.kind)) {
+      if (typeof d.dl === "number" && d.dl >= 1 && d.dl <= 1000) this.level = Math.floor(d.dl);
+      this.torpor = typeof d.tp === "number" && d.tp >= 0 ? Math.min(d.tp, maxTorpor(this.kind as keyof typeof CREATURES, this.level) * 1.5) : 0;
+      this.unconscious = d.ko === 1;
+      this.taming = typeof d.tm === "number" ? Math.max(0, Math.min(1, d.tm)) : 0;
+      this.tameEffect = typeof d.te === "number" ? Math.max(0, Math.min(1, d.te)) : 1;
+      this.saddled = d.sd === 1;
+      this.rider = typeof d.r === "string" ? d.r.slice(0, 64) : null;
+      this.owner = typeof d.ow === "string" ? d.ow.slice(0, 64) : null;
+      this.ownerName = typeof d.on === "string" ? d.on.slice(0, 16) : null;
+      this.sitting = d.si === 1;
+    }
     const h = d.vh as { x?: unknown; z?: unknown } | undefined;
     this.home = h && typeof h.x === "number" && typeof h.z === "number" ? { x: h.x, z: h.z } : null;
   }

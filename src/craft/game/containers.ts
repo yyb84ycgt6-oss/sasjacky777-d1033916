@@ -59,7 +59,16 @@ export function craftWidth(game: Game): number {
 export function craftOutput(game: Game): { recipe: Recipe; stack: ItemStack } | null {
   if (game.screen?.kind !== "inventory" && game.screen?.kind !== "crafting") return null;
   const r = matchRecipe(game.craftGrid, craftWidth(game));
+  // A recipe an engram teaches makes nothing until the engram is learned (Primal).
+  if (r && game.engramLocking(r.result.item)) return null;
   return r ? { recipe: r, stack: recipeResult(r, game.craftGrid) } : null;
+}
+
+/** The engram the grid's recipe waits on, for the crafting screen to name. */
+export function craftLockedBy(game: Game): string | null {
+  if (game.screen?.kind !== "inventory" && game.screen?.kind !== "crafting") return null;
+  const r = matchRecipe(game.craftGrid, craftWidth(game));
+  return r ? game.engramLocking(r.result.item)?.name ?? null : null;
 }
 
 function changed(game: Game): void {

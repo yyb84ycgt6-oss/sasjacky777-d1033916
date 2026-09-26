@@ -25,6 +25,7 @@ import { TouchControls } from "./TouchControls";
 import { EndPoem } from "./EndPoem";
 import { Minimap, WaypointLabels, WorldMapScreen } from "./MapView";
 import { WaystoneScreen } from "./WaystoneScreen";
+import { EngramScreen } from "./EngramScreen";
 import { ModsScreen } from "./ModsScreen";
 
 export interface GameViewProps {
@@ -226,6 +227,7 @@ function Overlay({ game, input, settings, onSettings, onQuit, onExitApp }: GameV
           onShare={() => game.setScreen({ kind: "share" })}
           onAdvancements={() => game.setScreen({ kind: "advancements" })}
           onMods={() => game.setScreen({ kind: "mods" })}
+          onEngrams={game.engramsOn() ? () => game.setScreen({ kind: "engrams", from: "pause" }) : undefined}
           onQuit={() => quit()}
           onExitApp={onExitApp && (() => { leaving.current = true; onExitApp(); })}
           canShare={!guest}
@@ -241,6 +243,7 @@ function Overlay({ game, input, settings, onSettings, onQuit, onExitApp }: GameV
         />
       )}
       {screen?.kind === "waystone" && <WaystoneScreen game={game} x={screen.x} y={screen.y} z={screen.z} />}
+      {screen?.kind === "engrams" && <EngramScreen game={game} onBack={() => game.setScreen(screen.from === "pause" ? { kind: "pause" } : { kind: "inventory" })} />}
       {screen?.kind === "map" && <WorldMapScreen game={game} mobile={mobile} onClose={() => game.setScreen(null)} />}
       {screen?.kind === "poem" && <EndPoem name={game.player.name} onDone={() => game.setScreen(null)} />}
       {screen?.kind === "advancements" && (

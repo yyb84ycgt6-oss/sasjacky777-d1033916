@@ -128,6 +128,19 @@ const GLYPHS: Record<string, { rows: string[]; colors: Record<string, string> }>
     rows: ["kkk.kkk.", "kwwkddk.", "kwwwddk.", "kwwwddk.", ".kwwdk..", ".kwwdk..", "..kkk...", "........"],
     colors: { k: "#1a1a1a", w: "#d8d8d8", d: "#3a3a3a" },
   },
+  // Thirst (engine/vitals.ts): a drop of water, half, and empty.
+  water: {
+    rows: ["...k....", "..kbk...", ".kbbbk..", "kbwbbbk.", "kbwbbbk.", "kbbbbbk.", ".kbbbk..", "..kkk..."],
+    colors: { k: "#0a1a3a", b: "#3a8af0", w: "#bfe0ff" },
+  },
+  waterHalf: {
+    rows: ["...k....", "..kdk...", ".kddbk..", "kddbbbk.", "kddbbbk.", "kddbbbk.", ".kdbbk..", "..kkk..."],
+    colors: { k: "#0a1a3a", b: "#3a8af0", d: "#14284a" },
+  },
+  waterEmpty: {
+    rows: ["...k....", "..kdk...", ".kdddk..", "kdddddk.", "kdddddk.", "kdddddk.", ".kdddk..", "..kkk..."],
+    colors: { k: "#0a1a3a", d: "#14284a" },
+  },
   bubble: {
     rows: ["..kkk...", ".kbbbk..", "kbwbbbk.", "kbbbbbk.", "kbbbbbk.", ".kbbbk..", "..kkk...", "........"],
     colors: { k: "#1a3a6a", b: "#5ab4f0", w: "#ffffff" },

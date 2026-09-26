@@ -7,7 +7,7 @@ import { enchantedBook, enchantLabel, ENCHANTMENTS, MAX_SHELVES } from "../engin
 import type { Slot } from "../engine/inventory";
 import type { Game } from "../game/game";
 import {
-  anvilView, brewingView, chestView, clickContainer, cookView, smithingView, sortContainer, craftOutput, craftWidth, creativeTake, creativeTrash, dropCursor, enchantItem,
+  anvilView, brewingView, chestView, clickContainer, cookView, smithingView, sortContainer, craftOutput, craftLockedBy, craftWidth, creativeTake, creativeTrash, dropCursor, enchantItem,
   enchantOffers, fillRecipe, furnaceView, inventoryCounts, makeTrade, tradingWith, type Section,
 } from "../game/containers";
 import { canAfford as canAffordOffer, LEVEL_NAMES, LEVEL_XP } from "../engine/trading";
@@ -96,12 +96,14 @@ function Arrow({ progress = 0 }: { progress?: number }) {
 function CraftingArea({ game, onHover, quick }: { game: Game; onHover: (s: Slot, x: number, y: number) => void; quick: boolean }) {
   const width = craftWidth(game);
   const out = craftOutput(game);
+  const locked = out ? null : craftLockedBy(game);
   return (
     <div style={{ display: "flex", alignItems: "center", gap: "calc(var(--u) * 4)" }}>
       <Grid slots={game.craftGrid} cols={width} section="grid" game={game} onHover={onHover} quick={quick} />
       <Arrow />
       <SlotButton stack={out?.stack ?? null} className="bc-result" onHover={onHover} quickMove={quick}
         onClick={(b, shift) => clickContainer(game, "result", 0, b, shift)} />
+      {locked && <div className="bc-sub" data-testid="engram-locked" style={{ color: "#ff9a6a", maxWidth: "calc(var(--u) * 60)" }}>Learn the {locked} engram to make this.</div>}
     </div>
   );
 }
@@ -282,6 +284,7 @@ export function InventoryScreen({ game, mobile }: { game: Game; mobile: boolean 
         <div style={{ display: "flex", gap: "calc(var(--u) * 2)" }}>
           <Button onClick={() => setBook(!book)}>📖 {book ? "Hide" : "Show"} recipe book</Button>
           {game.modOn("inventory_sort") && <SortButton onClick={() => sortContainer(game, "inv")} label="Sort inventory" />}
+          {game.engramsOn() && <Button onClick={() => game.setScreen({ kind: "engrams", from: "inventory" })}>Engrams…</Button>}
         </div>
       </Frame>
       {tip}

@@ -14,6 +14,7 @@ import { itemDef, type FoodInfo, type ItemStack, type StatusEffect } from "./ite
 import { glide, newBody, senseEnvironment, travel, type Body, type BlockReader } from "./physics";
 import type { DamageSource } from "./entities";
 import { sanitizeWaypoints, type Waypoint } from "./waypoints";
+import { freshVitals, sanitizeVitals, type Vitals } from "./vitals";
 
 export type GameMode = "survival" | "creative" | "adventure" | "spectator";
 
@@ -64,6 +65,7 @@ const DEATH_MESSAGES: Record<DamageSource, string> = {
   lava: "tried to swim in lava", drown: "drowned", starve: "starved to death", void: "fell out of the world",
   cactus: "was pricked to death", player: "was slain", magic: "died", suffocation: "suffocated in a wall",
   wither: "withered away", fireball: "was fireballed", fly_into_wall: "experienced kinetic energy",
+  thirst: "died of thirst", cold: "froze to death", heat: "succumbed to the heat", bleeding: "bled out", sickness: "died of a fever",
 };
 
 /** Elytra: flight wears it a point a second, and at one point from breaking it will no longer open. */
@@ -107,6 +109,10 @@ export class Player {
   fireTicks = 0;
   private foodTimer = 0;
   effects: Effect[] = [];
+  /** Thirst, body temperature and wounds, where a mode keeps them (engine/vitals.ts). */
+  vitals: Vitals = freshVitals();
+  /** Primal's engrams this player has learned (engine/engrams.ts). */
+  engrams = new Set<string>();
   /** Chance source for Unbreaking and Respiration; tests pin it. */
   rng: () => number = Math.random;
   /**
@@ -258,7 +264,8 @@ export class Player {
       if (amount <= this.lastDamage) return 0;
       dealt = amount - this.lastDamage;
     }
-    const armored = source !== "fall" && source !== "drown" && source !== "starve" && source !== "void" && source !== "fire" && source !== "magic" && source !== "suffocation" && source !== "wither";
+    const armored = source !== "fall" && source !== "drown" && source !== "starve" && source !== "void" && source !== "fire" && source !== "magic" && source !== "suffocation" && source !== "wither"
+      && source !== "thirst" && source !== "cold" && source !== "heat" && source !== "bleeding" && source !== "sickness";
     if (armored) {
       const armor = this.inventory.armorPoints();
       const tough = this.inventory.armorToughness();
@@ -319,6 +326,8 @@ export class Player {
     this.fireTicks = 0;
     this.effects = [];
     this.gliding = false;
+    // Death takes the thirst and the wounds with it; what you learned stays.
+    this.vitals = freshVitals();
     this.body.x = x; this.body.y = y; this.body.z = z;
     this.body.vx = this.body.vy = this.body.vz = 0;
     this.body.fallDistance = 0;
@@ -551,6 +560,8 @@ export class Player {
       enchantSeed: this.enchantSeed, poem: this.poemSeen || undefined,
       waypoints: this.waypoints.length ? this.waypoints : undefined,
       waystones: this.waystones.size ? [...this.waystones] : undefined,
+      vitals: this.vitals,
+      engrams: this.engrams.size ? [...this.engrams] : undefined,
     };
   }
 
@@ -574,6 +585,8 @@ export class Player {
     this.effects = Array.isArray(s.effects) ? s.effects.filter((e) => e && typeof e.ticks === "number") : [];
     this.fireTicks = num(s.fireTicks, 0);
     this.enchantSeed = num(s.enchantSeed, this.enchantSeed);
+    this.vitals = sanitizeVitals(s.vitals);
+    this.engrams = new Set(Array.isArray(s.engrams) ? s.engrams.filter((e): e is string => typeof e === "string").slice(0, 128) : []);
     if (s.dead || this.health <= 0) { this.dead = true; this.health = 0; }
   }
 }
@@ -594,4 +607,6 @@ export interface PlayerSave {
   poem?: boolean;
   waypoints?: Waypoint[];
   waystones?: string[];
+  vitals?: Vitals;
+  engrams?: string[];
 }

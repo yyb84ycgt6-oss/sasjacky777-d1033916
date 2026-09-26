@@ -23,6 +23,9 @@ export interface DriveInput {
   strafe: number;
   /** Where the rider is looking (minecarts are nudged that way). */
   yaw: number;
+  /** A ridden creature: jump, and (a flyer) how steeply the rider looks up or down. */
+  jump?: boolean;
+  pitch?: number;
 }
 
 /** Wood types a boat can be made of, in variant order. */

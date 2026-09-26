@@ -40,6 +40,8 @@ export type StatusEffect =
   | "wither"
   /** From a shulker's bullet: carried slowly upward, whatever is underfoot. */
   | "levitation"
+  /** A dilophosaur's spit: the world closes in to a few blocks' fog. */
+  | "blindness"
   /** Instant effects: applied once, never listed. */
   | "instant_health" | "instant_damage";
 
@@ -64,6 +66,8 @@ export type ItemUse =
   | "end_crystal" | "rocket"
   /** Hung on the face of a block. */
   | "item_frame"
+  /** Treats a wound (engine/vitals.ts): a bandage stops bleeding, a splint sets a leg, antibiotics end sickness. */
+  | "treat"
   /** Opened in the hand: a satchel of 27 slots carried with you. */
   | "backpack";
 
@@ -430,6 +434,27 @@ for (const p of POTIONS) {
   if (!p.effects.length) continue;
   item(`tipped_arrow_${p.key}`, `Arrow of ${p.displayName.replace(/^Potion of /, "")}`, { category: "combat", icon: `tipped_arrow_${p.art}` });
 }
+
+// Primal (after ARK). Appended rather than filed with their kind, so that no item a save holds changes id.
+food("mejoberry", "Mejoberry", 1, 0.6);
+// Eaten, it makes you drowsy; fed to a creature asleep, it keeps it under.
+food("narcoberry", "Narcoberry", 1, 0.2, { alwaysEdible: true, effect: ["slowness", 8, 1] });
+item("narcotic", "Narcotic", { category: "ingredients" });
+item("tranq_arrow", "Tranquilizer Arrow", { category: "combat" });
+// A club hits softly and knocks out: most of its blow is torpor, not harm.
+item("wooden_club", "Wooden Club", { maxStack: 1, damage: 2, attackSpeed: 1.4, category: "combat" });
+food("kibble", "Kibble", 2, 1);
+item("saddle", "Primitive Saddle", { maxStack: 1, category: "tools" });
+item("heavy_saddle", "Heavy Saddle", { maxStack: 1, category: "tools" });
+item("flyer_saddle", "Flyer Saddle", { maxStack: 1, category: "tools" });
+food("raw_meat", "Raw Meat", 3, 1.8);
+food("cooked_meat", "Cooked Meat", 8, 12.8);
+// Wounds (Dead Zone, after DayZ): what treats them, and a canteen to carry water in.
+item("bandage", "Bandage", { use: "treat", category: "tools" });
+item("splint", "Splint", { use: "treat", category: "tools" });
+item("antibiotics", "Antibiotics", { use: "treat", category: "tools" });
+item("water_canteen", "Canteen of Water", { maxStack: 1, use: "drink", category: "food" });
+item("canteen", "Empty Canteen", { maxStack: 1, use: "bottle", category: "tools" });
 
 // ---- lookups -----------------------------------------------------------------------
 

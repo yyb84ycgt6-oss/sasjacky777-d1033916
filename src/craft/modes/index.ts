@@ -13,3 +13,4 @@ import "./waves";
 import "./tntrun";
 import "./survivalGames";
 import "./challenges";
+import "./primal";

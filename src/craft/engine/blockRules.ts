@@ -8,6 +8,7 @@
  * it is saved and sent to guests on the same path.
  */
 import {
+  isBerryBush,
   B, block, chorusJoins, CROP_MAX_AGE, FACE_DIRS, FACING_DIRS, isButton, isCrop, isDoor, isFire, isFluid, isLeaves, isLog, isNylium, isRedstoneTorch, isSapling,
   isSlab, OPPOSITE_FACING,
 } from "./blocks";
@@ -574,6 +575,12 @@ export class BlockRules {
         const pace = season ? cropGrowth(season, this.roofed(x, y, z)) : 1;
         if (rand() < (wet ? 1 / 3 : 1 / 6) * pace) world.setMeta(x, y, z, age + 1);
       }
+      return;
+    }
+    // A picked berry bush fruits again in a few minutes of loaded time.
+    if (isBerryBush(id)) {
+      const meta = world.getMeta(x, y, z);
+      if ((meta & 1) !== 0 && rand() < 1 / 6) world.setMeta(x, y, z, meta & ~1);
       return;
     }
     if (isSapling(id)) {

@@ -2,8 +2,9 @@
  * Map packs: whole worlds built for a game mode rather than grown from noise
  * — the islands of SkyBlock, the lone block of OneBlock, a parkour course in
  * the sky, a colosseum for waves of monsters, the layered floors of TNT Run,
- * and the arena of the Survival Games (real terrain with a cornucopia at its
- * heart). Each is laid out from the seed alone, so every worker and every
+ * the arena of the Survival Games (real terrain with a cornucopia at its
+ * heart), and Primal's Island (a land ringed by sea, its three obelisks
+ * standing over it). Each is laid out from the seed alone, so every worker and every
  * friend in the world builds the same one, and stamped chunk by chunk as the
  * world generates, like the other structures.
  *
@@ -17,7 +18,7 @@ import { itemByName, type ItemStack } from "./items";
 import { hash4, Rng } from "./rng";
 import type { ChunkGenerator, GeneratedChunk, Generator, Tints } from "./worldgen";
 
-export const MAP_IDS = ["skyblock", "oneblock", "void", "parkour", "colosseum", "tnt_run", "sg_arena"] as const;
+export const MAP_IDS = ["skyblock", "oneblock", "void", "parkour", "colosseum", "tnt_run", "sg_arena", "primal_island"] as const;
 export type MapId = (typeof MAP_IDS)[number];
 export const isMapId = (v: unknown): v is MapId => typeof v === "string" && (MAP_IDS as readonly string[]).includes(v);
 
@@ -34,6 +35,7 @@ export const MAPS: Record<MapId, MapInfo> = {
   colosseum: { name: "The Colosseum", description: "A sand-floored arena ringed in stone, with four gates the waves come through." },
   tnt_run: { name: "TNT Run Floors", description: "Three floors of wool over the void. Every block you step on falls away." },
   sg_arena: { name: "Survival Games Arena", description: "Real terrain around a cornucopia of chests, twelve spawn pads, and loot hidden in the wild." },
+  primal_island: { name: "The Island", description: "An island some fourteen hundred blocks across, ringed by open sea, with three great obelisks. You wake on its southern beach." },
 };
 
 /** Loot tables a map's chests are filled from (see mapLoot). */
@@ -230,6 +232,35 @@ function tntRun(): Omit<MapLayout, "map"> {
   return { spawn: [0.5, 91, 0.5], blocks: p.blocks, terrain: false, chests: [], floors, center: [0, 0], radius: 15, floorY: 70 };
 }
 
+/**
+ * Primal's Island. The generator shapes the land itself (worldgen.ts sinks
+ * everything past a radius into the sea); the map adds the three obelisks —
+ * red, green and blue, as on the Island — and wakes you on the southern beach.
+ */
+function primalIsland(base: Generator): Omit<MapLayout, "map"> {
+  const p = new Plan();
+  const obelisks: [number, number, number][] = [[0, -280, wool("red")], [-242, 140, wool("green")], [242, 140, wool("blue")]];
+  for (const [ox, oz, color] of obelisks) {
+    const y = Math.max(64, base.surfaceY(ox, oz));
+    // A stepped plinth of obsidian, a column of its colour, and a lantern crown seen from far off.
+    for (let dx = -3; dx <= 3; dx++) for (let dz = -3; dz <= 3; dz++) {
+      const edge = Math.max(Math.abs(dx), Math.abs(dz));
+      for (let yy = y - 4; yy <= y + (edge <= 2 ? 2 : 1); yy++) p.set(ox + dx, yy, oz + dz, B.OBSIDIAN);
+    }
+    for (let yy = y + 3; yy <= y + 34; yy++) for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
+      p.set(ox + dx, yy, oz + dz, (yy - y) % 8 === 0 ? B.SEA_LANTERN : color);
+    }
+    for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) p.set(ox + dx, y + 35, oz + dz, B.GLOWSTONE);
+  }
+  // The south beach: coming in from the open sea, the first dry ground (a river inland is not the coast).
+  let sz = 300;
+  for (let z = 780; z > 300; z -= 2) {
+    if (base.surfaceY(0, z) >= 63) { sz = z - 3; break; }
+  }
+  const sy = Math.max(63, base.surfaceY(0, sz)) + 1;
+  return { spawn: [0.5, sy, sz + 0.5], blocks: p.blocks, terrain: true, chests: [], center: [0, 0], radius: 700, floorY: -64 };
+}
+
 function sgArena(seed: number, base: Generator): Omit<MapLayout, "map"> {
   const p = new Plan();
   const s = base.findSpawn();
@@ -273,7 +304,8 @@ export function mapLayout(map: MapId, seed: number, base: Generator): MapLayout 
   let l = layouts.get(key);
   if (!l) {
     const made = map === "skyblock" ? skyblock() : map === "oneblock" ? oneblock() : map === "void" ? voidMap()
-      : map === "parkour" ? parkour(seed) : map === "colosseum" ? colosseum() : map === "tnt_run" ? tntRun() : sgArena(seed, base);
+      : map === "parkour" ? parkour(seed) : map === "colosseum" ? colosseum() : map === "tnt_run" ? tntRun()
+        : map === "primal_island" ? primalIsland(base) : sgArena(seed, base);
     l = { map, ...made };
     if (layouts.size > 16) layouts.clear();
     layouts.set(key, l);

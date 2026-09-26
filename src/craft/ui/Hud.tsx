@@ -71,6 +71,13 @@ export function Hud({ hud, mobile, crosshair }: { hud: HudState; mobile: boolean
         </div>
       )}
 
+      {hud.inspect && !hud.screen && (
+        // Primal: the creature under the crosshair — its level, torpor and how a tame is going.
+        <div data-testid="inspect" className="absolute left-1/2" style={{ top: "calc(50% + var(--u) * 12)", transform: "translateX(-50%)", fontSize: "calc(var(--u) * 6)", background: "rgba(0,0,0,0.45)", padding: "calc(var(--u) * 1) calc(var(--u) * 3)", whiteSpace: "nowrap" }}>
+          {hud.inspect}
+        </div>
+      )}
+
       {hud.boss && !hud.screen && (
         // The boss bar: the dragon's name over its health, purple as the original's.
         <div className="absolute left-1/2 flex flex-col items-center" style={{ top: "calc(var(--u) * 3)", transform: "translateX(-50%)" }}>
@@ -116,6 +123,14 @@ export function Hud({ hud, mobile, crosshair }: { hud: HudState; mobile: boolean
       {/* Bottom cluster: status bars, XP, hotbar. */}
       <div className="absolute left-1/2 flex flex-col items-center" style={{ bottom: mobile ? "calc(var(--u) * 2)" : "calc(var(--u) * 1)", transform: "translateX(-50%)" }}>
         {hud.actionbar && <div style={{ fontSize: "calc(var(--u) * 7)", marginBottom: "calc(var(--u) * 4)" }}>{hud.actionbar.text}</div>}
+        {survival && hud.vitals.length > 0 && (
+          // Body temperature and anything wrong, in words: the vitals a mode keeps (engine/vitals.ts).
+          <div data-testid="vitals" style={{ display: "flex", gap: "calc(var(--u) * 3)", marginBottom: "calc(var(--u) * 2)", fontSize: "calc(var(--u) * 5.5)" }}>
+            {hud.vitals.map((v) => (
+              <span key={v} style={{ background: "rgba(0,0,0,0.45)", padding: "0 calc(var(--u) * 2)", color: /Bleeding|Sick|Broken|Freezing|Overheating/.test(v) ? "#ff7070" : /Cold/.test(v) ? "#8fd0ff" : /Hot/.test(v) ? "#ffc070" : "#e0e0e0" }}>{v}</span>
+            ))}
+          </div>
+        )}
         {heldNameVisible && !hud.actionbar && <div style={{ fontSize: "calc(var(--u) * 7)", marginBottom: "calc(var(--u) * 4)" }}>{hud.heldName}</div>}
         {survival && (
           <div style={{ display: "flex", justifyContent: "space-between", width: "calc(var(--u) * 182)", alignItems: "flex-end" }}>
@@ -129,6 +144,9 @@ export function Hud({ hud, mobile, crosshair }: { hud: HudState; mobile: boolean
                 <div style={{ display: "flex", flexDirection: "row-reverse" }}>
                   {Array.from({ length: Math.ceil(Math.max(0, hud.air) / 30) }, (_, i) => <img key={i} src={glyph("bubble")} className="bc-glyph" alt="" />)}
                 </div>
+              )}
+              {hud.water !== null && (
+                <div data-testid="water-bar"><Row full={Math.ceil(hud.water)} max={20} icon="water" half="waterHalf" empty="waterEmpty" reverse shake={hud.water <= 3} /></div>
               )}
               <Row
                 full={hud.food} max={20} icon="food" half="foodHalf" empty="foodEmpty" reverse

@@ -40,6 +40,8 @@ export interface GenSettings {
   lucky?: boolean;
   /** A map pack (engine/maps.ts) the overworld is built as, instead of open terrain. */
   map?: MapId;
+  /** Primal's berry bushes in the undergrowth. */
+  berries?: boolean;
 }
 
 /** What the game and the workers need from any dimension's generator. */
@@ -92,6 +94,10 @@ export class Generator implements ChunkGenerator {
   readonly dungeons: boolean;
   /** Lucky blocks on the ground, a world of the Lucky Blocks mode. */
   readonly lucky: boolean;
+  /** Primal's island: the land ringed by ocean. */
+  readonly island: boolean;
+  /** Primal's berry bushes in the undergrowth. */
+  readonly berries: boolean;
   private continent: Simplex;
   private erosion: Simplex;
   private ridge: Simplex;
@@ -112,6 +118,8 @@ export class Generator implements ChunkGenerator {
     this.type = settings.type;
     this.dungeons = settings.dungeons !== false;
     this.lucky = settings.lucky === true;
+    this.island = settings.map === "primal_island";
+    this.berries = settings.berries === true || this.island;
     const s = this.seed;
     this.continent = new Simplex(hash4(s, 1));
     this.erosion = new Simplex(hash4(s, 2));
@@ -145,10 +153,12 @@ export class Generator implements ChunkGenerator {
       return { height: 3, biome: BiomeId.Plains, temperature: 0.2, humidity: 0, river: false };
     }
     const cs = this.climateScale;
-    const c = this.continent.fbm2(x / (700 * cs), z / (700 * cs), 4) * 1.25 + 0.08;
+    let c = this.continent.fbm2(x / (700 * cs), z / (700 * cs), 4) * 1.25 + 0.08;
     const e = this.erosion.fbm2(x / 420, z / 420, 3);
     const ridge = 1 - Math.abs(this.ridge.fbm2(x / 240, z / 240, 4));
     const d = this.detail.fbm2(x / 48, z / 48, 3);
+    // The Island: all land within a few hundred blocks, sinking to open ocean beyond.
+    if (this.island) c = lerp(-1.25, Math.max(c, 0.04), 1 - smoothstep(440, 680, Math.hypot(x, z)));
 
     let h: number;
     if (c < -0.55) h = lerp(30, 44, smoothstep(-1.2, -0.55, c));
@@ -307,7 +317,7 @@ export class Generator implements ChunkGenerator {
   /** The villages overlapping this chunk, built after trees so their roads and houses win. */
   private placeVillages(blocks: Uint8Array, meta: Uint8Array, cx: number, cz: number): void {
     const x0 = cx * 16, z0 = cz * 16;
-    for (const v of villagesTouching(this as Terrain, this.seed, cx, cz)) {
+    for (const v of this.villagesAt(cx, cz)) {
       buildVillage(v, this, (x, y, z, id, m = 0) => {
         const lx = x - x0, lz = z - z0;
         if (lx < 0 || lx >= 16 || lz < 0 || lz >= 16 || y < 1 || y >= WORLD_HEIGHT) return;
@@ -332,7 +342,8 @@ export class Generator implements ChunkGenerator {
 
   /** The villages overlapping a chunk, for the game to populate. */
   villagesAt(cx: number, cz: number): ReturnType<typeof villagesTouching> {
-    if (this.type === "flat") return [];
+    // The Island is wild: nobody lives there but what you tame.
+    if (this.type === "flat" || this.island) return [];
     return villagesTouching(this, this.seed, cx, cz);
   }
 
@@ -482,6 +493,10 @@ export class Generator implements ChunkGenerator {
         }
         if (this.lucky && (ground === B.GRASS || ground === B.SAND || ground === B.SNOW_BLOCK) && rng.next() < 1 / 450) {
           blocks[above] = B.LUCKY_BLOCK;
+          continue;
+        }
+        if (this.berries && (ground === B.GRASS || ground === B.PODZOL) && rng.next() < 1 / 70) {
+          blocks[above] = rng.next() < 0.72 ? B.MEJOBERRY_BUSH : B.NARCOBERRY_BUSH;
           continue;
         }
         if (ground === B.GRASS || ground === B.PODZOL || ground === B.MOSS) {

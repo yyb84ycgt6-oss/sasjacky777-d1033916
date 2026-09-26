@@ -1124,6 +1124,15 @@ add(250, "gravestone", "Gravestone", {
   textures: tex("gravestone"),
 });
 // A lucky block (engine/lucky.ts): break it and something happens. It drops nothing of itself.
+// Primal's berry bushes: picked by hand (right click), bare for a while after, then fruiting again.
+// Meta bit 0 is "picked".
+for (const [id, name, display] of [[253, "mejoberry_bush", "Mejoberry Bush"], [254, "narcoberry_bush", "Narcoberry Bush"]] as const) {
+  add(id, name, display, {
+    ...plant(), tint: "none", textures: tex(name), flammable: true,
+    drops: [{ item: name.replace("_bush", ""), min: 1, max: 2 }],
+    boxTexture: (meta) => ((meta & 1) !== 0 ? `${name}_bare` : undefined),
+  });
+}
 add(252, "lucky_block", "Lucky Block", {
   textures: tex("lucky_block"), hardness: 0.3, material: "wood", drops: [], emission: 4,
 });
@@ -1201,6 +1210,7 @@ export const B = {
   END_STONE: 232, END_STONE_BRICKS: 233, PURPUR_BLOCK: 234, PURPUR_PILLAR: 235, PURPUR_STAIRS: 236, END_ROD: 237,
   CHORUS_PLANT: 238, CHORUS_FLOWER: 239, END_PORTAL_FRAME: 240, END_PORTAL: 241, END_GATEWAY: 242, DRAGON_EGG: 243,
   IRON_BARS: 244, SHULKER_BOX: 245, DRAGON_HEAD: 246, PURPUR_SLAB: 247, MAGENTA_STAINED_GLASS: 248, WAYSTONE: 249, GRAVESTONE: 250, COOKING_POT: 251, LUCKY_BLOCK: 252,
+  MEJOBERRY_BUSH: 253, NARCOBERRY_BUSH: 254,
 } as const;
 
 /** Blocks that stand on an axis kept in meta like a log's (0 up, 1 along x, 2 along z). */
@@ -1282,3 +1292,6 @@ export function collisionBoxes(def: BlockDef, meta: number): Box[] {
   if (def.boxes) return def.boxes(meta);
   return [FULL_BOX];
 }
+
+/** Primal's berry bushes, which fruit, are picked, and fruit again. */
+export const isBerryBush = (id: number): boolean => id === B.MEJOBERRY_BUSH || id === B.NARCOBERRY_BUSH;

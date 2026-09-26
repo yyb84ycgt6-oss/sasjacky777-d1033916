@@ -66,7 +66,9 @@ export type Screen =
   /** A backpack in the player's inventory slot `slot`, opened. */
   | { kind: "backpack"; slot: number }
   /** A waystone's list of the others this player has found. */
-  | { kind: "waystone"; x: number; y: number; z: number };
+  | { kind: "waystone"; x: number; y: number; z: number }
+  /** Primal's engram list. */
+  | { kind: "engrams"; from: "pause" | "inventory" };
 
 /** A game mode's scoreboard: a title and label–value lines, as the classic sidebar shows them. */
 export interface Objective {
@@ -147,6 +149,12 @@ export interface Hud {
   foodPreview: { food: number; saturation: number } | null;
   /** A game mode's scoreboard (modes/runtime.ts), shown at the right. */
   objective: Objective | null;
+  /** Thirst, where the mode keeps it (0..20); null where it does not. */
+  water: number | null;
+  /** Body temperature and wounds, as short words for the HUD (engine/vitals.ts). */
+  vitals: string[];
+  /** Primal: what the crosshair rests on, when it is a creature: name, level, torpor, tame. */
+  inspect: string | null;
   /** The minimap is showing in the top right corner, so what usually sits there moves down. */
   minimap: boolean;
 }

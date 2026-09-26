@@ -18,8 +18,10 @@ export function MenuFrame({ title, children, width = 200, dim = true }: { title?
   );
 }
 
-export function PauseMenu({ onResume, onOptions, onShare, onAdvancements, onMods, onQuit, onExitApp, shareLabel, canShare, quitLabel }: {
+export function PauseMenu({ onResume, onOptions, onShare, onAdvancements, onMods, onEngrams, onQuit, onExitApp, shareLabel, canShare, quitLabel }: {
   onResume: () => void; onOptions: () => void; onShare: () => void; onAdvancements: () => void; onMods: () => void; onQuit: () => void; onExitApp?: () => void;
+  /** Primal worlds: the engram list. */
+  onEngrams?: () => void;
   shareLabel: string; canShare: boolean; quitLabel: string;
 }) {
   const exitLabel = onExitApp ? edition().exitLabel : null;
@@ -34,6 +36,7 @@ export function PauseMenu({ onResume, onOptions, onShare, onAdvancements, onMods
         <Button onClick={onOptions}>Options…</Button>
         <Button onClick={onMods}>Mods…</Button>
       </div>
+      {onEngrams && <Button wide onClick={onEngrams}>Engrams…</Button>}
       <Button wide onClick={onQuit}>{quitLabel}</Button>
       {exitLabel && <Button wide onClick={onExitApp}>{exitLabel}</Button>}
     </MenuFrame>

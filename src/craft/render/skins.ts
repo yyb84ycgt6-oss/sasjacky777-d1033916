@@ -9,6 +9,7 @@
  * same pig.
  */
 import { Rng } from "../engine/rng";
+import { DINO_COLORS, dinoBoxes, type Role } from "./dinoModels";
 
 export type Face = "top" | "bottom" | "west" | "front" | "east" | "back";
 
@@ -97,6 +98,56 @@ function humanoid(p: SkinPainter, skin: RGB, hair: RGB, shirt: RGB, pants: RGB, 
   p.box(16, 16, 8, 12, 4, (face, _x, y) => (face === "bottom" ? pants : y > 10 ? pants : shirt));
   p.box(40, 16, 4, 12, 4, (face, _x, y) => (face === "bottom" ? skin : y < 5 ? shirt : skin));
   p.box(0, 16, 4, 12, 4, (face, _x, y) => (face === "bottom" || y > 9 ? shoes : pants));
+}
+
+/**
+ * A creature's skin, box by box: hide on top and sides with its markings in
+ * stripes across the back, a paler underside, eyes on the head, and each part
+ * with a role of its own coloured to suit (a crest, a frill, horns, plates,
+ * wing membrane, a leather saddle). Variants shift the hide a little, so a
+ * herd is not a row of copies.
+ */
+function paintDino(p: SkinPainter, kind: string, variant: number): void {
+  const c = DINO_COLORS[kind];
+  if (!c) return;
+  const tone = [1, 0.88, 1.1, 0.95][variant & 3];
+  const shade = (h: string, f = 1): RGB => hex(h).map((v) => Math.max(0, Math.min(255, v * f * tone))) as RGB;
+  const hide = shade(c.hide), belly = shade(c.belly), mark = shade(c.mark), accent = hex(c.accent);
+  const bone: RGB = [232, 224, 200], leather: RGB = [122, 78, 44], strap: RGB = [70, 44, 24];
+  const byRole: Partial<Record<Role, (face: Face, x: number, y: number) => RGB>> = {
+    horn: () => bone, spike: () => bone, beak: () => hex("#d8b060"),
+    crest: (_f, x, y) => ((x + y) % 3 === 0 ? mark : accent), frill: (_f, x, y) => ((x * 3 + y) % 5 === 0 ? mark : (x + y) % 7 === 0 ? bone : accent),
+    plate: (_f, _x, y) => (y < 1 ? mark : accent),
+    wing: (face, x, y) => (face === "top" || face === "bottom" ? ((x + y) % 4 === 0 ? mark : shade(c.hide, 1.15)) : mark),
+    saddle: (face, x) => (face === "top" ? (x % 4 === 0 ? strap : leather) : strap),
+  };
+  for (const part of dinoBoxes(kind)) {
+    const [w, h, d] = part.size;
+    const paint = byRole[part.role] ?? ((face: Face, x: number, y: number): RGB => {
+      if (face === "bottom") return belly;
+      if (face === "top") return (x * 7 + y * 3) % 5 === 0 || y % 4 === 1 ? mark : hide;
+      // Stripes down the flanks, a paler lower edge toward the belly.
+      if (y >= h - Math.max(1, Math.floor(h / 4)) && part.role !== "leg") return belly;
+      return (x + Math.floor(y / 2)) % 5 === 0 && y < h / 2 ? mark : hide;
+    });
+    const regions = p.box(part.uv[0], part.uv[1], w, h, d, paint, 0.1);
+    if (part.role === "head") {
+      // Eyes a third of the way back on each side, and nostrils at the snout.
+      const eye: RGB = kind === "rex" || kind === "raptor" || kind === "dilo" ? [220, 170, 30] : [20, 16, 12];
+      for (const side of ["west", "east"] as Face[]) {
+        const r = regions[side];
+        p.px(r.x + (side === "west" ? Math.floor(r.w / 3) : r.w - 1 - Math.floor(r.w / 3)), r.y + 1, eye, 0);
+        p.px(r.x + (side === "west" ? Math.floor(r.w / 3) : r.w - 1 - Math.floor(r.w / 3)), r.y + 2, [12, 10, 8], 0);
+      }
+      const f = regions.front;
+      p.px(f.x + 1, f.y + 1, [30, 20, 16], 0); p.px(f.x + f.w - 2, f.y + 1, [30, 20, 16], 0);
+    }
+    if (part.role === "jaw") {
+      // Teeth along the jaw's top edge.
+      const f = regions.front;
+      for (let x = 0; x < f.w; x += 2) p.px(f.x + x, f.y, bone, 0);
+    }
+  }
 }
 
 const cache = new Map<string, HTMLCanvasElement>();
@@ -445,6 +496,10 @@ export function skin(kind: string, variant = 0): HTMLCanvasElement {
       p.box(24, 12, 6, 4, 1, rim);
       break;
     }
+    case "dodo": case "dilo": case "raptor": case "parasaur": case "rex": case "gigantoraptor":
+    case "trike": case "stego": case "bronto": case "ptero":
+      paintDino(p, kind, variant);
+      break;
     case "tribute": {
       // Every tribute dressed differently: their district's colours, their own skin and hair.
       const r = new Rng(variant * 7919 + 13);

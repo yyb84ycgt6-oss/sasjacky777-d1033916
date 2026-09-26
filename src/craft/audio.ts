@@ -345,6 +345,24 @@ export class GameAudio {
         else for (let i = 0; i < 3; i++) this.noiseBurst(out, t + i * 0.16, 0.08, "bandpass", 900, 1.5, 0.12);
         break;
       case "deer": this.tone(out, t, "sawtooth", 700 * p * low, 500 * p * low, 0.25, 0.12, 0.02); break;
+      // Primal's creatures: each its own voice, lower for the big ones, a roar for the rex.
+      case "dodo": this.tone(out, t, "square", 700 * p * low, 480 * p * low, 0.14, 0.12); this.tone(out, t + 0.16, "square", 650 * p * low, 450 * p * low, 0.12, 0.1); break;
+      case "dilo":
+        if (what === "spit") { this.noiseBurst(out, t, 0.25, "bandpass", 2400, 1.5, 0.5); break; }
+        this.tone(out, t, "sawtooth", 900 * p * low, 1300 * p * low, 0.2, 0.12); this.noiseBurst(out, t, 0.2, "highpass", 2500, 1, 0.2);
+        break;
+      case "parasaur": this.tone(out, t, "sawtooth", 220 * p * low, 260 * p * low, 0.8, 0.2, 0.1); this.tone(out, t, "sine", 440 * p * low, 520 * p * low, 0.8, 0.08, 0.1); break;
+      case "raptor": this.tone(out, t, "sawtooth", 950 * p * low, 600 * p * low, 0.28, 0.16); this.noiseBurst(out, t, 0.2, "bandpass", 1800, 2, 0.25); break;
+      case "trike": this.tone(out, t, "sawtooth", 120 * p * low, 90 * p * low, 0.6, 0.3, 0.05); this.noiseBurst(out, t, 0.5, "lowpass", 400, 1, 0.3); break;
+      case "stego": this.tone(out, t, "sawtooth", 100 * p * low, 80 * p * low, 0.9, 0.28, 0.1); break;
+      case "rex":
+        // The roar: a long falling growl under a rush of breath.
+        this.tone(out, t, "sawtooth", (what === "roar" ? 120 : 95) * p * low, 55 * p * low, what === "roar" ? 1.8 : 0.9, 0.45, 0.15);
+        this.noiseBurst(out, t, what === "roar" ? 1.7 : 0.8, "lowpass", 600, 0.7, 0.55, 0.4);
+        break;
+      case "bronto": this.tone(out, t, "sine", 65 * p * low, 45 * p * low, 2, 0.5, 0.4); this.tone(out, t + 0.1, "sawtooth", 90 * p * low, 70 * p * low, 1.6, 0.12, 0.4); break;
+      case "ptero": this.tone(out, t, "square", 1250 * p * low, 900 * p * low, 0.3, 0.1); this.tone(out, t + 0.12, "square", 1100 * p * low, 800 * p * low, 0.25, 0.08); break;
+      case "gigantoraptor": this.tone(out, t, "sawtooth", 320 * p * low, 200 * p * low, 0.7, 0.22, 0.1); this.noiseBurst(out, t, 0.4, "bandpass", 900, 1.5, 0.2); break;
       // A tribute is only a person: a grunt when struck, a cry when they fall, nothing idle.
       case "tribute":
         if (what === "hurt") { this.tone(out, t, "triangle", 250 * p, 150 * p, 0.18, 0.4); this.noiseBurst(out, t, 0.08, "lowpass", 800, 1, 0.25); }
