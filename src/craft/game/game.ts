@@ -33,6 +33,9 @@ import { ambientCue } from "../engine/ambience";
 import { POT_SLOTS } from "../engine/cooking";
 import { pickWildlife } from "../engine/wildlife";
 import { dungeonLoot } from "../engine/dungeons";
+import { MapGenerator, mapLoot } from "../engine/maps";
+import { luckyOutcome } from "../engine/lucky";
+import { createRuntime, modeDef, type ModeRuntime } from "../modes";
 import { travelCost, WAYSTONE_NAME_MAX, waystoneKey, waystoneName, type Waystone } from "../engine/waystones";
 import { seasonAt, seasonLabel, seasonTint, snowsHere, warmBiome, type Season } from "../engine/seasons";
 import { MAX_DYNAMIC_LIGHTS } from "../render/materials";
@@ -71,7 +74,7 @@ import { SaveStore, type ChunkData, type WorldMeta } from "./save";
 import { effectiveControls, saveSettings, type Settings } from "./settings";
 import { Store } from "./store";
 import { Streamer } from "./streamer";
-import { emptyControls, type ChatLine, type Controls, type Hud, type Screen } from "./types";
+import { emptyControls, type ChatLine, type Controls, type Hud, type ModeTell, type Objective, type Screen } from "./types";
 import { sanitizeStack, type Slot } from "../engine/inventory";
 
 export type Role = "local" | "host" | "guest";
@@ -133,6 +136,8 @@ export interface NetLink {
   placeGrave?(x: number, y: number, z: number, items: Slot[], owner: string, yaw: number): void;
   /** Guest → host: give me the gravestone at x, y, z. */
   collectGrave?(x: number, y: number, z: number): void;
+  /** Host → a guest (or all): what the game mode wants them to see or be. */
+  modeTell?(target: string | null, t: ModeTell): void;
   /** Guest: settles once the host has said which chunks of the new dimension it changed. */
   readonly keysReady?: Promise<void> | null;
   /** Guest: the host's connection id. */
@@ -280,6 +285,16 @@ export class Game {
   readonly endFight = new EndFight(this);
   /** Everywhere this world's players have been, for the minimap and the world map (M). */
   readonly worldMap = new WorldMap();
+  /** The world's game mode at play (modes/runtime.ts), where the world is simulated; guests hear it from the host. */
+  mode: ModeRuntime | null = null;
+  /** A square border (half-width `radius`) round the overworld's play area, set by a mode; outside it hurts. */
+  border: { x: number; z: number; radius: number } | null = null;
+  /** A mode's countdown: players look about but cannot move. */
+  frozen = false;
+  /** At most this much health, a mode's rule (One Heart). */
+  maxHealth = 20;
+  private objectiveNow: Objective | null = null;
+  private objectiveSent = new Map<string, string>();
 
   constructor(opts: GameOptions) {
     this.meta = opts.meta;
@@ -314,6 +329,10 @@ export class Game {
     this.actions = new Actions(this);
 
     if (this.saves.problem) this.message(this.saves.problem, "#ffcc55");
+    if (this.role !== "guest") {
+      this.mode = createRuntime(this);
+      this.mode?.resume();
+    }
     // A guest's map is for the visit: the world, and so its saved map, is the host's.
     if (this.role !== "guest") {
       void this.saves.maps.load(this.meta.id).then((regions) => this.worldMap.merge(regions)).catch(() => {});
@@ -332,7 +351,7 @@ export class Game {
     world.simulates = this.role !== "guest";
     this.world = world;
     // Dungeons are part of the terrain, so a guest's generator must be told the host's choice too (its meta carries it).
-    const settings = { seed: this.meta.seed, type: this.meta.type, dimension: dim, dungeons: this.modOn("dungeons") };
+    const settings = { seed: this.meta.seed, type: this.meta.type, dimension: dim, dungeons: this.modOn("dungeons"), map: this.meta.map, lucky: !!modeDef(this.meta.mode?.id)?.lucky };
     this.generator = createGenerator(settings);
     this.pool = new WorkerPool({ kind: "init", settings, layers: this.atlas.layers });
     this.rules = new BlockRules(world, {
@@ -1163,10 +1182,12 @@ export class Game {
         return out;
       },
       placeBlock: (x, y, z, id, meta) => this.world.setBlock(x, y, z, id, meta, "world"),
-      creditKill: (id, hostile) => {
+      creditKill: (id, hostile, kind) => {
         if (id === this.player.id) this.advance({ kind: "kill", hostile });
         else this.net?.advanceRemote?.(id, { kind: "kill", hostile });
+        if (kind) this.mode?.onKill(id, kind);
       },
+      transformLoot: (s) => this.mode?.transformDrop(s) ?? s,
       pearlLanded: (id, x, y, z, gateway) => this.pearlLanded(id, x, y, z, gateway),
       crystalDestroyed: (crystal, attacker) => { if (crystal instanceof EndCrystal) this.endFight.crystalDestroyed(crystal, attacker); },
       dragonDefeated: () => this.endFight.defeated(),
@@ -1279,6 +1300,8 @@ export class Game {
   private onBlockChange(c: BlockChange): void {
     const chunk = this.world.chunkAt(c.x, c.z);
     if (chunk) { this.dirtySave.add(chunk.id); this.mapDirty.add(chunk.id); }
+    if (this.simulates && this.meta.mode?.started) this.mode?.onBlockChange(c);
+    if (this.simulates && c.prevId === B.LUCKY_BLOCK && c.id !== B.LUCKY_BLOCK && c.cause !== "world") this.luckyOutcome(c.x, c.y, c.z);
     if (this.simulates && c.prevId === B.WAYSTONE && c.id !== B.WAYSTONE) this.waystoneBroken(c.x, c.y, c.z);
     if (c.cause !== "remote") this.net?.blockChanged(c);
     if (this.simulates && isLog(c.prevId) && c.id !== c.prevId) this.rules.logRemoved(c.x, c.y, c.z);
@@ -1312,9 +1335,13 @@ export class Game {
   private settleStructures(cx: number, cz: number): void {
     if (this.dimension === "overworld") {
       this.settleVillages(cx, cz);
-      if (this.generator instanceof Generator) {
-        for (const s of this.generator.strongholdsAt(cx, cz)) this.fillChests(cx, cz, s.chests.map(([x, y, z, room]) => [x, y, z, (items) => strongholdLoot(items, hash4(this.meta.seed ^ 0x57, x, y, z), room)]));
-        for (const d of this.generator.dungeonsAt(cx, cz)) this.fillChests(cx, cz, d.chests.map(([x, y, z]) => [x, y, z, (items) => dungeonLoot(items, hash4(this.meta.seed ^ 0xd9, x, y, z), d.kind)]));
+      if (this.generator instanceof MapGenerator) {
+        this.fillChests(cx, cz, this.generator.chestsIn(cx, cz).map(([x, y, z, table]) => [x, y, z, (items) => mapLoot(items, hash4(this.meta.seed ^ 0x3a, x, y, z), table)]));
+      }
+      const terrain = this.terrainGenerator();
+      if (terrain) {
+        for (const s of terrain.strongholdsAt(cx, cz)) this.fillChests(cx, cz, s.chests.map(([x, y, z, room]) => [x, y, z, (items) => strongholdLoot(items, hash4(this.meta.seed ^ 0x57, x, y, z), room)]));
+        for (const d of terrain.dungeonsAt(cx, cz)) this.fillChests(cx, cz, d.chests.map(([x, y, z]) => [x, y, z, (items) => dungeonLoot(items, hash4(this.meta.seed ^ 0xd9, x, y, z), d.kind)]));
       }
     }
     else if (this.dimension === "nether") {
@@ -1384,9 +1411,10 @@ export class Game {
    */
   private settleVillages(cx: number, cz: number): void {
     const w = this.world;
-    if (!(this.generator instanceof Generator)) return;
+    const terrain = this.terrainGenerator();
+    if (!terrain) return;
     const done = (this.meta.villages ??= []);
-    for (const v of this.generator.villagesAt(cx, cz)) {
+    for (const v of terrain.villagesAt(cx, cz)) {
       for (const h of v.houses) {
         if (!h.chest) continue;
         const [x, y, z] = h.chest;
@@ -1445,6 +1473,16 @@ export class Game {
       this.world.setEntity(x, y, z, e);
     }
     return e;
+  }
+
+  /** A mode's chest at x, y, z — placed if missing, emptied if not — filled by `fill`, and sent to everyone. */
+  placeChest(x: number, y: number, z: number, fill: (items: (ItemStack | null)[]) => void): void {
+    if (this.world.blockAt(x, y, z) !== B.CHEST) this.world.setBlock(x, y, z, B.CHEST, 0, "world");
+    const e = this.containerAt(x, y, z, "chest");
+    if (e.kind !== "chest") return;
+    e.items.fill(null);
+    fill(e.items);
+    this.containerChanged(x, y, z);
   }
 
   /** A container changed from this client: save it and tell the others. */
@@ -1765,6 +1803,7 @@ export class Game {
     if (this.meta.hardcore) p.setGameMode("spectator");
     this.spawnPlaced = false;
     this.setScreen(null);
+    if (this.simulates) this.mode?.onRespawn();
   }
 
   worldSpawn(): { x: number; y: number; z: number } {
@@ -1978,6 +2017,7 @@ export class Game {
       dimension: info.hasSky ? undefined : { fog: biome.fog ?? 0x330808, ambient: info.ambient, sky: info.skyLight, open: info.open },
       dynamicLights: this.dynamicLights(ix, eye, iz),
       season: this.season() ? seasonTint(this.time, warmBiome(biome.id)) : undefined,
+      border: this.dimension === "overworld" ? this.border : null,
     });
     this.lightning = 0;
     this.audio.setListener(ix, eye, iz, p.yaw);
@@ -1999,7 +2039,8 @@ export class Game {
     const b = p.body;
     const inputBlocked = !!this.screen && this.screen.kind !== "chat";
     const c = this.controls;
-    const frozen = !this.world.isLoaded(Math.floor(b.x), Math.floor(b.z));
+    // A mode's countdown holds everyone on their pads, as does ground that has not loaded yet.
+    const frozen = !this.world.isLoaded(Math.floor(b.x), Math.floor(b.z)) || (this.frozen && p.gameMode !== "spectator");
     const rules = { difficulty: this.meta.difficulty, naturalRegeneration: this.meta.rules.naturalRegeneration, raining: this.rain > 0.5 };
     const vehicle = this.ridden();
     if (!frozen && vehicle) {
@@ -2043,6 +2084,15 @@ export class Game {
     if (this.tickCount % 20 === 0) this.audio.tickMusic(1, !this.isNight());
     if (this.tickCount % 20 === 11) this.repaintMap();
     if (this.tickCount % 20 === 13 && this.modOn("ambient_sounds")) this.ambience();
+    this.borderTick();
+    if (p.health > this.maxHealth) p.health = this.maxHealth;
+    if (this.simulates && this.mode) {
+      if (!this.meta.mode!.started && this.spawnPlaced) { this.meta.mode!.started = true; this.mode.start(); }
+      if (this.meta.mode!.started) {
+        this.mode.tick();
+        if (this.tickCount % 20 === 0) { this.mode.second(); this.pushObjectives(); }
+      }
+    }
     if (this.tickCount % 10 === 0) this.advance();
     // The City at the End of the Game: inside a city's bounds, above its island.
     if (this.tickCount % 20 === 7 && this.dimension === "end" && this.generator instanceof EndGenerator && !this.player.advancements.has("city")) {
@@ -2066,7 +2116,7 @@ export class Game {
       if (this.player.body.y - this.levitatedFrom >= 50) this.advance({ kind: "levitate" });
     } else this.levitatedFrom = null;
     // Eye Spy: standing in a stronghold's halls.
-    if (this.tickCount % 20 === 5 && this.dimension === "overworld" && !this.player.advancements.has("stronghold") && this.meta.type !== "flat"
+    if (this.tickCount % 20 === 5 && this.dimension === "overworld" && !this.player.advancements.has("stronghold") && this.hasStrongholds()
       && inStronghold(this.meta.seed, this.player.body.x, this.player.body.y, this.player.body.z)) this.advance({ kind: "stronghold" });
   }
 
@@ -2082,6 +2132,7 @@ export class Game {
           this.net?.chat(`\u0000death:${ev.message}`);
           if (this.modOn("minimap")) p.waypoints = withDeathPoint(p.waypoints, p.body.x, p.body.y, p.body.z, this.dimension);
           this.onDeath();
+          if (this.simulates) this.mode?.onPlayerDeath(p.id);
           break;
         case "land":
           if (ev.distance > 1.5 && ev.block > 0) this.blockSound(block(ev.block).material, "step", p.body.x, p.body.y, p.body.z, false);
@@ -2413,6 +2464,142 @@ export class Game {
     if (pack?.contents && !pack.contents.some(Boolean)) delete pack.contents;
     this.sound("chest_close", null, 0, 0, 0.4, 1.3);
     this.bumpInv();
+  }
+
+  // ---- game modes ------------------------------------------------------------------------------
+
+  /** Once a second: this player's scoreboard, and each guest's own, sent only when it changed. */
+  private pushObjectives(): void {
+    if (!this.mode) return;
+    const mine = this.mode.objective(this.player.id);
+    if (JSON.stringify(mine) !== JSON.stringify(this.objectiveNow)) { this.objectiveNow = mine; this.store.set({ objective: mine }); }
+    for (const r of this.remote.values()) {
+      const obj = this.mode.objective(r.id);
+      const key = JSON.stringify([obj, this.border, this.frozen, this.maxHealth]);
+      if (this.objectiveSent.get(r.id) === key) continue;
+      this.objectiveSent.set(r.id, key);
+      this.modeTell(r.id, { obj, border: this.border, frozen: this.frozen, maxHealth: this.maxHealth });
+    }
+  }
+
+  /** Host → a guest (or all, with null): what a mode wants them to see or be. */
+  modeTell(target: string | null, t: ModeTell): void {
+    if (this.role === "guest") return;
+    this.net?.modeTell?.(target, t);
+  }
+
+  /** A new round of a mode for this player: empty-handed, healed, fed, and rid of every effect. */
+  resetForRound(): void {
+    const p = this.player;
+    p.inventory.clear();
+    p.health = this.maxHealth;
+    p.food = 20;
+    p.saturation = 5;
+    p.effects = [];
+    p.fireTicks = 0;
+    this.bumpInv();
+  }
+
+  /** A guest hears from the host's mode. */
+  applyModeTell(t: ModeTell): void {
+    if (t.reset) this.resetForRound();
+    if (t.msg) this.message(t.msg, t.color ?? "#ffff55");
+    if (t.title) this.showTitle(t.title, t.sub);
+    if (t.gm) { this.player.setGameMode(t.gm); this.bumpInv(); }
+    if (t.obj !== undefined) { this.objectiveNow = t.obj; this.store.set({ objective: t.obj }); }
+    if (t.border !== undefined) this.border = t.border;
+    if (t.frozen !== undefined) this.frozen = t.frozen;
+    if (t.maxHealth !== undefined) this.maxHealth = t.maxHealth;
+  }
+
+  /** Changes the world's border (host); guests hear it with their next scoreboard. */
+  setBorder(border: { x: number; z: number; radius: number } | null): void {
+    this.border = border;
+    this.objectiveSent.clear();
+  }
+
+  /** Outside a mode's border, in the overworld, a survival player takes a point of harm a second. */
+  private borderTick(): void {
+    const bd = this.border, p = this.player, b = p.body;
+    if (!bd || this.dimension !== "overworld" || !p.survivalLike || p.dead) return;
+    const out = Math.max(Math.abs(b.x - bd.x), Math.abs(b.z - bd.z)) - bd.radius;
+    if (out <= 0) return;
+    if (this.tickCount % 20 === 0) {
+      p.hurt(Math.min(4, 1 + Math.floor(out / 8)), "magic");
+      this.showActionbar("You are outside the border — get back inside!");
+    }
+  }
+
+  /** A bolt from the blue at x, y, z: a flash, thunder, fire where it lands, and a hard blow to anyone close. */
+  strikeLightning(x: number, y: number, z: number): void {
+    this.lightning = 1;
+    this.net?.effect("explosion", ["lightning"]);
+    this.sound("thunder", x, y + 4, z, 1, 1);
+    const fx = Math.floor(x), fz = Math.floor(z);
+    if (this.world.blockAt(fx, Math.floor(y), fz) === B.AIR && block(this.world.blockAt(fx, Math.floor(y) - 1, fz)).solid) this.world.setBlock(fx, Math.floor(y), fz, B.FIRE, 0, "world");
+    for (const r of this.playerRefs()) {
+      if (Math.hypot(r.x - x, r.y - y, r.z - z) > 3) continue;
+      if (r.id === this.player.id) { this.player.hurt(5, "fire", x, z); this.player.fireTicks = Math.max(this.player.fireTicks, 100); }
+      else this.net?.hurtRemote(r.id, 5, "fire", x, z, 0.3);
+    }
+  }
+
+  /** A lucky block broke at x, y, z: whatever luck it held happens there (engine/lucky.ts). */
+  private luckyOutcome(x: number, y: number, z: number): void {
+    const o = luckyOutcome(Math.random);
+    const near = this.playerRefs().sort((a, b) => Math.hypot(a.x - x, a.z - z) - Math.hypot(b.x - x, b.z - z))[0];
+    const cx = x + 0.5, cy = y + 0.5, cz = z + 0.5;
+    const tellNear = (text: string) => {
+      if (!near || near.id === this.player.id) this.showActionbar(text);
+      else this.modeTell(near.id, { msg: text, color: o.mood === "bad" ? "#ff8888" : "#ffff55" });
+    };
+    tellNear(`Lucky block: ${o.message}`);
+    this.particles("firework_spark", cx, cy, cz, 20);
+    for (const a of o.actions) {
+      switch (a.kind) {
+        case "drop": for (const s of a.stacks) this.dropItem(cx, cy, cz, s); break;
+        case "spawn":
+          for (let i = 0; i < a.count; i++) {
+            const m = new Mob(a.mob, cx + (Math.random() - 0.5) * 3, y, cz + (Math.random() - 0.5) * 3);
+            if (a.baby) m.setBaby();
+            if (a.tame && near) { m.owner = near.id; m.ownerName = near.name; m.health = m.maxHealth; m.persistent = true; }
+            this.spawn(m);
+          }
+          break;
+        case "tnt": for (let i = 0; i < a.count; i++) this.spawn(new PrimedTnt(cx + (Math.random() - 0.5) * 2, y + 1 + i, cz + (Math.random() - 0.5) * 2, a.fuse)); break;
+        case "blocks":
+          for (const [dx, dy, dz, id, m] of a.list) {
+            const bx = x + dx, by = y + dy, bz = z + dz;
+            if (by > 0 && by < WORLD_HEIGHT - 1 && (block(this.world.blockAt(bx, by, bz)).replaceable || this.world.blockAt(bx, by, bz) === B.AIR)) this.world.setBlock(bx, by, bz, id, m, "world");
+          }
+          break;
+        case "effect":
+          if (!near || near.id === this.player.id) this.player.addEffect(a.effect, a.seconds, a.amp);
+          else this.net?.effectRemote?.(near.id, a.effect, a.seconds, a.amp);
+          break;
+        case "xp": this.spawnXp(cx, cy, cz, a.amount); break;
+        case "fireworks":
+          for (let i = 0; i < a.count; i++) this.launchFirework(cx + (Math.random() - 0.5) * 6, cy, cz + (Math.random() - 0.5) * 6, { flight: 1 + (i % 2), bursts: [{ shape: (["small", "large", "star", "burst"] as const)[i % 4], colors: [1 + (i % 7)] }] }, null);
+          break;
+        case "lightning": this.strikeLightning(cx, y, cz); break;
+        case "launch":
+          if (!near || near.id === this.player.id) { this.player.body.vy = Math.sqrt(2 * 0.08 * a.height) * 1.1; }
+          else this.net?.pushRemote?.(near.id, 0, Math.sqrt(2 * 0.08 * a.height) * 1.1, 0);
+          break;
+      }
+    }
+  }
+
+  /** The ordinary terrain generator of the overworld, where there is one: open terrain, or a map pack that keeps it. */
+  terrainGenerator(): Generator | null {
+    if (this.dimension !== "overworld") return null;
+    if (this.generator instanceof MapGenerator) return this.generator.terrain;
+    return this.generator instanceof Generator ? this.generator : null;
+  }
+
+  /** Whether this world has strongholds: real terrain, and not superflat. */
+  hasStrongholds(): boolean {
+    return this.meta.type !== "flat" && (!this.meta.map || this.meta.map === "sg_arena");
   }
 
   /** Cheats: the world allows them, or the player is in creative. */
@@ -2816,6 +3003,7 @@ export class Game {
       perspective: this.perspective,
       toasts: this.toasts.filter((t) => performance.now() - t.at < 5000),
       boss: this.endFight.bossBar(),
+      objective: this.objectiveNow,
       minimap: this.modOn("minimap"),
     };
   }

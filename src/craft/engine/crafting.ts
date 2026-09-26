@@ -269,6 +269,8 @@ function itemDefOrNull(name: string): boolean {
 shaped("shulker_box", ["S", "C", "S"], { S: "shulker_shell", C: "chest" }, "shulker_box");
 shaped("purpur_slab", ["###"], { "#": "purpur_block" }, "purpur_slab", 6);
 shaped("item_frame", ["SSS", "SLS", "SSS"], { S: "stick", L: "leather" }, "item_frame");
+// A lucky block: gold round a dropper, as the mod has it.
+shaped("lucky_block", ["GGG", "GDG", "GGG"], { G: "gold_ingot", D: "dropper" }, "lucky_block");
 // A cooking pot: an iron pot with brick handles, a wooden spoon (shovel) to stir it.
 shaped("cooking_pot", ["BSB", "I I", "III"], { B: "brick", S: "wooden_shovel", I: "iron_ingot" }, "cooking_pot");
 // A backpack: leather round a chest, a string strap.

@@ -478,7 +478,7 @@ export class Actions {
     if (!chained || Math.random() < 0.2) g.blockSound(def.material, "break", x + 0.5, y + 0.5, z + 0.5, false);
     g.particles("block", x + 0.5, y + 0.5, z + 0.5, chained ? 4 : 16, id, false);
 
-    for (const s of stacks) g.dropItem(x + 0.5, y + 0.3, z + 0.5, s);
+    for (const s of stacks) g.dropItem(x + 0.5, y + 0.3, z + 0.5, g.mode?.transformDrop(s) ?? s);
     if (drops && harvest && def.xp && !silk) {
       const [lo, hi] = def.xp;
       g.spawnXp(x + 0.5, y + 0.5, z + 0.5, lo + Math.floor(Math.random() * (hi - lo + 1)));
@@ -668,8 +668,8 @@ export class Actions {
     }
     if (def.use === "ender_eye") {
       // Eyes only find strongholds in the overworld, and a flat world has none.
-      if (g.dimension !== "overworld" || g.meta.type === "flat") {
-        g.showActionbar(g.meta.type === "flat" ? "A flat world has no strongholds for the eye to find" : "The eye finds strongholds only in the overworld");
+      if (g.dimension !== "overworld" || !g.hasStrongholds()) {
+        g.showActionbar(g.dimension === "overworld" ? "This world has no strongholds for the eye to find" : "The eye finds strongholds only in the overworld");
         return;
       }
       const b = p.body;

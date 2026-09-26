@@ -5,8 +5,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MODS, modEnabled } from "../engine/mods";
 import { ModsList } from "./ModsScreen";
+import { ModeCard, ModePicker } from "./ModePicker";
+import { applyMode, modeDef, MODES, randomMode, type ModeDef } from "../modes/modes";
+import { MAPS } from "../engine/maps";
 import { randomSeed, seedFromString } from "../engine/rng";
-import type { GameMode } from "../engine/player";
 import type { WorldType } from "../engine/worldgen";
 import { edition, GAME_NAME, GAME_VERSION } from "../edition";
 import { cloudAvailable, deleteCloudWorld, downloadWorld, listCloudWorlds, uploadWorld, type CloudWorld } from "../game/cloud";
@@ -259,7 +261,7 @@ export function WorldSelect({ saves, ready, onPlay, onCreate, onBack }: {
                   )}
                   <div className="bc-sub">{when(w.lastPlayed)}</div>
                   <div className="bc-sub" style={{ color: w.hardcore ? "#ff5555" : undefined }}>
-                    {w.hardcore ? "Hardcore Mode!" : `${MODE_LABEL[w.gameMode] ?? w.gameMode} Mode`}{w.cheats ? ", Cheats" : ""} · Day {Math.floor(w.time / 24000) + 1}
+                    {w.hardcore ? "Hardcore Mode!" : `${MODE_LABEL[w.gameMode] ?? w.gameMode} Mode`}{w.cheats ? ", Cheats" : ""}{modeLabel(w)} · Day {Math.floor(w.time / 24000) + 1}
                   </div>
                 </div>
               </div>
@@ -387,7 +389,6 @@ function CloudWorlds({ saves, localIds, onBack, onDownloaded }: {
   );
 }
 
-type ModeChoice = "survival" | "creative" | "hardcore";
 const WORLD_TYPES: WorldType[] = ["default", "amplified", "large_biomes", "flat"];
 const TYPE_LABEL: Record<WorldType, string> = { default: "Default", amplified: "Amplified", large_biomes: "Large Biomes", flat: "Superflat" };
 const DIFFICULTY_LABEL = ["Peaceful", "Easy", "Normal", "Hard"];
@@ -396,7 +397,8 @@ export function CreateWorld({ saves, existing, onCreate, onBack }: {
   saves: SaveStore; existing: string[]; onCreate: (meta: WorldMeta) => void; onBack: () => void;
 }) {
   const [name, setName] = useState(() => uniqueName("New World", existing));
-  const [mode, setMode] = useState<ModeChoice>("survival");
+  const [modeId, setModeId] = useState("survival");
+  const [picking, setPicking] = useState(false);
   const [difficulty, setDifficulty] = useState<0 | 1 | 2 | 3>(2);
   const [type, setType] = useState<WorldType>("default");
   const [seedText, setSeedText] = useState("");
@@ -407,12 +409,15 @@ export function CreateWorld({ saves, existing, onCreate, onBack }: {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const hardcore = mode === "hardcore";
-  const describe = {
-    survival: "Search for resources, craft, gain levels, health and hunger",
-    creative: "Unlimited resources, free flying and destroy blocks instantly",
-    hardcore: "Same as survival mode, locked at hardest difficulty, and one life only",
-  }[mode];
+  const def = modeDef(modeId) ?? MODES[0];
+  const hardcore = !!def.hardcore;
+  const pick = (d: ModeDef) => {
+    setModeId(d.id);
+    setDifficulty(d.difficulty ?? 2);
+    setCheats(!!d.cheats);
+    if (d.type) setType(d.type);
+    setPicking(false);
+  };
 
   const create = async () => {
     setBusy(true);
@@ -420,12 +425,12 @@ export function CreateWorld({ saves, existing, onCreate, onBack }: {
     try {
       const text = seedText.trim();
       const seed = !text ? randomSeed() : /^-?\d+$/.test(text) ? Number(BigInt.asIntN(32, BigInt(text))) : seedFromString(text);
-      const gameMode: GameMode = mode === "creative" ? "creative" : "survival";
       const meta = newWorldMeta({
         name: name.trim().slice(0, 32) || "New World",
-        seed, seedText: text || String(seed), type, gameMode,
+        seed, seedText: text || String(seed), type, gameMode: def.gameMode,
         difficulty: hardcore ? 3 : difficulty, hardcore, cheats: hardcore ? false : cheats,
       });
+      applyMode(meta, def);
       if (disabledMods.length) meta.disabledMods = [...disabledMods];
       await saves.putWorld(meta);
       onCreate(meta);
@@ -435,6 +440,18 @@ export function CreateWorld({ saves, existing, onCreate, onBack }: {
     }
   };
 
+  if (picking) {
+    return (
+      <>
+        <MenuBackground />
+        <MenuFrame title="Choose a Game Mode" width={330} dim={false}>
+          <ModePicker value={modeId} onChange={pick} />
+          <Button wide onClick={() => setPicking(false)}>Back</Button>
+        </MenuFrame>
+      </>
+    );
+  }
+
   return (
     <>
       <MenuBackground />
@@ -443,12 +460,11 @@ export function CreateWorld({ saves, existing, onCreate, onBack }: {
           <span className="bc-sub">World Name</span>
           <input className="bc-input" value={name} maxLength={32} onChange={(e) => setName(e.target.value)} />
         </label>
-        <Cycle<ModeChoice>
-          label="Game Mode" value={mode} options={["survival", "creative", "hardcore"]}
-          onChange={(v) => { setMode(v); setCheats(v === "creative"); }}
-          format={(v) => v[0].toUpperCase() + v.slice(1)}
-        />
-        <div className="bc-sub" style={{ textAlign: "center", lineHeight: 1.5 }}>{describe}</div>
+        <ModeCard def={def} selected />
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "calc(var(--u) * 4)" }}>
+          <Button onClick={() => setPicking(true)}>Game Mode…</Button>
+          <Button onClick={() => pick(randomMode(Math.random))}>Random!</Button>
+        </div>
         {!hardcore && (
           <Cycle<number> label="Difficulty" value={difficulty} options={[0, 1, 2, 3]} onChange={(v) => setDifficulty(v as 0 | 1 | 2 | 3)} format={(v) => DIFFICULTY_LABEL[v]} />
         )}
@@ -460,7 +476,9 @@ export function CreateWorld({ saves, existing, onCreate, onBack }: {
               <span className="bc-sub">Seed for the world generator (leave blank for a random seed)</span>
               <input className="bc-input" value={seedText} maxLength={48} onChange={(e) => setSeedText(e.target.value)} />
             </label>
-            <Cycle<WorldType> label="World Type" value={type} options={WORLD_TYPES} onChange={setType} format={(v) => TYPE_LABEL[v]} />
+            {def.map
+              ? <div className="bc-sub" style={{ textAlign: "center" }}>Map pack: {MAPS[def.map].name}</div>
+              : <Cycle<WorldType> label="World Type" value={type} options={WORLD_TYPES} onChange={setType} format={(v) => TYPE_LABEL[v]} />}
           </>
         )}
         <Button wide onClick={() => setMods(!mods)}>{mods ? "Hide Mods" : `Mods… (${MODS.filter((m) => modEnabled(disabledMods, m.id)).length} of ${MODS.length} on)`}</Button>
@@ -473,6 +491,12 @@ export function CreateWorld({ saves, existing, onCreate, onBack }: {
       </MenuFrame>
     </>
   );
+}
+
+/** A world made for a mode says which, unless the mode is only its game mode by another name. */
+function modeLabel(w: WorldMeta): string {
+  const d = modeDef(w.mode?.id);
+  return d && d.category !== "classic" ? ` · ${d.name}` : "";
 }
 
 function uniqueName(base: string, taken: string[]): string {

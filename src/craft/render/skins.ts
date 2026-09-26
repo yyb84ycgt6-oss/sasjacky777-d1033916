@@ -445,6 +445,15 @@ export function skin(kind: string, variant = 0): HTMLCanvasElement {
       p.box(24, 12, 6, 4, 1, rim);
       break;
     }
+    case "tribute": {
+      // Every tribute dressed differently: their district's colours, their own skin and hair.
+      const r = new Rng(variant * 7919 + 13);
+      const pick = <T,>(a: T[]): T => a[r.int(a.length)];
+      const shirt = pick(["#6a4a2a", "#2a5a3a", "#5a2a2a", "#2a3a6a", "#6a6a6a", "#3a3a3a", "#7a5a1a", "#4a2a5a"]);
+      const pants = pick(["#2a2a2a", "#3a2a1a", "#2a3a2a", "#1a2a3a", "#4a4a4a"]);
+      humanoid(p, hex(pick(["#c89a78", "#a8744e", "#e8c09a", "#7a5236", "#5a3a24"])), hex(pick(["#3a2412", "#1a1a1a", "#a8742a", "#5a3a1a", "#c8a050", "#8a2a1a"])), hex(shirt), hex(pants), hex("#2a2016"), [30, 30, 30]);
+      break;
+    }
     case "player": {
       const hues = [
         ["#3aa8a8", "#2e3a8c"], ["#a83a3a", "#3a3a3a"], ["#3a8a3a", "#5a4a2a"], ["#8a3aa8", "#2a2a5a"],

@@ -82,6 +82,8 @@ export interface FrameState {
   dynamicLights?: [number, number, number, number][];
   /** The season's tint over grass and leaves: [r, g, b, amount]. */
   season?: [number, number, number, number];
+  /** A mode's world border (a square of half-width `radius`), drawn as a striped wall when near. */
+  border?: { x: number; z: number; radius: number } | null;
 }
 
 const WATER_FOG = col("#1f4f9a");
@@ -128,6 +130,8 @@ export class WorldRenderer {
   contextLost = false;
   private lastFrameState: FrameState | null = null;
   private cameraPull = 4;
+  private borderWall: THREE.Group | null = null;
+  private borderKey = "";
 
   constructor(readonly canvas: HTMLCanvasElement, private world: World, pixelRatio: number) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: "high-performance", preserveDrawingBuffer: false, alpha: false });
@@ -667,6 +671,7 @@ export class WorldRenderer {
       this.crackMat.uniforms.uLayer.value = layerOf(`destroy_stage_${Math.min(9, frame.crack)}`);
     } else this.crack.visible = false;
 
+    this.updateBorder(frame.border ?? null, c.x, c.z);
     this.updateEntities(frame);
     this.updatePlayers(frame);
     this.particles.update(frame.dt, dim ? dim.sky ?? 0 : sky.daylight, dim?.ambient ?? 0);
@@ -682,6 +687,35 @@ export class WorldRenderer {
       this.renderer.clearDepth();
       this.renderer.render(this.hand.scene, this.hand.camera);
     }
+  }
+
+  /**
+   * The border as the original draws it: four walls of drifting stripes that
+   * only show as you come near, so a shrinking border is seen coming rather
+   * than learned about from the damage.
+   */
+  private updateBorder(border: FrameState["border"], x: number, z: number): void {
+    const key = border ? `${border.x},${border.z},${border.radius}` : "";
+    if (key !== this.borderKey) {
+      this.borderKey = key;
+      if (this.borderWall) {
+        this.scene.remove(this.borderWall);
+        const mat = (this.borderWall.children[0] as THREE.Mesh).material as THREE.MeshBasicMaterial;
+        mat.map?.dispose();
+        mat.dispose();
+        this.borderWall.traverse((o) => { if (o instanceof THREE.Mesh) o.geometry.dispose(); });
+      }
+      this.borderWall = border ? borderWalls(border.x, border.z, border.radius) : null;
+      if (this.borderWall) this.scene.add(this.borderWall);
+    }
+    const wall = this.borderWall;
+    if (!wall || !border) return;
+    const inside = border.radius - Math.max(Math.abs(x - border.x), Math.abs(z - border.z));
+    const near = Math.max(0, Math.min(1, 1 - inside / 32));
+    wall.visible = near > 0;
+    const mat = (wall.children[0] as THREE.Mesh).material as THREE.MeshBasicMaterial;
+    mat.opacity = 0.2 + near * 0.45;
+    if (mat.map) mat.map.offset.x = (this.time * 0.25) % 1;
   }
 
   stats(): { chunks: number; quads: number; calls: number; triangles: number } {
@@ -706,6 +740,43 @@ export class WorldRenderer {
   }
 }
 
+let borderTexture: THREE.CanvasTexture | null = null;
+
+/** Diagonal cyan stripes on nothing, tiled every two blocks. */
+function borderStripes(): THREE.CanvasTexture {
+  if (borderTexture) return borderTexture;
+  const cv = document.createElement("canvas");
+  cv.width = cv.height = 32;
+  const g = cv.getContext("2d")!;
+  g.strokeStyle = "rgba(60,190,255,1)";
+  g.lineWidth = 5;
+  for (let i = -32; i <= 64; i += 16) { g.beginPath(); g.moveTo(i, 32); g.lineTo(i + 32, 0); g.stroke(); }
+  const t = new THREE.CanvasTexture(cv);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.magFilter = THREE.NearestFilter;
+  t.colorSpace = THREE.NoColorSpace;
+  return (borderTexture = t);
+}
+
+function borderWalls(cx: number, cz: number, r: number): THREE.Group {
+  const lo = -64, hi = 320, h = hi - lo;
+  const tex = borderStripes().clone();
+  tex.needsUpdate = true;
+  tex.repeat.set(r, h / 2);
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false, fog: false });
+  const group = new THREE.Group();
+  const sides: [number, number, number][] = [[cx, cz - r, 0], [cx, cz + r, Math.PI], [cx - r, cz, Math.PI / 2], [cx + r, cz, -Math.PI / 2]];
+  for (const [x, z, rot] of sides) {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(r * 2, h), mat);
+    m.position.set(x, lo + h / 2, z);
+    m.rotation.y = rot;
+    m.renderOrder = 4;
+    m.frustumCulled = false;
+    group.add(m);
+  }
+  return group;
+}
+
 function angleDelta(a: number, b: number): number {
   let d = b - a;
   while (d > Math.PI) d -= Math.PI * 2;
@@ -724,6 +795,7 @@ function skinVariant(e: Mob): number {
   if (e.kind === "shulker") return e.shellColor;
   // A wolf's collar when tame; red eyes when angry.
   if (e.kind === "wolf") return (e.owner ? 1 : 0) | (e.anger > 0 ? 2 : 0);
+  if (e.kind === "tribute") return e.id % 24;
   return 0;
 }
 

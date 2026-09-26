@@ -26,6 +26,9 @@ import {
 import { itemDef, type ItemStack, type StatusEffect } from "../engine/items";
 import { sanitizeRocket, type Rocket } from "../engine/fireworks";
 import { sanitizeWaystones, type Waystone } from "../engine/waystones";
+import { isMapId, type MapId } from "../engine/maps";
+import type { ModeState } from "../modes/modes";
+import type { ModeTell } from "../game/types";
 import { sanitizeStack } from "../engine/inventory";
 import { Mob, isMobKind } from "../engine/mobs";
 import { isVehicleKind, Vehicle, vehicleFromSnapshot } from "../engine/vehicles";
@@ -65,6 +68,37 @@ export interface Welcome {
   disabledMods?: string[];
   /** The world's waystones (engine/waystones.ts). */
   waystones?: Record<string, Waystone>;
+  /** The map pack the overworld is built as, which a guest's generator must build too. */
+  map?: MapId;
+  /** The world's game mode (its state stays with the host). */
+  mode?: ModeState;
+}
+
+const GAME_MODES = ["survival", "creative", "adventure", "spectator"] as const;
+
+/** A host's mode message, kept to what it may say: short words, a known game mode, a sane scoreboard and border. */
+export function sanitizeModeTell(v: unknown): ModeTell {
+  const t = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
+  const str = (x: unknown, n: number) => (typeof x === "string" ? x.slice(0, n) : undefined);
+  const out: ModeTell = {};
+  if (str(t.msg, 200)) { out.msg = str(t.msg, 200); out.color = /^#[0-9a-f]{6}$/i.test(String(t.color)) ? String(t.color) : undefined; }
+  if (str(t.title, 60)) { out.title = str(t.title, 60); out.sub = str(t.sub, 100); }
+  if ((GAME_MODES as readonly unknown[]).includes(t.gm)) out.gm = t.gm as ModeTell["gm"];
+  if (t.obj === null) out.obj = null;
+  else if (t.obj && typeof t.obj === "object") {
+    const o = t.obj as { title?: unknown; lines?: unknown };
+    const lines = Array.isArray(o.lines) ? o.lines.slice(0, 15).map((l): [string, string] => [String((l as unknown[])?.[0] ?? "").slice(0, 40), String((l as unknown[])?.[1] ?? "").slice(0, 40)]) : [];
+    out.obj = { title: String(o.title ?? "").slice(0, 40), lines };
+  }
+  if (t.border === null) out.border = null;
+  else if (t.border && typeof t.border === "object") {
+    const b = t.border as { x?: unknown; z?: unknown; radius?: unknown };
+    if (finite(b.x, b.z, b.radius)) out.border = { x: b.x as number, z: b.z as number, radius: Math.max(1, b.radius as number) };
+  }
+  if (typeof t.frozen === "boolean") out.frozen = t.frozen;
+  if (finite(t.maxHealth)) out.maxHealth = Math.max(1, Math.min(20, t.maxHealth as number));
+  if (t.reset === true) out.reset = true;
+  return out;
 }
 
 // 2: dimensions (the "dm" and "mk" ops, and the welcome's dimension).
@@ -410,6 +444,7 @@ export class NetSession implements NetLink {
   }
   waystonesChanged(): void { if (this.role === "host") this.push(["wz", this.game?.meta.waystones ?? {}]); }
   modsChanged(): void { if (this.role === "host") this.push(["md", this.game?.meta.disabledMods ?? []]); }
+  modeTell(target: string | null, t: ModeTell): void { if (this.role === "host") this.push(["mt", target, t]); }
   registerWaystone(x: number, y: number, z: number): void { if (this.role === "guest") this.push(["wr", x, y, z]); }
   renameWaystone(key: string, name: string): void { if (this.role === "guest") this.push(["wn", key, name]); }
   placeGrave(x: number, y: number, z: number, items: (ItemStack | null)[], owner: string, yaw: number): void {
@@ -495,6 +530,7 @@ export class NetSession implements NetLink {
         : saved,
       hostId: this.myId, hostName: g.player.name, dimension: g.dimension, disabledMods: g.meta.disabledMods ?? [],
       waystones: g.meta.waystones ?? {},
+      map: g.meta.map, mode: g.meta.mode ? { id: g.meta.mode.id, data: {} } : undefined,
     };
     this.send({ t: "welcome", to: m.from, w });
     if (!g.remote.has(m.from)) {
@@ -607,6 +643,8 @@ export class NetSession implements NetLink {
             // System lines (joins, deaths, advancements): shown as the game's words, not as chat.
             const [kind, msg] = text.slice(1).split(/:(.*)/s);
             if (msg) g.message(msg, kind === "adv" ? "#55ff55" : kind === "death" ? "#ff8888" : "#ffff55");
+            // A guest's death is the host's mode's business (out of the Survival Games, a wave run over).
+            if (kind === "death" && this.role === "host") g.mode?.onPlayerDeath(from);
           } else g.message(`<${String(op[2] ?? "?").slice(0, 16)}> ${text}`);
           break;
         }
@@ -668,6 +706,9 @@ export class NetSession implements NetLink {
         case "pv": if (this.role === "host") this.onPlaceVehicle(from, op); break;
         case "pf": if (this.role === "host") this.onPlaceFrame(from, op); break;
         case "wz": if (this.role === "guest" && fromHost) g.meta.waystones = sanitizeWaystones(op[1]); break;
+        case "mt":
+          if (this.role === "guest" && fromHost && (op[1] === null || op[1] === this.myId)) g.applyModeTell(sanitizeModeTell(op[2]));
+          break;
         case "md":
           if (this.role === "guest" && fromHost && Array.isArray(op[1])) {
             g.meta.disabledMods = (op[1] as unknown[]).filter((m): m is string => typeof m === "string").slice(0, 64);

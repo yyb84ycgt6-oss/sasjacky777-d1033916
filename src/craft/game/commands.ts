@@ -1,7 +1,7 @@
 /**
  * Chat commands, the familiar set: /time, /gamemode, /give, /tp, /weather,
  * /kill, /seed, /spawnpoint, /difficulty, /gamerule, /clear, /summon, /enchant,
- * /effect, /xp, /setblock, /fill, /help.
+ * /effect, /xp, /setblock, /fill, /mode, /help.
  *
  * World-changing commands need cheats on (as a world option) or creative
  * mode, as in the original. An online guest can only run the ones that affect
@@ -20,6 +20,7 @@ import { fortressInRegion, FORTRESS_REGION } from "../engine/nether";
 import { Generator } from "../engine/worldgen";
 import { PROFESSIONS, villageInRegion, VILLAGE_REGION, type Profession } from "../engine/villages";
 import type { GameMode } from "../engine/player";
+import { modeDef, MODES as GAME_MODES } from "../modes/modes";
 import type { Game } from "./game";
 import { DEFAULT_RULES, type GameRules } from "./save";
 
@@ -48,6 +49,7 @@ const HELP = [
   "/xp add <amount>, /clear, /kill, /seed, /spawnpoint",
   "/locate village|fortress|stronghold|end_city|catacombs|spider_cave, /dimension overworld|nether|end",
   "/difficulty peaceful|easy|normal|hard, /gamerule <rule> <true|false>",
+  "/mode [info|restart|list]   (this world's game mode)",
 ];
 
 export function runCommand(game: Game, line: string): Line[] {
@@ -66,6 +68,23 @@ export function runCommand(game: Game, line: string): Line[] {
   switch ((cmd ?? "").toLowerCase()) {
     case "help": case "?":
       return HELP.map((text) => ({ text, color: OK }));
+    case "mode": {
+      const def = modeDef(game.meta.mode?.id);
+      const sub = (args[0] ?? "info").toLowerCase();
+      if (sub === "list") return GAME_MODES.map((m) => ({ text: `${m.name} (${m.id}) — ${m.goal}`, color: OK }));
+      if (!def) return [{ text: "This world has no game mode: it is plain survival or creative. Pick one when creating a world." }];
+      if (sub === "restart") {
+        const denied = needHost();
+        if (denied) return denied;
+        if (!game.mode) return [{ text: "The mode is not running here.", color: ERR }];
+        return [{ text: game.mode.restart() }];
+      }
+      return [
+        { text: `${def.name}: ${def.description}` },
+        { text: `Goal: ${def.goal}`, color: OK },
+        ...(def.inspiredBy ? [{ text: `Inspired by ${def.inspiredBy}.`, color: OK }] : []),
+      ];
+    }
     case "seed":
       return [{ text: `Seed: ${game.meta.seed}${game.meta.seedText && game.meta.seedText !== String(game.meta.seed) ? ` ("${game.meta.seedText}")` : ""}` }];
     case "time": {
@@ -247,8 +266,8 @@ export function runCommand(game: Game, line: string): Line[] {
       const what = (args[0] ?? "").toLowerCase();
       const b = p.body;
       if (what === "village") {
-        if (game.dimension !== "overworld" || !(game.generator instanceof Generator)) return [{ text: "Villages are in the overworld.", color: ERR }];
-        const gen = game.generator;
+        const gen = game.terrainGenerator();
+        if (!gen) return [{ text: "Villages are in the overworld's open terrain.", color: ERR }];
         const size = VILLAGE_REGION * 16;
         const hit = nearestInRegions(b.x, b.z, size, (rx, rz) => villageInRegion(gen, game.meta.seed, rx, rz));
         return hit ? [{ text: `The nearest village is at ${hit.x}, ${hit.y}, ${hit.z} (${Math.round(Math.hypot(hit.x - b.x, hit.z - b.z))} blocks away)` }]
@@ -265,7 +284,7 @@ export function runCommand(game: Game, line: string): Line[] {
           : [{ text: "No fortress within 4000 blocks.", color: ERR }];
       }
       if (what === "stronghold") {
-        if (game.dimension !== "overworld" || game.meta.type === "flat") return [{ text: "Strongholds are in the overworld (and not in a flat world).", color: ERR }];
+        if (game.dimension !== "overworld" || !game.hasStrongholds()) return [{ text: "Strongholds are in the overworld (and not in a flat world or most map packs).", color: ERR }];
         const hit = nearestStronghold(game.meta.seed, b.x, b.z);
         return [{ text: `The nearest stronghold's portal room is at ${hit.x}, ${hit.y}, ${hit.z} (${Math.round(Math.hypot(hit.x - b.x, hit.z - b.z))} blocks away)` }];
       }
@@ -281,7 +300,8 @@ export function runCommand(game: Game, line: string): Line[] {
           : [{ text: "No End city within 4000 blocks.", color: ERR }];
       }
       if (what === "catacombs" || what === "spider_cave") {
-        if (game.dimension !== "overworld" || !(game.generator instanceof Generator) || !game.generator.dungeons || game.meta.type === "flat") {
+        const gen = game.terrainGenerator();
+        if (!gen || !gen.dungeons || game.meta.type === "flat") {
           return [{ text: "Dungeons are under the overworld (and not in a flat world, or one that switched them off).", color: ERR }];
         }
         const hit = nearestInRegions(b.x, b.z, DUNGEON_REGION, (rx, rz) => {

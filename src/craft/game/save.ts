@@ -19,6 +19,8 @@ import type { GameMode, PlayerSave } from "../engine/player";
 import type { WorldType } from "../engine/worldgen";
 import type { Dimension } from "../engine/dimension";
 import type { Waystone } from "../engine/waystones";
+import type { MapId } from "../engine/maps";
+import type { ModeState } from "../modes/modes";
 import { GAME_NAME } from "../edition";
 import { MapStore } from "./mapStore";
 
@@ -75,6 +77,10 @@ export interface WorldMeta {
    * been saved, does not people its city a second time.
    */
   spawned?: string[];
+  /** The map pack the overworld is built as (engine/maps.ts); absent is open terrain. */
+  map?: MapId;
+  /** The game mode played in this world (modes/modes.ts) and what it has kept track of. */
+  mode?: ModeState;
   /** Mod-inspired features switched off for this world (engine/mods.ts ids); everything else is on. */
   disabledMods?: string[];
   /** Every waystone in the world, by key (engine/waystones.ts). Who has found which is on each player. */

@@ -277,6 +277,10 @@ export class GameAudio {
       case "item_frame_add": this.noiseBurst(out, t, 0.08, "bandpass", 1300, 2, 0.4); break;
       case "item_frame_rotate": this.tone(out, t, "square", 1100, 1000, 0.03, 0.1); break;
       case "item_frame_remove": this.tone(out, t, "sine", 600, 950, 0.08, 0.3); break;
+      // Game modes: a horn for a wave, the arena's cannon for a fallen tribute, a beep for a countdown.
+      case "horn": this.tone(out, t, "sawtooth", 110, 116, 1.6, 0.25, 0.3); this.tone(out, t, "sawtooth", 165, 172, 1.6, 0.12, 0.3); break;
+      case "cannon": this.noiseBurst(out, t, 1.4, "lowpass", 260, 0.7, 1, 0.1); this.tone(out, t, "sine", 70, 28, 1.2, 0.6); break;
+      case "countdown": this.tone(out, t, "square", 880 * p, 880 * p, 0.12, 0.12); break;
       default:
         this.mob(name, out, t, p);
     }
@@ -341,6 +345,11 @@ export class GameAudio {
         else for (let i = 0; i < 3; i++) this.noiseBurst(out, t + i * 0.16, 0.08, "bandpass", 900, 1.5, 0.12);
         break;
       case "deer": this.tone(out, t, "sawtooth", 700 * p * low, 500 * p * low, 0.25, 0.12, 0.02); break;
+      // A tribute is only a person: a grunt when struck, a cry when they fall, nothing idle.
+      case "tribute":
+        if (what === "hurt") { this.tone(out, t, "triangle", 250 * p, 150 * p, 0.18, 0.4); this.noiseBurst(out, t, 0.08, "lowpass", 800, 1, 0.25); }
+        else if (death) this.tone(out, t, "triangle", 300, 110, 0.7, 0.35, 0.1);
+        break;
       case "bear": this.tone(out, t, "sawtooth", 85 * p * low, 60 * p * low, 0.9, 0.35, 0.1); this.noiseBurst(out, t, 0.8, "lowpass", 300, 1, 0.3, 0.6); break;
       case "wither_skeleton": for (let i = 0; i < 4; i++) this.noiseBurst(out, t + i * 0.06, 0.04, "bandpass", 1400, 4, 0.5); break;
       // A ghast's long mournful cry; a shriek when hurt; a cough of fire when it spits.

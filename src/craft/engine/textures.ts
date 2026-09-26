@@ -1180,6 +1180,16 @@ def("magenta_stained_glass", (p) => {
   for (let j = 0; j < 4; j++) p.set(3 + j, 6 - j, hex("#ffe0fa"), 170);
 });
 
+// A lucky block: gold-yellow, darker rim, a bold question mark.
+def("lucky_block", (p, r) => {
+  noisy(p, r, hex("#f2c43a"), 0.06, 4);
+  frame(p, hex("#b88a14"));
+  const mark = hex("#ffffff"), shadow = hex("#8a6408");
+  const q = [[6, 3], [7, 3], [8, 3], [9, 3], [5, 4], [10, 4], [10, 5], [9, 6], [8, 7], [7, 8], [7, 9], [7, 12], [7, 11]];
+  for (const [x, y] of q) { p.set(x + 1, y + 1, shadow); }
+  for (const [x, y] of q) { p.set(x, y, mark); }
+});
+
 // A cooking pot: dark iron, a riveted band, a copper-bright rim.
 const POT_IRON = hex("#4e4e56");
 def("cooking_pot_side", (p, r) => {

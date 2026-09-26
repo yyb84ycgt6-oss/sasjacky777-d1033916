@@ -1123,6 +1123,10 @@ add(250, "gravestone", "Gravestone", {
   boxes: (m) => ([[1, 0, 2, 15, 2, 14], [3, 2, 6, 13, 13, 10], [5, 13, 6, 11, 15, 10]] as Box[]).map((b) => hFacingBox(b, m & 3)),
   textures: tex("gravestone"),
 });
+// A lucky block (engine/lucky.ts): break it and something happens. It drops nothing of itself.
+add(252, "lucky_block", "Lucky Block", {
+  textures: tex("lucky_block"), hardness: 0.3, material: "wood", drops: [], emission: 4,
+});
 // A cooking pot (engine/cooking.ts): an iron pot with handles and a lid, set over heat to cook meals.
 add(251, "cooking_pot", "Cooking Pot", {
   shape: "boxes", layer: "cutout", opaque: false, hardness: 2, tool: P, harvestTier: 0, material: "metal", interact: "cooking",
@@ -1196,7 +1200,7 @@ export const B = {
   QUARTZ_BLOCK: 230, SPAWNER: 231,
   END_STONE: 232, END_STONE_BRICKS: 233, PURPUR_BLOCK: 234, PURPUR_PILLAR: 235, PURPUR_STAIRS: 236, END_ROD: 237,
   CHORUS_PLANT: 238, CHORUS_FLOWER: 239, END_PORTAL_FRAME: 240, END_PORTAL: 241, END_GATEWAY: 242, DRAGON_EGG: 243,
-  IRON_BARS: 244, SHULKER_BOX: 245, DRAGON_HEAD: 246, PURPUR_SLAB: 247, MAGENTA_STAINED_GLASS: 248, WAYSTONE: 249, GRAVESTONE: 250, COOKING_POT: 251,
+  IRON_BARS: 244, SHULKER_BOX: 245, DRAGON_HEAD: 246, PURPUR_SLAB: 247, MAGENTA_STAINED_GLASS: 248, WAYSTONE: 249, GRAVESTONE: 250, COOKING_POT: 251, LUCKY_BLOCK: 252,
 } as const;
 
 /** Blocks that stand on an axis kept in meta like a log's (0 up, 1 along x, 2 along z). */

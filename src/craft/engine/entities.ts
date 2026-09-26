@@ -24,7 +24,7 @@ export type EntityKind =
   | "zombified_piglin" | "ghast" | "magma_cube" | "blaze" | "wither_skeleton" | "piglin" | "hoglin"
   | "boat" | "minecart" | "tnt_minecart"
   | "shulker" | "shulker_bullet" | "item_frame" | "firework_rocket"
-  | "wolf" | "deer" | "bear";
+  | "wolf" | "deer" | "bear" | "tribute";
 
 export interface PlayerRef {
   id: string;
@@ -78,7 +78,9 @@ export interface EntityContext {
   /** Places a block as the world (sand landing), returning whether it took. */
   placeBlock(x: number, y: number, z: number, id: number, meta: number): boolean;
   /** A player's blow finished a mob off (for advancements). */
-  creditKill?(playerId: string, hostile: boolean): void;
+  creditKill?(playerId: string, hostile: boolean, kind?: string): void;
+  /** A game mode's say in what a mob drops (Random Drops). */
+  transformLoot?(stack: ItemStack): ItemStack;
   /** A thrown potion burst here; `direct` is what it struck, which takes the full dose. */
   splashPotion?(itemId: number, x: number, y: number, z: number, direct: Entity | PlayerRef | null, owner: string | null): void;
   /** An ender pearl landed: carry its thrower here (or, if it struck a gateway, through it). */

@@ -27,7 +27,9 @@ export type MobKind =
   | "zombified_piglin" | "ghast" | "magma_cube" | "blaze" | "wither_skeleton" | "piglin" | "hoglin"
   | "enderman" | "silverfish" | "ender_dragon" | "shulker"
   // Wildlife (after Alex's Mobs and Naturalist): wolves to tame, skittish deer, bears best left alone.
-  | "wolf" | "deer" | "bear";
+  | "wolf" | "deer" | "bear"
+  // Game modes: the Survival Games' other tributes.
+  | "tribute";
 
 interface MobSpec {
   health: number;
@@ -81,6 +83,8 @@ export const MOB_SPECS: Record<MobKind, MobSpec> = {
   wolf: { health: 8, width: 0.6, height: 0.85, speed: 0.075, hostile: false, attack: 4, tempt: [], burnsInDay: false, followRange: 16, xp: [1, 3] },
   deer: { health: 12, width: 0.9, height: 1.5, speed: 0.07, hostile: false, attack: 0, tempt: ["wheat", "apple"], burnsInDay: false, followRange: 10, xp: [1, 3] },
   bear: { health: 30, width: 1.4, height: 1.4, speed: 0.06, hostile: false, attack: 6, tempt: ["apple"], burnsInDay: false, followRange: 16, xp: [1, 3] },
+  // Roams the arena and fights back when struck; a mode sends the bold ones hunting.
+  tribute: { health: 20, width: 0.6, height: 1.8, speed: 0.07, hostile: true, attack: 4, tempt: [], burnsInDay: false, followRange: 20, xp: [5, 5] },
 };
 
 /** What a tamed wolf eats: any meat, as in the original, and it will breed on it too. */
@@ -210,6 +214,12 @@ export class Mob extends Entity {
   ownerName: string | null = null;
   /** A tamed wolf told to stay. */
   sitting = false;
+  /**
+   * Sent by a game mode to hunt the players down: it tracks them across a
+   * whole arena and needs no sight of them, where a wild monster gives up
+   * past its follow range.
+   */
+  hunting = false;
 
   constructor(kind: MobKind, x: number, y: number, z: number, id?: number) {
     const spec = MOB_SPECS[kind];
@@ -382,7 +392,7 @@ export class Mob extends Entity {
     }
     if (this.kind === "piglin" && attacker && !attacker.startsWith("mob:")) this.anger = 600;
     // A wolf or a bear turns on whoever struck it — a wild wolf's whole pack with it — but never on its owner.
-    if ((this.kind === "wolf" || this.kind === "bear") && attacker && !attacker.startsWith("mob:") && attacker !== this.owner) {
+    if ((this.kind === "wolf" || this.kind === "bear" || this.kind === "tribute") && attacker && !attacker.startsWith("mob:") && attacker !== this.owner) {
       this.targetId = attacker;
       this.anger = 600;
       this.sitting = false;
@@ -461,6 +471,7 @@ export class Mob extends Entity {
     else if (this.kind === "wolf") this.wolfAi(ctx, move);
     else if (this.kind === "bear") this.bearAi(ctx, move);
     else if (this.kind === "deer") this.deerAi(ctx, move);
+    else if (this.kind === "tribute" && !this.hunting) this.tributeAi(ctx, move);
     else if (this.spec.hostile) this.hostileAi(ctx, move);
     else this.passiveAi(ctx, move);
 
@@ -749,6 +760,12 @@ export class Mob extends Entity {
     move.speedMul *= this.panic > 0 ? 1 : 0.7;
   }
 
+  /** A tribute not yet hunting keeps moving round the arena, and turns on anyone who strikes it. */
+  private tributeAi(ctx: EntityContext, move: { forward: number; jump: boolean; yaw: number; speedMul: number }): void {
+    if (this.chasePlayer(ctx, move, 1.3)) return;
+    this.wanderAi(ctx, move, 1 / 40);
+  }
+
   /**
    * A deer is skittish: anyone who comes near without sneaking — and without
    * food in hand — sends it bounding away. Otherwise it grazes like the rest.
@@ -777,12 +794,13 @@ export class Mob extends Entity {
     const passiveNow = this.kind === "spider" && bright && this.lastAttacker === null;
     if (this.age % 20 === 0 && !passiveNow) {
       const current = this.targetId ? ctx.players().find((p) => p.id === this.targetId) : null;
-      if (!current || !current.targetable || Math.hypot(current.x - b.x, current.z - b.z) > this.spec.followRange) {
-        const candidate = this.nearestPlayer(ctx, this.spec.followRange * (this.kind === "zombie" ? 0.5 : 1), eligible);
-        this.targetId = candidate && this.canSee(ctx, candidate) ? candidate.id : null;
+      const range = this.hunting ? 128 : this.spec.followRange;
+      if (!current || !current.targetable || Math.hypot(current.x - b.x, current.z - b.z) > range) {
+        const candidate = this.nearestPlayer(ctx, this.hunting ? range : range * (this.kind === "zombie" ? 0.5 : 1), eligible);
+        this.targetId = candidate && (this.hunting || this.canSee(ctx, candidate)) ? candidate.id : null;
       }
     }
-    if (passiveNow && this.lastAttacker === null) this.targetId = null;
+    if (passiveNow && this.lastAttacker === null && !this.hunting) this.targetId = null;
     if (neutral) this.targetId = null;
     const target = this.targetId ? ctx.players().find((p) => p.id === this.targetId) ?? null : null;
     if ((!target || !target.targetable) && this.kind === "zombie" && this.huntVillager(ctx, move)) return;
@@ -1471,12 +1489,13 @@ export class Mob extends Entity {
         ctx.spawn(child);
       }
     }
-    for (const s of this.loot(ctx)) {
+    for (const raw of this.loot(ctx)) {
+      const s = ctx.transformLoot?.(raw) ?? raw;
       ctx.dropItem(b.x, b.y + 0.5, b.z, s, (ctx.random() - 0.5) * 0.2, 0.2, (ctx.random() - 0.5) * 0.2);
     }
     // Experience only for kills a player had a hand in, as in the original.
     if (this.lastAttacker && !this.lastAttacker.startsWith("mob:")) {
-      ctx.creditKill?.(this.lastAttacker, this.spec.hostile);
+      ctx.creditKill?.(this.lastAttacker, this.spec.hostile, this.kind);
       const [lo, hi] = isCubeMob(this.kind) ? [this.size, this.size] : this.spec.xp;
       for (const v of xpOrbValues(lo + Math.floor(ctx.random() * (hi - lo + 1)))) ctx.spawn(new XpOrb(b.x, b.y + 0.5, b.z, v));
     }
@@ -1516,6 +1535,7 @@ export class Mob extends Entity {
       case "wolf": return [];
       case "deer": return [...it(burnt ? "cooked_venison" : "venison", r(1, 3)), ...it("leather", r(0, 2))];
       case "bear": return [...it("leather", r(1, 3)), ...it("bone", r(0, 2))];
+      case "tribute": return [...it("bread", r(0, 2)), ...it("arrow", r(0, 4)), ...(ctx.random() < 0.3 ? it("stone_sword", 1) : [])];
     }
   }
 
@@ -1542,6 +1562,7 @@ export class Mob extends Entity {
         // A wolf's owner, whether it sits, and its anger (red eyes, for drawing).
         ow: this.owner ?? undefined, on: this.ownerName ?? undefined, si: this.sitting ? 1 : undefined,
         an: (this.kind === "wolf" || this.kind === "bear") && this.anger > 0 ? 1 : undefined,
+        hu: this.hunting ? 1 : undefined,
       },
     };
   }
@@ -1602,6 +1623,7 @@ export class Mob extends Entity {
       this.sitting = d.si === 1;
     }
     if (this.kind === "wolf" || this.kind === "bear") this.anger = d.an === 1 ? Math.max(this.anger, 20) : 0;
+    this.hunting = d.hu === 1;
     const h = d.vh as { x?: unknown; z?: unknown } | undefined;
     this.home = h && typeof h.x === "number" && typeof h.z === "number" ? { x: h.x, z: h.z } : null;
   }

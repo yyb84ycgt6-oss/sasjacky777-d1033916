@@ -148,7 +148,7 @@ const FUNCTIONAL = new Set([
   "sea_lantern", "jack_o_lantern", "carved_pumpkin", "note_block", "hay_block", "oak_fence", "glass_pane",
   "enchanting_table", "anvil", "chipped_anvil", "damaged_anvil", "brewing_stand", "cauldron",
   "composter", "lectern", "smoker", "barrel", "fletching_table", "loom", "stonecutter", "smithing_table", "bell",
-  "end_rod", "end_portal_frame", "iron_bars", "waystone", "cooking_pot",
+  "end_rod", "end_portal_frame", "iron_bars", "waystone", "cooking_pot", "lucky_block",
 ]);
 
 for (const def of allBlocks()) {

@@ -17,6 +17,7 @@
  */
 import { stampStronghold, strongholdsTouching, type Stronghold } from "./stronghold";
 import { dungeonsTouching, stampDungeon, type Dungeon } from "./dungeons";
+import type { MapId } from "./maps";
 import { B } from "./blocks";
 import { BiomeId, biomeDef, foliageColor, grassColor, waterColor, type BiomeDef, type TreeKind } from "./biomes";
 import { blockIndex, CHUNK_SIZE, CHUNK_VOLUME, DEEPSLATE_LEVEL, SEA_LEVEL, WORLD_HEIGHT } from "./constants";
@@ -35,6 +36,10 @@ export interface GenSettings {
   dimension?: Dimension;
   /** Catacombs and spider caves (engine/dungeons.ts); absent means yes. */
   dungeons?: boolean;
+  /** Lucky blocks scattered on the ground (engine/lucky.ts). */
+  lucky?: boolean;
+  /** A map pack (engine/maps.ts) the overworld is built as, instead of open terrain. */
+  map?: MapId;
 }
 
 /** What the game and the workers need from any dimension's generator. */
@@ -85,6 +90,8 @@ export class Generator implements ChunkGenerator {
   readonly type: WorldType;
   /** Catacombs and spider caves (engine/dungeons.ts). */
   readonly dungeons: boolean;
+  /** Lucky blocks on the ground, a world of the Lucky Blocks mode. */
+  readonly lucky: boolean;
   private continent: Simplex;
   private erosion: Simplex;
   private ridge: Simplex;
@@ -104,6 +111,7 @@ export class Generator implements ChunkGenerator {
     this.seed = settings.seed | 0;
     this.type = settings.type;
     this.dungeons = settings.dungeons !== false;
+    this.lucky = settings.lucky === true;
     const s = this.seed;
     this.continent = new Simplex(hash4(s, 1));
     this.erosion = new Simplex(hash4(s, 2));
@@ -470,6 +478,10 @@ export class Generator implements ChunkGenerator {
             const pad = blockIndex(x, SEA_LEVEL + 1, z);
             if (blocks[pad] === B.AIR) blocks[pad] = B.LILY_PAD;
           }
+          continue;
+        }
+        if (this.lucky && (ground === B.GRASS || ground === B.SAND || ground === B.SNOW_BLOCK) && rng.next() < 1 / 450) {
+          blocks[above] = B.LUCKY_BLOCK;
           continue;
         }
         if (ground === B.GRASS || ground === B.PODZOL || ground === B.MOSS) {

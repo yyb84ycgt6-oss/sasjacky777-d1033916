@@ -98,6 +98,21 @@ export function Hud({ hud, mobile, crosshair }: { hud: HudState; mobile: boolean
         </div>
       )}
 
+      {hud.objective && !hud.screen && (
+        // The sidebar scoreboard, where servers have always put a minigame's state: right edge, middle.
+        <div data-testid="objective" className="absolute" style={{ right: "calc(var(--u) * 2)", top: "50%", transform: "translateY(-50%)", minWidth: "calc(var(--u) * 70)", maxWidth: "calc(var(--u) * 110)", background: "rgba(0,0,0,0.45)", fontSize: "calc(var(--u) * 6)", lineHeight: 1.35 }}>
+          <div style={{ textAlign: "center", color: "#ffff55", background: "rgba(0,0,0,0.25)", padding: "calc(var(--u) * 1) calc(var(--u) * 3)" }}>{hud.objective.title}</div>
+          <div style={{ padding: "calc(var(--u) * 1) calc(var(--u) * 3)" }}>
+            {hud.objective.lines.map(([k, v], i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: "calc(var(--u) * 5)" }}>
+                <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{k}</span>
+                <span style={{ color: "#ff5555", whiteSpace: "nowrap" }}>{v}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Bottom cluster: status bars, XP, hotbar. */}
       <div className="absolute left-1/2 flex flex-col items-center" style={{ bottom: mobile ? "calc(var(--u) * 2)" : "calc(var(--u) * 1)", transform: "translateX(-50%)" }}>
         {hud.actionbar && <div style={{ fontSize: "calc(var(--u) * 7)", marginBottom: "calc(var(--u) * 4)" }}>{hud.actionbar.text}</div>}

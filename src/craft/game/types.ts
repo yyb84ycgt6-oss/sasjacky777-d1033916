@@ -68,6 +68,28 @@ export type Screen =
   /** A waystone's list of the others this player has found. */
   | { kind: "waystone"; x: number; y: number; z: number };
 
+/** A game mode's scoreboard: a title and label–value lines, as the classic sidebar shows them. */
+export interface Objective {
+  title: string;
+  lines: [string, string][];
+}
+
+/** What a mode running on the host tells one guest (or all): words, a title, a game mode, their scoreboard, the border. */
+export interface ModeTell {
+  msg?: string;
+  color?: string;
+  title?: string;
+  sub?: string;
+  gm?: "survival" | "creative" | "adventure" | "spectator";
+  obj?: Objective | null;
+  border?: { x: number; z: number; radius: number } | null;
+  frozen?: boolean;
+  /** At most this much health (One Heart). */
+  maxHealth?: number;
+  /** A new round: empty hands, full health and food, no effects. */
+  reset?: boolean;
+}
+
 export interface ChatLine {
   id: number;
   text: string;
@@ -123,6 +145,8 @@ export interface Hud {
   /** Hidden hunger made visible (after AppleSkin): saturation, and what the held food would restore. */
   saturation: number | null;
   foodPreview: { food: number; saturation: number } | null;
+  /** A game mode's scoreboard (modes/runtime.ts), shown at the right. */
+  objective: Objective | null;
   /** The minimap is showing in the top right corner, so what usually sits there moves down. */
   minimap: boolean;
 }
