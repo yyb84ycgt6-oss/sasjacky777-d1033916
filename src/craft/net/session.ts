@@ -109,7 +109,9 @@ export function sanitizeModeTell(v: unknown): ModeTell {
 //    would generate differently, so a guest on it would walk through walls the host sees — plus
 //    shulkers, fireworks, waystones, gravestones and the mod switches (the "wz", "wr", "wn", "gr",
 //    "gc", "md" and "fw" ops, and the welcome's disabledMods and waystones).
-const PROTOCOL = 3;
+// 4: game modes and map packs, Primal creatures and riding, the infected, guns, vitals and blood moons
+//    (the "nz" op, and the tell's reset and bloodMoon) — a guest on 3 would see none of it.
+const PROTOCOL = 4;
 const FLUSH_TICKS = 2;
 const ENTITY_TICKS = 4;
 const ENV_TICKS = 40;
