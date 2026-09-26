@@ -33,6 +33,8 @@ export type GameAction =
   | { type: "screenshot" }
   | { type: "toggleFly" }
   | { type: "map" }
+  /** The critter modes: the party (P). */
+  | { type: "party" }
   | { type: "close" };
 
 export function emptyControls(): Controls {
@@ -68,7 +70,13 @@ export type Screen =
   /** A waystone's list of the others this player has found. */
   | { kind: "waystone"; x: number; y: number; z: number }
   /** Primal's engram list. */
-  | { kind: "engrams"; from: "pause" | "inventory" };
+  | { kind: "engrams"; from: "pause" | "inventory" }
+  /** The critter modes: a battle; the party (with a medicine to give, or the storage box beside it at a station); the
+   *  starter to choose (or the Spire's rentals); a healing station's counter. */
+  | { kind: "battle" }
+  | { kind: "party"; give?: string; tab?: "party" | "dex" }
+  | { kind: "starter"; rentals?: boolean }
+  | { kind: "center"; x: number; y: number; z: number };
 
 /** A game mode's scoreboard: a title and label–value lines, as the classic sidebar shows them. */
 export interface Objective {
@@ -159,4 +167,6 @@ export interface Hud {
   inspect: string | null;
   /** The minimap is showing in the top right corner, so what usually sits there moves down. */
   minimap: boolean;
+  /** The critter modes: the party's health at a glance, coins and badges; null elsewhere. */
+  critters: { party: { name: string; species: string; level: number; hp: number; max: number; status: string | null }[]; coins: number; badges: number } | null;
 }

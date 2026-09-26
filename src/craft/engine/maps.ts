@@ -20,7 +20,7 @@ import { itemByName, type ItemStack } from "./items";
 import { hash4, Rng } from "./rng";
 import type { ChunkGenerator, GeneratedChunk, Generator, Tints } from "./worldgen";
 
-export const MAP_IDS = ["skyblock", "oneblock", "void", "parkour", "colosseum", "tnt_run", "sg_arena", "primal_island", "dead_zone", "zombie_bunker"] as const;
+export const MAP_IDS = ["skyblock", "oneblock", "void", "parkour", "colosseum", "tnt_run", "sg_arena", "primal_island", "dead_zone", "zombie_bunker", "critter_region", "safari_park", "battle_spire"] as const;
 export type MapId = (typeof MAP_IDS)[number];
 export const isMapId = (v: unknown): v is MapId => typeof v === "string" && (MAP_IDS as readonly string[]).includes(v);
 
@@ -40,6 +40,9 @@ export const MAPS: Record<MapId, MapInfo> = {
   primal_island: { name: "The Island", description: "An island some fourteen hundred blocks across, ringed by open sea, with three great obelisks. You wake on its southern beach." },
   dead_zone: { name: "The Dead Zone", description: "Three abandoned towns, a hospital, and a military base to the north — real terrain, overrun." },
   zombie_bunker: { name: "The Bunker", description: "A concrete bunker on a slab in the sky: a start room, two more behind doors, boarded windows, and guns on the walls." },
+  critter_region: { name: "The Critter Region", description: "Six towns up one long road — four gyms, the League at the end, trainers on every route — and a summit above it all." },
+  safari_park: { name: "The Safari Park", description: "A fenced park of meadow, pond, grove, rocks and marsh, full of critters to catch." },
+  battle_spire: { name: "The Battle Spire", description: "A round arena at the top of a spire, where challengers step up one after another." },
 };
 
 /** Loot tables a map's chests are filled from (see mapLoot). */
@@ -89,6 +92,24 @@ export interface MapLayout {
   /** The zombie bunker's wall buys, box, perk and doors, and its windows. */
   buys?: Buy[];
   windows?: BunkerWindow[];
+  /** The critter modes: named areas and the levels of the critters met there (the region's routes and towns, the park's corners). */
+  areas?: CritterArea[];
+  /** Where the map's trainers stand, and which way they watch the road. */
+  npcs?: { id: string; x: number; y: number; z: number; yaw: number }[];
+  /** The legend's perch: the region's summit. */
+  legend?: [number, number, number];
+}
+
+/** A named stretch of a critter map. */
+export interface CritterArea {
+  name: string;
+  x0: number; z0: number; x1: number; z1: number;
+  /** Wild critters here are of these levels. */
+  levels: [number, number];
+  /** Whose critters live here, whatever the land underfoot (a park's pond, a cave). */
+  biome?: string;
+  /** No wild critters at all: a town. */
+  quiet?: boolean;
 }
 
 class Plan {
@@ -443,6 +464,281 @@ function zombieBunker(): Omit<MapLayout, "map"> {
   return { spawn: [0.5, Y + 1, 0.5], blocks: p.blocks, terrain: false, chests: [], center: [0, 0], radius: 34, floorY: Y - 10, buys, windows };
 }
 
+// ---- the critter modes ----------------------------------------------------------------------------------------------
+
+/** Which way a trainer faces to look at (dx, dz): the yaw a mob turns to (Mob.faceTo). */
+const facing = (dx: number, dz: number) => Math.atan2(-dx, -dz);
+
+/**
+ * A building of the critter region on the ground at (x0, z0): a foundation where
+ * the land falls away, a floor, walls with a doorway on one side and windows,
+ * a roof. Returns the floor's height (what stands on it stands one above).
+ */
+function critterHouse(p: Plan, base: Generator, x0: number, z0: number, w: number, d: number, door: "north" | "south" | "east" | "west",
+  wall: number, roof: number, floor: number = B.OAK_PLANKS, height = 4): number {
+  const y = base.surfaceY(x0 + (w >> 1), z0 + (d >> 1)) + 1;
+  for (let x = x0 - 1; x <= x0 + w; x++) for (let z = z0 - 1; z <= z0 + d; z++) {
+    const s = base.surfaceY(x, z);
+    const inside = x >= x0 && x < x0 + w && z >= z0 && z < z0 + d;
+    // A step of ground all round, so the door never opens onto a drop.
+    for (let yy = Math.min(s, y - 1); yy < y; yy++) p.set(x, yy, z, inside ? B.COBBLE : B.GRASS);
+    for (let yy = y; yy <= y + height + 4; yy++) p.set(x, yy, z, B.AIR);
+    if (!inside) continue;
+    p.set(x, y - 1, z, floor);
+    const edge = x === x0 || x === x0 + w - 1 || z === z0 || z === z0 + d - 1;
+    for (let yy = y; yy < y + height; yy++) if (edge) p.set(x, yy, z, wall);
+    p.set(x, y + height, z, roof);
+  }
+  // The doorway, in the middle of its side; windows along the other walls.
+  const mx = x0 + (w >> 1), mz = z0 + (d >> 1);
+  const dx = door === "west" ? x0 : door === "east" ? x0 + w - 1 : mx;
+  const dz = door === "north" ? z0 : door === "south" ? z0 + d - 1 : mz;
+  for (const yy of [y, y + 1]) p.set(dx, yy, dz, B.AIR);
+  if (door !== "west") p.set(x0, y + 1, mz, B.GLASS_PANE);
+  if (door !== "east") p.set(x0 + w - 1, y + 1, mz, B.GLASS_PANE);
+  if (door !== "north") p.set(mx, y + 1, z0, B.GLASS_PANE);
+  if (door !== "south") p.set(mx, y + 1, z0 + d - 1, B.GLASS_PANE);
+  p.set(mx, y + height - 1, mz, B.LANTERN);
+  return y;
+}
+
+/** A gym's colours: its walls, roof and floor, by the type it keeps to. */
+const GYM_LOOK: Record<string, [number, number, number]> = {
+  stone: [B.STONE_BRICKS, B.STONE_BRICK_SLAB, B.SMOOTH_STONE],
+  water: [wool("light_blue"), B.LAPIS_BLOCK, B.PACKED_ICE],
+  electric: [B.YELLOW_TERRACOTTA, B.GOLD_BLOCK, B.SMOOTH_STONE],
+  spirit: [B.BLACKSTONE, B.OBSIDIAN, B.BLACKSTONE],
+};
+
+/**
+ * The critter region (after the monster-collecting games' regions): six places
+ * up one long road north — Home Town with the professor's lab, four towns each
+ * with a gym, and the League — every town with a healing station, trainers
+ * along every route, the rival waiting at three turns of the road, and above
+ * it all a summit where the legend perches. Real terrain; the road crosses
+ * water on a bridge.
+ */
+function critterRegion(seed: number, base: Generator): Omit<MapLayout, "map"> {
+  const p = new Plan();
+  const rng = new Rng(hash4(seed, 0xc417));
+  const home = base.findSpawn();
+  const towns: [number, number][] = [dryNear(base, Math.floor(home.x), Math.floor(home.z))];
+  for (let i = 1; i < 6; i++) {
+    const [px, pz] = towns[i - 1];
+    towns.push(dryNear(base, px + rng.int(81) - 40, pz - 150));
+  }
+  const npcs: NonNullable<MapLayout["npcs"]> = [];
+  const areas: CritterArea[] = [];
+  const TOWN_NAMES = ["Home Town", "Granite Town", "Tide Town", "Static Town", "Lantern Town", "the League"];
+  const ROUTES: [string, [number, number]][] = [["Route 1", [2, 5]], ["Route 2", [8, 13]], ["Route 3", [16, 24]], ["Route 4", [28, 36]], ["Victory Road", [38, 46]]];
+  const ROUTE_TRAINERS = [["r1_tom", "r1_ivy", "rival1"], ["r2_finn", "r2_coral", "r2_sol"], ["r3_rowan", "r3_selene", "rival2", "r3_gus"], ["r4_jun", "r4_lin", "r4_reyes"], []];
+
+  // The road, town to town: gravel three wide on the ground, planks where it crosses water, cleared above.
+  for (let i = 0; i < 5; i++) {
+    const [ax, az] = towns[i], [bx, bz] = towns[i + 1];
+    const len = Math.hypot(bx - ax, bz - az);
+    const ux = (bx - ax) / len, uz = (bz - az) / len;
+    for (let t = 0; t <= len; t += 0.5) {
+      const cx = ax + ux * t, cz = az + uz * t;
+      for (const w of [-1, 0, 1]) {
+        const x = Math.round(cx - uz * w), z = Math.round(cz + ux * w);
+        const sy = base.surfaceY(x, z);
+        const y = Math.max(sy, 63);
+        p.set(x, y, z, sy < 63 ? B.OAK_PLANKS : B.GRAVEL);
+        for (let yy = y + 1; yy <= y + 4; yy++) p.set(x, yy, z, B.AIR);
+      }
+      // Lamps down the roadside, every so often.
+      if (Math.round(t * 2) % 36 === 0 && t > 20 && t < len - 20) {
+        const lx = Math.round(cx - uz * 2.5), lz = Math.round(cz + ux * 2.5);
+        const ly = Math.max(base.surfaceY(lx, lz), 63) + 1;
+        p.set(lx, ly, lz, B.OAK_FENCE); p.set(lx, ly + 1, lz, B.OAK_FENCE); p.set(lx, ly + 2, lz, B.LANTERN);
+      }
+    }
+    // The route's trainers stand beside the road and watch across it; a rival stands in it, facing whoever comes up it.
+    const ids = ROUTE_TRAINERS[i];
+    ids.forEach((id, k) => {
+      const f = (k + 1) / (ids.length + 1);
+      const cx = ax + (bx - ax) * f, cz = az + (bz - az) * f;
+      const side = k % 2 === 0 ? 1 : -1;
+      const onRoad = id.startsWith("rival");
+      const x = Math.round(cx - uz * (onRoad ? 0 : side * 3)), z = Math.round(cz + ux * (onRoad ? 0 : side * 3));
+      const y = Math.max(base.surfaceY(x, z), 63) + 1;
+      npcs.push({ id, x: x + 0.5, y, z: z + 0.5, yaw: onRoad ? facing(-ux, -uz) : facing(uz * side, -ux * side) });
+    });
+    const [name, levels] = ROUTES[i];
+    areas.push({ name, x0: Math.min(ax, bx) - 60, z0: Math.min(az, bz) - 20, x1: Math.max(ax, bx) + 60, z1: Math.max(az, bz) + 20, levels });
+  }
+
+  // The towns: a healing station in each, a gym in four, the professor's lab in the first, the League last.
+  const gymTypes = ["stone", "water", "electric", "spirit"];
+  const gymIds = [["g1_dale", "g1_brom"], ["g2_kai", "g2_marina"], ["g3_ohm", "g3_volta"], ["g4_veil"]];
+  towns.forEach(([cx, cz], i) => {
+    areas.unshift({ name: TOWN_NAMES[i], x0: cx - 32, z0: cz - 32, x1: cx + 32, z1: cz + 32, levels: [2, 5], quiet: true });
+    if (i < 5) {
+      // The healing station: a white hall with a red roof, east of the road, its door facing it.
+      const hy = critterHouse(p, base, cx + 4, cz - 4, 9, 7, "west", B.WHITE_WOOL, wool("red"), B.QUARTZ_BLOCK);
+      p.set(cx + 11, hy, cz - 1, B.HEALING_STATION);
+      p.set(cx + 11, hy, cz - 3, B.LANTERN);
+      // Two houses for the people who live here.
+      critterHouse(p, base, cx + 4, cz + 8, 7, 6, "west", rng.next() < 0.5 ? B.OAK_PLANKS : B.BRICKS, B.OAK_SLAB);
+      critterHouse(p, base, cx - 12, cz + 9, 7, 6, "east", rng.next() < 0.5 ? B.SPRUCE_PLANKS : B.COBBLE, B.COBBLE_SLAB);
+    }
+    if (i === 0) {
+      // The professor's lab, west of the road: a quartz hall with the professor inside, facing the door.
+      const ly = critterHouse(p, base, cx - 16, cz - 6, 11, 9, "east", B.QUARTZ_BLOCK, B.SMOOTH_STONE, B.QUARTZ_BLOCK);
+      for (const [dx, dz] of [[1, 1], [1, 7], [3, 1], [3, 7]]) p.set(cx - 16 + dx, ly, cz - 6 + dz, B.BOOKSHELF);
+      npcs.push({ id: "professor", x: cx - 13.5, y: ly, z: cz - 1.5, yaw: facing(1, 0) });
+    } else if (i < 5) {
+      // The gym, west of the road, in its type's colours: its trainers in the aisle, its leader at the back.
+      const [wall, roof, floor] = GYM_LOOK[gymTypes[i - 1]];
+      const gy = critterHouse(p, base, cx - 20, cz - 7, 15, 11, "east", wall, roof, floor, 6);
+      const ids = gymIds[i - 1];
+      const leader = ids[ids.length - 1];
+      npcs.push({ id: leader, x: cx - 18.5, y: gy, z: cz - 1.5, yaw: facing(1, 0) });
+      if (ids.length > 1) npcs.push({ id: ids[0], x: cx - 12.5, y: gy, z: cz - 4.5, yaw: facing(0, 1) });
+      for (const dz of [-5, 3]) p.set(cx - 17, gy, cz + dz, B.LANTERN);
+    } else {
+      // The League: a great hall of quartz and gold at the road's end, the rival at its door and the Champion within.
+      const gy = critterHouse(p, base, cx - 9, cz - 22, 19, 17, "south", B.QUARTZ_BLOCK, B.GOLD_BLOCK, B.QUARTZ_BLOCK, 7);
+      for (let z = cz - 20; z <= cz - 7; z++) p.set(cx, gy - 1, z, wool("red"));
+      p.set(cx - 5, gy, cz - 8, B.HEALING_STATION);
+      npcs.push({ id: "rival3", x: cx + 0.5, y: gy, z: cz - 8.5, yaw: facing(0, 1) });
+      npcs.push({ id: "league_aria", x: cx + 0.5, y: gy, z: cz - 19.5, yaw: facing(0, 1) });
+      areas.unshift({ name: "the League", x0: cx - 12, z0: cz - 25, x1: cx + 12, z1: cz - 3, levels: [40, 46], quiet: true });
+    }
+  });
+
+  // The summit: the highest ground near the League, crowned with ice, where the legend waits.
+  const [lx, lz] = towns[5];
+  let peak: [number, number, number] = [lx + 40, base.surfaceY(lx + 40, lz), lz];
+  for (let x = lx - 160; x <= lx + 160; x += 8) for (let z = lz - 160; z <= lz + 60; z += 8) {
+    const h = base.surfaceY(x, z);
+    if (h > peak[1]) peak = [x, h, z];
+  }
+  const [px, py, pz] = peak;
+  for (let x = -4; x <= 4; x++) for (let z = -4; z <= 4; z++) {
+    const r = Math.hypot(x, z);
+    if (r > 4.5) continue;
+    for (let yy = base.surfaceY(px + x, pz + z) + 1; yy <= py; yy++) p.set(px + x, yy, pz + z, B.PACKED_ICE);
+    p.set(px + x, py + 1, pz + z, r > 3.5 ? B.PACKED_ICE : B.SNOW_BLOCK);
+    for (let yy = py + 2; yy <= py + 8; yy++) p.set(px + x, yy, pz + z, B.AIR);
+    if (r > 3.5 && (x + z) % 3 === 0) { p.set(px + x, py + 2, pz + z, B.PACKED_ICE); p.set(px + x, py + 3, pz + z, B.ICE); }
+  }
+  areas.unshift({ name: "the Summit", x0: px - 10, z0: pz - 10, x1: px + 10, z1: pz + 10, levels: [45, 50], quiet: true });
+
+  // Every trainer outdoors stands in a clearing: out of the trees, on grass, where a passer-by can see them.
+  for (const n of npcs) {
+    const nx = Math.floor(n.x), nz = Math.floor(n.z);
+    // Indoors (the lab, the gyms, the League) and on the road itself (the rival), the ground is already right.
+    if (n.id === "professor" || n.id.startsWith("g") || n.id === "league_aria" || n.id.startsWith("rival")) continue;
+    for (let x = nx - 1; x <= nx + 1; x++) for (let z = nz - 1; z <= nz + 1; z++) {
+      const sy = base.surfaceY(x, z);
+      if (sy >= 63) p.set(x, sy, z, B.GRASS);
+      for (let yy = Math.max(sy, 63) + 1; yy <= Math.max(sy, 63) + 6; yy++) p.set(x, yy, z, B.AIR);
+    }
+  }
+  const [sx, sz] = towns[0];
+  const sy = Math.max(base.surfaceY(sx, sz + 6), 63) + 1;
+  return {
+    spawn: [sx + 0.5, sy, sz + 6.5], blocks: p.blocks, terrain: true, chests: [], center: [sx, sz - 350], radius: 900, floorY: -64,
+    areas, npcs, legend: [px + 0.5, py + 2, pz + 0.5],
+  };
+}
+
+/**
+ * The Safari Park (after the monster-collecting games' safari zones): a fenced
+ * park on real ground, its corners given over to meadow, pond, grove and
+ * rocks — each with its own critters — and a marsh in the middle. No battles:
+ * throw orbs, bait and mud, and catch what you can before the time runs out.
+ */
+function safariPark(seed: number, base: Generator): Omit<MapLayout, "map"> {
+  const p = new Plan();
+  const rng = new Rng(hash4(seed, 0x5afa));
+  const s = base.findSpawn();
+  const [cx, cz] = dryNear(base, Math.floor(s.x), Math.floor(s.z));
+  const R = 70;
+  // The fence: two high all round, a gate in the south side.
+  for (let t = -R; t <= R; t++) {
+    for (const [x, z] of [[cx + t, cz - R], [cx + t, cz + R], [cx - R, cz + t], [cx + R, cz + t]]) {
+      if (z === cz + R && Math.abs(x - cx) <= 2) continue;
+      const y = Math.max(base.surfaceY(x, z), 62) + 1;
+      p.set(x, y, z, B.OAK_FENCE); p.set(x, y + 1, z, B.OAK_FENCE);
+      if (t % 12 === 0) p.set(x, y + 2, z, B.LANTERN);
+    }
+  }
+  // The pond, north-east: water dug into the ground, reeds at its edge.
+  const [ox, oz] = [cx + 35, cz - 35];
+  for (let x = -12; x <= 12; x++) for (let z = -12; z <= 12; z++) {
+    const r = Math.hypot(x, z);
+    if (r > 12) continue;
+    const y = base.surfaceY(ox + x, oz + z);
+    if (r < 10.5) { for (let yy = y - 2; yy <= y; yy++) p.set(ox + x, yy, oz + z, B.WATER); for (let yy = y + 1; yy <= y + 3; yy++) p.set(ox + x, yy, oz + z, B.AIR); }
+    else if (rng.next() < 0.4) { p.set(ox + x, y, oz + z, B.SAND); p.set(ox + x, y + 1, oz + z, B.SUGAR_CANE); }
+  }
+  // The rocks, south-east: boulders of stone and cobble.
+  for (let i = 0; i < 14; i++) {
+    const bx = cx + 20 + rng.int(40), bz = cz + 20 + rng.int(40), by = base.surfaceY(bx, bz) + 1, r = 1 + rng.int(3);
+    for (let x = -r; x <= r; x++) for (let y = 0; y <= r; y++) for (let z = -r; z <= r; z++) {
+      if (Math.hypot(x, y * 1.3, z) <= r + 0.3) p.set(bx + x, by + y, bz + z, rng.next() < 0.3 ? B.COBBLE : rng.next() < 0.5 ? B.ANDESITE : B.STONE);
+    }
+  }
+  // The meadow, north-west: flowers everywhere.
+  const FLOWERS = [B.DANDELION, B.POPPY, B.CORNFLOWER, B.ALLIUM, B.OXEYE_DAISY];
+  for (let i = 0; i < 260; i++) {
+    const fx = cx - 60 + rng.int(58), fz = cz - 60 + rng.int(58), fy = base.surfaceY(fx, fz);
+    if (fy >= 63) p.set(fx, fy + 1, fz, FLOWERS[rng.int(FLOWERS.length)]);
+  }
+  // The marsh, in the middle: mud and shallow pools.
+  for (let x = -10; x <= 10; x++) for (let z = -10; z <= 10; z++) {
+    if (Math.hypot(x, z) > 10) continue;
+    const y = base.surfaceY(cx + x, cz + z);
+    p.set(cx + x, y, cz + z, (x * 7 + z * 3) % 5 === 0 ? B.WATER : B.MUD);
+  }
+  // The gatehouse: the keeper's hut inside the gate, with a healing station.
+  const gy = critterHouse(p, base, cx + 4, cz + R - 12, 7, 6, "west", B.SPRUCE_PLANKS, B.OAK_SLAB);
+  p.set(cx + 9, gy, cz + R - 9, B.HEALING_STATION);
+  const areas: CritterArea[] = [
+    { name: "the Marsh", x0: cx - 12, z0: cz - 12, x1: cx + 12, z1: cz + 12, levels: [10, 22], biome: "Swamp" },
+    { name: "the Meadow", x0: cx - R, z0: cz - R, x1: cx, z1: cz, levels: [5, 20], biome: "Meadow" },
+    { name: "the Pond", x0: cx, z0: cz - R, x1: cx + R, z1: cz, levels: [8, 24], biome: "Beach" },
+    { name: "the Grove", x0: cx - R, z0: cz, x1: cx, z1: cz + R, levels: [6, 22], biome: "Dark Forest" },
+    { name: "the Rocks", x0: cx, z0: cz, x1: cx + R, z1: cz + R, levels: [10, 26], biome: "Stony Peaks" },
+  ];
+  const sy = Math.max(base.surfaceY(cx, cz + R - 4), 63) + 1;
+  return { spawn: [cx + 0.5, sy, cz + R - 3.5], blocks: p.blocks, terrain: true, chests: [], center: [cx, cz], radius: R, floorY: -64, areas };
+}
+
+/**
+ * The Battle Spire (after the battle towers of the monster-collecting
+ * games): a round floor at the top of a spire over the void, a healing
+ * station, a gold pad to step on for the next challenger, and the spot they
+ * step up to.
+ */
+function battleSpire(): Omit<MapLayout, "map"> {
+  const p = new Plan();
+  const Y = 100;
+  for (let x = -16; x <= 16; x++) for (let z = -16; z <= 16; z++) {
+    const r = Math.hypot(x, z);
+    if (r > 16.5) continue;
+    p.set(x, Y - 1, z, B.QUARTZ_BLOCK);
+    p.set(x, Y, z, r > 15.5 ? B.GLASS : Math.abs(r - 10) < 0.6 ? B.GOLD_BLOCK : B.SMOOTH_STONE);
+    if (r > 15.5) { p.set(x, Y + 1, z, B.GLASS); p.set(x, Y + 2, z, B.GLASS); }
+  }
+  // The spire itself, falling away beneath.
+  for (let y = Y - 40; y < Y - 1; y++) for (let x = -3; x <= 3; x++) for (let z = -3; z <= 3; z++) if (Math.abs(x) === 3 || Math.abs(z) === 3) p.set(x, y, z, B.QUARTZ_BLOCK);
+  for (const [x, z] of [[-11, -11], [11, -11], [-11, 11], [11, 11]]) {
+    for (let y = Y + 1; y <= Y + 5; y++) p.set(x, y, z, B.QUARTZ_BLOCK);
+    p.set(x, Y + 6, z, B.SEA_LANTERN);
+  }
+  p.set(0, Y, 2, B.EMERALD_BLOCK);
+  p.set(0, Y + 1, 12, B.HEALING_STATION);
+  return {
+    spawn: [0.5, Y + 1, 8.5], blocks: p.blocks, terrain: false, chests: [], center: [0, 0], radius: 16, floorY: Y - 45,
+    // The pad the player steps on for a battle; where the challenger steps up to.
+    pads: [[0, Y, 2], [0, Y + 1, -6]],
+  };
+}
+
 function sgArena(seed: number, base: Generator): Omit<MapLayout, "map"> {
   const p = new Plan();
   const s = base.findSpawn();
@@ -487,7 +783,8 @@ export function mapLayout(map: MapId, seed: number, base: Generator): MapLayout 
   if (!l) {
     const made = map === "skyblock" ? skyblock() : map === "oneblock" ? oneblock() : map === "void" ? voidMap()
       : map === "parkour" ? parkour(seed) : map === "colosseum" ? colosseum() : map === "tnt_run" ? tntRun()
-        : map === "primal_island" ? primalIsland(base) : map === "dead_zone" ? deadZone(seed, base) : map === "zombie_bunker" ? zombieBunker() : sgArena(seed, base);
+        : map === "primal_island" ? primalIsland(base) : map === "dead_zone" ? deadZone(seed, base) : map === "zombie_bunker" ? zombieBunker()
+          : map === "critter_region" ? critterRegion(seed, base) : map === "safari_park" ? safariPark(seed, base) : map === "battle_spire" ? battleSpire() : sgArena(seed, base);
     l = { map, ...made };
     if (layouts.size > 16) layouts.clear();
     layouts.set(key, l);

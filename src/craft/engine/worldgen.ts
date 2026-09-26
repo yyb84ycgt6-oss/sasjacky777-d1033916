@@ -121,7 +121,7 @@ export class Generator implements ChunkGenerator {
     this.dungeons = settings.dungeons !== false;
     this.lucky = settings.lucky === true;
     this.island = settings.map === "primal_island";
-    this.noVillages = this.island || settings.map === "dead_zone";
+    this.noVillages = this.island || settings.map === "dead_zone" || settings.map === "critter_region" || settings.map === "safari_park";
     this.berries = settings.berries === true || this.island;
     const s = this.seed;
     this.continent = new Simplex(hash4(s, 1));

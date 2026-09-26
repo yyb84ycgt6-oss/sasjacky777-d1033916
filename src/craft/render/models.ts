@@ -12,6 +12,7 @@ import { boxRegions, skin, type Face } from "./skins";
 import { col, createLitBlockMaterial, createSpriteMaterial, type SharedUniforms } from "./materials";
 import { itemModel } from "./itemModels";
 import { DINO_MODELS } from "./dinoModels";
+import { CRITTER_MODELS } from "./critterModels";
 
 const FACE_ORDER: Face[] = ["east", "west", "top", "bottom", "back", "front"];
 
@@ -250,8 +251,10 @@ const MODELS: Record<string, PartSpec[]> = {
     { name: "armR", size: [4, 30, 6], uv: [32, 23], pivot: [-11, 36, 0], offset: [0, -13, 0] },
     { name: "armL", size: [4, 30, 6], uv: [32, 23], pivot: [11, 36, 0], offset: [0, -13, 0] },
   ],
-  // Primal's creatures (render/dinoModels.ts), their skins packed to fit.
+  // Primal's creatures (render/dinoModels.ts), their skins packed to fit; and the critters, likewise.
   ...DINO_MODELS,
+  ...CRITTER_MODELS,
+  trainer: HUMANOID(false),
   player: [...HUMANOID(false), ...WINGS],
   zombie: HUMANOID(false),
   tribute: HUMANOID(false),
@@ -465,7 +468,7 @@ export function pose(m: ModelInstance, kind: string, p: PoseInput): void {
     wingR.rotation.set(0.15, 0, 0.35); wingL.rotation.set(0.15, 0, -0.35);
   }
 
-  if (DINO_MODELS[kind]) { poseDino(m, p, swing, r); return; }
+  if (DINO_MODELS[kind] || CRITTER_MODELS[kind]) { poseDino(m, p, swing, r); return; }
 
   switch (kind) {
     case "enderman": {
@@ -505,7 +508,7 @@ export function pose(m: ModelInstance, kind: string, p: PoseInput): void {
       for (let i = 0; i < 3; i++) set(`neck${i}`, Math.sin(p.time * 1.2 + i) * 0.05, 0, 0);
       break;
     }
-    case "player": case "zombie": case "skeleton": case "piglin": case "zombified_piglin": case "wither_skeleton": case "tribute":
+    case "player": case "zombie": case "skeleton": case "piglin": case "zombified_piglin": case "wither_skeleton": case "tribute": case "trainer":
     case "infected": case "runner": case "brute": case "spitter": case "screamer": case "bloater": {
       const sneak = p.sneaking ? 0.5 : 0;
       const body = m.parts.get("body");

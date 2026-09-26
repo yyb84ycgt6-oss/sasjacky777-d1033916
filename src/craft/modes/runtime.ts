@@ -52,6 +52,8 @@ export abstract class ModeRuntime {
   onPlayerDeath(_id: string): void {}
   /** The local player respawned. */
   onRespawn(): void {}
+  /** A player caught a critter of this species (the critter modes). */
+  onCritterCaught(_player: string, _species: string): void {}
   /** A drop, as this mode would have it (Random Drops swaps it for another). */
   transformDrop(s: ItemStack): ItemStack { return s; }
   /** The scoreboard for one player; null for none. */

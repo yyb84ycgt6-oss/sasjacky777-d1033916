@@ -25,6 +25,7 @@ import { isArthropod, isUndead, Mob, WOLF_FOOD } from "../engine/mobs";
 import { attackPower, canRide, dinoWouldTake } from "../engine/dinoAi";
 import { gunOf, stray, tracePellet, type Gun, type Shootable } from "../engine/guns";
 import { CREATURES, foodPoints, isDino, TORPOR } from "../engine/creatures";
+import { displayName, maxHp } from "../engine/critters";
 import { potionOfItem } from "../engine/potions";
 import { isRail, neighboursToReshape, placedShape, railShape, RAIL_EXITS } from "../engine/rails";
 import { Vehicle } from "../engine/vehicles";
@@ -151,8 +152,15 @@ export class Actions {
     const p = g.player;
     const inv = p.inventory;
     if (a.type === "close") {
-      // Escape backs out of whatever is open; the death screen stays until a choice is made.
+      // Escape backs out of whatever is open; the death screen stays until a choice is made, a battle until it is
+      // run from or won, and a new trainer's first critter until it is chosen.
+      if (g.screen?.kind === "battle" || (g.screen?.kind === "starter" && !p.card.party.length)) return;
       if (g.screen && g.screen.kind !== "death") g.setScreen(null);
+      return;
+    }
+    if (a.type === "party") {
+      if (g.screen?.kind === "party") g.setScreen(null);
+      else if (!g.screen && !p.dead && g.critters.on) g.setScreen({ kind: "party" });
       return;
     }
     if (a.type === "pause") {
@@ -612,10 +620,29 @@ export class Actions {
       return;
     }
 
+    // A trainer: talk to them, which (unless they are beaten) is to battle them.
+    if (t?.entity instanceof Mob && t.entity.kind === "trainer" && fresh) {
+      if (g.critters.on) g.critters.startTrainer(t.entity);
+      this.swing();
+      return;
+    }
+
     // A saddled creature of yours: climb on (unless you are feeding it while it is hurt; sneak to tell it to wait).
     if (t?.entity instanceof Mob && fresh && !p.sneaking && canRide(t.entity, p.id, p.name)
       && !(def && isDino(t.entity.kind) && foodPoints(t.entity.kind, def.name) > 0 && t.entity.health < t.entity.maxHealth)) {
       g.mount(t.entity);
+      this.swing();
+      return;
+    }
+
+    // A critter: a wild one is battled; one of your own out of its orb says hello.
+    if (t?.entity instanceof Mob && t.entity.kind === "critter" && fresh) {
+      const m = t.entity;
+      if (!m.owner) { if (g.critters.on) g.critters.startWild(m); }
+      else if (m.owner === p.id && !m.battle) {
+        const c = p.card.party.find((k) => k.uid === m.partnerUid);
+        if (c) g.showActionbar(`${displayName(c)} · Lv ${c.level} · ${c.hp}/${maxHp(c)} health`);
+      }
       this.swing();
       return;
     }
@@ -668,6 +695,15 @@ export class Actions {
   private useInAir(def: ItemDef): void {
     const g = this.game;
     const p = g.player;
+    if (def.use === "orb") {
+      g.showActionbar(g.critters.on ? "Aim at a wild critter and use the orb to battle it." : "There are no critters in this world.");
+      return;
+    }
+    if (def.use === "critter_medicine") {
+      if (g.critters.on && p.card.party.length) g.setScreen({ kind: "party", give: def.name });
+      else g.showActionbar("You have no critters to give it to.");
+      return;
+    }
     if (def.food) {
       if (p.canEat(def.food)) this.eating = { ticks: 0, slot: p.inventory.selected, id: def.id };
       return;
@@ -1250,6 +1286,10 @@ export class Actions {
         return true;
       case "waystone":
         g.useWaystone(x, y, z);
+        return true;
+      case "healing":
+        if (g.critters.on) g.setScreen({ kind: "center", x, y, z });
+        else g.showActionbar("Its dome glows softly, but there are no critters in this world to heal.");
         return true;
       case "grave":
         g.useGrave(x, y, z);

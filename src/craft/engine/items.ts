@@ -71,7 +71,9 @@ export type ItemUse =
   /** Fires (engine/guns.ts), spending a round of its ammunition. */
   | "gun"
   /** Opened in the hand: a satchel of 27 slots carried with you. */
-  | "backpack";
+  | "backpack"
+  /** Critters: an orb starts a battle with the wild critter it is aimed at (and catches, thrown in one); a medicine opens the party to give it. */
+  | "orb" | "critter_medicine";
 
 export type Category = "building" | "colored" | "natural" | "functional" | "redstone" | "tools" | "combat" | "food" | "ingredients";
 
@@ -154,7 +156,7 @@ const FUNCTIONAL = new Set([
   "sea_lantern", "jack_o_lantern", "carved_pumpkin", "note_block", "hay_block", "oak_fence", "glass_pane",
   "enchanting_table", "anvil", "chipped_anvil", "damaged_anvil", "brewing_stand", "cauldron",
   "composter", "lectern", "smoker", "barrel", "fletching_table", "loom", "stonecutter", "smithing_table", "bell",
-  "end_rod", "end_portal_frame", "iron_bars", "waystone", "cooking_pot", "lucky_block",
+  "end_rod", "end_portal_frame", "iron_bars", "waystone", "cooking_pot", "lucky_block", "healing_station",
 ]);
 
 for (const def of allBlocks()) {
@@ -468,6 +470,17 @@ item("shotgun_shells", "Shotgun Shells", { category: "combat" });
 food("canned_beans", "Canned Beans", 6, 7.2);
 item("soda_can", "Can of Soda", { maxStack: 16, use: "drink", category: "food" });
 item("baseball_bat", "Baseball Bat", { maxStack: 1, damage: 6, attackSpeed: 1.2, category: "combat" });
+// Critters (engine/critters.ts): the orbs they are caught in, and their medicines.
+item("capture_orb", "Capture Orb", { use: "orb", category: "tools" });
+item("silver_orb", "Silver Orb", { use: "orb", category: "tools" });
+item("gold_orb", "Gold Orb", { use: "orb", category: "tools" });
+item("star_orb", "Star Orb", { use: "orb", category: "tools", maxStack: 16 });
+item("park_orb", "Park Orb", { use: "orb", category: "tools" });
+item("herbal_tonic", "Herbal Tonic", { use: "critter_medicine", category: "tools", maxStack: 16 });
+item("strong_tonic", "Strong Tonic", { use: "critter_medicine", category: "tools", maxStack: 16 });
+item("cure_all", "Cure-All", { use: "critter_medicine", category: "tools", maxStack: 16 });
+item("revival_herb", "Revival Herb", { use: "critter_medicine", category: "tools", maxStack: 16 });
+item("honey_cake", "Honey Cake", { use: "critter_medicine", category: "tools", maxStack: 16 });
 
 // ---- lookups -----------------------------------------------------------------------
 

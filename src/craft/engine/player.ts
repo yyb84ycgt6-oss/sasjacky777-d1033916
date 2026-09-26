@@ -15,6 +15,7 @@ import { glide, newBody, senseEnvironment, travel, type Body, type BlockReader }
 import type { DamageSource } from "./entities";
 import { sanitizeWaypoints, type Waypoint } from "./waypoints";
 import { freshVitals, sanitizeVitals, type Vitals } from "./vitals";
+import { freshCard, sanitizeCard, type TrainerCard } from "./critters";
 
 export type GameMode = "survival" | "creative" | "adventure" | "spectator";
 
@@ -113,6 +114,8 @@ export class Player {
   vitals: Vitals = freshVitals();
   /** Primal's engrams this player has learned (engine/engrams.ts). */
   engrams = new Set<string>();
+  /** The monster-collecting modes: this player's critters, badges, field guide and coins (engine/critters.ts). */
+  card: TrainerCard = freshCard();
   /** Chance source for Unbreaking and Respiration; tests pin it. */
   rng: () => number = Math.random;
   /**
@@ -562,6 +565,8 @@ export class Player {
       waystones: this.waystones.size ? [...this.waystones] : undefined,
       vitals: this.vitals,
       engrams: this.engrams.size ? [...this.engrams] : undefined,
+      // Only once they have a critter: a world that never had any keeps its saves as they were.
+      card: this.card.party.length || this.card.box.length || this.card.starter ? this.card : undefined,
     };
   }
 
@@ -587,6 +592,7 @@ export class Player {
     this.enchantSeed = num(s.enchantSeed, this.enchantSeed);
     this.vitals = sanitizeVitals(s.vitals);
     this.engrams = new Set(Array.isArray(s.engrams) ? s.engrams.filter((e): e is string => typeof e === "string").slice(0, 128) : []);
+    this.card = sanitizeCard(s.card);
     if (s.dead || this.health <= 0) { this.dead = true; this.health = 0; }
   }
 }
@@ -609,4 +615,5 @@ export interface PlayerSave {
   waystones?: string[];
   vitals?: Vitals;
   engrams?: string[];
+  card?: TrainerCard;
 }

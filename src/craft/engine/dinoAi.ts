@@ -21,6 +21,7 @@ import { itemByName, type ItemStack } from "./items";
 import {
   bonusLevels, CREATURES, damageScale, diet, foodPoints, HIT_PENALTY, isDino, maxTorpor, tameCost, torporDecay, TORPOR, type DinoKind,
 } from "./creatures";
+import { SPECIES } from "./critters";
 
 type Move = { forward: number; jump: boolean; yaw: number; speedMul: number };
 
@@ -85,13 +86,13 @@ export function dinoTick(m: Mob, ctx: EntityContext): boolean {
   }
   if (m.rider) {
     if (!ctx.players().some((p) => p.id === m.rider)) m.rider = null;
-    else { ride(m, ctx); return true; }
+    else { rideTick(m, ctx); return true; }
   }
   return false;
 }
 
 /** A saddled creature under its rider: the rider's keys, the creature's legs (or wings). */
-function ride(m: Mob, ctx: EntityContext): void {
+export function rideTick(m: Mob, ctx: EntityContext): void {
   const b = m.body, inp = m.input;
   m.yaw = inp.yaw;
   const speed = m.spec.speed * 1.6;
@@ -360,6 +361,10 @@ export function dinoLoot(m: Mob, ctx: EntityContext): ItemStack[] {
 
 /** Whether a player could climb on: tamed by them, saddled, awake, and free. */
 export function canRide(m: Mob, playerId: string, playerName?: string): boolean {
+  // A trainer's partner big enough to carry them, out of its orb and not in the middle of a battle.
+  if (m.kind === "critter") {
+    return !!SPECIES[m.species]?.ride && m.saddled && m.owner === playerId && !m.battle && !m.dying && (m.rider === null || m.rider === playerId);
+  }
   return isDino(m.kind) && !!CREATURES[m.kind].saddle && m.saddled && !!m.owner && !m.unconscious && !m.dying
     && (m.owner === playerId || (!!playerName && m.ownerName === playerName)) && (m.rider === null || m.rider === playerId);
 }

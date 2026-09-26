@@ -286,6 +286,17 @@ shaped("flyer_saddle", ["LLL", "FSF"], { L: "leather", F: "feather", S: "string"
 shapeless("bandage", ["white_wool", "string"], "bandage", 3);
 shapeless("bandage_paper", ["paper", "paper", "string"], "bandage", 2);
 shapeless("splint", ["stick", "stick", "string"], "splint");
+// Critters: orbs from iron and redstone (the better ones with gold and diamond), medicine from what grows, and a
+// healing station for a base of one's own.
+shaped("capture_orb", [" I ", "IRI", " I "], { I: "iron_nugget", R: "redstone" }, "capture_orb", 2);
+shaped("silver_orb", [" I ", "IRI", " I "], { I: "iron_ingot", R: "redstone" }, "silver_orb", 2);
+shaped("gold_orb", [" G ", "GRG", " G "], { G: "gold_ingot", R: "redstone" }, "gold_orb", 2);
+shapeless("herbal_tonic", ["glass_bottle", "wheat_seeds", "sugar"], "herbal_tonic");
+shapeless("strong_tonic", ["herbal_tonic", "glistering_melon_slice"], "strong_tonic");
+shapeless("cure_all", ["glass_bottle", "sugar", "brown_mushroom", "red_mushroom"], "cure_all");
+shapeless("revival_herb", ["golden_carrot", "bone_meal"], "revival_herb");
+shapeless("honey_cake", ["wheat", "sugar", "egg", "apple"], "honey_cake");
+shaped("healing_station", ["GGG", "IDI", "III"], { G: "glass", I: "iron_ingot", D: "glowstone_dust" }, "healing_station");
 shapeless("pistol_ammo", ["iron_nugget", "iron_nugget", "gunpowder"], "pistol_ammo", 8);
 shapeless("rifle_ammo", ["iron_ingot", "gunpowder", "gunpowder"], "rifle_ammo", 6);
 shapeless("shotgun_shells", ["iron_nugget", "gunpowder", "paper"], "shotgun_shells", 4);

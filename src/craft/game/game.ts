@@ -42,6 +42,7 @@ import { MAX_DYNAMIC_LIGHTS } from "../render/materials";
 import { isSlimeChunk, Mob, MOB_KINDS, MOB_SPECS, type MobKind } from "../engine/mobs";
 import { isDino, pickCreatures } from "../engine/creatures";
 import { canLearn, engramFor, ENGRAMS, type Engram } from "../engine/engrams";
+import { CritterPlay, type CritterOp } from "./critterPlay";
 import { BREAK_FALL, SICKNESS_TICKS, sicknessChance, statusLine, vitalsSecond, waterFrom, type VitalsRules } from "../engine/vitals";
 import { CREATURES, maxTorpor } from "../engine/creatures";
 import { favouriteFoods } from "../engine/dinoAi";
@@ -132,6 +133,8 @@ export interface NetLink {
   placeCrystal?(x: number, y: number, z: number): void;
   /** Guest → host: a noise the infected should hear (a gunshot). */
   noise?(x: number, y: number, z: number, radius: number): void;
+  /** Guest → host: a battle's needs in the world (game/critterPlay.ts). */
+  critter?(op: CritterOp): void;
   /** Host → guests: the world's mod switches changed. */
   modsChanged?(): void;
   /** Host → guests: the world's waystones changed (one found, named or broken). */
@@ -244,6 +247,8 @@ export class Game {
   readonly remote = new Map<string, RemotePlayer>();
   readonly store: Store<Hud>;
   readonly actions: Actions;
+  /** The critter modes' battles, party and trainers (game/critterPlay.ts). */
+  readonly critters: CritterPlay;
   net: NetLink | null = null;
   /** The stars of the rocket pushing this player's glide, to go off on them when it is spent. */
   boostBursts: Rocket | null = null;
@@ -286,6 +291,8 @@ export class Game {
   private savingNow = false;
   private stepDist = 0;
   private spawnPlaced = false;
+  /** The player has been set down on the ground they spawn on (a starter screen waits for it). */
+  get spawnReady(): boolean { return this.spawnPlaced; }
   private startedAt = performance.now();
   private playTimeBase: number;
   private title: Hud["title"] = null;
@@ -344,6 +351,7 @@ export class Game {
 
     this.store = new Store<Hud>(this.hudSnapshot());
     this.actions = new Actions(this);
+    this.critters = new CritterPlay(this);
 
     if (this.saves.problem) this.message(this.saves.problem, "#ffcc55");
     if (this.role !== "guest") {
@@ -2117,6 +2125,7 @@ export class Game {
     // Running is loud where the infected roam: they hear it from a few blocks off.
     if (this.tickCount % 20 === 3 && p.sprinting && !p.dead && modeDef(this.meta.mode?.id)?.fauna === "infected") this.makeNoise(b.x, b.y, b.z, 10, p.id);
     this.borderTick();
+    this.critters.tick();
     if (p.health > this.maxHealth) p.health = this.maxHealth;
     if (this.simulates && this.mode) {
       if (!this.meta.mode!.started && this.spawnPlaced) { this.meta.mode!.started = true; this.mode.start(); }
@@ -2962,6 +2971,14 @@ export class Game {
     for (const e of this.entities.values()) {
       // Villagers and golems belong to their village: they neither count against animals nor despawn.
       if (!(e instanceof Mob) || e.kind === "villager" || e.kind === "iron_golem" || e.kind === "ender_dragon") continue;
+      // A wild critter wanders off once nobody is near; one in a battle, a partner, or a trainer, never.
+      if (e.kind === "critter" || e.kind === "trainer") {
+        if (e.kind === "trainer" || e.persistent || e.battle) continue;
+        fauna++;
+        const nearest = Math.min(...refs.map((r) => Math.hypot(r.x - e.x, r.z - e.z)));
+        if (nearest > 96) e.removed = true;
+        continue;
+      }
       // Primal's creatures roam far: a wild one goes only once nobody is anywhere near (or, a hunter, in peaceful).
       if (isDino(e.kind)) {
         fauna++;
@@ -2981,6 +2998,12 @@ export class Game {
     // A Dead Zone world's monsters are the infected, by day as by night; its animals are the usual.
     if (modeDef(this.meta.mode?.id)?.fauna === "infected" && this.dimension === "overworld") {
       if (this.meta.difficulty > 0 && hostile < MAX_INFECTED * refs.length) for (let attempt = 0; attempt < 3; attempt++) this.trySpawnInfected(origin);
+      if (passive < MAX_PASSIVE * refs.length && (this.tickCount % 400 === 0 || this.tickCount < 200)) for (let attempt = 0; attempt < 4; attempt++) this.trySpawn(origin, false);
+      return;
+    }
+    // A critter world's wilds hold critters, and its farm animals; no monsters come out to interrupt a battle.
+    if (modeDef(this.meta.mode?.id)?.fauna === "critters" && this.dimension === "overworld") {
+      this.critters.trySpawn(origin, fauna, refs.length);
       if (passive < MAX_PASSIVE * refs.length && (this.tickCount % 400 === 0 || this.tickCount < 200)) for (let attempt = 0; attempt < 4; attempt++) this.trySpawn(origin, false);
       return;
     }
@@ -3253,6 +3276,7 @@ export class Game {
       vitals: this.vitalsRules() ? statusLine(p.vitals, this.vitalsRules()!) : [],
       inspect: this.inspectLine(),
       minimap: this.modOn("minimap"),
+      critters: this.critters?.hud() ?? null,
     };
   }
 

@@ -10,6 +10,7 @@
  */
 import { Rng } from "../engine/rng";
 import { DINO_COLORS, dinoBoxes, type Role } from "./dinoModels";
+import { CRITTER_COLORS, critterBoxes } from "./critterModels";
 
 export type Face = "top" | "bottom" | "west" | "front" | "east" | "back";
 
@@ -151,6 +152,103 @@ function paintDino(p: SkinPainter, kind: string, variant: number): void {
 }
 
 /**
+ * A critter's skin: its main colour over the top and sides with a soft
+ * darker saddle along the back, a pale underside, and each feature in the
+ * species' accent — a flame bright at the tip, leaves veined, fins striped,
+ * a shell ringed, a glowing heart. Eyes are big and dark (critters are drawn
+ * to be liked). Variant 1 is the rare colour: the same critter, its hues
+ * turned round the wheel.
+ */
+function paintCritter(p: SkinPainter, key: string, variant: number): void {
+  const species = key.slice("critter_".length);
+  const c = CRITTER_COLORS[species];
+  if (!c) return;
+  const shiny = variant === 1;
+  const tint = (h: string, f = 1): RGB => {
+    let [r, g, b] = hex(h);
+    // The rare colour: red to green to blue, a third of the way round.
+    if (shiny) [r, g, b] = [b * 0.9 + r * 0.1, r * 0.9 + g * 0.1, g * 0.9 + b * 0.1];
+    return [Math.min(255, r * f), Math.min(255, g * f), Math.min(255, b * f)];
+  };
+  const main = tint(c.main), dark = tint(c.main, 0.78), belly = tint(c.belly), accent = tint(c.accent), bright = tint(c.accent, 1.3);
+  const eye: RGB = c.eye ? hex(c.eye) : [24, 20, 28];
+  const leaf: RGB = shiny ? tint("#4aa83a") : hex("#4aa83a"), bark: RGB = hex("#5a4228"), bone: RGB = [236, 228, 208];
+  const byRole: Partial<Record<Role, (face: Face, x: number, y: number, h: number) => RGB>> = {
+    ear: (face) => (face === "front" ? accent : main),
+    flame: (_f, x, y, h) => ((x + y) % 3 === 0 ? bright : y < h / 2 ? bright : accent),
+    leaf: (_f, x, y) => (x === y || x + y === 3 ? tint("#2a7a2a") : c.accent.startsWith("#3") || c.accent.startsWith("#5") ? accent : leaf),
+    fin: (_f, x) => (x % 2 === 0 ? accent : tint(c.accent, 0.8)),
+    gill: () => accent,
+    mane: (_f, x, y) => ((x * 3 + y) % 4 === 0 ? bright : accent),
+    tooth: () => bone,
+    horn: (_f, _x, y) => (species === "grovestag" || species === "fernfawn" ? bark : species === "cinderam" ? (y < 2 ? bright : accent) : bone),
+    spike: (_f, _x, y) => (y === 0 ? bright : accent),
+    shell: (_f, x, y) => ((x + y) % 4 === 0 ? tint(c.accent, 0.7) : species === "cocoonix" ? main : accent),
+    moss: (_f, x, y) => ((x + y) % 3 === 0 ? tint("#7ac84a") : leaf),
+    glow: () => bright,
+    antenna: () => dark,
+    tentacle: (_f, _x, y) => (y % 2 ? main : accent),
+    lantern: (_f, x, y) => (x === 0 || y === 0 ? tint("#5a5a62") : tint("#2a2a32")),
+    rock: (_f, x, y) => ((x + y) % 3 === 0 ? dark : tint(c.main, 1.12)),
+    beak: () => accent,
+    crest: () => accent,
+    wing: (face, x, y) => (face === "top" ? ((x + y) % 5 === 0 ? accent : main) : face === "bottom" ? belly : dark),
+    feather: (_f, x) => (x % 2 ? main : dark),
+    jaw: () => belly,
+  };
+  for (const part of critterBoxes(key)) {
+    const [w, h, d] = part.size;
+    const role = part.role;
+    const paint = byRole[role] ?? ((face: Face, x: number, y: number): RGB => {
+      if (face === "bottom" || role === "belly") return belly;
+      if (face === "top") return (x + y) % 6 === 0 ? dark : main;
+      // A paler lower edge toward the belly; the odd darker fleck.
+      if (y >= h - Math.max(1, Math.floor(h / 3)) && role !== "leg") return belly;
+      return (x * 5 + y * 3) % 11 === 0 ? dark : main;
+    });
+    const regions = p.box(part.uv[0], part.uv[1], w, h, d, (f, x, y) => paint(f, x, y, h), 0.08);
+    if (part.role === "head" && part.name === "head") {
+      // Big eyes with a glint, on the front corners; a small mouth between.
+      const f = regions.front;
+      const ex = Math.max(0, Math.floor(f.w / 4));
+      const ey = Math.max(0, Math.floor(f.h / 3));
+      for (const x of [f.x + ex, f.x + f.w - 1 - ex]) {
+        p.px(x, f.y + ey, eye, 0);
+        if (f.h > 3) p.px(x, f.y + ey + 1, eye, 0);
+        p.px(x, f.y + ey, [250, 250, 250], 0);
+      }
+      for (const x of [f.x + ex, f.x + f.w - 1 - ex]) p.px(x, f.y + ey + (f.h > 3 ? 1 : 0), eye, 0);
+      if (f.w > 2 && f.h > 3) p.px(f.x + Math.floor(f.w / 2), f.y + f.h - 1, tint(c.main, 0.55), 0);
+    }
+  }
+}
+
+/** Trainers dressed for their calling: a youngster's cap, a hiker's beard, a professor's coat, a champion's blue and gold. */
+const TRAINER_OUTFITS: Record<string, { shirt: string; pants: string; hair?: string; shoes?: string }> = {
+  youngster: { shirt: "#3a6ab8", pants: "#c8a878", hair: "#c83a2a" }, lass: { shirt: "#e87aa8", pants: "#f0f0f0" },
+  hiker: { shirt: "#6a7a3a", pants: "#6a4a2a", shoes: "#3a2a1a" }, swimmer: { shirt: "#e8b890", pants: "#2a8ae8" },
+  bug_catcher: { shirt: "#5a9a3a", pants: "#c8b878", hair: "#e8d070" }, ace: { shirt: "#2a2a30", pants: "#b8303a" },
+  ranger: { shirt: "#a8986a", pants: "#5a6a3a" }, mystic: { shirt: "#6a3a9a", pants: "#4a2a6a" }, tamer: { shirt: "#8a2a2a", pants: "#2a2a2a" },
+  gym_leader: { shirt: "#f0f0f0", pants: "#d8b040" }, champion: { shirt: "#2a4aa8", pants: "#e8c040" }, rival: { shirt: "#e8782a", pants: "#2a3a5a" },
+  professor: { shirt: "#f4f4f4", pants: "#5a5a60" }, tower: { shirt: "#1a1a22", pants: "#3a3a44" }, tycoon: { shirt: "#1a1a22", pants: "#c8a030" },
+};
+export const TRAINER_CLASS_ORDER = Object.keys(TRAINER_OUTFITS);
+
+function paintTrainer(p: SkinPainter, variant: number): void {
+  const cls = TRAINER_CLASS_ORDER[(variant >> 6) % TRAINER_CLASS_ORDER.length];
+  const o = TRAINER_OUTFITS[cls];
+  const r = new Rng((variant & 63) * 7919 + 101);
+  const pick = <T,>(a: T[]): T => a[r.int(a.length)];
+  const skin = hex(pick(["#e8c09a", "#c89a78", "#a8744e", "#7a5236", "#5a3a24", "#f0d0b0"]));
+  const hair = hex(o.hair ?? pick(["#3a2412", "#1a1a1a", "#a8742a", "#5a3a1a", "#c8a050", "#8a2a1a", "#d8d8d8"]));
+  humanoid(p, skin, hair, hex(o.shirt), hex(o.pants), hex(o.shoes ?? "#2a2016"), [30, 30, 30]);
+  // A hiker's beard; a professor's coat hangs open over a shirt.
+  if (cls === "hiker") for (let x = 9; x < 15; x++) for (let y = 13; y < 16; y++) p.px(x, y, hair, 0.1);
+  if (cls === "professor") for (let y = 20; y < 32; y++) { p.px(23, y, hex("#6a8ab8"), 0); p.px(24, y, hex("#6a8ab8"), 0); }
+  if (cls === "champion" || cls === "gym_leader") for (let x = 20; x < 28; x++) p.px(x, 21, hex("#e8c040"), 0);
+}
+
+/**
  * The infected: grey-green skin, clothes torn and darkened with old blood,
  * eyes gone pale — each kind with a tell: a runner lean and pale, a brute
  * blotched and bare-chested, a spitter's jaw green with acid, a screamer's
@@ -183,7 +281,8 @@ export function skin(kind: string, variant = 0): HTMLCanvasElement {
   const hit = cache.get(key);
   if (hit) return hit;
   const p = new SkinPainter(kind.length * 977 + variant);
-  switch (kind) {
+  if (kind.startsWith("critter_")) paintCritter(p, kind, variant);
+  else switch (kind) {
     case "pig": {
       const pink = hex("#f0a8a4"), dark = hex("#d88c88");
       const head = p.box(0, 0, 8, 8, 8, (_f, x, y) => ((x * 7 + y * 3) % 11 === 0 ? dark : pink));
@@ -530,6 +629,9 @@ export function skin(kind: string, variant = 0): HTMLCanvasElement {
       paintInfected(p, kind, variant);
       break;
     }
+    case "trainer":
+      paintTrainer(p, variant);
+      break;
     case "tribute": {
       // Every tribute dressed differently: their district's colours, their own skin and hair.
       const r = new Rng(variant * 7919 + 13);

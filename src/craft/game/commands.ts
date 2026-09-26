@@ -15,6 +15,7 @@ import { DAY_TICKS, WORLD_HEIGHT } from "../engine/constants";
 import { allItems, itemByName, itemDef, type StatusEffect } from "../engine/items";
 import { canApply, compatible, enchantDef, enchantLabel, ENCHANTMENTS } from "../engine/enchanting";
 import { isCubeMob, Mob, MOB_KINDS, type MobKind } from "../engine/mobs";
+import { addCritter, makeCritter, restore, SPECIES, SPECIES_IDS } from "../engine/critters";
 import { DIMENSION_INFO, isDimension } from "../engine/dimension";
 import { fortressInRegion, FORTRESS_REGION } from "../engine/nether";
 import { Generator } from "../engine/worldgen";
@@ -44,6 +45,7 @@ const HELP = [
   "/setblock <x> <y> <z> <block>, /fill <x1> <y1> <z1> <x2> <y2> <z2> <block>",
   "/weather clear|rain|thunder",
   "/summon <mob> [size|profession]  (pig, cow, ..., slime 4, villager librarian, iron_golem)",
+  "/critter give <species> [level] | wild <species> [level] | heal | coins <n> | list",
   "/effect <speed|strength|fire_resistance|...> [seconds] [level] | /effect clear",
   "/enchant <enchantment> [level]   (the held item, e.g. /enchant sharpness 5)",
   "/xp add <amount>, /clear, /kill, /seed, /spawnpoint",
@@ -260,6 +262,41 @@ export function runCommand(game: Game, line: string): Line[] {
       if (kind === "villager" || kind === "iron_golem") mob.home = { x: mob.body.x, z: mob.body.z };
       game.spawn(mob);
       return [{ text: `Summoned new ${kind}` }];
+    }
+    case "critter": {
+      // The critter modes' cheats: a critter for the party or in the wild, a full heal, coins, and the species list.
+      const denied = needCheats();
+      if (denied) return denied;
+      const sub = (args[0] ?? "").toLowerCase();
+      if (sub === "list") return [{ text: SPECIES_IDS.join(", ") }];
+      if (sub === "heal") { for (const c of p.card.party) restore(c); game.bumpInv(); return [{ text: "Your critters are healed." }]; }
+      if (sub === "coins") {
+        const n = Math.floor(Number(args[1]));
+        if (!Number.isFinite(n) || n < 0) return [{ text: "Usage: /critter coins <n>", color: ERR }];
+        p.card.coins = Math.min(9_999_999, n);
+        game.bumpInv();
+        return [{ text: `You have ${p.card.coins} coins.` }];
+      }
+      if (sub === "give" || sub === "wild") {
+        const species = (args[1] ?? "").toLowerCase();
+        if (!SPECIES[species]) return [{ text: `No such critter. One of: ${SPECIES_IDS.join(", ")}`, color: ERR }];
+        const level = Math.max(1, Math.min(100, Math.floor(Number(args[2] ?? 5)) || 5));
+        if (sub === "give") {
+          const c = makeCritter(species, level, Math.random, { ot: p.name, met: "a command" });
+          const where = addCritter(p.card, c);
+          if (!p.card.starter && SPECIES[species].starter) p.card.starter = species;
+          game.bumpInv();
+          return [{ text: `${SPECIES[species].name} (level ${level}) joined your ${where === "full" ? "— no, your party and box are full" : where}.` }];
+        }
+        const deniedHost = needHost();
+        if (deniedHost) return deniedHost;
+        const b = p.body;
+        const m = new Mob("critter", b.x - Math.sin(p.yaw) * 4, b.y, b.z - Math.cos(p.yaw) * 4);
+        m.setSpecies(species, level);
+        game.spawn(m);
+        return [{ text: `A wild ${SPECIES[species].name} (level ${level}) appeared.` }];
+      }
+      return [{ text: "Usage: /critter give <species> [level] | wild <species> [level] | heal | coins <n> | list", color: ERR }];
     }
     case "locate": {
       // The nearest village (overworld) or fortress (Nether), searched region by region outward.

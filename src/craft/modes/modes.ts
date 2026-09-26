@@ -16,10 +16,13 @@ import type { GameMode } from "../engine/player";
 import type { MapId } from "../engine/maps";
 import type { WorldType } from "../engine/worldgen";
 
-export type ModeCategory = "classic" | "minigame" | "challenge" | "primal" | "zombie";
+export type ModeCategory = "classic" | "minigame" | "challenge" | "primal" | "zombie" | "critter";
+
+/** The order the create screen lists categories in. Every category must be here, or its modes cannot be chosen. */
+export const CATEGORY_ORDER: ModeCategory[] = ["classic", "minigame", "challenge", "primal", "zombie", "critter"];
 
 export const CATEGORY_NAMES: Record<ModeCategory, string> = {
-  classic: "Classic", minigame: "Minigames", challenge: "Challenges", primal: "Primal", zombie: "Zombies",
+  classic: "Classic", minigame: "Minigames", challenge: "Challenges", primal: "Primal", zombie: "Zombies", critter: "Critters",
 };
 
 export interface ModeDef {
@@ -44,8 +47,10 @@ export interface ModeDef {
   lucky?: boolean;
   /** Good with friends; playable alone (bots or a score to beat) either way. */
   multiplayer?: boolean;
-  /** Who roams the wilds instead of the overworld's usual mobs: Primal's creatures, or the infected. */
-  fauna?: "primal" | "infected";
+  /** Who roams the wilds instead of the overworld's usual mobs: Primal's creatures, the infected, or critters. */
+  fauna?: "primal" | "infected" | "critters";
+  /** The critter modes' own rules: one life and one catch per area; the park's orbs only; the Spire's rentals. */
+  critters?: { nuzlocke?: boolean; safari?: boolean; spire?: boolean };
   /** Primal's rules: Evolved's, or Ascended's gentler taming and wider roster. */
   primal?: "evolved" | "ascended";
   /** Survival beyond hunger: thirst, body temperature, and wounds (bleeding, sickness, broken bones). */
@@ -152,6 +157,33 @@ export const MODES: readonly ModeDef[] = [
     inspiredBy: "Zombie survival sandboxes (Project Zomboid, State of Decay)",
     description: "An ordinary world, overrun: the infected by day and by night in place of the usual monsters. No thirst or wounds — just survive and build.",
     goal: "Make a fortress that holds." },
+
+  // ---- critters (after Pokémon, and Pixelmon and Cobblemon) -------------------------------------
+  { id: "critter_quest", name: "Critter Quest", category: "critter", icon: "capture_orb", gameMode: "survival", map: "critter_region", difficulty: 1,
+    fauna: "critters", multiplayer: true, rules: { keepInventory: true },
+    inspiredBy: "Pokémon Red and Blue, and the games since (Game Freak, 1996 on)",
+    description: "Choose your first critter from the professor, then take the long road north: wild critters in the grass, trainers on every route, a rival who picked the one that beats yours, four gyms and their badges, and the Champion at the end.",
+    goal: "Win four badges and beat the Champion." },
+  { id: "critter_craft", name: "Critter Craft", category: "critter", icon: "silver_orb", gameMode: "survival", difficulty: 1,
+    fauna: "critters", multiplayer: true,
+    inspiredBy: "Pixelmon and Cobblemon (Minecraft mods)",
+    description: "An ordinary world full of critters, each in its own lands: catch them, battle wandering trainers, ride the big ones, build a healing station at your base.",
+    goal: "Catch twenty kinds of critter." },
+  { id: "critter_nuzlocke", name: "One-Life Run", category: "critter", icon: "revival_herb", gameMode: "survival", map: "critter_region", difficulty: 1,
+    fauna: "critters", critters: { nuzlocke: true }, rules: { keepInventory: true },
+    inspiredBy: "The Nuzlocke Challenge (fan-made rules, 2010)",
+    description: "Critter Quest by the hardest rules there are: only the first critter you meet in each area may be caught, and a critter that faints is gone for good.",
+    goal: "Beat the Champion without losing everything." },
+  { id: "critter_safari", name: "Safari Park", category: "critter", icon: "park_orb", gameMode: "adventure", map: "safari_park", difficulty: 1,
+    fauna: "critters", critters: { safari: true }, multiplayer: true, rules: { keepInventory: true, doDaylightCycle: false },
+    inspiredBy: "The safari zones of the monster-collecting games",
+    description: "No battles, just thirty Park Orbs, bait and mud. Rarer critters score more; a rare colour scores most. Ten minutes on the clock.",
+    goal: "Score the most in ten minutes." },
+  { id: "battle_spire", name: "Battle Spire", category: "critter", icon: "star_orb", gameMode: "adventure", map: "battle_spire", difficulty: 1,
+    fauna: "critters", critters: { spire: true }, rules: { doMobSpawning: false, doDaylightCycle: false, keepInventory: true },
+    inspiredBy: "The battle towers of the monster-collecting games",
+    description: "Pick three rental critters at level 50 and face challenger after challenger at the top of the spire. Every seventh is the Spire Master.",
+    goal: "Win as many battles in a row as you can." },
 ];
 
 export function modeDef(id: string | undefined): ModeDef | undefined {
@@ -160,7 +192,7 @@ export function modeDef(id: string | undefined): ModeDef | undefined {
 
 /** A mode for the Random button: any minigame or challenge (the classics are not a surprise). */
 export function randomMode(random: () => number): ModeDef {
-  const pool = MODES.filter((m) => m.category === "minigame" || m.category === "challenge" || m.category === "primal" || m.category === "zombie");
+  const pool = MODES.filter((m) => m.category === "minigame" || m.category === "challenge" || m.category === "primal" || m.category === "zombie" || m.category === "critter");
   return pool[Math.floor(random() * pool.length)];
 }
 

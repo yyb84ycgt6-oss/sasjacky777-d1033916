@@ -131,6 +131,11 @@ export class DesktopInput {
       e.preventDefault();
       return;
     }
+    if (e.code === "KeyP" && g.screen?.kind === "party") {
+      a.push({ type: "party" });
+      e.preventDefault();
+      return;
+    }
     if (e.code === "KeyM" && g.screen?.kind === "map") {
       a.push({ type: "map" });
       e.preventDefault();
@@ -155,6 +160,7 @@ export class DesktopInput {
       case "KeyE": a.push({ type: "inventory" }); this.exitLock(); break;
       case "KeyM": if (g.modOn("minimap")) { a.push({ type: "map" }); this.exitLock(); } break;
       case "KeyQ": a.push({ type: "drop", all: e.ctrlKey || e.metaKey }); break;
+      case "KeyP": if (g.critters.on) { a.push({ type: "party" }); this.exitLock(); } break;
       case "KeyT": case "Enter": a.push({ type: "chat" }); this.exitLock(); e.preventDefault(); break;
       case "Slash": a.push({ type: "chat", text: "/" }); this.exitLock(); e.preventDefault(); break;
       case "F1": a.push({ type: "hideHud" }); break;

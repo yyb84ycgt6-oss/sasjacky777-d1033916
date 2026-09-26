@@ -27,6 +27,7 @@ import { Minimap, WaypointLabels, WorldMapScreen } from "./MapView";
 import { WaystoneScreen } from "./WaystoneScreen";
 import { EngramScreen } from "./EngramScreen";
 import { ModsScreen } from "./ModsScreen";
+import { BattleScreen, CenterScreen, PartyScreen, PartyStrip, StarterScreen } from "./CritterScreens";
 
 export interface GameViewProps {
   meta: WorldMeta;
@@ -200,6 +201,7 @@ function Overlay({ game, input, settings, onSettings, onQuit, onExitApp }: GameV
         </>
       )}
       <Hud hud={hud} mobile={mobile} crosshair={!mobile || settings.touchMode === "buttons"} />
+      {hud.critters && !screen && !hud.hudHidden && !hud.loading && <PartyStrip party={hud.critters.party} />}
 
       {!mobile && !screen && !locked && !hud.loading && !hud.dead && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none bc-shadow">
@@ -228,6 +230,7 @@ function Overlay({ game, input, settings, onSettings, onQuit, onExitApp }: GameV
           onAdvancements={() => game.setScreen({ kind: "advancements" })}
           onMods={() => game.setScreen({ kind: "mods" })}
           onEngrams={game.engramsOn() ? () => game.setScreen({ kind: "engrams", from: "pause" }) : undefined}
+          onCritters={game.critters.on ? () => game.setScreen({ kind: "party" }) : undefined}
           onQuit={() => quit()}
           onExitApp={onExitApp && (() => { leaving.current = true; onExitApp(); })}
           canShare={!guest}
@@ -243,6 +246,10 @@ function Overlay({ game, input, settings, onSettings, onQuit, onExitApp }: GameV
         />
       )}
       {screen?.kind === "waystone" && <WaystoneScreen game={game} x={screen.x} y={screen.y} z={screen.z} />}
+      {screen?.kind === "battle" && <BattleScreen game={game} />}
+      {screen?.kind === "party" && <PartyScreen key={`${screen.give ?? ""}${screen.tab ?? ""}`} game={game} give={screen.give} tab={screen.tab} />}
+      {screen?.kind === "starter" && <StarterScreen game={game} rentals={screen.rentals} />}
+      {screen?.kind === "center" && <CenterScreen game={game} x={screen.x} y={screen.y} z={screen.z} />}
       {screen?.kind === "engrams" && <EngramScreen game={game} onBack={() => game.setScreen(screen.from === "pause" ? { kind: "pause" } : { kind: "inventory" })} />}
       {screen?.kind === "map" && <WorldMapScreen game={game} mobile={mobile} onClose={() => game.setScreen(null)} />}
       {screen?.kind === "poem" && <EndPoem name={game.player.name} onDone={() => game.setScreen(null)} />}

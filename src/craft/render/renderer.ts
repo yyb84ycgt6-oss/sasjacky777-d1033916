@@ -28,6 +28,10 @@ import { Weather } from "./weather";
 import { blockGeometry, itemModel, spriteGeometry } from "./itemModels";
 import { GAME_NAME } from "../edition";
 import { CREATURES, isDino } from "../engine/creatures";
+import { SPECIES } from "../engine/critters";
+import { trainerById, trainerTitle } from "../engine/trainers";
+import { seedFromString } from "../engine/rng";
+import { TRAINER_CLASS_ORDER } from "./skins";
 import { isInfectedMob } from "../engine/infected";
 
 export interface RemotePlayerView {
@@ -104,6 +108,8 @@ interface EntityView {
   nameTag?: THREE.Sprite;
   /** What a creature's tag says, so it is redrawn only when that changes. */
   tagText?: string;
+  /** The model a mob was built from: its kind, or a critter's species. */
+  modelKey?: string;
   /** The skin a mob's model was built with, so a change (a villager's new trade) rebuilds it. */
   variant?: number;
   /** An end crystal's spinning cage and its beam to the dragon. */
@@ -271,13 +277,15 @@ export class WorldRenderer {
   private viewFor(e: Entity): EntityView {
     let v = this.views.get(e.id);
     // A villager who takes up a trade changes clothes: rebuild its model.
-    if (v && v.entity === e && (!(e instanceof Mob) || v.variant === skinVariant(e)) && (!(e instanceof ItemFrame) || v.variant === (e.item?.id ?? 0))) return v;
+    // So does a critter that evolves, or is swapped for another in a battle: its species is its model.
+    if (v && v.entity === e && (!(e instanceof Mob) || (v.variant === skinVariant(e) && v.modelKey === modelKey(e))) && (!(e instanceof ItemFrame) || v.variant === (e.item?.id ?? 0))) return v;
     if (v) this.dropView(e.id);
     const object = new THREE.Group();
     v = { entity: e, object };
     if (e instanceof Mob) {
       v.variant = skinVariant(e);
-      v.model = buildModel(e.kind, v.variant);
+      v.modelKey = modelKey(e);
+      v.model = buildModel(v.modelKey, v.variant);
       if (e.kind === "enderman" && e.carried) {
         // The block it carries, held out between its hands.
         v.lit = createLitBlockMaterial(this.shared);
@@ -389,6 +397,28 @@ export class WorldRenderer {
     if (v.nameTag) v.nameTag.position.set(x, y + e.body.height + 0.6, z);
   }
 
+  /** A critter's name and level (and whose it is), or a trainer's title, floating over them when near. */
+  private critterTag(v: EntityView, e: Mob, x: number, y: number, z: number, cam: THREE.Vector3): void {
+    // Near enough to read, but not so near it fills the screen (a partner at its trainer's side).
+    const d = Math.hypot(x - cam.x, z - cam.z);
+    const near = d < 12 && d > 3.2;
+    let text = "";
+    if (near && e.kind === "critter") {
+      const s = SPECIES[e.species];
+      // A trainer's critter out for a battle is the trainer's, whoever's machine put it there: no owner's name on it.
+      text = `${e.shiny ? "✦ " : ""}${s?.name ?? e.species} · Lv ${e.level}${e.owner && e.ownerName && e.partnerUid !== "foe" ? ` · ${e.ownerName}` : ""}`;
+    } else if (near && e.kind === "trainer" && e.trainerId) {
+      const t = trainerById(e.trainerId);
+      text = t ? trainerTitle(t) : "";
+    }
+    if (text !== v.tagText) {
+      if (v.nameTag) { this.scene.remove(v.nameTag); v.nameTag.material.map?.dispose(); v.nameTag.material.dispose(); v.nameTag = undefined; }
+      v.tagText = text;
+      if (text) { v.nameTag = nameTag(text); this.scene.add(v.nameTag); }
+    }
+    if (v.nameTag) v.nameTag.position.set(x, y + e.body.height * (e.kind === "critter" ? 1.15 : 1) + 0.5, z);
+  }
+
   private dropView(id: number): void {
     const v = this.views.get(id);
     if (!v) return;
@@ -424,8 +454,8 @@ export class WorldRenderer {
         // Blazes and magma cubes glow with their own heat.
         const glowing = e.kind === "blaze" || e.kind === "magma_cube";
         if (e.kind === "blaze" && Math.random() < 0.1) this.particles.emit(Math.random() < 0.5 ? "smoke" : "flame", x, y + 1, z, 1, 0, 0.4);
-        pose(v.model, e.kind, {
-          x, y, z, yaw, pitch: 0, walk, speed, light: glowing ? Math.max(bright, 0.95) : bright, hurt: e.hurtTime > 0, death: e.deathTime > 0 ? e.deathTime + a : 0,
+        pose(v.model, v.modelKey ?? e.kind, {
+          x, y, z, yaw, pitch: 0, walk, speed, light: glowing || (e.kind === "critter" && GLOWING_CRITTERS.has(e.species)) ? Math.max(bright, 0.95) : bright, hurt: e.hurtTime > 0, death: e.deathTime > 0 ? e.deathTime + a : 0,
           time: this.time, baby: e.baby, swell: e.kind === "creeper" ? e.fuse / 30 : 0,
           flash: e.kind === "creeper" && e.fuse > 0 && Math.floor(this.time * 8) % 2 === 0,
           woolColor: e.woolColor, sheared: e.sheared, onGround: e.body.onGround,
@@ -445,6 +475,7 @@ export class WorldRenderer {
           ...(isDino(e.kind) ? { swing: Math.max(0, e.attackCooldown - 14) / 6, saddled: e.saddled, asleep: e.unconscious } : {}),
         });
         if (isDino(e.kind)) this.creatureTag(v, e, x, y, z);
+        if (e.kind === "critter" || e.kind === "trainer") this.critterTag(v, e, x, y, z, camPos);
         if (e.kind === "ender_dragon") {
           // It is perched when its phase says so; the flag doubles as "wings folded".
           if (e.dragon?.phase === "perch") pose(v.model, e.kind, { x, y, z, yaw, pitch: 0, walk, speed, light: bright, hurt: e.hurtTime > 0, death: 0, time: this.time, swing: 0, size: 4, onGround: true });
@@ -825,8 +856,23 @@ function skinVariant(e: Mob): number {
   if (e.kind === "tribute") return e.id % 24;
   if (isDino(e.kind)) return e.id % 4;
   if (isInfectedMob(e.kind)) return e.id % 8;
+  if (e.kind === "critter") return e.shiny ? 1 : 0;
+  // A trainer dressed for their calling, their face their own.
+  if (e.kind === "trainer") {
+    const t = e.trainerId ? trainerById(e.trainerId) : null;
+    const cls = Math.max(0, TRAINER_CLASS_ORDER.indexOf(t?.cls ?? "youngster"));
+    return (cls << 6) | (seedFromString(e.trainerId ?? String(e.id)) & 63);
+  }
   return 0;
 }
+
+/** The model a mob is drawn from: its kind's, or its species' for a critter. */
+function modelKey(e: Mob): string {
+  return e.kind === "critter" ? `critter_${e.species}` : e.kind;
+}
+
+/** Critters made of light: drawn bright in the dark. */
+const GLOWING_CRITTERS = new Set(["wisplet", "lanternwisp", "lumoth", "jellispark", "emberkit", "cinderlynx", "pyrolion"]);
 
 /** How much bigger than its model a mob is drawn: a ghast is four blocks across, a hoglin is modelled at half size. */
 function modelScale(e: Mob): number {
@@ -839,6 +885,7 @@ function modelScale(e: Mob): number {
     case "wither_skeleton": return 1.2;
     case "brute": return 1.35;
     case "bloater": return 1.15;
+    case "critter": return SPECIES[e.species]?.scale ?? 1;
     default: return isDino(e.kind) ? CREATURES[e.kind].scale : e.size;
   }
 }

@@ -1252,6 +1252,24 @@ def("waystone_top", (p, r) => {
   frame16(p, 6, 6, 9, 9, RUNE);
 });
 
+// A healing station: a white counter with a red cross panel, and a glowing pink dome on top.
+const STATION_WHITE = hex("#e8e8ee"), STATION_TRIM = hex("#b8bcc8"), STATION_GLOW = hex("#ff8ab8");
+def("healing_station_side", (p, r) => {
+  noisy(p, r, STATION_WHITE, 0.04, 4);
+  frame(p, STATION_TRIM);
+  for (let x = 1; x < 15; x++) p.set(x, 13, STATION_TRIM);
+  // The cross, red on the counter's face.
+  for (let y = 4; y <= 10; y++) for (let x = 6; x <= 9; x++) p.set(x, y, hex("#d83a4a"));
+  for (let y = 6; y <= 8; y++) for (let x = 4; x <= 11; x++) p.set(x, y, hex("#d83a4a"));
+});
+def("healing_station_top", (p, r) => { noisy(p, r, STATION_WHITE, 0.04, 4); frame(p, STATION_TRIM); frame16(p, 3, 3, 12, 12, STATION_GLOW); });
+def("healing_station_bottom", (p, r) => noisy(p, r, STATION_TRIM, 0.06, 4));
+def("healing_station_dome", (p, r) => {
+  noisy(p, r, STATION_GLOW, 0.08, 4);
+  for (let x = 2; x < 14; x++) p.set(x, 3, shade(STATION_GLOW, 1.3));
+  frame(p, shade(STATION_GLOW, 0.8));
+});
+
 // Water and lava are animated: ANIM_FRAMES consecutive layers, painted from a
 // looping path through 3D noise so the last frame flows into the first.
 const WATER_NOISE = new Simplex(4242);
@@ -2666,6 +2684,39 @@ const ITEM_TEMPLATES: Record<string, string[]> = {
     "..abbbaabbba....",
     "...aaa..aaa.....",
   ],
+  // A critter orb: two halves in its colours, a dark band round the middle with a pale catch.
+  orb: [
+    "................",
+    "......aaaa......",
+    "....aabbbbaa....",
+    "...abcbbbbbba...",
+    "..abcbbbbbbbba..",
+    "..abbbbbbbbbba..",
+    ".akkkkkkkkkkkka.",
+    ".addddkeekdddda.",
+    ".akkkkkkkkkkkka.",
+    "..adddddddddda..",
+    "..adddddddddda..",
+    "...adddddddda...",
+    "....aaddddaa....",
+    "......aaaa......",
+  ],
+  // A sprig of a healing herb: three leaves on a stem, a flower at the top.
+  herb: [
+    "................",
+    ".......ff.......",
+    "......fwwf......",
+    ".......ff.......",
+    ".......g........",
+    "....bb.g.bb.....",
+    "...bccbgbccb....",
+    "....bbbgbbb.....",
+    "......bgb.......",
+    ".....bcgcb......",
+    "......bgb.......",
+    ".......g........",
+    ".......g........",
+  ],
   vial: [
     "................",
     "......hhhh......",
@@ -2828,6 +2879,16 @@ art("splint", "splint", { h: H, w: hex("#e8e4dc") });
 art("antibiotics", "pills", { a: hex("#3a3a3a"), b: hex("#d83a3a"), w: hex("#f0f0f0"), c: hex("#4aa84a") });
 art("canteen", "canteen", paletteOf("#5a6a3a", { c: shade(hex("#5a6a3a"), 1.4) }));
 art("water_canteen", "canteen", paletteOf("#5a6a3a", { c: hex("#6ab0f0") }));
+// Critters: the orbs, each tier its own colours; the medicines; a honey cake.
+for (const [name, top, bottom] of [["capture_orb", "#3a7ad8", "#e8e8e8"], ["silver_orb", "#b8c0cc", "#4a5060"], ["gold_orb", "#e8c030", "#2a2a2a"], ["star_orb", "#8a3ad8", "#f0e060"], ["park_orb", "#5a8a2a", "#d8c890"]] as const) {
+  const t = hex(top), b = hex(bottom);
+  art(name, "orb", { a: hex("#1a1a1e"), b: t, c: shade(t, 1.45), d: b, k: hex("#26262a"), e: hex("#f4f4f4") });
+}
+art("herbal_tonic", "vial", paletteOf("#5ac05a", { h: hex("#8a6536") }));
+art("strong_tonic", "vial", paletteOf("#d8508a", { h: hex("#d8d8d8") }));
+art("cure_all", "vial", paletteOf("#f0d040", { h: hex("#8a6536") }));
+art("revival_herb", "herb", { b: hex("#3c9a3a"), c: hex("#6ad06a"), g: hex("#2a6a2a"), f: hex("#f0c040"), w: hex("#fff8d0") });
+art("honey_cake", "bread", paletteOf("#e0a030", { c: hex("#f8d870") }));
 art("bread", "bread", paletteOf("#b8843a"));
 art("carrot", "carrot", paletteOf("#ef8a1c", { g: hex("#4c9a2a") }));
 art("potato", "potato", paletteOf("#c8a254"));

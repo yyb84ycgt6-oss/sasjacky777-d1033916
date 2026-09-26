@@ -25,7 +25,7 @@ export type Trigger =
   | { kind: "brew" }
   | { kind: "dimension"; dimension: Dimension }
   /** Something that happened once, named: the dragon slain, a stronghold found, a gateway taken. */
-  | { kind: "event"; event: "dragon" | "stronghold" | "gateway" | "city" | "levitate" | "waystone" | "tame" };
+  | { kind: "event"; event: "dragon" | "stronghold" | "gateway" | "city" | "levitate" | "waystone" | "tame" | "catch" | "badge" | "champion" };
 
 export interface Advancement {
   id: string;
@@ -80,6 +80,10 @@ export const ADVANCEMENTS: readonly Advancement[] = [
   { id: "box", title: "Pack It Up", description: "Make a shulker box", icon: "shulker_box", trigger: has("shulker_box") },
   { id: "tame", title: "Best Friends Forever", description: "Tame a wolf with a bone", icon: "bone", trigger: { kind: "event", event: "tame" } },
   { id: "waystone", title: "Well Travelled", description: "Travel from one waystone to another", icon: "waystone", trigger: { kind: "event", event: "waystone" } },
+  // The critter modes.
+  { id: "catch", title: "Gotcha!", description: "Catch a wild critter in an orb", icon: "capture_orb", trigger: { kind: "event", event: "catch" } },
+  { id: "badge", title: "Badge of Honour", description: "Win a badge from a gym leader", icon: "gold_orb", trigger: { kind: "event", event: "badge" } },
+  { id: "champion", title: "Champion of the Region", description: "Defeat the Champion at the end of the road", icon: "star_orb", trigger: { kind: "event", event: "champion" } },
 ];
 
 export function advancement(id: string): Advancement | undefined {
@@ -108,7 +112,7 @@ export interface PlayerState {
 export type AdvancementEvent =
   | { kind: "kill"; hostile: boolean } | { kind: "sleep" } | { kind: "eat" } | { kind: "enchant" } | { kind: "brew" }
   | { kind: "dimension"; dimension: Dimension } | { kind: "dragon" } | { kind: "stronghold" } | { kind: "gateway" }
-  | { kind: "city" } | { kind: "levitate" } | { kind: "waystone" } | { kind: "tame" };
+  | { kind: "city" } | { kind: "levitate" } | { kind: "waystone" } | { kind: "tame" } | { kind: "catch" } | { kind: "badge" } | { kind: "champion" };
 
 /**
  * Which not-yet-earned advancements the player has now earned: from their

@@ -9,7 +9,9 @@
  * disagree.
  */
 
-export type Role = "body" | "belly" | "head" | "jaw" | "beak" | "neck" | "leg" | "arm" | "tail" | "crest" | "frill" | "horn" | "plate" | "spike" | "wing" | "feather" | "saddle";
+export type Role = "body" | "belly" | "head" | "jaw" | "beak" | "neck" | "leg" | "arm" | "tail" | "crest" | "frill" | "horn" | "plate" | "spike" | "wing" | "feather" | "saddle"
+  // Critters' parts (render/critterModels.ts).
+  | "ear" | "flame" | "leaf" | "fin" | "shell" | "glow" | "gill" | "mane" | "tooth" | "antenna" | "tentacle" | "lantern" | "moss" | "rock";
 
 export interface DinoPart {
   name: string;
@@ -24,22 +26,22 @@ export interface DinoPart {
   children?: DinoPart[];
 }
 
-type Spec = Omit<DinoPart, "uv" | "children"> & { children?: Spec[] };
+export type Spec = Omit<DinoPart, "uv" | "children"> & { children?: Spec[] };
 
-const P = (name: string, size: [number, number, number], pivot: [number, number, number], role: Role, extra: Partial<Spec> = {}): Spec =>
+export const P = (name: string, size: [number, number, number], pivot: [number, number, number], role: Role, extra: Partial<Spec> = {}): Spec =>
   ({ name, size, pivot, role, ...extra });
 
-const legs2 = (size: [number, number, number], x: number, y: number, z: number): Spec[] => [
+export const legs2 = (size: [number, number, number], x: number, y: number, z: number): Spec[] => [
   P("legR", size, [-x, y, z], "leg", { offset: [0, -size[1] / 2, 0], share: "leg" }),
   P("legL", size, [x, y, z], "leg", { offset: [0, -size[1] / 2, 0], share: "leg" }),
 ];
-const legs4 = (size: [number, number, number], x: number, y: number, z: number): Spec[] => [
+export const legs4 = (size: [number, number, number], x: number, y: number, z: number): Spec[] => [
   P("legFR", size, [-x, y, -z], "leg", { offset: [0, -size[1] / 2, 0], share: "leg" }),
   P("legFL", size, [x, y, -z], "leg", { offset: [0, -size[1] / 2, 0], share: "leg" }),
   P("legBR", size, [-x, y, z], "leg", { offset: [0, -size[1] / 2, 0], share: "leg" }),
   P("legBL", size, [x, y, z], "leg", { offset: [0, -size[1] / 2, 0], share: "leg" }),
 ];
-const arms = (size: [number, number, number], x: number, y: number, z: number): Spec[] => [
+export const arms = (size: [number, number, number], x: number, y: number, z: number): Spec[] => [
   P("armR", size, [-x, y, z], "arm", { offset: [0, -size[1] / 2, 0], rotation: [-0.6, 0, 0], share: "arm" }),
   P("armL", size, [x, y, z], "arm", { offset: [0, -size[1] / 2, 0], rotation: [-0.6, 0, 0], share: "arm" }),
 ];
@@ -142,7 +144,7 @@ const SPECS: Record<string, Spec[]> = {
 };
 
 /** Lays every box's skin out on a 64×64 sheet, tallest first, row by row. */
-function pack(specs: Spec[]): DinoPart[] {
+export function pack(specs: Spec[]): DinoPart[] {
   const flat: Spec[] = [];
   const walk = (s: Spec) => { flat.push(s); s.children?.forEach(walk); };
   specs.forEach(walk);

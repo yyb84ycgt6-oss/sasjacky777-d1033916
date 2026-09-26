@@ -27,7 +27,8 @@ export type EntityKind =
   | "shulker" | "shulker_bullet" | "item_frame" | "firework_rocket"
   | "wolf" | "deer" | "bear" | "tribute"
   | "dodo" | "dilo" | "parasaur" | "raptor" | "trike" | "stego" | "rex" | "bronto" | "ptero" | "gigantoraptor"
-  | "infected" | "runner" | "brute" | "spitter" | "screamer" | "bloater";
+  | "infected" | "runner" | "brute" | "spitter" | "screamer" | "bloater"
+  | "critter" | "trainer";
 
 export interface PlayerRef {
   id: string;

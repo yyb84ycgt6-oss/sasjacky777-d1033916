@@ -289,6 +289,21 @@ export class GameAudio {
       case "gun_empty": this.tone(out, t, "square", 1800, 1700, 0.03, 0.15); break;
       case "zombie_break": this.noiseBurst(out, t, 0.15, "bandpass", 500, 1.5, 0.5); this.tone(out, t, "sine", 120, 80, 0.12, 0.3); break;
       case "purchase": [523, 659, 784].forEach((f, i) => this.tone(out, t + i * 0.06, "square", f, f, 0.1, 0.1)); break;
+      // Critters: a chirruping cry pitched to the critter's size, blows landing, the orb's throw, wobble and click.
+      case "critter_cry": case "critter_hurt":
+        this.tone(out, t, "triangle", 700 * p, 1100 * p, 0.09, 0.25); this.tone(out, t + 0.09, "triangle", 1000 * p, 650 * p, 0.12, 0.2);
+        break;
+      case "critter_death": case "critter_faint": this.tone(out, t, "triangle", 600 * p, 180 * p, 0.5, 0.3); break;
+      case "critter_move": this.noiseBurst(out, t, 0.18, "bandpass", 1600 * p, 0.9, 0.35, 0.5); break;
+      case "critter_hit": this.noiseBurst(out, t, 0.12, "lowpass", 1400 * p, 1, 0.7); this.tone(out, t, "square", 220 * p, 110 * p, 0.08, 0.25); break;
+      case "orb_throw": this.noiseBurst(out, t, 0.2, "highpass", 2500, 0.8, 0.35, 0.6); this.tone(out, t + 0.15, "sine", 900, 500, 0.12, 0.2); break;
+      case "orb_shake": this.tone(out, t, "square", 320 * p, 300 * p, 0.05, 0.18); this.tone(out, t + 0.07, "square", 300 * p, 280 * p, 0.05, 0.14); break;
+      case "orb_open": this.tone(out, t, "sine", 500, 1400, 0.15, 0.25); this.noiseBurst(out, t, 0.15, "highpass", 3000, 1, 0.25); break;
+      case "orb_catch": [784, 988, 1175, 1568].forEach((f, i) => this.tone(out, t + i * 0.08, "square", f, f, 0.12, 0.1)); break;
+      case "heal_jingle": [659, 784, 988, 784, 1319].forEach((f, i) => this.tone(out, t + i * 0.13, "triangle", f, f, 0.2, 0.2)); break;
+      case "level_up": [523, 659, 784, 1047, 1319].forEach((f, i) => this.tone(out, t + i * 0.07, "square", f, f, 0.12, 0.1)); break;
+      case "battle_start": [220, 277, 330, 440, 330, 440, 554].forEach((f, i) => this.tone(out, t + i * 0.06, "sawtooth", f, f, 0.08, 0.1)); break;
+      case "trainer_spot": this.tone(out, t, "square", 1047, 1047, 0.08, 0.2); this.tone(out, t + 0.1, "square", 1397, 1397, 0.18, 0.2); break;
       default:
         this.mob(name, out, t, p);
     }

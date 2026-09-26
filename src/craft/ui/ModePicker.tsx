@@ -2,14 +2,14 @@
  * Choosing how to play a new world: every mode (modes/modes.ts) as a card
  * under its category, and a Random button for when you would rather be told.
  */
-import { CATEGORY_NAMES, MODES, randomMode, type ModeCategory, type ModeDef } from "../modes/modes";
+import { CATEGORY_NAMES, CATEGORY_ORDER, MODES, randomMode, type ModeDef } from "../modes/modes";
 import { MAPS } from "../engine/maps";
 import { itemId } from "../engine/items";
 import { Button, ItemIcon } from "./common";
 
 const u = (n: number) => `calc(var(--u) * ${n})`;
 
-const ORDER: ModeCategory[] = ["classic", "minigame", "challenge", "primal", "zombie"];
+const ORDER = CATEGORY_ORDER;
 
 function iconId(name: string): number {
   // A card with the wrong picture is better than a create screen that will not open.
