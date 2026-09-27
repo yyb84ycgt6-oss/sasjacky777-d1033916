@@ -680,6 +680,11 @@ export class Actions {
       }
     }
 
+    // A casino machine or table: sit down and play.
+    if (t?.block && fresh) {
+      const cg = g.casinoGameAt(t.block.x, t.block.y, t.block.z);
+      if (cg) { g.setScreen({ kind: "casino", game: cg }); this.swing(); return; }
+    }
     if (t?.block) {
       if (this.useOnBlock(t.block, def, fresh)) return;
     } else if (def && fresh) {

@@ -162,6 +162,12 @@ export abstract class ModeRuntime {
     else this.game.modeTell(id, { reset: true });
   }
 
+  /** Dollars to a player (or from one, if negative), here or online. */
+  giveCash(id: string, n: number): void {
+    if (this.isLocal(id)) { this.game.player.cash = Math.max(0, this.game.player.cash + n); this.game.bumpInv(); }
+    else this.game.modeTell(id, { cash: n });
+  }
+
   teleport(id: string, x: number, y: number, z: number): void {
     const g = this.game;
     if (this.isLocal(id)) g.teleportLocal(x, y, z);

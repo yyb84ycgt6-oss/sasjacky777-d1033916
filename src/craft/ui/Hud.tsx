@@ -4,7 +4,7 @@ import { glyph, textureBackground } from "./icons";
 import { ItemIcon, StackView } from "./common";
 import { clock, effectName } from "./itemText";
 import { itemId } from "../engine/items";
-import { MINIMAP_ROOM } from "./MapView";
+import { MINIMAP_ROOM, MINIMAP_SIZE } from "./MapView";
 
 function Row({ full, max, icon, half, empty, reverse, shake, preview, glow }: {
   full: number; max: number; icon: string; half: string; empty: string; reverse?: boolean; shake?: boolean;
@@ -96,12 +96,21 @@ export function Hud({ hud, mobile, crosshair }: { hud: HudState; mobile: boolean
       )}
 
       {hud.effects.length > 0 && !hud.screen && (
-        <div className="absolute flex flex-col items-end" style={{ right: "calc(var(--u) * 3)", top: `calc(var(--u) * ${(mobile ? 26 : 3) + corner + (hud.net ? 18 : 0)})`, gap: "calc(var(--u) * 1)" }}>
+        <div className="absolute flex flex-col items-end" style={{ right: "calc(var(--u) * 3)", top: `calc(var(--u) * ${(mobile ? 26 : 3) + corner + (hud.net ? 18 : 0) + (hud.cash !== null && !hud.minimap ? 16 : 0)})`, gap: "calc(var(--u) * 1)" }}>
           {hud.effects.map((e) => (
             <div key={e.kind} style={{ background: "rgba(0,0,0,0.45)", padding: "calc(var(--u) * 1) calc(var(--u) * 3)", fontSize: "calc(var(--u) * 5.5)" }}>
               {effectName(e.kind, e.amp)} <span style={{ color: e.seconds <= 10 ? "#ff8080" : "#c0c0c0" }}>{clock(e.seconds)}</span>
             </div>
           ))}
+        </div>
+      )}
+
+      {hud.cash !== null && !hud.screen && (
+        // The city's money, where the city shows it: top right, green, eight
+        // digits. Beside the minimap rather than under it, where the sidebar
+        // scoreboard starts on a short screen.
+        <div data-testid="hud-cash" className="absolute" style={{ right: `calc(var(--u) * ${hud.minimap ? MINIMAP_SIZE + 8 : 3})`, top: `calc(var(--u) * ${(mobile ? 22 : 3) + (hud.minimap ? 0 : hud.net ? 18 : 0)})`, fontFamily: "monospace", fontSize: "calc(var(--u) * 11)", color: "#7aff9a", WebkitTextStroke: "1px #0a2a12", letterSpacing: "calc(var(--u) * 0.5)" }}>
+          ${String(Math.floor(hud.cash)).padStart(8, "0")}
         </div>
       )}
 

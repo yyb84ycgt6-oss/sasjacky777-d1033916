@@ -16,13 +16,13 @@ import type { GameMode } from "../engine/player";
 import type { MapId } from "../engine/maps";
 import type { WorldType } from "../engine/worldgen";
 
-export type ModeCategory = "classic" | "minigame" | "challenge" | "primal" | "zombie" | "critter";
+export type ModeCategory = "classic" | "minigame" | "challenge" | "primal" | "zombie" | "critter" | "city";
 
 /** The order the create screen lists categories in. Every category must be here, or its modes cannot be chosen. */
-export const CATEGORY_ORDER: ModeCategory[] = ["classic", "minigame", "challenge", "primal", "zombie", "critter"];
+export const CATEGORY_ORDER: ModeCategory[] = ["classic", "minigame", "challenge", "primal", "zombie", "critter", "city"];
 
 export const CATEGORY_NAMES: Record<ModeCategory, string> = {
-  classic: "Classic", minigame: "Minigames", challenge: "Challenges", primal: "Primal", zombie: "Zombies", critter: "Critters",
+  classic: "Classic", minigame: "Minigames", challenge: "Challenges", primal: "Primal", zombie: "Zombies", critter: "Critters", city: "City & Casino",
 };
 
 export interface ModeDef {
@@ -184,6 +184,13 @@ export const MODES: readonly ModeDef[] = [
     inspiredBy: "The battle towers of the monster-collecting games",
     description: "Pick three rental critters at level 50 and face challenger after challenger at the top of the spire. Every seventh is the Spire Master.",
     goal: "Win as many battles in a row as you can." },
+
+  // ---- city and casino ---------------------------------------------------------------------------
+  { id: "high_roller", name: "High Roller", category: "city", icon: "gold_block", gameMode: "adventure", map: "high_roller", difficulty: 0, multiplayer: true,
+    rules: { doMobSpawning: false, doDaylightCycle: false, keepInventory: true },
+    inspiredBy: "The casinos of Las Vegas, and every game that ever put one in a city",
+    description: "A thousand dollars and the run of the Golden Stonk: slots, blackjack, roulette, video poker, the wheel, and Stonks the crash game. Real odds; play money.",
+    goal: "Turn $1,000 into $1,000,000." },
 ];
 
 export function modeDef(id: string | undefined): ModeDef | undefined {
@@ -192,7 +199,7 @@ export function modeDef(id: string | undefined): ModeDef | undefined {
 
 /** A mode for the Random button: any minigame or challenge (the classics are not a surprise). */
 export function randomMode(random: () => number): ModeDef {
-  const pool = MODES.filter((m) => m.category === "minigame" || m.category === "challenge" || m.category === "primal" || m.category === "zombie" || m.category === "critter");
+  const pool = MODES.filter((m) => m.category !== "classic");
   return pool[Math.floor(random() * pool.length)];
 }
 

@@ -303,6 +303,22 @@ export class GameAudio {
       case "heal_jingle": [659, 784, 988, 784, 1319].forEach((f, i) => this.tone(out, t + i * 0.13, "triangle", f, f, 0.2, 0.2)); break;
       case "level_up": [523, 659, 784, 1047, 1319].forEach((f, i) => this.tone(out, t + i * 0.07, "square", f, f, 0.12, 0.1)); break;
       case "battle_start": [220, 277, 330, 440, 330, 440, 554].forEach((f, i) => this.tone(out, t + i * 0.06, "sawtooth", f, f, 0.08, 0.1)); break;
+      // The casino: chips clacking, cards snapping down, reels whirring and thunking to a stop, the ball's rattle,
+      // wins from a bright chime to a full jackpot fanfare, and the crash game's rising whine and its crash.
+      case "chip": this.tone(out, t, "square", 2400 * p, 2200 * p, 0.03, 0.12); this.noiseBurst(out, t, 0.04, "highpass", 5000, 1, 0.25); break;
+      case "card": this.noiseBurst(out, t, 0.06, "bandpass", 3000 * p, 1.5, 0.45); break;
+      case "reel_spin": for (let i = 0; i < 6; i++) this.tone(out, t + i * 0.05, "square", 520 + (i % 2) * 90, 480, 0.03, 0.06); break;
+      case "reel_stop": this.tone(out, t, "square", 180 * p, 120 * p, 0.07, 0.3); this.noiseBurst(out, t, 0.05, "lowpass", 900, 1, 0.3); break;
+      case "ball": for (let i = 0; i < 10; i++) this.noiseBurst(out, t + i * (0.05 + i * 0.012), 0.03, "bandpass", 4200 - i * 150, 3, 0.25); break;
+      case "win_small": [784, 1047, 1319].forEach((f, i) => this.tone(out, t + i * 0.07, "triangle", f, f, 0.14, 0.18)); break;
+      case "win_big": [523, 659, 784, 1047, 784, 1047, 1319, 1568].forEach((f, i) => this.tone(out, t + i * 0.09, "square", f, f, 0.16, 0.12)); break;
+      case "jackpot":
+        for (let r = 0; r < 3; r++) [1047, 1319, 1568, 2093].forEach((f, i) => this.tone(out, t + r * 0.42 + i * 0.08, "square", f, f, 0.18, 0.12));
+        this.noiseBurst(out, t, 1.2, "highpass", 6000, 0.6, 0.2, 0.8);
+        break;
+      case "lose": this.tone(out, t, "sawtooth", 300 * p, 140 * p, 0.35, 0.15); break;
+      case "crash_boom": this.noiseBurst(out, t, 0.8, "lowpass", 700, 0.8, 0.7, 0.2); this.tone(out, t, "sawtooth", 400, 50, 0.6, 0.25); break;
+      case "cashout": [880, 1175, 1760].forEach((f, i) => this.tone(out, t + i * 0.05, "square", f, f, 0.08, 0.14)); break;
       case "trainer_spot": this.tone(out, t, "square", 1047, 1047, 0.08, 0.2); this.tone(out, t + 0.1, "square", 1397, 1397, 0.18, 0.2); break;
       default:
         this.mob(name, out, t, p);

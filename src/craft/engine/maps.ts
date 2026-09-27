@@ -19,8 +19,9 @@ import { blockIndex, CHUNK_VOLUME, WORLD_HEIGHT } from "./constants";
 import { itemByName, type ItemStack } from "./items";
 import { hash4, Rng } from "./rng";
 import type { ChunkGenerator, GeneratedChunk, Generator, Tints } from "./worldgen";
+import type { CasinoGame } from "./casino";
 
-export const MAP_IDS = ["skyblock", "oneblock", "void", "parkour", "colosseum", "tnt_run", "sg_arena", "primal_island", "dead_zone", "zombie_bunker", "critter_region", "safari_park", "battle_spire"] as const;
+export const MAP_IDS = ["skyblock", "oneblock", "void", "parkour", "colosseum", "tnt_run", "sg_arena", "primal_island", "dead_zone", "zombie_bunker", "critter_region", "safari_park", "battle_spire", "high_roller"] as const;
 export type MapId = (typeof MAP_IDS)[number];
 export const isMapId = (v: unknown): v is MapId => typeof v === "string" && (MAP_IDS as readonly string[]).includes(v);
 
@@ -43,6 +44,7 @@ export const MAPS: Record<MapId, MapInfo> = {
   critter_region: { name: "The Critter Region", description: "Six towns up one long road — four gyms, the League at the end, trainers on every route — and a summit above it all." },
   safari_park: { name: "The Safari Park", description: "A fenced park of meadow, pond, grove, rocks and marsh, full of critters to catch." },
   battle_spire: { name: "The Battle Spire", description: "A round arena at the top of a spire, where challengers step up one after another." },
+  high_roller: { name: "The Golden Stonk", description: "A casino floor: rows of slots, blackjack and roulette tables, a video poker bar, the wheel and the Stonks terminal." },
 };
 
 /** Loot tables a map's chests are filled from (see mapLoot). */
@@ -98,6 +100,8 @@ export interface MapLayout {
   npcs?: { id: string; x: number; y: number; z: number; yaw: number }[];
   /** The legend's perch: the region's summit. */
   legend?: [number, number, number];
+  /** Casino machines and tables: every block of each, and the game it plays. */
+  casino?: { game: CasinoGame; x: number; y: number; z: number }[];
 }
 
 /** A named stretch of a critter map. */
@@ -739,6 +743,94 @@ function battleSpire(): Omit<MapLayout, "map"> {
   };
 }
 
+/** Letters five blocks tall in a three-wide pixel font, for signs made of blocks. */
+const SIGN_FONT: Record<string, string[]> = {
+  S: ["###", "#..", "###", "..#", "###"], T: ["###", ".#.", ".#.", ".#.", ".#."], O: ["###", "#.#", "#.#", "#.#", "###"],
+  N: ["#.#", "##.", "#.#", "#.#", "#.#"], K: ["#.#", "##.", "#..", "##.", "#.#"], G: ["###", "#..", "#.#", "#.#", "###"],
+  L: ["#..", "#..", "#..", "#..", "###"], D: ["##.", "#.#", "#.#", "#.#", "##."], E: ["###", "#..", "##.", "#..", "###"],
+  C: ["###", "#..", "#..", "#..", "###"], A: ["###", "#.#", "###", "#.#", "#.#"], I: ["###", ".#.", ".#.", ".#.", "###"],
+  " ": ["...", "...", "...", "...", "..."], "$": [".#.", "###", "##.", ".##", "###"],
+};
+
+/** Writes a word in blocks on a wall that faces along z, left to right in +x, its baseline at y. */
+function signWord(p: Plan, word: string, x0: number, y: number, z: number, id: number): void {
+  let x = x0;
+  for (const ch of word) {
+    const rows = SIGN_FONT[ch] ?? SIGN_FONT[" "];
+    rows.forEach((row, r) => [...row].forEach((c, i) => { if (c === "#") p.set(x + i, y + 4 - r, z, id); }));
+    x += 4;
+  }
+}
+
+/**
+ * The Golden Stonk: a casino floor in the sky. Red carpet with gold, quartz
+ * walls, lights in the ceiling; rows of slot machines, blackjack and
+ * roulette tables, a video poker bar along one wall, the wheel on another,
+ * and the Stonks terminal's chart glowing on a third. Every block of a
+ * machine or table is listed with the game it plays, so using any of them
+ * sits the player down at it.
+ */
+function casinoFloor(): Omit<MapLayout, "map"> {
+  const p = new Plan();
+  const casino: NonNullable<MapLayout["casino"]> = [];
+  const Y = 64, X0 = -30, X1 = 30, Z0 = -22, Z1 = 22, H = 9;
+  const put = (x: number, y: number, z: number, id: number, game?: CasinoGame) => { p.set(x, y, z, id); if (game) casino.push({ game, x, y, z }); };
+  for (let x = X0; x <= X1; x++) for (let z = Z0; z <= Z1; z++) {
+    const wall = x === X0 || x === X1 || z === Z0 || z === Z1;
+    p.set(x, Y - 1, z, B.QUARTZ_BLOCK);
+    // Red carpet, with a gold diamond lattice through it.
+    p.set(x, Y, z, wall ? B.QUARTZ_BLOCK : (x + z) % 6 === 0 || (x - z) % 6 === 0 ? wool("yellow") : wool("red"));
+    for (let y = Y + 1; y < Y + H; y++) p.set(x, y, z, wall ? (y === Y + 1 || y === Y + H - 1 ? B.GOLD_BLOCK : B.QUARTZ_BLOCK) : B.AIR);
+    p.set(x, Y + H, z, !wall && x % 5 === 0 && z % 5 === 0 ? B.GLOWSTONE : B.QUARTZ_BLOCK);
+  }
+  // Slot machines: two banks of purple cabinets with glowing screens, back to back.
+  for (const z of [-12, -10, 10, 12]) for (let x = -24; x <= -8; x += 2) {
+    put(x, Y + 1, z, B.PURPUR_BLOCK, "slots");
+    put(x, Y + 2, z, B.SEA_LANTERN, "slots");
+    put(x, Y + 3, z, B.MAGENTA_STAINED_GLASS, "slots");
+  }
+  // Blackjack tables: green felt on dark legs.
+  for (const [tx, tz] of [[4, -12], [12, -12], [4, 10], [12, 10]]) {
+    for (let x = tx; x < tx + 4; x++) for (let z = tz; z < tz + 3; z++) {
+      put(x, Y + 1, z, x === tx || x === tx + 3 || z === tz || z === tz + 2 ? B.SPRUCE_PLANKS : wool("green"), "blackjack");
+    }
+  }
+  // Roulette tables: felt, with the wheel in the middle — red, black and a gold spindle.
+  for (const [tx, tz] of [[-4, -4], [8, -4]]) {
+    for (let x = tx; x < tx + 5; x++) for (let z = tz; z < tz + 5; z++) {
+      const cx = x - tx - 2, cz = z - tz - 2;
+      const id = cx === 0 && cz === 0 ? B.GOLD_BLOCK : Math.abs(cx) <= 1 && Math.abs(cz) <= 1 ? ((cx + cz) % 2 === 0 ? wool("black") : wool("red")) : wool("green");
+      put(x, Y + 1, z, id, "roulette");
+    }
+  }
+  // The video poker bar along the east wall.
+  for (let z = -16; z <= 16; z += 2) {
+    put(X1 - 2, Y + 1, z, B.LAPIS_BLOCK, "poker");
+    put(X1 - 2, Y + 2, z, B.SEA_LANTERN, "poker");
+  }
+  // The wheel, standing against the north wall: a disc of coloured segments round a gold hub.
+  const wheelColors = [wool("white"), wool("blue"), wool("yellow"), wool("lime"), wool("magenta"), wool("red")];
+  for (let dx = -5; dx <= 5; dx++) for (let dy = -5; dy <= 5; dy++) {
+    const r = Math.hypot(dx, dy);
+    if (r > 5.4) continue;
+    const seg = Math.floor(((Math.atan2(dy, dx) + Math.PI) / (Math.PI * 2)) * 18) % wheelColors.length;
+    put(dx, Y + 3 + 3 + dy, Z0 + 1, r < 1.2 ? B.GOLD_BLOCK : r > 4.6 ? B.GOLD_BLOCK : wheelColors[seg], "wheel");
+  }
+  put(0, Y + 12, Z0 + 1, B.REDSTONE_BLOCK, "wheel");
+  // The Stonks terminal on the west wall: a black screen with a green line that only goes up.
+  for (let dz = -6; dz <= 6; dz++) for (let dy = 0; dy < 6; dy++) {
+    const line = Math.round(dy) === Math.min(5, Math.max(0, Math.floor((dz + 6) / 2.4)));
+    put(X0 + 1, Y + 2 + dy, dz, line ? wool("lime") : wool("black"), "crash");
+  }
+  for (let dz = -3; dz <= 3; dz++) put(X0 + 2, Y + 1, dz, B.EMERALD_BLOCK, "crash");
+  // Pillars, and the name over the door in pink.
+  for (const [x, z] of [[-20, -4], [20, -4], [-20, 4], [20, 4]]) for (let y = Y + 1; y < Y + H; y++) p.set(x, y, z, y === Y + H - 1 ? B.GOLD_BLOCK : B.QUARTZ_BLOCK);
+  signWord(p, "STONKS", -11, Y + 3, Z1 - 1, wool("pink"));
+  // The cashier's cage by the door.
+  for (let x = -3; x <= 3; x++) { p.set(x, Y + 1, Z1 - 4, B.GOLD_BLOCK); p.set(x, Y + 2, Z1 - 4, B.IRON_BARS); }
+  return { spawn: [0.5, Y + 1, Z1 - 2.5], blocks: p.blocks, terrain: false, chests: [], center: [0, 0], radius: 40, floorY: Y - 10, casino };
+}
+
 function sgArena(seed: number, base: Generator): Omit<MapLayout, "map"> {
   const p = new Plan();
   const s = base.findSpawn();
@@ -784,7 +876,7 @@ export function mapLayout(map: MapId, seed: number, base: Generator): MapLayout 
     const made = map === "skyblock" ? skyblock() : map === "oneblock" ? oneblock() : map === "void" ? voidMap()
       : map === "parkour" ? parkour(seed) : map === "colosseum" ? colosseum() : map === "tnt_run" ? tntRun()
         : map === "primal_island" ? primalIsland(base) : map === "dead_zone" ? deadZone(seed, base) : map === "zombie_bunker" ? zombieBunker()
-          : map === "critter_region" ? critterRegion(seed, base) : map === "safari_park" ? safariPark(seed, base) : map === "battle_spire" ? battleSpire() : sgArena(seed, base);
+          : map === "critter_region" ? critterRegion(seed, base) : map === "safari_park" ? safariPark(seed, base) : map === "battle_spire" ? battleSpire() : map === "high_roller" ? casinoFloor() : sgArena(seed, base);
     l = { map, ...made };
     if (layouts.size > 16) layouts.clear();
     layouts.set(key, l);

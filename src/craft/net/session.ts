@@ -102,6 +102,7 @@ export function sanitizeModeTell(v: unknown): ModeTell {
   if (finite(t.maxHealth)) out.maxHealth = Math.max(1, Math.min(20, t.maxHealth as number));
   if (t.reset === true) out.reset = true;
   if (typeof t.bloodMoon === "boolean") out.bloodMoon = t.bloodMoon;
+  if (finite(t.cash)) out.cash = Math.max(-1_000_000, Math.min(1_000_000, Math.floor(t.cash as number)));
   return out;
 }
 

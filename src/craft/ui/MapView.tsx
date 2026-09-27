@@ -20,7 +20,7 @@ import { Button } from "./common";
 
 /** How far down (in GUI units) the minimap reaches, so the HUD can stack what else is in that corner below it. */
 export const MINIMAP_ROOM = 80;
-const MINIMAP_SIZE = 64;
+export const MINIMAP_SIZE = 64;
 
 const DIMENSION_NAMES = { overworld: "Overworld", nether: "The Nether", end: "The End" } as const;
 

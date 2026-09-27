@@ -33,7 +33,8 @@ import { ambientCue } from "../engine/ambience";
 import { POT_SLOTS } from "../engine/cooking";
 import { pickWildlife } from "../engine/wildlife";
 import { dungeonLoot } from "../engine/dungeons";
-import { MapGenerator, mapLoot } from "../engine/maps";
+import { MapGenerator, mapLayout, mapLoot } from "../engine/maps";
+import type { CasinoGame } from "../engine/casino";
 import { luckyOutcome } from "../engine/lucky";
 import { createRuntime, modeDef, type ModeRuntime } from "../modes";
 import { travelCost, WAYSTONE_NAME_MAX, waystoneKey, waystoneName, type Waystone } from "../engine/waystones";
@@ -1871,7 +1872,10 @@ export class Game {
     // in the leaves before they have punched anything.
     if (this.needsSurface || b.y < 1) {
       for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) if (!this.world.isLoaded(x + dx * 16, z + dz * 16)) return false;
-      const ground = this.groundNear(x, z);
+      // A spawn that is already somewhere to stand is kept: snapping to the
+      // highest block would put a player spawned indoors, like the casino
+      // floor, up on its roof.
+      const ground = this.standableAt(x, Math.floor(b.y), z) ?? this.groundNear(x, z);
       if (ground) {
         b.x = ground.x; b.z = ground.z; b.y = ground.y;
         if (this.needsSurface) this.meta.spawn = { ...ground };
@@ -1884,6 +1888,16 @@ export class Game {
     }
     this.spawnPlaced = true;
     return true;
+  }
+
+  /** This exact spot, when the player's feet and head are clear and the block under them is ground rather than leaves. */
+  private standableAt(x: number, y: number, z: number): { x: number; y: number; z: number } | null {
+    if (y < 1 || y >= WORLD_HEIGHT - 2) return null;
+    const under = this.world.blockAt(x, y - 1, z);
+    if (!block(under).solid || isLeaves(under) || isFluid(under)) return null;
+    const feet = this.world.blockAt(x, y, z), head = this.world.blockAt(x, y + 1, z);
+    if (block(feet).solid || block(head).solid || isFluid(feet) || isFluid(head)) return null;
+    return { x: x + 0.5, y, z: z + 0.5 };
   }
 
   /** The nearest column, spiralling out, whose top is ground to stand on: not leaves, a trunk or water. */
@@ -2553,6 +2567,31 @@ export class Game {
     if (t.frozen !== undefined) this.frozen = t.frozen;
     if (t.maxHealth !== undefined) this.maxHealth = t.maxHealth;
     if (t.bloodMoon !== undefined) this.bloodMoon = t.bloodMoon;
+    if (t.cash) { this.player.cash = Math.max(0, this.player.cash + t.cash); this.bumpInv(); }
+  }
+
+  // ---- the casino (engine/casino.ts, ui/CasinoScreens.tsx) -------------------------------------------------
+
+  private casinoCache: Map<string, CasinoGame> | null = null;
+
+  /** The casino game whose machine or table stands at a block, on a map that has a casino. */
+  casinoGameAt(x: number, y: number, z: number): CasinoGame | null {
+    if (!this.casinoCache) {
+      this.casinoCache = new Map();
+      const m = this.meta;
+      if (m.map) for (const c of mapLayout(m.map, m.seed, new Generator({ seed: m.seed, type: m.type, dimension: "overworld" })).casino ?? []) this.casinoCache.set(`${c.x},${c.y},${c.z}`, c.game);
+    }
+    return this.dimension === "overworld" ? this.casinoCache.get(`${x},${y},${z}`) ?? null : null;
+  }
+
+  /** A casino game paid out: the advancements that come of winning, and a million. */
+  casinoResult(paid: number, stake: number): void {
+    if (paid > stake) this.advance({ kind: "casino_win" });
+    if (stake > 0 && paid >= stake * 100) this.advance({ kind: "jackpot" });
+    if (this.player.cash >= 1_000_000 && !this.player.advancements.has("millionaire")) {
+      this.advance({ kind: "millionaire" });
+      this.showTitle("MILLIONAIRE", "Number go up.");
+    }
   }
 
   /** Changes the world's border (host); guests hear it with their next scoreboard. */
@@ -3277,6 +3316,7 @@ export class Game {
       inspect: this.inspectLine(),
       minimap: this.modOn("minimap"),
       critters: this.critters?.hud() ?? null,
+      cash: modeDef(this.meta.mode?.id)?.category === "city" ? p.cash : null,
     };
   }
 

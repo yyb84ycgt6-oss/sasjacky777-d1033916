@@ -1,6 +1,7 @@
 import type { Slot } from "../engine/inventory";
 import type { GameMode } from "../engine/player";
 import type { LinkKind } from "../net/transport";
+import type { CasinoGame } from "../engine/casino";
 
 /** What the input layer (keyboard/mouse or touch) writes and the game reads each frame. */
 export interface Controls {
@@ -76,7 +77,9 @@ export type Screen =
   | { kind: "battle" }
   | { kind: "party"; give?: string; tab?: "party" | "dex" }
   | { kind: "starter"; rentals?: boolean }
-  | { kind: "center"; x: number; y: number; z: number };
+  | { kind: "center"; x: number; y: number; z: number }
+  /** The casino: its lobby, or one game's table. */
+  | { kind: "casino"; game: CasinoGame };
 
 /** A game mode's scoreboard: a title and label–value lines, as the classic sidebar shows them. */
 export interface Objective {
@@ -100,6 +103,8 @@ export interface ModeTell {
   reset?: boolean;
   /** A blood moon is up (or has set). */
   bloodMoon?: boolean;
+  /** Dollars handed to the player (a mode's stake, a mission's pay). */
+  cash?: number;
 }
 
 export interface ChatLine {
@@ -169,4 +174,6 @@ export interface Hud {
   minimap: boolean;
   /** The critter modes: the party's health at a glance, coins and badges; null elsewhere. */
   critters: { party: { name: string; species: string; level: number; hp: number; max: number; status: string | null }[]; coins: number; badges: number } | null;
+  /** The city and casino modes: the player's dollars, shown as the city shows them; null elsewhere. */
+  cash: number | null;
 }
