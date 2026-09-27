@@ -131,6 +131,20 @@ function drawMarkers(ctx: CanvasRenderingContext2D, game: Game, v: View, size: n
       ctx.fillText(w.name, sx, sy - size * 1.2);
     }
   }
+  // A mission's marks: dots, held at the edge when off it, like the waypoints.
+  if (dim === "overworld") for (const m of game.markers) {
+    let [sx, sy] = toScreen(v, m.x, m.z);
+    const inside = sx >= margin && sy >= margin && sx <= v.width - margin && sy <= v.height - margin;
+    if (!inside && !clampToEdge) continue;
+    if (!inside) { sx = Math.max(margin, Math.min(v.width - margin, sx)); sy = Math.max(margin, Math.min(v.height - margin, sy)); }
+    ctx.beginPath();
+    ctx.arc(sx, sy, size * 0.75, 0, Math.PI * 2);
+    ctx.fillStyle = m.color;
+    ctx.strokeStyle = "#000";
+    ctx.lineWidth = Math.max(1, size / 4);
+    ctx.fill();
+    ctx.stroke();
+  }
   for (const r of game.remote.values()) {
     if (r.dead) continue;
     const [sx, sy] = toScreen(v, r.x, r.z);

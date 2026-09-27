@@ -11,6 +11,7 @@
  * Browsers only start audio after a user gesture, so the context is created
  * lazily and resumed on the first click or key.
  */
+import { djLine, STATIONS, type Station } from "./engine/radio";
 import type { AmbientCue } from "./engine/ambience";
 import type { Material } from "./engine/blocks";
 
@@ -321,6 +322,13 @@ export class GameAudio {
       case "cashout": [880, 1175, 1760].forEach((f, i) => this.tone(out, t + i * 0.05, "square", f, f, 0.08, 0.14)); break;
       // The streets: a two-note horn (lower for the big ones), the police whoop, a crunch of metal and glass, a dent.
       case "car_horn": this.tone(out, t, "sawtooth", 415 * p, 415 * p, 0.35, 0.16); this.tone(out, t, "sawtooth", 523 * p, 523 * p, 0.35, 0.12); break;
+      // Mission passed: a rising fanfare with a sting at the end. Failed: two sagging notes.
+      case "mission_passed":
+        [392, 523, 659, 784].forEach((f, i) => this.tone(out, t + i * 0.1, "square", f, f, 0.14, 0.12));
+        this.tone(out, t + 0.42, "sawtooth", 1047, 1047, 0.6, 0.12, 0.02);
+        this.tone(out, t + 0.42, "square", 523, 523, 0.6, 0.08, 0.02);
+        break;
+      case "mission_failed": this.tone(out, t, "sawtooth", 392, 370, 0.35, 0.14); this.tone(out, t + 0.35, "sawtooth", 294, 262, 0.7, 0.14); break;
       // A cruiser's wail: up and down, carried a long way.
       case "siren_wail": this.tone(out, t, "square", 650, 1250, 0.45, 0.08, 0.05); this.tone(out, t + 0.45, "square", 1250, 650, 0.45, 0.08, 0.05); break;
       case "siren_whoop": this.tone(out, t, "square", 600, 1500, 0.35, 0.14); this.tone(out, t + 0.35, "square", 1500, 700, 0.3, 0.12); break;
@@ -558,6 +566,122 @@ export class GameAudio {
   }
 
   /** Called every second or so; starts a short generative piece now and then. */
+  // ---- the car radio (engine/radio.ts has the stations) --------------------------------------
+
+  private tuned: {
+    station: number; out: GainNode; next: number; step: number; bar: number; song: number; shift: number;
+    melody: number[]; crackle: AudioBufferSourceNode | null; talkAt: number;
+  } | null = null;
+  /** Called with the DJ's words (for a caption) when a station comes on and between tunes. */
+  onDj: ((who: string, text: string) => void) | null = null;
+
+  /**
+   * Plays a station, writing its music as it goes a quarter-second ahead;
+   * null turns the radio off. Called every frame while at the wheel.
+   */
+  radio(station: number | null): void {
+    if (station === null || !this.ready() || this.volumes.music <= 0) { this.radioOff(); return; }
+    const ctx = this.ctx!;
+    const s = STATIONS[station % STATIONS.length];
+    if (!this.tuned || this.tuned.station !== station) {
+      this.radioOff();
+      const out = ctx.createGain();
+      out.gain.value = 0.5;
+      let node: AudioNode = out;
+      if (s.lofi) {
+        const f = ctx.createBiquadFilter();
+        f.type = "lowpass"; f.frequency.value = 2200;
+        out.connect(f);
+        node = f;
+      }
+      node.connect(this.music);
+      let crackle: AudioBufferSourceNode | null = null;
+      if (s.lofi) {
+        crackle = ctx.createBufferSource();
+        crackle.buffer = this.noise; crackle.loop = true;
+        const hp = ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 5000;
+        const g = ctx.createGain(); g.gain.value = 0.025;
+        crackle.connect(hp); hp.connect(g); g.connect(out);
+        crackle.start();
+      }
+      this.tuned = { station, out, next: ctx.currentTime + 0.15, step: 0, bar: 0, song: Math.floor(Math.random() * 8), shift: 0, melody: this.writeMelody(s), crackle, talkAt: ctx.currentTime + 1 };
+      this.onDj?.(s.dj, djLine(s, this.tuned.song, Math.random));
+    }
+    const st = this.tuned;
+    if (s.talk) {
+      // Talk radio: the host never stops, and a jingle between rants.
+      if (ctx.currentTime >= st.talkAt) {
+        st.talkAt = ctx.currentTime + 9 + Math.random() * 5;
+        [523, 659, 784].forEach((f, i) => this.tone(st.out, ctx.currentTime + i * 0.12, "sine", f, f, 0.18, 0.08));
+        if (st.bar++ > 0) this.onDj?.(s.dj, djLine(s, 0, Math.random));
+      }
+      return;
+    }
+    const step = 60 / s.bpm / 4;
+    while (st.next < ctx.currentTime + 0.25) {
+      this.radioStep(s, st, st.next, step);
+      st.next += step;
+      if (++st.step % 16 === 0) {
+        st.bar++;
+        // Every sixteen bars a new tune: a new key nearby, a new melody, and a word from the DJ.
+        if (st.bar % 16 === 0) {
+          st.song++;
+          st.shift = [0, 2, -2, 3, -3, 5][Math.floor(Math.random() * 6)];
+          st.melody = this.writeMelody(s);
+          this.onDj?.(s.dj, djLine(s, st.song, Math.random));
+        }
+      }
+    }
+  }
+
+  private radioOff(): void {
+    if (!this.tuned) return;
+    const t = this.tuned;
+    this.tuned = null;
+    try { t.crackle?.stop(); } catch { /* already stopped */ }
+    if (this.ctx) t.out.gain.setTargetAtTime(0, this.ctx.currentTime, 0.05);
+    setTimeout(() => t.out.disconnect(), 400);
+  }
+
+  /** Two bars of eighth notes, scale degrees or rests (-1), for a melodic station to repeat and vary. */
+  private writeMelody(s: Station): number[] {
+    const out: number[] = [];
+    let d = 4 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < 16; i++) {
+      if (Math.random() < (s.arp ? 0.1 : 0.35)) { out.push(-1); continue; }
+      d = Math.max(0, Math.min(11, d + Math.floor(Math.random() * 5) - 2));
+      out.push(d);
+    }
+    return out;
+  }
+
+  private radioStep(s: Station, st: NonNullable<typeof this.tuned>, t: number, len: number): void {
+    const i = st.step % 16;
+    const chord = s.chords[st.bar % s.chords.length];
+    const freq = (deg: number, octave: number) => {
+      const n = s.scale.length;
+      const semis = s.scale[((deg % n) + n) % n] + 12 * Math.floor(deg / n) + st.shift;
+      return s.root * Math.pow(2, semis / 12 + octave);
+    };
+    const out = st.out;
+    if (s.kick[i] === "x") this.tone(out, t, "sine", 130, 42, 0.22, 0.55, 0.002);
+    if (s.snare[i] === "x") this.noiseBurst(out, t, 0.14, "bandpass", 1800, 0.9, 0.35, 0.5);
+    if (s.hat[i] === "x") this.noiseBurst(out, t, 0.04, "highpass", 7000, 0.8, 0.12);
+    if (i === 0) for (const k of [0, 2, 4]) this.tone(out, t, s.pad, freq(chord + k, 0), freq(chord + k, 0), len * 15, 0.035, 0.3);
+    if (i % 8 === 0 || (s.arp && i % 4 === 2)) this.tone(out, t, s.bass, freq(chord, -1), freq(chord, -1), len * (s.arp ? 1.8 : 3.5), 0.16, 0.01);
+    if (s.arp) {
+      // An arpeggio up and down the chord, an octave up.
+      const pattern = [0, 2, 4, 7, 4, 2];
+      this.tone(out, t, s.lead, freq(chord + pattern[st.step % pattern.length], 1), freq(chord + pattern[st.step % pattern.length], 1), len * 0.9, 0.05);
+      // The tune over it, on the eighths, every other bar.
+      const m = st.melody[(st.step >> 1) % 16];
+      if (i % 2 === 0 && st.bar % 2 === 1 && m >= 0) this.tone(out, t, "square", freq(m, 1), freq(m, 1), len * 1.8, 0.045);
+    } else if (i % 2 === 0) {
+      const m = st.melody[(st.step >> 1) % 16];
+      if (m >= 0) this.tone(out, t, s.lead, freq(m, 1), freq(m, 1), len * 3, 0.08, 0.02);
+    }
+  }
+
   private motor: { osc: OscillatorNode; sub: OscillatorNode; gain: GainNode; filter: BiquadFilterNode } | null = null;
   /**
    * The engine of the car being driven: a growl whose pitch climbs with the

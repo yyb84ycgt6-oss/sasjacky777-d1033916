@@ -10,6 +10,7 @@
  * pause menu, the way the original does, so the game never keeps running
  * with the mouse loose and the player unable to steer.
  */
+import { Car } from "../engine/cars";
 import type { Game } from "./game";
 
 const MOVE_KEYS = new Set(["KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space", "ShiftLeft", "ShiftRight", "ControlLeft", "ControlRight"]);
@@ -160,6 +161,7 @@ export class DesktopInput {
       case "KeyE": a.push({ type: "inventory" }); this.exitLock(); break;
       case "KeyM": if (g.modOn("minimap")) { a.push({ type: "map" }); this.exitLock(); } break;
       case "KeyQ": a.push({ type: "drop", all: e.ctrlKey || e.metaKey }); break;
+      case "KeyR": if (g.ridden() instanceof Car) a.push({ type: "radio" }); break;
       case "KeyP": if (g.critters.on) { a.push({ type: "party" }); this.exitLock(); } break;
       case "KeyT": case "Enter": a.push({ type: "chat" }); this.exitLock(); e.preventDefault(); break;
       case "Slash": a.push({ type: "chat", text: "/" }); this.exitLock(); e.preventDefault(); break;

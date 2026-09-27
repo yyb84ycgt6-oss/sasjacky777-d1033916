@@ -100,6 +100,8 @@ export interface FrameState {
   bloodMoon?: boolean;
   /** A mode's world border (a square of half-width `radius`), drawn as a striped wall when near. */
   border?: { x: number; z: number; radius: number } | null;
+  /** A mission's marks: glowing columns where something is to be done. */
+  markers?: { x: number; y: number; z: number; color: string; r: number }[];
 }
 
 const WATER_FOG = col("#1f4f9a");
@@ -155,6 +157,8 @@ export class WorldRenderer {
   private cameraPull = 4;
   private borderWall: THREE.Group | null = null;
   private borderKey = "";
+  private markerViews: { column: THREE.Mesh; ring: THREE.Mesh; mat: THREE.MeshBasicMaterial }[] = [];
+  private markerKey = "";
 
   constructor(readonly canvas: HTMLCanvasElement, private world: World, pixelRatio: number) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: "high-performance", preserveDrawingBuffer: false, alpha: false });
@@ -416,14 +420,19 @@ export class WorldRenderer {
   }
 
   /** What a citizen just said, over their head while they say it. */
-  private quipTag(v: EntityView, e: Mob, x: number, y: number, z: number): void {
+  private quipTag(v: EntityView, e: Mob, x: number, y: number, z: number, cam: THREE.Vector3): void {
     const text = e.quipTicks > 0 && e.quip ? e.quip : "";
     if (text !== v.tagText) {
       if (v.nameTag) { this.scene.remove(v.nameTag); v.nameTag.material.map?.dispose(); v.nameTag.material.dispose(); v.nameTag = undefined; }
       v.tagText = text;
       if (text) { v.nameTag = nameTag(text); this.scene.add(v.nameTag); }
     }
-    if (v.nameTag) v.nameTag.position.set(x, y + e.body.height + 0.5, z);
+    if (v.nameTag) {
+      v.nameTag.position.set(x, y + e.body.height + 0.5, z);
+      // Near enough to read, not so near it fills the screen (someone shouting in your ear).
+      const d = cam.distanceTo(v.nameTag.position);
+      v.nameTag.visible = d > 2.5 && d < 40;
+    }
   }
 
   /** A critter's name and level (and whose it is), or a trainer's title, floating over them when near. */
@@ -507,7 +516,7 @@ export class WorldRenderer {
         });
         if (isDino(e.kind)) this.creatureTag(v, e, x, y, z);
         if (e.kind === "critter" || e.kind === "trainer") this.critterTag(v, e, x, y, z, camPos);
-        if (e.kind === "citizen" || e.kind === "cop") this.quipTag(v, e, x, y, z);
+        if (e.kind === "citizen" || e.kind === "cop") this.quipTag(v, e, x, y, z, camPos);
         if (e.kind === "ender_dragon") {
           // It is perched when its phase says so; the flag doubles as "wings folded".
           if (e.dragon?.phase === "perch") pose(v.model, e.kind, { x, y, z, yaw, pitch: 0, walk, speed, light: bright, hurt: e.hurtTime > 0, death: 0, time: this.time, swing: 0, size: 4, onGround: true });
@@ -781,6 +790,7 @@ export class WorldRenderer {
     } else this.crack.visible = false;
 
     this.updateBorder(frame.border ?? null, c.x, c.z);
+    this.updateMarkers(frame.markers ?? []);
     this.updateEntities(frame);
     this.updatePlayers(frame);
     this.particles.update(frame.dt, dim ? dim.sky ?? 0 : sky.daylight, dim?.ambient ?? 0);
@@ -803,6 +813,34 @@ export class WorldRenderer {
    * only show as you come near, so a shrinking border is seen coming rather
    * than learned about from the damage.
    */
+  /**
+   * A mission's marks, drawn the way the city games draw them: a column of
+   * light rising from the spot, see-through and glowing whatever the time of
+   * day, with a ring turning at the top so it catches the eye from afar.
+   */
+  private updateMarkers(markers: { x: number; y: number; z: number; color: string; r: number }[]): void {
+    const key = markers.map((m) => `${m.color}:${m.r}`).join("|");
+    if (key !== this.markerKey) {
+      this.markerKey = key;
+      for (const v of this.markerViews) { this.scene.remove(v.column, v.ring); v.column.geometry.dispose(); v.ring.geometry.dispose(); v.mat.dispose(); }
+      this.markerViews = markers.map((m) => {
+        const mat = new THREE.MeshBasicMaterial({ color: col(m.color), transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending });
+        const column = new THREE.Mesh(new THREE.CylinderGeometry(m.r * 0.6, m.r * 0.6, 5, 24, 1, true), mat);
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(m.r * 0.6, 0.08, 6, 32), mat);
+        ring.rotation.x = Math.PI / 2;
+        this.scene.add(column, ring);
+        return { column, ring, mat };
+      });
+    }
+    markers.forEach((m, i) => {
+      const v = this.markerViews[i];
+      if (!v) return;
+      v.column.position.set(m.x, m.y + 2.5, m.z);
+      v.ring.position.set(m.x, m.y + 0.2 + ((this.time * 0.8) % 1) * 4.6, m.z);
+      v.mat.opacity = 0.28 + Math.sin(this.time * 4) * 0.08;
+    });
+  }
+
   private updateBorder(border: FrameState["border"], x: number, z: number): void {
     const key = border ? `${border.x},${border.z},${border.radius}` : "";
     if (key !== this.borderKey) {

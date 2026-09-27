@@ -37,6 +37,8 @@ export type GameAction =
   | { type: "map" }
   /** The critter modes: the party (P). */
   | { type: "party" }
+  /** At the wheel: the next radio station (R). */
+  | { type: "radio" }
   | { type: "close" };
 
 export function emptyControls(): Controls {
@@ -111,6 +113,20 @@ export interface ModeTell {
   wanted?: number;
   /** Busted: hand over every gun and round. */
   confiscate?: boolean;
+  /** A line of dialogue across the bottom of the screen: who says it, and what. */
+  caption?: { who: string; text: string; color: string };
+  /** The spots this player's mission marks in the world and on the map (null clears them). */
+  markers?: Marker[] | null;
+}
+
+/** A mission's mark: a glowing column in the world and a dot on the map. */
+export interface Marker {
+  x: number;
+  y: number;
+  z: number;
+  color: string;
+  /** How close counts as there, and so how wide the column is drawn. */
+  r: number;
 }
 
 export interface ChatLine {
@@ -184,6 +200,8 @@ export interface Hud {
   cash: number | null;
   /** In a city: wanted stars, 0 to 5. */
   wanted: number | null;
+  /** Someone talking: a contact on the phone, the DJ on the radio. */
+  caption: { who: string; text: string; color: string } | null;
   /** At the wheel of a car: its name, speed, how much of it is left (0-1), and its siren. */
   vehicle: { name: string; kmh: number; health: number; siren: boolean; police: boolean } | null;
   /** In a city: the district (announced for a few seconds on the way in) and the street underfoot. */

@@ -126,11 +126,21 @@ export function Hud({ hud, mobile, crosshair }: { hud: HudState; mobile: boolean
         </div>
       )}
 
+      {hud.caption && !hud.screen && (
+        // Dialogue across the bottom, over the hotbar: who is talking, in their colour, then what they say.
+        <div data-testid="hud-caption" className="absolute" style={{
+          left: "50%", transform: "translateX(-50%)", bottom: `calc(var(--u) * ${mobile ? 70 : 48})`, maxWidth: "min(90%, calc(var(--u) * 220))",
+          textAlign: "center", fontSize: "calc(var(--u) * 6.5)", lineHeight: 1.35, background: "rgba(0,0,0,0.45)", padding: "calc(var(--u) * 1.5) calc(var(--u) * 4)",
+        }}>
+          <span style={{ color: hud.caption.color }}>{hud.caption.who}: </span>{hud.caption.text}
+        </div>
+      )}
+
       {hud.zone?.fresh && !hud.screen && (
         // The district, announced on the way in, the way the city games do: big, slanted, bottom right.
         <div data-testid="hud-zone" className="absolute" style={{
           right: "calc(var(--u) * 4)", ...(mobile ? { top: "calc(var(--u) * 40)" } : { bottom: `calc(var(--u) * ${hud.vehicle ? 44 : 14})` }),
-          fontSize: "calc(var(--u) * 13)", fontStyle: "italic", fontWeight: 700, color: "#ffe25a", letterSpacing: "calc(var(--u) * 0.4)",
+          fontSize: "calc(var(--u) * 13)", fontStyle: "italic", fontWeight: 700, color: "#ffe25a", letterSpacing: "calc(var(--u) * 0.4)", whiteSpace: "nowrap",
           WebkitTextStroke: "1px #3a1a00", textShadow: "calc(var(--u) * 0.8) calc(var(--u) * 0.8) 0 #ff3aa8",
         }}>{hud.zone.name}</div>
       )}

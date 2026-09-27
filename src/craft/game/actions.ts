@@ -196,6 +196,7 @@ export class Actions {
       case "drop": this.dropHeld(a.all); break;
       case "pickBlock": this.pickBlock(); break;
       case "perspective": g.perspective = ((g.perspective + 1) % 3) as 0 | 1 | 2; break;
+      case "radio": g.nextStation(); break;
       case "debug": g.debug = !g.debug; break;
       case "hideHud": g.hudHidden = !g.hudHidden; break;
       case "toggleFly":

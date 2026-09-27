@@ -65,6 +65,7 @@ import { levelOf } from "../engine/enchanting";
 import { potionOfItem, splashSeconds } from "../engine/potions";
 import { Boat, Minecart, Vehicle, vehicleFromSnapshot } from "../engine/vehicles";
 import { Car, kmh, type CarModelId } from "../engine/cars";
+import { STATIONS } from "../engine/radio";
 import { carCode, carFromCode, type ShopKind } from "../engine/shops";
 import type { City } from "../engine/city";
 import { CARJACK_QUIPS, pick as pickQuip, toughCitizen } from "../engine/citizens";
@@ -86,7 +87,7 @@ import { SaveStore, type ChunkData, type WorldMeta } from "./save";
 import { effectiveControls, saveSettings, type Settings } from "./settings";
 import { Store } from "./store";
 import { Streamer } from "./streamer";
-import { emptyControls, type ChatLine, type Controls, type Hud, type ModeTell, type Objective, type Screen } from "./types";
+import { emptyControls, type ChatLine, type Controls, type Hud, type Marker, type ModeTell, type Objective, type Screen } from "./types";
 import { sanitizeStack, type Slot } from "../engine/inventory";
 
 export type Role = "local" | "host" | "guest";
@@ -357,6 +358,8 @@ export class Game {
     for (const s of opts.meta.entities ?? []) this.restoreEntity(s);
 
     this.store = new Store<Hud>(this.hudSnapshot());
+    // The radio's DJ talks in captions.
+    this.audio.onDj = (who, text) => this.caption(who, text, "#9ad8ff");
     this.actions = new Actions(this);
     this.critters = new CritterPlay(this);
 
@@ -2086,10 +2089,12 @@ export class Game {
       season: this.season() ? seasonTint(this.time, warmBiome(biome.id)) : undefined,
       bloodMoon: this.bloodMoon && this.dimension === "overworld",
       border: this.dimension === "overworld" ? this.border : null,
+      markers: this.dimension === "overworld" ? this.markers : [],
     });
     this.lightning = 0;
     this.audio.setListener(ix, eye, iz, p.yaw);
     this.audio.engine(localCar && !localCar.wrecked && !this.screen ? { speed: localCar.speed, top: localCar.spec.top, throttle: Math.abs(this.controls.forward) } : null);
+    this.audio.radio(localCar && !localCar.wrecked && this.radioStation >= 0 ? this.radioStation : null);
 
     this.hudTimer -= dt;
     if (this.hudTimer <= 0) {
@@ -2340,6 +2345,25 @@ export class Game {
 
   /** Set when getting into a car switched the view to behind it, so getting out switches it back. */
   private carCamera = false;
+
+  /** The car radio's station (engine/radio.ts), or -1 for off; kept from car to car. */
+  radioStation = 0;
+  /** Tunes the car radio to the next station, and round to off. */
+  nextStation(): void {
+    this.radioStation = this.radioStation + 1 >= STATIONS.length ? -1 : this.radioStation + 1;
+    const s = STATIONS[this.radioStation];
+    this.showActionbar(s ? `Radio: ${s.name} — ${s.genre}` : "Radio off");
+  }
+
+  private captionNow: { who: string; text: string; color: string; at: number } | null = null;
+  /** A line of dialogue across the bottom of the screen, for as long as it takes to read. */
+  caption(who: string, text: string, color = "#ffffff"): void {
+    this.captionNow = { who, text, color, at: performance.now() };
+    this.store.set({ caption: { who, text, color } });
+  }
+
+  /** The spots the player's mission marks (the city runtime's, or the host's word for a guest). */
+  markers: Marker[] = [];
 
   /**
    * Taking a car somebody is driving: they are pulled out of the other side,
@@ -2628,6 +2652,8 @@ export class Game {
     if (t.bloodMoon !== undefined) this.bloodMoon = t.bloodMoon;
     if (t.cash) { this.player.cash = Math.max(0, this.player.cash + t.cash); this.bumpInv(); }
     if (t.wanted !== undefined) this.player.wanted = t.wanted;
+    if (t.caption) this.caption(t.caption.who, t.caption.text, t.caption.color);
+    if (t.markers !== undefined) this.markers = t.markers ?? [];
     if (t.confiscate) this.confiscateGuns();
   }
 
@@ -3427,6 +3453,7 @@ export class Game {
       critters: this.critters?.hud() ?? null,
       cash: modeDef(this.meta.mode?.id)?.category === "city" ? p.cash : null,
       wanted: this.cityNow() ? p.wanted : null,
+      caption: this.captionNow && performance.now() - this.captionNow.at < 2500 + this.captionNow.text.length * 55 ? { who: this.captionNow.who, text: this.captionNow.text, color: this.captionNow.color } : null,
       vehicle: this.carHud(),
       zone: this.zoneHud(),
     };

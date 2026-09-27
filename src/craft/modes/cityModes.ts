@@ -11,7 +11,7 @@
  * not the player's — and a car a player was given is kept.
  */
 import type { Objective } from "../game/types";
-import { Car, CAR_COLORS, type CarModelId } from "../engine/cars";
+import { Car, CAR_COLORS, CAR_MODELS, type CarModelId } from "../engine/cars";
 import { STREET, type City, LOT } from "../engine/city";
 import type { Entity } from "../engine/entities";
 import { Mob } from "../engine/mobs";
@@ -21,6 +21,9 @@ import {
 } from "../engine/police";
 import { laneNear, laneSpot, newTraffic, sidewalkSpot, trafficDrive, type TrafficState } from "../engine/traffic";
 import type { PlayerRef } from "../engine/entities";
+import { ALL_MISSIONS, boostPay, CONTACTS, contactSpot, nextMission, placeSpot, raceRoute, type Contact, type MissionDef } from "../engine/missions";
+import { hash4 } from "../engine/rng";
+import type { Marker } from "../game/types";
 import { ModeRuntime, registerRuntime } from "./runtime";
 
 /** Dollars a player starts High Roller with. */
@@ -55,6 +58,21 @@ class HighRollerRuntime extends ModeRuntime {
 
 registerRuntime("high_roller", (g, d, s) => new HighRollerRuntime(g, d, s));
 
+/** A job in progress: whose, from whom, how far along, against what clock, and what the city put out for it. */
+interface Job {
+  player: string;
+  contact: Contact;
+  def: MissionDef;
+  stage: number;
+  deadline: number | null;
+  from?: [number, number, number];
+  to?: [number, number, number];
+  car?: number;
+  target?: number;
+  guards: number[];
+  route?: [number, number, number][];
+}
+
 /** What the traffic drives, and how often. */
 const TRAFFIC_MIX: [CarModelId, number][] = [["sedan", 30], ["compact", 18], ["taxi", 14], ["pickup", 10], ["van", 8], ["muscle", 8], ["sports", 7], ["police", 3], ["super", 2]];
 
@@ -88,6 +106,8 @@ export abstract class CityRuntime extends ModeRuntime {
   private readonly wasted = new Set<string>();
   /** Cars through the respray lately, so one pass is one respray. */
   private readonly sprayed = new Map<number, number>();
+  /** People the city must not tidy away: a mission's target and their friends. */
+  protected readonly keep = new Set<number>();
 
   city(): City | null {
     return this.layout()?.city ?? null;
@@ -143,6 +163,16 @@ export abstract class CityRuntime extends ModeRuntime {
     this.tellWanted(id);
   }
 
+  /** Heat straight onto a player's record, at least this much (a job the police notice from the start). */
+  protected raiseHeat(id: string, heat: number): void {
+    this.heat.set(id, Math.max(this.heat.get(id) ?? 0, heat));
+    this.unseen.set(id, 0);
+    this.tellWanted(id);
+  }
+
+  /** A player's job ended badly (wasted, busted): the mode's to deal with. */
+  protected jobLost(_id: string, _why: string): void {}
+
   /** Clears a player's record: busted, wasted, or resprayed. */
   protected clearHeat(id: string): void {
     this.heat.delete(id);
@@ -184,6 +214,7 @@ export abstract class CityRuntime extends ModeRuntime {
   }
 
   onPlayerDeath(id: string): void {
+    this.jobLost(id, "Wasted. The job's off.");
     if (!this.police) return;
     this.clearHeat(id);
     this.wasted.add(id);
@@ -289,6 +320,7 @@ export abstract class CityRuntime extends ModeRuntime {
   }
 
   private bust(city: City, id: string): void {
+    this.jobLost(id, "Busted. The job's off.");
     const s = this.stars(id);
     const fine = 100 + 50 * s;
     this.clearHeat(id);
@@ -346,6 +378,7 @@ export abstract class CityRuntime extends ModeRuntime {
       if (e instanceof Car && e.ambient && !e.rider) {
         if (far(e.x, e.z, e.wrecked ? 70 : 120)) { e.removed = true; this.brains.delete(e.id); } else if (e.npc) traffic++;
       } else if (e instanceof Mob && e.kind === "citizen" && !e.dying) {
+        if (this.keep.has(e.id)) continue;
         if (far(e.x, e.z, 90)) e.removed = true; else people++;
       } else if (e instanceof Mob && e.kind === "cop" && !e.dying && far(e.x, e.z, 100)) e.removed = true;
     }
@@ -413,6 +446,225 @@ class NeonBayRuntime extends CityRuntime {
   private get given(): string[] { return ((this.data.given as string[] | undefined) ??= []); }
   private count(key: string, by = 1): void { this.data[key] = ((this.data[key] as number | undefined) ?? 0) + by; }
 
+  // ---- missions (engine/missions.ts) ---------------------------------------------------------------
+
+  private readonly jobs = new Map<string, Job>();
+  private readonly lines = new Map<string, { at: number; who: string; text: string; color: string }[]>();
+  private readonly marked = new Map<string, string>();
+  private spots: [number, number, number][] | null = null;
+
+  /** How many of each contact's jobs a player has done, by player name (so it survives a new connection). */
+  private done(name: string): Record<string, number> {
+    const all = ((this.data.missions as Record<string, Record<string, number>> | undefined) ??= {});
+    return (all[name] ??= {});
+  }
+
+  private contactSpots(city: City): [number, number, number][] {
+    return (this.spots ??= CONTACTS.map((c) => contactSpot(city, c)));
+  }
+
+  /** A line of dialogue for one player, now or after a pause. */
+  private say(id: string, who: string, text: string, color: string, delayTicks = 0): void {
+    const q = this.lines.get(id) ?? [];
+    q.push({ at: this.game.tickCount + delayTicks, who, text, color });
+    this.lines.set(id, q);
+  }
+
+  private flushLines(): void {
+    const now = this.game.tickCount;
+    for (const [id, q] of this.lines) {
+      while (q.length && q[0].at <= now) {
+        const l = q.shift()!;
+        if (this.isLocal(id)) this.game.caption(l.who, l.text, l.color);
+        else this.game.modeTell(id, { caption: { who: l.who, text: l.text, color: l.color } });
+      }
+      if (!q.length) this.lines.delete(id);
+    }
+  }
+
+  /** Walked into a contact's mark with no stars: their next job. */
+  private offerJobs(city: City): void {
+    const spots = this.contactSpots(city);
+    for (const p of this.alive()) {
+      if (this.jobs.has(p.id) || this.stars(p.id) > 0) continue;
+      CONTACTS.forEach((c, k) => {
+        if (this.jobs.has(p.id)) return;
+        const [x, , z] = spots[k];
+        if (Math.hypot(p.x - x, p.z - z) > 2.6) return;
+        const def = nextMission(c, this.done(p.name)[c.id] ?? 0);
+        if (def) this.startJob(city, p.id, p.name, c, def);
+      });
+    }
+  }
+
+  private startJob(city: City, id: string, name: string, contact: Contact, def: MissionDef): void {
+    const g = this.game;
+    const salt = hash4(g.meta.seed, name.length * 131 + def.id.length, this.done(name)[contact.id] ?? 0, g.tickCount);
+    const job: Job = { player: id, contact, def, stage: 0, deadline: def.seconds ? g.tickCount + def.seconds * 20 : null, guards: [] };
+    if (def.from) job.from = placeSpot(city, def.from, salt);
+    if (def.to) job.to = placeSpot(city, def.to, salt + 1);
+    if (def.kind === "boost" && job.from) {
+      // The car waits in the lot, nose to the street.
+      const car = new Car(job.from[0], STREET, job.from[2] - 4, def.car ?? "sedan", Math.floor(g.ctx.random() * CAR_COLORS.length));
+      car.yaw = car.prevYaw = Math.PI;
+      car.ambient = false;
+      g.spawn(car);
+      job.car = car.id;
+    }
+    if (def.kind === "hit" && job.from) {
+      const target = new Mob("citizen", job.from[0], STREET, job.from[2] - 3);
+      target.quip = def.target ?? "The Target";
+      target.quipTicks = 1e9;
+      g.spawn(target);
+      job.target = target.id;
+      this.keep.add(target.id);
+      for (let k = 0; k < (def.guards ?? 0); k++) {
+        const guard = new Mob("citizen", job.from[0] + (k % 2 ? 2 : -2), STREET, job.from[2] - 3 - Math.floor(k / 2) * 2);
+        guard.say("I'm with them.");
+        g.spawn(guard);
+        job.guards.push(guard.id);
+        this.keep.add(guard.id);
+      }
+    }
+    if (def.kind === "race") {
+      const p = this.players().find((q) => q.id === id)!;
+      job.route = raceRoute(city, p.x, p.z, def.checkpoints ?? 6, g.ctx.random);
+    }
+    if (def.heat) this.raiseHeat(id, def.heat);
+    this.jobs.set(id, job);
+    this.title(id, def.name, `${contact.name} · $${def.pay.toLocaleString("en-US")}`);
+    def.brief.forEach((line, i) => this.say(id, contact.name, line, contact.color, 20 + i * 75));
+    this.game.sound("orb_catch", null);
+  }
+
+  private endJob(job: Job): void {
+    this.jobs.delete(job.player);
+    // Whatever the contact had left to say is moot now.
+    this.lines.delete(job.player);
+    for (const e of [job.target, ...job.guards]) if (e !== undefined) this.keep.delete(e);
+  }
+
+  private passJob(job: Job, pay: number): void {
+    const p = this.players().find((q) => q.id === job.player);
+    this.endJob(job);
+    if (!p) return;
+    const done = this.done(p.name);
+    done[job.contact.id] = (done[job.contact.id] ?? 0) + 1;
+    this.count("jobs");
+    this.giveCash(p.id, pay);
+    this.title(p.id, "MISSION PASSED", `+$${pay.toLocaleString("en-US")}`);
+    this.say(p.id, job.contact.name, job.def.pass, job.contact.color, 30);
+    this.game.sound("mission_passed", p.x, p.y + 1, p.z, 1);
+    const all = CONTACTS.every((c) => (done[c.id] ?? 0) >= c.missions.length);
+    if (all) this.say(p.id, "Neon Bay", "Every contact, every job. The city is yours now. Main character energy: confirmed.", "#ff9ad8", 140);
+  }
+
+  private failJob(job: Job, why: string): void {
+    this.endJob(job);
+    this.title(job.player, "MISSION FAILED", why);
+    const p = this.players().find((q) => q.id === job.player);
+    if (p) this.game.sound("mission_failed", p.x, p.y + 1, p.z, 1);
+  }
+
+  protected jobLost(id: string, why: string): void {
+    const job = this.jobs.get(id);
+    if (job) this.failJob(job, why);
+  }
+
+  /** Every few ticks: how each job is going. */
+  private runJobs(): void {
+    const g = this.game;
+    for (const job of [...this.jobs.values()]) {
+      const p = this.players().find((q) => q.id === job.player);
+      if (!p) { this.endJob(job); continue; }
+      if (job.deadline !== null && g.tickCount > job.deadline) { this.failJob(job, "Out of time. Skill issue."); continue; }
+      const near = (at: [number, number, number] | undefined, r: number) => !!at && Math.hypot(p.x - at[0], p.z - at[2]) < r;
+      const { def, contact } = job;
+      switch (def.kind) {
+        case "delivery":
+          if (job.stage === 0 && near(job.from, 3)) { job.stage = 1; this.say(p.id, contact.name, `Got ${def.cargo}? Now get it where it's going.`, contact.color); }
+          else if (job.stage === 1 && near(job.to, 3.5)) this.passJob(job, def.pay);
+          break;
+        case "boost": {
+          const car = job.car !== undefined ? g.entities.get(job.car) : undefined;
+          if (!(car instanceof Car) || car.removed || car.wrecked) { this.failJob(job, "The car's toast. So is your cut."); break; }
+          if (job.stage === 0 && car.rider === p.id) { job.stage = 1; this.say(p.id, contact.name, "Nice ride. Now to the drop-off, and don't scratch it.", contact.color); }
+          else if (job.stage === 1 && car.rider === p.id && Math.hypot(car.x - job.to![0], car.z - job.to![2]) < 5) {
+            this.passJob(job, boostPay(def.pay, car.model, car.health));
+            car.removed = true;
+          }
+          break;
+        }
+        case "hit": {
+          const target = job.target !== undefined ? g.entities.get(job.target) : undefined;
+          if (!(target instanceof Mob) || target.dying || target.removed) { this.passJob(job, def.pay); break; }
+          // Their name stays over their head, whatever they shout in between.
+          if (target.quipTicks <= 1) { target.quip = def.target ?? "The Target"; target.quipTicks = 1e9; }
+          const d = Math.hypot(p.x - target.x, p.z - target.z);
+          if (d > 170) { this.failJob(job, "They got away."); break; }
+          if (d < 16) {
+            // Spotted: the target runs, the friends step up.
+            target.panic = Math.max(target.panic, 60);
+            target.scare = { x: p.x, z: p.z };
+            for (const gid of job.guards) {
+              const guard = g.entities.get(gid);
+              if (guard instanceof Mob && !guard.dying && guard.anger <= 0) { guard.targetId = p.id; guard.anger = 900; guard.say("Protect the boss!"); }
+            }
+          }
+          break;
+        }
+        case "race":
+          if (job.route && near(job.route[job.stage], 7)) {
+            job.stage++;
+            g.sound("orb", p.x, p.y + 1, p.z, 1, 1.4);
+            if (job.stage >= job.route.length) this.passJob(job, def.pay);
+          }
+          break;
+      }
+    }
+  }
+
+  /** The marks each player should see: their job's next spot, or the contacts who have work. */
+  private markJobs(city: City): void {
+    const spots = this.contactSpots(city);
+    for (const p of this.players()) {
+      const job = this.jobs.get(p.id);
+      const out: Marker[] = [];
+      const at = (s: [number, number, number] | undefined, color: string, r: number) => { if (s) out.push({ x: s[0], y: s[1], z: s[2], color, r }); };
+      if (job) {
+        const e = (id: number | undefined) => (id === undefined ? undefined : this.game.entities.get(id));
+        switch (job.def.kind) {
+          case "delivery": at(job.stage === 0 ? job.from : job.to, job.stage === 0 ? "#ffd83a" : "#5aff7a", 3); break;
+          case "boost": {
+            const car = e(job.car);
+            if (job.stage === 0 && car) at([car.x, car.y, car.z], "#ff4a4a", 2.5); else at(job.to, "#5aff7a", 4);
+            break;
+          }
+          case "hit": { const t = e(job.target); if (t) at([t.x, t.y, t.z], "#ff4a4a", 1.5); break; }
+          case "race":
+            at(job.route?.[job.stage], "#3ad0ff", 6);
+            at(job.route?.[job.stage + 1], "#1a6a8a", 4);
+            break;
+        }
+      } else if (this.stars(p.id) === 0) {
+        CONTACTS.forEach((c, k) => { if (nextMission(c, this.done(p.name)[c.id] ?? 0)) at(spots[k], c.color, 2.5); });
+      }
+      const key = out.map((m) => `${m.color}${Math.round(m.x)},${Math.round(m.z)}`).join("|");
+      if (this.marked.get(p.id) === key) continue;
+      this.marked.set(p.id, key);
+      if (this.isLocal(p.id)) this.game.markers = out; else this.game.modeTell(p.id, { markers: out });
+    }
+  }
+
+  tick(): void {
+    super.tick();
+    const city = this.city();
+    if (!city || !this.home) return;
+    this.flushLines();
+    if (this.game.tickCount % 5 === 0) this.runJobs();
+    if (this.game.tickCount % 10 === 0) this.markJobs(city);
+  }
+
   start(): void {
     this.title(null, "Neon Bay", "Sun, sand, and questionable decisions.");
     this.tell(null, "Your ride is parked outside your crib. Use a car to get in, sneak to get out; W and S for the pedals, A and D to steer, Space for the handbrake. Any car is your car if you want it badly enough.", "#ff9ad8");
@@ -429,6 +681,8 @@ class NeonBayRuntime extends CityRuntime {
 
   second(): void {
     super.second();
+    const city = this.city();
+    if (city && this.home) this.offerJobs(city);
     for (const p of this.players()) {
       if (this.given.includes(p.name)) continue;
       this.given.push(p.name);
@@ -440,9 +694,23 @@ class NeonBayRuntime extends CityRuntime {
   onKill(killer: string, kind: string): void { super.onKill(killer, kind); if (kind === "citizen") this.count("bonked"); }
   onCarWrecked(): void { this.count("wrecked"); }
 
-  objective(): Objective {
+  objective(playerId: string): Objective {
+    const job = this.jobs.get(playerId);
+    if (job) {
+      const { def } = job;
+      const what = def.kind === "delivery" ? (job.stage === 0 ? `Pick up ${def.cargo}` : `Deliver ${def.cargo}`)
+        : def.kind === "boost" ? (job.stage === 0 ? `Steal the ${CAR_MODELS[def.car ?? "sedan"].name}` : "Drive it to the drop-off")
+        : def.kind === "hit" ? `Bonk ${def.target}`
+        : `Checkpoint ${Math.min(job.stage + 1, job.route?.length ?? 0)} of ${job.route?.length ?? 0}`;
+      const lines: [string, string][] = [["Do", what]];
+      if (job.deadline !== null) lines.push(["Time", ModeRuntime.clock(Math.max(0, (job.deadline - this.game.tickCount) / 20))]);
+      lines.push(["Pay", `$${def.pay.toLocaleString("en-US")}`]);
+      return { title: def.name, lines };
+    }
     const n = (k: string) => String((this.data[k] as number | undefined) ?? 0);
-    return { title: "Neon Bay", lines: [["Cars jacked", n("jacked")], ["Cars wrecked", n("wrecked")], ["People bonked", n("bonked")]] };
+    const name = this.players().find((p) => p.id === playerId)?.name ?? "";
+    const done = Object.values(this.done(name)).reduce((t, v) => t + v, 0);
+    return { title: "Neon Bay", lines: [["Jobs done", `${done} of ${ALL_MISSIONS.length}`], ["Cars jacked", n("jacked")], ["Cars wrecked", n("wrecked")], ["People bonked", n("bonked")]] };
   }
 
   restart(): string {

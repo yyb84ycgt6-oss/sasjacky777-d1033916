@@ -106,6 +106,16 @@ export function sanitizeModeTell(v: unknown): ModeTell {
   if (finite(t.cash)) out.cash = Math.max(-1_000_000, Math.min(1_000_000, Math.floor(t.cash as number)));
   if (finite(t.wanted)) out.wanted = Math.max(0, Math.min(5, Math.floor(t.wanted as number)));
   if (t.confiscate === true) out.confiscate = true;
+  const c = t.caption as { who?: unknown; text?: unknown; color?: unknown } | undefined;
+  if (c && typeof c.who === "string" && typeof c.text === "string") out.caption = { who: c.who.slice(0, 40), text: c.text.slice(0, 300), color: typeof c.color === "string" && /^#[0-9a-f]{6}$/i.test(c.color) ? c.color : "#ffffff" };
+  if (t.markers === null) out.markers = null;
+  else if (Array.isArray(t.markers)) {
+    out.markers = t.markers.slice(0, 16).flatMap((m: unknown) => {
+      const k = m as Record<string, unknown>;
+      if (!finite(k?.x, k?.y, k?.z, k?.r)) return [];
+      return [{ x: k.x as number, y: k.y as number, z: k.z as number, r: Math.max(0.5, Math.min(12, k.r as number)), color: typeof k.color === "string" && /^#[0-9a-f]{6}$/i.test(k.color) ? k.color : "#ffffff" }];
+    });
+  }
   return out;
 }
 
