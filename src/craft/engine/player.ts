@@ -118,6 +118,8 @@ export class Player {
   card: TrainerCard = freshCard();
   /** Dollars: the city's money and the casino's (play money, earned and lost in game). */
   cash = 0;
+  /** The city modes: wanted stars, as the host last told this player (not saved: the heat dies with the session). */
+  wanted = 0;
   /** Chance source for Unbreaking and Respiration; tests pin it. */
   rng: () => number = Math.random;
   /**

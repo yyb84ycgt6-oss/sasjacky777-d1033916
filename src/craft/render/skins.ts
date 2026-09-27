@@ -299,6 +299,23 @@ function paintCitizen(p: SkinPainter, variant: number): void {
   }
 }
 
+/** The NBPD: navy shirt and trousers, a peaked cap, a gold badge, a belt, shades on the odd one. */
+function paintCop(p: SkinPainter, variant: number): void {
+  const r = new Rng(variant * 3571 + 7);
+  const skin = hex(["#e8c09a", "#c89a78", "#a8744e", "#7a5236", "#5a3a24", "#f0d0b0"][r.int(6)]);
+  const navy = hex("#1c2a5a"), dark = hex("#141a30"), black: RGB = [20, 20, 22];
+  humanoid(p, skin, navy, navy, dark, black, [30, 30, 30]);
+  const at = (x: number, y: number, c: RGB) => p.px(x, y, c, 0);
+  // The cap: navy crown, black peak across the brow.
+  for (let x = 8; x < 16; x++) { at(x, 8, navy); at(x, 9, black); }
+  for (let x = 0; x < 32; x++) at(x, 7, navy);
+  // Badge, belt and buckle.
+  at(22, 22, hex("#f4c21a")); at(22, 23, hex("#d8a010"));
+  for (let x = 16; x < 40; x++) at(x, 30, black);
+  at(23, 30, hex("#c8c8c8")); at(24, 30, hex("#c8c8c8"));
+  if (variant % 3 === 0) for (let x = 9; x < 15; x++) at(x, 12, hex("#141418"));
+}
+
 /**
  * The infected: grey-green skin, clothes torn and darkened with old blood,
  * eyes gone pale — each kind with a tell: a runner lean and pale, a brute
@@ -685,6 +702,9 @@ export function skin(kind: string, variant = 0): HTMLCanvasElement {
       break;
     case "citizen":
       paintCitizen(p, variant);
+      break;
+    case "cop":
+      paintCop(p, variant);
       break;
     case "tribute": {
       // Every tribute dressed differently: their district's colours, their own skin and hair.

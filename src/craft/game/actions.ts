@@ -689,6 +689,8 @@ export class Actions {
     if (t?.block && fresh) {
       const cg = g.casinoGameAt(t.block.x, t.block.y, t.block.z);
       if (cg) { g.setScreen({ kind: "casino", game: cg }); this.swing(); return; }
+      const shop = g.shopAt(t.block.x, t.block.y, t.block.z);
+      if (shop) { g.setScreen({ kind: "shop", shop }); this.swing(); return; }
     }
     if (t?.block) {
       if (this.useOnBlock(t.block, def, fresh)) return;
@@ -858,11 +860,13 @@ export class Actions {
     const b = p.body;
     const ox = b.x, oy = b.y + b.eyeHeight, oz = b.z;
     const d = this.dir;
-    type Body = { mob?: Mob; remote?: RemotePlayer };
+    type Body = { mob?: Mob; remote?: RemotePlayer; car?: Car };
     const bodies: Shootable<Body>[] = [];
     for (const e of g.entities.values()) {
-      if (!(e instanceof Mob) || e.dying || e.id === p.riding) continue;
-      if (Math.abs(e.x - ox) > gun.range + 4 || Math.abs(e.z - oz) > gun.range + 4) continue;
+      if (e.id === p.riding || Math.abs(e.x - ox) > gun.range + 6 || Math.abs(e.z - oz) > gun.range + 6) continue;
+      // A car is shot along its whole length, each of its boxes the same car.
+      if (e instanceof Car && !e.wrecked) { const target = { car: e }; for (const part of e.hitParts()) bodies.push({ target, box: part.box }); continue; }
+      if (!(e instanceof Mob) || e.dying) continue;
       bodies.push({ target: { mob: e }, box: e.box() });
     }
     for (const r of g.remote.values()) {
@@ -883,8 +887,11 @@ export class Actions {
         g.particles("block", wall.px, wall.py, wall.pz, 4, g.world.blockAt(wall.x, wall.y, wall.z));
       }
     }
-    for (const [{ mob: m, remote: r }, dmg] of blows) {
-      if (m) {
+    for (const [{ mob: m, remote: r, car }, dmg] of blows) {
+      if (car) {
+        if (g.role === "guest") g.net?.attack(car.id, dmg, ox, oz, 0, 0, 0);
+        else car.hurt(g.ctx, dmg, "arrow", ox, oz, p.id);
+      } else if (m) {
         if (g.role === "guest") g.net?.attack(m.id, dmg, ox, oz, 0.1, 0, 0);
         else { m.invulnerable = 0; m.hurt(g.ctx, dmg, "arrow", ox, oz, p.id, 0.1); }
       } else if (r) g.net?.hurtRemote(r.id, dmg, "arrow", ox, oz, 0.2);

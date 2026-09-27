@@ -28,7 +28,7 @@ export type EntityKind =
   | "wolf" | "deer" | "bear" | "tribute"
   | "dodo" | "dilo" | "parasaur" | "raptor" | "trike" | "stego" | "rex" | "bronto" | "ptero" | "gigantoraptor"
   | "infected" | "runner" | "brute" | "spitter" | "screamer" | "bloater"
-  | "critter" | "trainer" | "citizen";
+  | "critter" | "trainer" | "citizen" | "cop";
 
 export interface PlayerRef {
   id: string;
@@ -89,6 +89,8 @@ export interface EntityContext {
   placeBlock(x: number, y: number, z: number, id: number, meta: number): boolean;
   /** A player's blow finished a mob off (for advancements). */
   creditKill?(playerId: string, hostile: boolean, kind?: string): void;
+  /** A player's blow (or bumper) landed on a mob: the city's police take an interest. */
+  creditHit?(playerId: string, victim: Entity): void;
   /** A game mode's say in what a mob drops (Random Drops). */
   transformLoot?(stack: ItemStack): ItemStack;
   /** A thrown potion burst here; `direct` is what it struck, which takes the full dose. */

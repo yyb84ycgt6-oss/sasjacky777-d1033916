@@ -21,6 +21,7 @@ import { hash4, Rng } from "./rng";
 import type { ChunkGenerator, GeneratedChunk, Generator, Tints } from "./worldgen";
 import type { CasinoGame } from "./casino";
 import { cityOf, STREET, type City } from "./city";
+import type { ShopKind } from "./shops";
 
 export const MAP_IDS = ["skyblock", "oneblock", "void", "parkour", "colosseum", "tnt_run", "sg_arena", "primal_island", "dead_zone", "zombie_bunker", "critter_region", "safari_park", "battle_spire", "high_roller", "neon_bay"] as const;
 export type MapId = (typeof MAP_IDS)[number];
@@ -106,6 +107,8 @@ export interface MapLayout {
   casino?: { game: CasinoGame; x: number; y: number; z: number }[];
   /** A city built chunk by chunk from the seed (engine/city.ts), rather than from `blocks`. */
   city?: City;
+  /** Shop counters: every block of each, and the shop it opens. */
+  shops?: { shop: ShopKind; x: number; y: number; z: number }[];
 }
 
 /** A named stretch of a critter map. */
@@ -845,9 +848,10 @@ function neonBay(seed: number): Omit<MapLayout, "map"> {
   const home = city.landmark("safehouse");
   const casinoLot = city.landmark("casino");
   const casino = casinoLot ? city.casinoPlan(casinoLot).map(({ game, x, y, z }) => ({ game, x, y, z })) : [];
+  const shops = (["guns", "dealer"] as const).flatMap((k) => { const lot = city.landmark(k); return lot ? city.shopPlan(lot).map(({ shop, x, y, z }) => ({ shop, x, y, z })) : []; });
   const spawn: [number, number, number] = home ? [home.x0 + 8.5, STREET, home.z0 + 19.5] : [0.5, STREET, 0.5];
   const cx = Math.round((city.minX + city.maxX) / 2), cz = Math.round((city.minZ + city.maxZ) / 2);
-  return { spawn, blocks: new Map(), terrain: false, chests: [], center: [cx, cz], radius: 420, floorY: 0, casino, city };
+  return { spawn, blocks: new Map(), terrain: false, chests: [], center: [cx, cz], radius: 420, floorY: 0, casino, city, shops };
 }
 
 function sgArena(seed: number, base: Generator): Omit<MapLayout, "map"> {

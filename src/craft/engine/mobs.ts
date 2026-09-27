@@ -29,6 +29,7 @@ import { burst, infectedAfter, infectedAi } from "./infectedAi";
 import { SPECIES, isSpecies } from "./critters";
 import { critterAi, critterTick, cryPitch, trainerAi } from "./critterAi";
 import { citizenAi, FIGHT_QUIPS, HURT_QUIPS, pick, toughCitizen } from "./citizens";
+import { copAi } from "./police";
 
 export type MobKind =
   | "pig" | "cow" | "sheep" | "chicken" | "zombie" | "skeleton" | "creeper" | "spider" | "slime" | "villager" | "iron_golem"
@@ -44,8 +45,8 @@ export type MobKind =
   | "infected" | "runner" | "brute" | "spitter" | "screamer" | "bloater"
   // The monster-collecting modes: every species is one kind, told apart by `species` (engine/critters.ts); and their trainers.
   | "critter" | "trainer"
-  // The city modes' people (engine/citizens.ts).
-  | "citizen";
+  // The city modes' people (engine/citizens.ts), and their police (engine/police.ts).
+  | "citizen" | "cop";
 
 interface MobSpec {
   health: number;
@@ -124,6 +125,7 @@ export const MOB_SPECS: Record<MobKind, MobSpec> = {
   critter: { health: 20, width: 0.6, height: 0.6, speed: 0.07, hostile: false, attack: 0, tempt: [], burnsInDay: false, followRange: 16, xp: [0, 0] },
   trainer: { health: 20, width: 0.6, height: 1.8, speed: 0.07, hostile: false, attack: 0, tempt: [], burnsInDay: false, followRange: 16, xp: [0, 0] },
   citizen: { health: 14, width: 0.6, height: 1.8, speed: 0.075, hostile: false, attack: 3, tempt: [], burnsInDay: false, followRange: 20, xp: [1, 3] },
+  cop: { health: 24, width: 0.6, height: 1.8, speed: 0.08, hostile: false, attack: 2, tempt: [], burnsInDay: false, followRange: 72, xp: [3, 5] },
 };
 
 /** What a tamed wolf eats: any meat, as in the original, and it will breed on it too. */
@@ -292,6 +294,8 @@ export class Mob extends Entity {
   quipTicks = 0;
   scare: { x: number; z: number } | null = null;
   stroll: { dir: number; pause: number } | null = null;
+  /** A cop: the wanted stars of whoever they are after, which decides whether they shoot. */
+  copStars = 0;
 
   constructor(kind: MobKind, x: number, y: number, z: number, id?: number) {
     const spec = MOB_SPECS[kind];
@@ -316,8 +320,8 @@ export class Mob extends Entity {
     if (isDino(kind)) { this.level = wildLevel(Math.random); this.health = this.maxHealth; this.persistent = false; }
     if (kind === "critter") { this.setSpecies("chirplet", 5); this.persistent = false; }
     if (kind === "trainer") this.persistent = true;
-    // The city makes and tidies away its own people (modes/cityModes.ts).
-    if (kind === "citizen") this.persistent = false;
+    // The city makes and tidies away its own people and police (modes/cityModes.ts).
+    if (kind === "citizen" || kind === "cop") this.persistent = false;
   }
 
   /** A line over their head for three seconds. */
@@ -522,6 +526,8 @@ export class Mob extends Entity {
       this.scare = { x: fromX, z: fromZ };
       this.say(pick(toughCitizen(this) ? FIGHT_QUIPS : HURT_QUIPS, ctx.random));
     }
+    // Strike a cop and you are the one they are after.
+    if (this.kind === "cop" && attacker && !attacker.startsWith("mob:")) this.targetId = attacker;
     if ((this.kind === "wolf" || this.kind === "bear" || this.kind === "tribute" || (this.kind === "citizen" && toughCitizen(this)))
       && attacker && !attacker.startsWith("mob:") && attacker !== this.owner) {
       this.targetId = attacker;
@@ -535,6 +541,7 @@ export class Mob extends Entity {
     }
     if (isDino(this.kind)) dinoHurt(this, attacker);
     this.health -= amount;
+    if (attacker && !attacker.startsWith("mob:")) ctx.creditHit?.(attacker, this);
     this.hurtTime = 10;
     this.invulnerable = 10;
     if (attacker) this.lastAttacker = attacker;
@@ -611,6 +618,7 @@ export class Mob extends Entity {
     else if (this.kind === "critter") critterAi(this, ctx, move);
     else if (this.kind === "trainer") trainerAi(this, ctx, move);
     else if (this.kind === "citizen") citizenAi(this, ctx, move);
+    else if (this.kind === "cop") copAi(this, ctx, move, () => citizenAi(this, ctx, move));
     else if (isInfectedMob(this.kind)) { if (!infectedAi(this, ctx, move)) this.hostileAi(ctx, move); infectedAfter(this, ctx, move); }
     else if (this.spec.hostile) this.hostileAi(ctx, move);
     else this.passiveAi(ctx, move);
@@ -1689,6 +1697,7 @@ export class Mob extends Entity {
       case "bloater": return it("gunpowder", r(0, 2));
       // Whatever was in their wallet.
       case "citizen": return it("cash", r(5, 40));
+      case "cop": return [...it("cash", r(10, 30)), ...it("pistol_ammo", r(2, 8))];
       default: return isDino(this.kind) ? dinoLoot(this, ctx) : [];
     }
   }
@@ -1731,7 +1740,7 @@ export class Mob extends Entity {
           pu: this.partnerUid ?? undefined, sd: this.saddled ? 1 : undefined, r: this.rider ?? undefined,
         } : {}),
         ...(this.kind === "trainer" ? { tr: this.trainerId ?? undefined, hy: Math.round(this.homeYaw * 100) } : {}),
-        ...(this.kind === "citizen" && this.quipTicks > 0 && this.quip ? { q: this.quip } : {}),
+        ...((this.kind === "citizen" || this.kind === "cop") && this.quipTicks > 0 && this.quip ? { q: this.quip } : {}),
       },
     };
   }
@@ -1824,7 +1833,7 @@ export class Mob extends Entity {
       this.trainerId = typeof d.tr === "string" ? d.tr.slice(0, 64) : null;
       if (typeof d.hy === "number") this.homeYaw = d.hy / 100;
     }
-    if (this.kind === "citizen") {
+    if (this.kind === "citizen" || this.kind === "cop") {
       this.quip = typeof d.q === "string" ? d.q.slice(0, 80) : null;
       this.quipTicks = this.quip ? 60 : 0;
     }

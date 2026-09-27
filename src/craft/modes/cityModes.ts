@@ -13,8 +13,14 @@
 import type { Objective } from "../game/types";
 import { Car, CAR_COLORS, type CarModelId } from "../engine/cars";
 import { STREET, type City, LOT } from "../engine/city";
+import type { Entity } from "../engine/entities";
 import { Mob } from "../engine/mobs";
+import {
+  addHeat, BUSTED_QUIPS, canSee, chaseDrive, COPS_ON_FOOT, CRUISERS, evadeSeconds, heatFor, starsFor, WASTED_QUIPS,
+  type ChaseState, type Crime,
+} from "../engine/police";
 import { laneNear, laneSpot, newTraffic, sidewalkSpot, trafficDrive, type TrafficState } from "../engine/traffic";
+import type { PlayerRef } from "../engine/entities";
 import { ModeRuntime, registerRuntime } from "./runtime";
 
 /** Dollars a player starts High Roller with. */
@@ -67,8 +73,21 @@ export abstract class CityRuntime extends ModeRuntime {
   private readonly brains = new Map<number, TrafficState>();
   /** Lots whose parked cars are out, so they are not parked twice. */
   private readonly parked = new Set<string>();
+  /** Cruisers after someone, by car id. */
+  private readonly chases = new Map<number, ChaseState>();
   protected trafficPerPlayer = 11;
   protected peoplePerPlayer = 16;
+  /** Whether the police come at all (a mode can call them off). */
+  protected police = true;
+  /** Each player's heat, the seconds they have been out of the police's sight, and the stars they were last told. */
+  private readonly heat = new Map<string, number>();
+  private readonly unseen = new Map<string, number>();
+  private readonly told = new Map<string, number>();
+  /** Ticks a cop has had a hand on someone standing still; who is waiting on a hospital bed. */
+  private readonly bustHold = new Map<string, number>();
+  private readonly wasted = new Set<string>();
+  /** Cars through the respray lately, so one pass is one respray. */
+  private readonly sprayed = new Map<number, number>();
 
   city(): City | null {
     return this.layout()?.city ?? null;
@@ -81,9 +100,14 @@ export abstract class CityRuntime extends ModeRuntime {
     const players = g.playerRefs();
     for (const e of g.entities.values()) {
       if (!(e instanceof Car) || e.removed) continue;
-      if (e.wrecked === 2 && this.state.started) this.onCarWrecked();
-      if (e.rider) { e.lastDriver = e.rider; this.brains.delete(e.id); continue; }
-      if (!e.npc || e.wrecked) { this.brains.delete(e.id); continue; }
+      if (e.wrecked === 2 && this.state.started) {
+        this.onCarWrecked();
+        if (e.lastAttacker) this.crime(e.lastAttacker, "carBombed");
+      }
+      if (e.rider) { e.lastDriver = e.rider; this.brains.delete(e.id); this.chases.delete(e.id); continue; }
+      if (!e.npc || e.wrecked) { this.brains.delete(e.id); this.chases.delete(e.id); continue; }
+      const chase = this.chases.get(e.id);
+      if (chase) { this.driveCruiser(city, e, chase, players); continue; }
       let st = this.brains.get(e.id);
       if (!st) {
         // A car the city lost track of (brought back from the host's last session): the lane it is on now.
@@ -92,7 +116,224 @@ export abstract class CityRuntime extends ModeRuntime {
       }
       trafficDrive(city, e, st, g.ctx, g.ctx.entitiesNear(e.x, e.y, e.z, 18), players);
     }
-    if (g.tickCount % 20 === 0) this.populate(city);
+    if (g.tickCount % 5 === 0) this.checkBusts(city, players);
+    if (g.tickCount % 20 === 0) { this.populate(city); if (this.police) this.dispatch(city); }
+  }
+
+  second(): void {
+    const city = this.city();
+    if (!city || !this.home) return;
+    this.lookForSuspects();
+    this.respray(city);
+    this.patchUpWasted(city);
+  }
+
+  // ---- the police --------------------------------------------------------------------------------
+
+  /** A player's wanted stars. */
+  stars(id: string): number {
+    return starsFor(this.heat.get(id) ?? 0);
+  }
+
+  /** A crime, on the record: the heat goes up, and the police know where you are. */
+  crime(id: string, crime: Crime): void {
+    if (!this.police || !this.players().some((p) => p.id === id)) return;
+    this.heat.set(id, addHeat(this.heat.get(id) ?? 0, crime));
+    this.unseen.set(id, 0);
+    this.tellWanted(id);
+  }
+
+  /** Clears a player's record: busted, wasted, or resprayed. */
+  protected clearHeat(id: string): void {
+    this.heat.delete(id);
+    this.unseen.delete(id);
+    this.tellWanted(id);
+    for (const e of this.game.entities.values()) if (e instanceof Mob && e.kind === "cop" && e.targetId === id) e.targetId = null;
+  }
+
+  private tellWanted(id: string): void {
+    const s = this.stars(id);
+    if (this.told.get(id) === s) return;
+    this.told.set(id, s);
+    if (this.isLocal(id)) this.game.player.wanted = s;
+    else this.game.modeTell(id, { wanted: s });
+  }
+
+  onHit(player: string, victim: Entity): void {
+    if (!(victim instanceof Mob)) return;
+    if (victim.kind === "citizen") this.crime(player, "assault");
+    else if (victim.kind === "cop") this.crime(player, "assaultCop");
+  }
+
+  onKill(killer: string, kind: string): void {
+    if (kind === "citizen") this.crime(killer, "murder");
+    else if (kind === "cop") this.crime(killer, "copKiller");
+  }
+
+  /** Taking a car is only a crime if a cop sees it. */
+  onCarjack(player: string): void {
+    const p = this.players().find((q) => q.id === player);
+    if (p && this.copsNear(p.x, p.z, 32).length) this.crime(player, "carjack");
+  }
+
+  /** A shot fired where people can hear it. */
+  onNoise(player: string, x: number, z: number, radius: number): void {
+    if (radius < 30) return;
+    const heard = [...this.game.entities.values()].some((e) => e instanceof Mob && (e.kind === "citizen" || e.kind === "cop") && Math.hypot(e.x - x, e.z - z) < 24);
+    if (heard) this.crime(player, "gunfire");
+  }
+
+  onPlayerDeath(id: string): void {
+    if (!this.police) return;
+    this.clearHeat(id);
+    this.wasted.add(id);
+  }
+
+  private copsNear(x: number, z: number, r: number): Mob[] {
+    const out: Mob[] = [];
+    for (const e of this.game.entities.values()) if (e instanceof Mob && e.kind === "cop" && !e.dying && Math.hypot(e.x - x, e.z - z) < r) out.push(e);
+    return out;
+  }
+
+  /** Once a second: can the police see each wanted player? Out of sight long enough, a star goes. */
+  private lookForSuspects(): void {
+    const g = this.game;
+    for (const p of this.alive()) {
+      const s = this.stars(p.id);
+      if (s === 0) continue;
+      const cop = this.copsNear(p.x, p.z, 40).some((c) => canSee(g.ctx, c.x, c.y + 1.6, c.z, p.x, p.y + 1.4, p.z));
+      const cruiser = [...g.entities.values()].some((e) => e instanceof Car && e.model === "police" && e.npc && !e.wrecked && Math.hypot(e.x - p.x, e.z - p.z) < 36);
+      if (cop || cruiser) { this.unseen.set(p.id, 0); continue; }
+      const u = (this.unseen.get(p.id) ?? 0) + 1;
+      if (u >= evadeSeconds(s)) {
+        this.heat.set(p.id, heatFor(s - 1));
+        this.unseen.set(p.id, 0);
+        this.tellWanted(p.id);
+        if (s - 1 === 0) { this.clearHeat(p.id); this.tell(p.id, "You lost them. For now.", "#9ad8ff"); }
+      } else this.unseen.set(p.id, u);
+    }
+  }
+
+  /** Every second or so: enough cops and cruisers after each wanted player, and their orders kept current. */
+  private dispatch(city: City): void {
+    const g = this.game;
+    const random = g.ctx.random;
+    for (const p of this.alive()) {
+      const s = this.stars(p.id);
+      if (s === 0) continue;
+      let onFoot = 0, cruisers = 0;
+      for (const e of g.entities.values()) {
+        if (e instanceof Mob && e.kind === "cop" && !e.dying && e.targetId === p.id) { onFoot++; e.copStars = s; }
+      }
+      for (const st of this.chases.values()) if (st.target === p.id) cruisers++;
+      if (onFoot < COPS_ON_FOOT[s]) {
+        const spot = sidewalkSpot(city, random, p, 24, 48);
+        if (spot && g.world.isLoaded(Math.floor(spot.x), Math.floor(spot.z))) {
+          const cop = new Mob("cop", spot.x, STREET, spot.z);
+          cop.targetId = p.id;
+          cop.copStars = s;
+          g.spawn(cop);
+        }
+      }
+      if (cruisers < CRUISERS[s]) {
+        const spot = laneSpot(city, random, p, 45, 85);
+        if (spot && g.world.isLoaded(Math.floor(spot.x), Math.floor(spot.z)) && g.ctx.entitiesNear(spot.x, STREET, spot.z, 7).length === 0) {
+          const car = new Car(spot.x, STREET, spot.z, "police");
+          car.yaw = car.prevYaw = spot.yaw;
+          car.npc = true;
+          car.siren = true;
+          g.spawn(car);
+          this.chases.set(car.id, { target: p.id, stuck: 0, reverse: 0 });
+        }
+      }
+    }
+  }
+
+  /** A cruiser on a chase: to its quarry by the streets; beside them on foot, two cops get out. */
+  private driveCruiser(city: City, car: Car, st: ChaseState, players: PlayerRef[]): void {
+    const g = this.game;
+    const t = players.find((p) => p.id === st.target);
+    if (!t || this.stars(st.target) === 0) {
+      // Called off: back to being traffic, lights off.
+      this.chases.delete(car.id);
+      car.siren = false;
+      this.brains.set(car.id, newTraffic(laneNear(city, car.x, car.z, car.yaw), g.ctx.random));
+      return;
+    }
+    const d = Math.hypot(t.x - car.x, t.z - car.z);
+    if (d < 10 && !t.riding && Math.abs(car.speed) < 0.35) {
+      this.chases.delete(car.id);
+      car.npc = false;
+      car.input = { forward: 0, strafe: 0, yaw: car.yaw, jump: true };
+      for (const side of [-1, 1]) {
+        const x = car.x + Math.cos(car.yaw) * side * (car.spec.w / 2 + 0.7), z = car.z - Math.sin(car.yaw) * side * (car.spec.w / 2 + 0.7);
+        const cop = new Mob("cop", x, car.y, z);
+        cop.targetId = t.id;
+        cop.copStars = this.stars(t.id);
+        g.spawn(cop);
+      }
+      return;
+    }
+    chaseDrive(city, car, st, t, g.ctx);
+    if (g.tickCount % 18 === car.id % 18) g.sound("siren_wail", car.x, car.y + 1, car.z, 0.7);
+  }
+
+  /** A cop's hand on a wanted player standing still, for a second and a half: busted. */
+  private checkBusts(city: City, players: PlayerRef[]): void {
+    for (const p of players) {
+      if (this.stars(p.id) === 0 || p.riding) { this.bustHold.delete(p.id); continue; }
+      const collar = this.copsNear(p.x, p.z, 1.6).some((c) => c.targetId === p.id);
+      const hold = collar ? (this.bustHold.get(p.id) ?? 0) + 5 : 0;
+      if (hold >= 30) { this.bust(city, p.id); this.bustHold.delete(p.id); } else this.bustHold.set(p.id, hold);
+    }
+  }
+
+  private bust(city: City, id: string): void {
+    const s = this.stars(id);
+    const fine = 100 + 50 * s;
+    this.clearHeat(id);
+    this.giveCash(id, -fine);
+    if (this.isLocal(id)) this.game.confiscateGuns(); else this.game.modeTell(id, { confiscate: true });
+    const door = city.landmarkDoor("police");
+    if (door) this.teleport(id, door[0], door[1], door[2]);
+    this.title(id, "BUSTED", `${BUSTED_QUIPS[Math.floor(Math.random() * BUSTED_QUIPS.length)]} Fined $${fine}; guns seized.`);
+  }
+
+  /** Whoever died: once they are back on their feet, St. Ouchie's has patched them up, for a fee. */
+  private patchUpWasted(city: City): void {
+    for (const id of [...this.wasted]) {
+      const p = this.players().find((q) => q.id === id);
+      if (!p) { this.wasted.delete(id); continue; }
+      if (p.dead) continue;
+      this.wasted.delete(id);
+      const door = city.landmarkDoor("hospital");
+      if (door) this.teleport(id, door[0], door[1], door[2]);
+      this.giveCash(id, -100);
+      this.title(id, "WASTED", WASTED_QUIPS[Math.floor(Math.random() * WASTED_QUIPS.length)]);
+    }
+  }
+
+  /** Spray & Pray: drive in and out comes a different car, as far as the police can tell. */
+  private respray(city: City): void {
+    const lot = city.landmark("respray");
+    if (!lot) return;
+    const x0 = lot.x0 + 9, x1 = lot.x0 + LOT - 10, z0 = lot.z0 + 5, z1 = lot.z0 + LOT - 3;
+    const now = this.game.tickCount;
+    for (const e of this.game.entities.values()) {
+      if (!(e instanceof Car) || !e.rider || e.wrecked) continue;
+      if (e.x < x0 || e.x > x1 + 1 || e.z < z0 || e.z > z1 + 1) continue;
+      if (now - (this.sprayed.get(e.id) ?? -10000) < 400) continue;
+      this.sprayed.set(e.id, now);
+      let colour = e.color;
+      while (colour === e.color && !e.spec.livery) colour = Math.floor(Math.random() * CAR_COLORS.length);
+      e.color = colour;
+      e.health = e.spec.health;
+      const had = this.stars(e.rider);
+      this.clearHeat(e.rider);
+      this.giveCash(e.rider, -100);
+      this.title(e.rider, "Spray & Pray", had ? "New paint, who dis? The heat is off." : "New paint, who dis? Good as new.");
+      this.game.sound("cashout", e.x, e.y + 1, e.z, 1);
+    }
   }
 
   /** Tidies away what nobody is near, and fills the streets round whoever is. */
@@ -106,7 +347,7 @@ export abstract class CityRuntime extends ModeRuntime {
         if (far(e.x, e.z, e.wrecked ? 70 : 120)) { e.removed = true; this.brains.delete(e.id); } else if (e.npc) traffic++;
       } else if (e instanceof Mob && e.kind === "citizen" && !e.dying) {
         if (far(e.x, e.z, 90)) e.removed = true; else people++;
-      }
+      } else if (e instanceof Mob && e.kind === "cop" && !e.dying && far(e.x, e.z, 100)) e.removed = true;
     }
     for (const key of [...this.parked]) {
       const [i, j] = key.split(",").map(Number);
@@ -187,6 +428,7 @@ class NeonBayRuntime extends CityRuntime {
   }
 
   second(): void {
+    super.second();
     for (const p of this.players()) {
       if (this.given.includes(p.name)) continue;
       this.given.push(p.name);
@@ -194,8 +436,8 @@ class NeonBayRuntime extends CityRuntime {
     }
   }
 
-  onCarjack(): void { this.count("jacked"); }
-  onKill(_killer: string, kind: string): void { if (kind === "citizen") this.count("bonked"); }
+  onCarjack(player: string): void { super.onCarjack(player); this.count("jacked"); }
+  onKill(killer: string, kind: string): void { super.onKill(killer, kind); if (kind === "citizen") this.count("bonked"); }
   onCarWrecked(): void { this.count("wrecked"); }
 
   objective(): Objective {

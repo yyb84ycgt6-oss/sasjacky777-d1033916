@@ -256,6 +256,7 @@ const MODELS: Record<string, PartSpec[]> = {
   ...CRITTER_MODELS,
   trainer: HUMANOID(false),
   citizen: HUMANOID(false),
+  cop: HUMANOID(false),
   player: [...HUMANOID(false), ...WINGS],
   zombie: HUMANOID(false),
   tribute: HUMANOID(false),

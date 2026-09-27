@@ -29,6 +29,7 @@ import { EngramScreen } from "./EngramScreen";
 import { ModsScreen } from "./ModsScreen";
 import { BattleScreen, CenterScreen, PartyScreen, PartyStrip, StarterScreen } from "./CritterScreens";
 import { CasinoScreen } from "./CasinoScreens";
+import { ShopScreen } from "./CityScreens";
 
 export interface GameViewProps {
   meta: WorldMeta;
@@ -249,6 +250,7 @@ function Overlay({ game, input, settings, onSettings, onQuit, onExitApp }: GameV
       {screen?.kind === "waystone" && <WaystoneScreen game={game} x={screen.x} y={screen.y} z={screen.z} />}
       {screen?.kind === "battle" && <BattleScreen game={game} />}
       {screen?.kind === "casino" && <CasinoScreen key={screen.game} game={game} which={screen.game} />}
+      {screen?.kind === "shop" && <ShopScreen key={screen.shop} game={game} which={screen.shop} />}
       {screen?.kind === "party" && <PartyScreen key={`${screen.give ?? ""}${screen.tab ?? ""}`} game={game} give={screen.give} tab={screen.tab} />}
       {screen?.kind === "starter" && <StarterScreen game={game} rentals={screen.rentals} />}
       {screen?.kind === "center" && <CenterScreen game={game} x={screen.x} y={screen.y} z={screen.z} />}

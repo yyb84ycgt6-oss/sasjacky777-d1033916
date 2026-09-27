@@ -104,6 +104,8 @@ export function sanitizeModeTell(v: unknown): ModeTell {
   if (t.reset === true) out.reset = true;
   if (typeof t.bloodMoon === "boolean") out.bloodMoon = t.bloodMoon;
   if (finite(t.cash)) out.cash = Math.max(-1_000_000, Math.min(1_000_000, Math.floor(t.cash as number)));
+  if (finite(t.wanted)) out.wanted = Math.max(0, Math.min(5, Math.floor(t.wanted as number)));
+  if (t.confiscate === true) out.confiscate = true;
   return out;
 }
 

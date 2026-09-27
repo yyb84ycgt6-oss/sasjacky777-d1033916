@@ -64,7 +64,8 @@ import { bottleBits, tickBrewing } from "../engine/brewing";
 import { levelOf } from "../engine/enchanting";
 import { potionOfItem, splashSeconds } from "../engine/potions";
 import { Boat, Minecart, Vehicle, vehicleFromSnapshot } from "../engine/vehicles";
-import { Car, kmh } from "../engine/cars";
+import { Car, kmh, type CarModelId } from "../engine/cars";
+import { carCode, carFromCode, type ShopKind } from "../engine/shops";
 import type { City } from "../engine/city";
 import { CARJACK_QUIPS, pick as pickQuip, toughCitizen } from "../engine/citizens";
 import { golemParts, villageLoot } from "../engine/villages";
@@ -1228,6 +1229,7 @@ export class Game {
         else this.net?.advanceRemote?.(id, { kind: "kill", hostile });
         if (kind) this.mode?.onKill(id, kind);
       },
+      creditHit: (id, victim) => { if (this.meta.mode?.started) this.mode?.onHit(id, victim); },
       transformLoot: (s) => this.mode?.transformDrop(s) ?? s,
       pearlLanded: (id, x, y, z, gateway) => this.pearlLanded(id, x, y, z, gateway),
       crystalDestroyed: (crystal, attacker) => { if (crystal instanceof EndCrystal) this.endFight.crystalDestroyed(crystal, attacker); },
@@ -2625,6 +2627,17 @@ export class Game {
     if (t.maxHealth !== undefined) this.maxHealth = t.maxHealth;
     if (t.bloodMoon !== undefined) this.bloodMoon = t.bloodMoon;
     if (t.cash) { this.player.cash = Math.max(0, this.player.cash + t.cash); this.bumpInv(); }
+    if (t.wanted !== undefined) this.player.wanted = t.wanted;
+    if (t.confiscate) this.confiscateGuns();
+  }
+
+  /** Busted: the police keep every gun and round on you. */
+  confiscateGuns(): void {
+    const inv = this.player.inventory;
+    const seized = (id: number) => { const d = itemDef(id); return d?.use === "gun" || ["pistol_ammo", "rifle_ammo", "shotgun_shells"].includes(d?.name ?? ""); };
+    inv.slots.forEach((s, i) => { if (s && seized(s.id)) inv.slots[i] = null; });
+    if (inv.offhand && seized(inv.offhand.id)) inv.offhand = null;
+    this.bumpInv();
   }
 
   // ---- the casino (engine/casino.ts, ui/CasinoScreens.tsx) -------------------------------------------------
@@ -2639,6 +2652,28 @@ export class Game {
       if (m.map) for (const c of mapLayout(m.map, m.seed, new Generator({ seed: m.seed, type: m.type, dimension: "overworld" })).casino ?? []) this.casinoCache.set(`${c.x},${c.y},${c.z}`, c.game);
     }
     return this.dimension === "overworld" ? this.casinoCache.get(`${x},${y},${z}`) ?? null : null;
+  }
+
+  private shopCache: Map<string, ShopKind> | null = null;
+  /** The shop whose counter stands at a block (the city's gun shop and car dealer). */
+  shopAt(x: number, y: number, z: number): ShopKind | null {
+    if (!this.shopCache) {
+      this.shopCache = new Map();
+      const m = this.meta;
+      if (m.map) for (const c of mapLayout(m.map, m.seed, new Generator({ seed: m.seed, type: m.type, dimension: "overworld" })).shops ?? []) this.shopCache.set(`${c.x},${c.y},${c.z}`, c.shop);
+    }
+    return this.dimension === "overworld" ? this.shopCache.get(`${x},${y},${z}`) ?? null : null;
+  }
+
+  /**
+   * A car bought at the dealer: put in the world beside the buyer, facing the
+   * street, and theirs to keep. A guest's is put there by the host.
+   */
+  deliverCar(model: CarModelId, color: number): void {
+    const b = this.player.body;
+    const x = Math.floor(b.x) + 0.5, z = Math.floor(b.z) + 4.5;
+    if (this.role === "guest") this.net?.placeVehicle?.("car", x, b.y, z, Math.PI, carCode(model, color));
+    else this.placeVehicle("car", x, b.y, z, Math.PI, carCode(model, color));
   }
 
   /** A casino game paid out: the advancements that come of winning, and a million. */
@@ -2861,6 +2896,15 @@ export class Game {
    */
   makeNoise(x: number, y: number, z: number, radius: number, by: string | null): void {
     if (!this.simulates) { this.net?.noise?.(x, y, z, radius); return; }
+    // In a city a shot or a blast scatters everyone who hears it, and a shot is the police's business.
+    if (radius >= 24 && this.cityNow()) {
+      for (const e of this.entities.values()) {
+        if (!(e instanceof Mob) || e.kind !== "citizen" || e.dying || Math.hypot(e.x - x, e.z - z) > radius / 2) continue;
+        e.panic = Math.max(e.panic, 140);
+        e.scare = { x, z };
+      }
+      if (by && this.meta.mode?.started) this.mode?.onNoise(by, x, z, radius);
+    }
     const who = by ?? this.playerRefs().sort((a, b) => Math.hypot(a.x - x, a.z - z) - Math.hypot(b.x - x, b.z - z))[0]?.id ?? null;
     if (!who) return;
     for (const e of this.entities.values()) {
@@ -3009,6 +3053,14 @@ export class Game {
     let v: Vehicle | null = null;
     if (kind === "boat") v = new Boat(x, y, z, wood);
     else if (kind === "minecart" || kind === "tnt_minecart") v = new Minecart(kind, x, y, z);
+    else if (kind === "car") {
+      // Only bought cars are placed this way, and only in a city.
+      const car = carFromCode(wood);
+      if (!car || !this.cityNow()) return null;
+      const c = new Car(x, y, z, car.model, car.color);
+      c.ambient = false;
+      v = c;
+    }
     if (!v) return null;
     v.yaw = yaw;
     v.prevYaw = yaw;
@@ -3374,6 +3426,7 @@ export class Game {
       minimap: this.modOn("minimap"),
       critters: this.critters?.hud() ?? null,
       cash: modeDef(this.meta.mode?.id)?.category === "city" ? p.cash : null,
+      wanted: this.cityNow() ? p.wanted : null,
       vehicle: this.carHud(),
       zone: this.zoneHud(),
     };

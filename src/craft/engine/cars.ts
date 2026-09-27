@@ -106,8 +106,10 @@ export class Car extends Vehicle {
   /** The front wheels' angle, for the model; and how far the wheels have rolled. */
   steer = 0;
   roll = 0;
-  /** The last player to drive it: credited for what it hits, and for the blast if it goes up. */
+  /** The last player to drive it: credited for what it hits. */
   lastDriver: string | null = null;
+  /** The last player to shoot or strike it: blamed if it goes up. */
+  lastAttacker: string | null = null;
   brain: CarBrain | null = null;
   /** Ticks until the horn may sound again. */
   hornCool = 0;
@@ -156,6 +158,7 @@ export class Car extends Vehicle {
     if (source === "fall" || source === "drown" || source === "starve" || source === "suffocation" || source === "void") return false;
     const creative = !!attacker && ctx.players().some((p) => p.id === attacker && !p.targetable);
     if (creative) { this.removed = true; return true; }
+    if (attacker && !attacker.startsWith("mob:") && attacker !== this.rider) this.lastAttacker = attacker;
     // A fist barely dents it; bullets and blades do; a blast wrecks it outright.
     const scale = source === "explosion" ? 90 : source === "fire" || source === "lava" ? 3 : source === "vehicle" ? 1 : 12;
     this.damageBy(ctx, amount * scale);

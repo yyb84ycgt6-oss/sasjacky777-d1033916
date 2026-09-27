@@ -507,7 +507,7 @@ export class WorldRenderer {
         });
         if (isDino(e.kind)) this.creatureTag(v, e, x, y, z);
         if (e.kind === "critter" || e.kind === "trainer") this.critterTag(v, e, x, y, z, camPos);
-        if (e.kind === "citizen") this.quipTag(v, e, x, y, z);
+        if (e.kind === "citizen" || e.kind === "cop") this.quipTag(v, e, x, y, z);
         if (e.kind === "ender_dragon") {
           // It is perched when its phase says so; the flag doubles as "wings folded".
           if (e.dragon?.phase === "perch") pose(v.model, e.kind, { x, y, z, yaw, pitch: 0, walk, speed, light: bright, hurt: e.hurtTime > 0, death: 0, time: this.time, swing: 0, size: 4, onGround: true });
@@ -906,6 +906,7 @@ function skinVariant(e: Mob): number {
   if (e.kind === "wolf") return (e.owner ? 1 : 0) | (e.anger > 0 ? 2 : 0);
   if (e.kind === "tribute") return e.id % 24;
   if (e.kind === "citizen") return e.id % 64;
+  if (e.kind === "cop") return e.id % 16;
   if (isDino(e.kind)) return e.id % 4;
   if (isInfectedMob(e.kind)) return e.id % 8;
   if (e.kind === "critter") return e.shiny ? 1 : 0;

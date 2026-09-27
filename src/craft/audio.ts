@@ -174,7 +174,7 @@ export class GameAudio {
   play(name: string, x: number | null = null, y = 0, z = 0, volume = 1, pitch = 1): void {
     if (!this.ready()) return;
     // The dragon and the End's portals carry across the island; most sounds only a few blocks.
-    const far = name === "explode" || name.startsWith("firework_") && name !== "firework_launch" || name === "thunder" || name.startsWith("ender_dragon") || name === "end_portal_spawn" || name === "end_gateway_spawn";
+    const far = name === "explode" || name === "siren_wail" || name.startsWith("firework_") && name !== "firework_launch" || name === "thunder" || name.startsWith("ender_dragon") || name === "end_portal_spawn" || name === "end_gateway_spawn";
     const out = this.placed(x, y, z, volume, far ? 96 : 16);
     if (!out) return;
     const t = this.ctx!.currentTime;
@@ -321,6 +321,8 @@ export class GameAudio {
       case "cashout": [880, 1175, 1760].forEach((f, i) => this.tone(out, t + i * 0.05, "square", f, f, 0.08, 0.14)); break;
       // The streets: a two-note horn (lower for the big ones), the police whoop, a crunch of metal and glass, a dent.
       case "car_horn": this.tone(out, t, "sawtooth", 415 * p, 415 * p, 0.35, 0.16); this.tone(out, t, "sawtooth", 523 * p, 523 * p, 0.35, 0.12); break;
+      // A cruiser's wail: up and down, carried a long way.
+      case "siren_wail": this.tone(out, t, "square", 650, 1250, 0.45, 0.08, 0.05); this.tone(out, t + 0.45, "square", 1250, 650, 0.45, 0.08, 0.05); break;
       case "siren_whoop": this.tone(out, t, "square", 600, 1500, 0.35, 0.14); this.tone(out, t + 0.35, "square", 1500, 700, 0.3, 0.12); break;
       case "car_crash":
         this.noiseBurst(out, t, 0.45, "lowpass", 1100 * p, 0.8, 0.9, 0.35);

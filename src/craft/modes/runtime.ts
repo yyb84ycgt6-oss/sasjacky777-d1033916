@@ -10,6 +10,7 @@
 import type { Game } from "../game/game";
 import type { Objective } from "../game/types";
 import type { BlockChange } from "../engine/world";
+import type { Entity } from "../engine/entities";
 import { itemByName, type ItemStack, type StatusEffect } from "../engine/items";
 import type { GameMode } from "../engine/player";
 import { mapLayout, type MapLayout } from "../engine/maps";
@@ -58,6 +59,10 @@ export abstract class ModeRuntime {
   onCarjack(_player: string): void {}
   /** A car blew up (the city modes). */
   onCarWrecked(): void {}
+  /** A player struck a mob (the city modes' police take note). */
+  onHit(_player: string, _victim: Entity): void {}
+  /** A player made a noise a long way round: a gunshot (the city modes' people scatter, and the police hear). */
+  onNoise(_player: string, _x: number, _z: number, _radius: number): void {}
   /** A drop, as this mode would have it (Random Drops swaps it for another). */
   transformDrop(s: ItemStack): ItemStack { return s; }
   /** The scoreboard for one player; null for none. */

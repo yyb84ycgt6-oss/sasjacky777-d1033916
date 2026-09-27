@@ -114,6 +114,18 @@ export function Hud({ hud, mobile, crosshair }: { hud: HudState; mobile: boolean
         </div>
       )}
 
+      {hud.wanted !== null && hud.wanted > 0 && !hud.screen && (
+        // Wanted stars, under the money: lit for each star, hollow for the rest.
+        <div data-testid="hud-wanted" className="absolute" style={{
+          right: `calc(var(--u) * ${hud.minimap ? MINIMAP_SIZE + 8 : 3})`, top: `calc(var(--u) * ${(mobile ? 22 : 3) + (hud.minimap ? 0 : hud.net ? 18 : 0) + 14})`,
+          fontSize: "calc(var(--u) * 10)", letterSpacing: "calc(var(--u) * 0.5)",
+        }}>
+          {[0, 1, 2, 3, 4].map((i) => (
+            <span key={i} style={{ color: i < hud.wanted! ? "#ffd83a" : "rgba(255,255,255,0.25)", WebkitTextStroke: i < hud.wanted! ? "1px #5a3a00" : undefined }}>{i < hud.wanted! ? "★" : "☆"}</span>
+          ))}
+        </div>
+      )}
+
       {hud.zone?.fresh && !hud.screen && (
         // The district, announced on the way in, the way the city games do: big, slanted, bottom right.
         <div data-testid="hud-zone" className="absolute" style={{

@@ -24,6 +24,7 @@ import { B, WOOL_COLORS } from "./blocks";
 import { blockIndex, SEA_LEVEL, WORLD_HEIGHT } from "./constants";
 import { hash4, hashFloat } from "./rng";
 import type { GeneratedChunk } from "./worldgen";
+import type { ShopKind } from "./shops";
 
 /** The top block of street level; feet stand a block above it. */
 export const GROUND = SEA_LEVEL + 1;
@@ -530,6 +531,7 @@ export class City {
       case "guns":
         p.ground = B.SMOOTH_STONE;
         b(x0 + 3, z0 + 6, X1 - 3, Z1 - 3, 7, "brick", B.BRICKS, B.IRON_BLOCK);
+        p.extra = (c) => { for (const f of this.shopPlan(p)) c.set(f.x, f.y, f.z, f.id); };
         sign("GUNS", STREET + 8, B.REDSTONE_LAMP_ON);
         break;
       case "respray":
@@ -571,6 +573,7 @@ export class City {
       case "dealer":
         p.ground = B.QUARTZ_BLOCK;
         b(x0 + 2, z0 + 2, X1 - 2, z0 + 10, 8, "glass", B.IRON_BLOCK, B.IRON_BLOCK, { lit: 0.8 });
+        p.extra = (c) => { for (const f of this.shopPlan(p)) c.set(f.x, f.y, f.z, f.id); };
         for (let x = x0 + 3; x + 2 <= X1 - 2; x += 5) p.parking.push([x + 1.5, STREET, z0 + 17.5, 0]);
         p.signs.push({ text: "YEET", x: x0 + 7, y: STREET + 9, z: z0 + 10, dx: 1, dz: 0, id: B.GLOWSTONE });
         break;
@@ -584,6 +587,21 @@ export class City {
         p.extra = (c) => c.box(x0 + 11, GROUND, z0 + 16, x0 + 16, GROUND, Z1, B.SMOOTH_STONE);
         break;
     }
+  }
+
+  /**
+   * The shops' counters: the Bullet Bazaar's, with its wares on the wall
+   * behind, and Yeet Motors' sales desk. Using one opens the shop.
+   */
+  shopPlan(p: LotPlan): { shop: ShopKind; x: number; y: number; z: number; id: number }[] {
+    const out: { shop: ShopKind; x: number; y: number; z: number; id: number }[] = [];
+    if (p.landmark?.kind === "guns") {
+      for (let x = p.x0 + 8; x <= p.x0 + LOT - 9; x++) out.push({ shop: "guns", x, y: STREET, z: p.z0 + 12, id: B.IRON_BLOCK });
+      for (let x = p.x0 + 6; x <= p.x0 + LOT - 7; x += 2) out.push({ shop: "guns", x, y: STREET + 1, z: p.z0 + 7, id: B.IRON_BARS });
+    } else if (p.landmark?.kind === "dealer") {
+      for (let x = p.x0 + 11; x <= p.x0 + 15; x++) out.push({ shop: "cars", x, y: STREET, z: p.z0 + 5, id: B.QUARTZ_BLOCK });
+    }
+    return out;
   }
 
   /** The Lucky Doge's floor: slots, blackjack, roulette and poker, each listed so using it deals you in. */

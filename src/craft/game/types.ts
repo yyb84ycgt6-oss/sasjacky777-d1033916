@@ -2,6 +2,7 @@ import type { Slot } from "../engine/inventory";
 import type { GameMode } from "../engine/player";
 import type { LinkKind } from "../net/transport";
 import type { CasinoGame } from "../engine/casino";
+import type { ShopKind } from "../engine/shops";
 
 /** What the input layer (keyboard/mouse or touch) writes and the game reads each frame. */
 export interface Controls {
@@ -79,7 +80,8 @@ export type Screen =
   | { kind: "starter"; rentals?: boolean }
   | { kind: "center"; x: number; y: number; z: number }
   /** The casino: its lobby, or one game's table. */
-  | { kind: "casino"; game: CasinoGame };
+  | { kind: "casino"; game: CasinoGame }
+  | { kind: "shop"; shop: ShopKind };
 
 /** A game mode's scoreboard: a title and label–value lines, as the classic sidebar shows them. */
 export interface Objective {
@@ -105,6 +107,10 @@ export interface ModeTell {
   bloodMoon?: boolean;
   /** Dollars handed to the player (a mode's stake, a mission's pay). */
   cash?: number;
+  /** The player's wanted stars now (the city modes). */
+  wanted?: number;
+  /** Busted: hand over every gun and round. */
+  confiscate?: boolean;
 }
 
 export interface ChatLine {
@@ -176,6 +182,8 @@ export interface Hud {
   critters: { party: { name: string; species: string; level: number; hp: number; max: number; status: string | null }[]; coins: number; badges: number } | null;
   /** The city and casino modes: the player's dollars, shown as the city shows them; null elsewhere. */
   cash: number | null;
+  /** In a city: wanted stars, 0 to 5. */
+  wanted: number | null;
   /** At the wheel of a car: its name, speed, how much of it is left (0-1), and its siren. */
   vehicle: { name: string; kmh: number; health: number; siren: boolean; police: boolean } | null;
   /** In a city: the district (announced for a few seconds on the way in) and the street underfoot. */
