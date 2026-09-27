@@ -77,6 +77,10 @@ export interface Welcome {
   map?: MapId;
   /** The world's game mode (its state stays with the host). */
   mode?: ModeState;
+  /** The real date the world's day 0 fell on (space/sky.ts), so a guest's Moon is the host's Moon. */
+  skyEpoch?: number;
+  /** Where on the Earth the world has been moved to, if it has (/sky chase). */
+  place?: { lat: number; lon: number };
 }
 
 const GAME_MODES = ["survival", "creative", "adventure", "spectator"] as const;
@@ -134,7 +138,9 @@ export function sanitizeModeTell(v: unknown): ModeTell {
 // 7: link battles and critter trades between players (the "cv" op), Team Copium, and the meme critters — a
 //    guest on 6 would meet species and trainers it has never heard of, and could not answer a challenge.
 // 8: the Starship item (a new item id) and the space trip it starts — a guest on 7 would hold an item it cannot draw.
-const PROTOCOL = 8;
+// 9: the real sky (the welcome's and the "env" op's skyEpoch and place) — a guest on 8 would see its own date's Moon and stars,
+//    and the Sun rise and set by the clock while the host's rose by the season.
+const PROTOCOL = 9;
 const FLUSH_TICKS = 2;
 const ENTITY_TICKS = 4;
 const ENV_TICKS = 40;
@@ -385,7 +391,7 @@ export class NetSession implements NetLink {
       p.gliding ? 1 : 0, p.inventory.armor[0]?.id === B.CARVED_PUMPKIN ? 1 : 0];
     if (this.role === "host") {
       if (this.ticks % ENTITY_TICKS === 0 && g.remote.size) this.push(["en", this.entitySnapshots()]);
-      if (this.ticks % ENV_TICKS === 0) this.push(["env", g.time, r2(g.rain), r2(g.thunder), g.meta.difficulty]);
+      if (this.ticks % ENV_TICKS === 0) this.push(["env", g.time, r2(g.rain), r2(g.thunder), g.meta.difficulty, g.meta.skyEpoch ?? null, g.meta.place?.lat ?? null, g.meta.place?.lon ?? null]);
       const now = performance.now();
       for (const [id, r] of g.remote) {
         if (now - r.lastSeen > TIMEOUT_MS) {
@@ -564,7 +570,8 @@ export class NetSession implements NetLink {
         : saved,
       hostId: this.myId, hostName: g.player.name, dimension: g.dimension, disabledMods: g.meta.disabledMods ?? [],
       waystones: g.meta.waystones ?? {},
-      map: g.meta.map, mode: g.meta.mode ? { id: g.meta.mode.id, data: {} } : undefined,
+      map: g.meta.map, mode: g.meta.mode ? { id: g.meta.mode.id, data: {} } : undefined, skyEpoch: g.meta.skyEpoch,
+      place: g.meta.place,
     };
     this.send({ t: "welcome", to: m.from, w });
     if (!g.remote.has(m.from)) {
@@ -691,6 +698,8 @@ export class NetSession implements NetLink {
             if (Math.abs(t - g.time) > 40) g.time = t;
             g.rain = op[2] as number; g.thunder = op[3] as number;
             if (int(op[4])) g.meta.difficulty = op[4] as 0 | 1 | 2 | 3;
+            if (finite(op[5])) g.meta.skyEpoch = op[5] as number;
+            if (finite(op[6], op[7]) && Math.abs(op[6] as number) <= 90) g.meta.place = { lat: op[6] as number, lon: op[7] as number };
             g.audio.setRain(g.rain);
           }
           break;

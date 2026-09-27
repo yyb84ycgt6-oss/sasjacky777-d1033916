@@ -20,9 +20,10 @@ import { BODIES, BODY, type BodyDef } from "./bodies";
 import { AU, cross, DEG, dot, gmst, J2000, len, norm, raDecToEcl, scale, sub, type Vec3 } from "./kepler";
 import { frameOf, orbitPath, velocityOf } from "./ephemeris";
 import { BELTS, beltPositions } from "./belts";
-import { cityLightsCanvas, cloudCanvas, decodeRuns, detailCanvas, surfaceCanvas } from "./textures";
-import { MILKY_WAY, STARS } from "./skyData";
+import { cityLightsCanvas, cloudCanvas, detailCanvas, milkyWayCanvas, surfaceCanvas } from "./textures";
+import { bvColor, starField } from "./starField";
 import type { Ship } from "./flight";
+import { comaSize, cometActivity, tailLength } from "./comets";
 import { Simplex } from "../engine/noise";
 import { Rng } from "../engine/rng";
 
@@ -211,17 +212,6 @@ void main() {
 
 // ---- colours ------------------------------------------------------------------------------------------------------
 
-/** A star's colour from its B−V index: blue-white hot stars through yellow to red. */
-export function bvColor(bv: number): [number, number, number] {
-  const stops: [number, [number, number, number]][] = [[-0.4, [0.62, 0.71, 1]], [0, [0.8, 0.86, 1]], [0.3, [0.95, 0.95, 1]], [0.6, [1, 0.95, 0.86]], [1.0, [1, 0.84, 0.66]], [1.5, [1, 0.72, 0.48]], [2.0, [1, 0.6, 0.38]]];
-  if (bv <= stops[0][0]) return stops[0][1];
-  for (let i = 0; i < stops.length - 1; i++) {
-    const [a, ca] = stops[i], [b, cb] = stops[i + 1];
-    if (bv <= b) { const t = (bv - a) / (b - a); return [ca[0] + (cb[0] - ca[0]) * t, ca[1] + (cb[1] - ca[1]) * t, ca[2] + (cb[2] - ca[2]) * t]; }
-  }
-  return stops[stops.length - 1][1];
-}
-
 const KIND_COLORS: Record<string, string> = {
   star: "#ffd76a", planet: "#8fd0ff", dwarf: "#b8c8ff", moon: "#c8d0d8", asteroid: "#c8a878", comet: "#9ff0ff", interstellar: "#ff9a6a", probe: "#e8e070",
 };
@@ -304,50 +294,8 @@ export class SpaceView {
   // ---- building ------------------------------------------------------------------------------------------------
 
   private buildSky(): void {
-    // The Milky Way: the outline map, softened and given texture, warm toward the galaxy's centre in Sagittarius.
-    const lv = decodeRuns(MILKY_WAY.width, MILKY_WAY.height, MILKY_WAY.runs);
-    const W = 1024, H = 512, n = new Simplex(99);
-    const canvas = document.createElement("canvas");
-    canvas.width = W; canvas.height = H;
-    const ctx = canvas.getContext("2d")!;
-    const img = ctx.createImageData(W, H);
-    const gc = raDecToEcl(266.4, -28.94);
-    // Softened once at the map's own size, then read with bilinear filtering at the texture's.
-    const MW = MILKY_WAY.width, MH = MILKY_WAY.height;
-    const blur = new Float32Array(MW * MH);
-    for (let y = 0; y < MH; y++) for (let x = 0; x < MW; x++) {
-      let v = 0, wsum = 0;
-      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
-        const w = Math.exp(-(dx * dx + dy * dy) / 3);
-        v += lv[Math.max(0, Math.min(MH - 1, y + dy)) * MW + (((x + dx) % MW) + MW) % MW] * w; wsum += w;
-      }
-      blur[y * MW + x] = v / (wsum * 5);
-    }
-    const sample = (fx: number, fy: number) => {
-      const x0 = Math.floor(fx), y0 = Math.max(0, Math.min(MH - 1, Math.floor(fy))), y1 = Math.min(MH - 1, y0 + 1), tx = fx - x0, ty = fy - Math.floor(fy);
-      const at = (x: number, y: number) => blur[y * MW + ((x % MW) + MW) % MW];
-      return (at(x0, y0) * (1 - tx) + at(x0 + 1, y0) * tx) * (1 - ty) + (at(x0, y1) * (1 - tx) + at(x0 + 1, y1) * tx) * ty;
-    };
-    for (let y = 0; y < H; y++) {
-      const dec = 90 - ((y + 0.5) / H) * 180;
-      for (let x = 0; x < W; x++) {
-        const ra = ((x + 0.5) / W) * 360;
-        const v = sample((x / W) * MW, (y / H) * MH);
-        const dir = raDecToEcl(ra, dec);
-        const nx = dir[0] * 6, ny = dir[1] * 6, nz = dir[2] * 6;
-        const dust = v > 0.02 ? Math.max(0, n.fbm3(nx * 2, ny * 2, nz * 2, 3)) : 0;
-        const grain = v > 0.02 ? 0.75 + n.noise3(nx * 5, ny * 5, nz * 5) * 0.3 : 1;
-        const core = Math.pow(Math.max(0, dot(dir, gc)), 6);
-        const b = Math.max(0, v * grain - dust * v * 0.9) * 0.55 + core * 0.08;
-        const warm = Math.min(1, core * 1.4 + v * 0.2);
-        const i = (y * W + x) * 4;
-        img.data[i] = Math.min(255, b * (190 + warm * 60) + 3);
-        img.data[i + 1] = Math.min(255, b * (190 + warm * 20) + 4);
-        img.data[i + 2] = Math.min(255, b * (220 - warm * 40) + 8);
-        img.data[i + 3] = 255;
-      }
-    }
-    ctx.putImageData(img, 0, 0);
+    // The Milky Way (textures.ts), on a sphere read by right ascension and declination.
+    const canvas = milkyWayCanvas()!;
     const tex = new THREE.CanvasTexture(canvas);
     tex.wrapS = THREE.RepeatWrapping;
     tex.colorSpace = THREE.NoColorSpace;
@@ -357,34 +305,15 @@ export class SpaceView {
     this.sky.add(sphere);
 
     // The real stars, and fainter ones scattered thickest along the Milky Way.
-    const raw = typeof atob === "function" ? Uint8Array.from(atob(STARS), (c) => c.charCodeAt(0)) : new Uint8Array(0);
-    const count = raw.length / 6;
-    const extra = 14000;
-    const pos = new Float32Array((count + extra) * 3), col = new Float32Array((count + extra) * 3), size = new Float32Array(count + extra);
-    const put = (i: number, dir: Vec3, mag: number, rgb: [number, number, number]) => {
-      const t = toThree(dir).multiplyScalar(4);
+    const field = starField();
+    const pos = new Float32Array(field.count * 3), col = new Float32Array(field.count * 3), size = new Float32Array(field.count);
+    for (let i = 0; i < field.count; i++) {
+      const t = toThree(raDecToEcl(field.ra[i], field.dec[i])).multiplyScalar(4);
       pos.set([t.x, t.y, t.z], i * 3);
-      const b = Math.pow(10, -0.4 * (mag - 1.5));
-      const s = Math.sqrt(b);
+      const s = Math.sqrt(Math.pow(10, -0.4 * (field.mag[i] - 1.5)));
       size[i] = (1.5 + 2.8 * Math.min(1.6, s)) * (this.renderer.getPixelRatio?.() ?? 1);
-      const a = Math.min(1.25, 0.14 + 0.9 * s);
+      const a = Math.min(1.25, 0.14 + 0.9 * s), rgb = bvColor(field.bv[i]);
       col.set([rgb[0] * a, rgb[1] * a, rgb[2] * a], i * 3);
-    };
-    const dv = new DataView(raw.buffer);
-    for (let i = 0; i < count; i++) {
-      const ra = (dv.getUint16(i * 6, true) / 65535) * 360, dec = (dv.getUint16(i * 6 + 2, true) / 65535) * 180 - 90;
-      const mag = raw[i * 6 + 4] / 30 - 1.5, bv = raw[i * 6 + 5] / 100 - 0.4;
-      put(i, raDecToEcl(ra, dec), mag, bvColor(bv));
-    }
-    const r = new Rng(2718);
-    for (let k = 0; k < extra; k++) {
-      let ra = 0, dec = 0;
-      for (let tries = 0; tries < 8; tries++) {
-        ra = r.next() * 360; dec = (Math.asin(r.next() * 2 - 1) * 180) / Math.PI;
-        const lvx = Math.floor((ra / 360) * MILKY_WAY.width), lvy = Math.floor(((90 - dec) / 180) * MILKY_WAY.height);
-        if (r.next() < 0.18 + lv[lvy * MILKY_WAY.width + lvx] * 0.2) break;
-      }
-      put(count + k, raDecToEcl(ra, dec), 6 + r.next() * 2.2, bvColor(r.next() * 1.6 - 0.2));
     }
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
@@ -1024,23 +953,6 @@ const W0: Record<string, number> = { sun: 84.176, mercury: 329.5988, venus: 160.
 function BODY_REACH(moon: BodyDef): number {
   const p = BODY[moon.parent!];
   return p ? p.radius * 400 : 1e6;
-}
-
-/** How active a comet is at a place: nothing beyond five AU, full by two and a half. */
-export function cometActivity(def: BodyDef, helio: Vec3): number {
-  const r = len(helio) / AU;
-  const k = Math.max(0, Math.min(1, (5 - r) / 2.5));
-  return k * (def.activity ?? 0.5);
-}
-
-export function tailLength(def: BodyDef, helio: Vec3): number {
-  const r = Math.max(0.2, len(helio) / AU);
-  return Math.min(1.5e8, (2.2e7 * (def.activity ?? 0.5)) / (r * r)) * Math.min(1, Math.max(0, (5 - r) / 2.5));
-}
-
-export function comaSize(def: BodyDef, helio: Vec3): number {
-  const r = Math.max(0.2, len(helio) / AU);
-  return (6e4 * (def.activity ?? 0.5)) / r;
 }
 
 /** A small body's shape: a sphere pushed in and out, the way asteroids and nuclei are lumpy. */

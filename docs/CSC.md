@@ -7,8 +7,10 @@ survival, creative and hardcore; mining, crafting, smelting, farming; mobs,
 water and lava, TNT, beds, day and night, weather; saves on the device, in a
 file or in the cloud; the Nether and the End, with strongholds, End cities,
 shulkers, the Ender Dragon, elytra and fireworks; a starship to the real Solar
-System, at its real size (see [Space](#space)); 51 advancements to earn;
-seventeen features borrowed from the best-loved mods (minimap, waystones,
+System, at its real size (see [Space](#space)), and the real sky over the
+world — the Moon's phases, eclipses, meteor showers and comets on their real
+dates (see [The real sky](#the-real-sky)); 52 advancements to earn;
+eighteen features borrowed from the best-loved mods (minimap, waystones,
 seasons, gravestones, tameable wolves, catacombs and more — see [Mods](#mods));
 thirty-seven game modes on sixteen map packs, among them Primal (after ARK:
 tame, saddle and ride dinosaurs), Dead Zone (after DayZ) with four more zombie
@@ -576,6 +578,88 @@ packaged by d3-celestial (© 2015 Olaf Frohn, BSD 3-Clause — see
 `space/skyData.ts`); Earth's coastlines from Natural Earth (public domain).
 `scripts/csc-space-data.mjs` rebuilds the sky data from those sources.
 
+## The real sky
+
+Over the overworld, the sky is the real one over the world's place on Earth
+(the latitude and longitude its seed chose — the same place a starship
+launches from), worked out each frame from the same ephemeris the starship
+flies through (`space/sky.ts`, drawn by `render/realSky.ts`). It is one of the
+mod features, **The Real Sky**, and can be switched off per world for the old
+clockwork sky.
+
+- **Its own calendar.** A world keeps a date (`WorldMeta.skyEpoch`): its first
+  day is the real day it was first played, and every game day after is the
+  next real day. Game noon is local solar noon. So the Moon runs through its
+  phases in twenty-nine and a half game days, the planets creep along the
+  zodiac, and a world played through a game year sees the real year's
+  eclipses and showers.
+- **The Sun keeps real hours.** It rises late and sets early in winter and
+  the other way round in summer, higher or lower with the latitude, and
+  daylight, sleeping and the undead burning follow it rather than the clock:
+  night is when the Sun is down. A bed wakes you at the real sunrise.
+- **The Moon** is lit from the Sun's side, so its phase is tonight's and its
+  terminator leans the way it really does; its face is turned by its real
+  pole, it goes orange low down, it lights the night by how full and how high
+  it is, and in daylight it is the pale thing it is. It hides the stars
+  behind it, and its dark part shows faintly in earthshine.
+- **The stars** are the 5,044 real ones to magnitude 6 (and a scatter of
+  fainter made-up ones, thickest along the Milky Way), turning about the pole at the right
+  height for the latitude, fainter and twinkling low down, washed out by
+  twilight and by a bright Moon. The Milky Way comes out only in true dark.
+- **The planets** are there as the bright wanderers they are, each as bright
+  as it really is that night (Mallama's phase laws for Mercury's and Venus's
+  crescents): Venus as the evening or morning star, never more than 47° from
+  the Sun.
+- **Comets** show when they really did or will: Hale–Bopp in the spring of
+  1997, Halley in the summer of 2061, each with a tail pointing away from the
+  Sun.
+- **Meteor showers** — the twelve major ones of the International Meteor
+  Organization's calendar, Quadrantids to Ursids — rise to their peaks on
+  their real dates (by the Sun's longitude), and their meteors streak out of
+  their radiants at the rate the radiant's height allows; sporadic ones fall
+  every night. The chat says which shower is falling, from where, and whose
+  dust it is.
+- **Eclipses.** The Moon's disc crosses the Sun's where it really does, seen
+  from the player's own spot on the Earth (the Moon is near enough that a few
+  hundred kilometres matter). The day dims only a little until the last
+  sliver, and then at totality it is suddenly dusk, with a sunset all round
+  the horizon, the corona and a pink rim round the black Moon, and the stars
+  and planets out — and the undead stop burning. The clock slows to a twelfth
+  of its pace through the deepest minutes, which at a game day's speed would
+  otherwise be gone in three seconds. A lunar eclipse turns the Moon dark red
+  in the Earth's shadow. Standing under a total eclipse earns **Path of
+  Totality**.
+- **The Sun and the Moon are drawn eight times their real size** — at half a
+  degree they would be a few pixels. Near the Sun the Moon's distance from it
+  is stretched by the same factor, so the drawn overlap is exactly the real
+  one; away from the Sun it stands among its true stars.
+
+`/sky` says what is up — the time, the Sun and Moon, the planets and comets
+in view, the showers, and the next eclipses. With cheats on, the host can move
+the sky: `/sky now` (the real sky this minute), `/sky date 2024-04-08 13:40`
+(local solar time), `/sky moon full`, `/sky eclipse [solar|lunar]` (the next
+one that can be seen from here, a little before it deepens), `/sky shower
+perseids` (two in the morning of the peak night), and `/sky chase` — any one
+place sees a total eclipse only every few centuries, so this finds the next
+total (or `annular`) eclipse anywhere, moves the world under the centre of its
+path, and starts the clock twenty-five minutes before totality. `/sky place
+home` puts the world back where its seed had it. The date and place travel to
+guests with the time; a trip into space starts on the world's date, and the
+world's sky takes up the trip's date when you land.
+
+Tested against real events in `src/test/craft-sky.test.ts`: the Sun's noon
+height at the equinox, the full and new moons of 2024, 2024's four eclipses
+and where the 8 April totality fell (Dallas yes, Sydney no), the greatest
+points of the 2024 and 2026 total eclipses, the umbra of the 2022 total lunar
+eclipse, the Perseids' and Geminids' dates and radiants, Hale–Bopp in 1997
+and Halley in 2061, and Venus's greatest brightness and elongation.
+
+Sources: the International Meteor Organization's meteor shower calendar
+(peaks, rates, radiants); Mallama and Hilton (2018) for the planets'
+magnitudes; the IAU WGCCRE for the Moon's pole; Danjon's enlargement of the
+Earth's shadow; Jean Meeus's *Astronomical Algorithms*; eclipse dates checked
+against NASA's Five Millennium Canon of Eclipses (Espenak and Meeus).
+
 ## Commands
 
 With cheats on (a world option) or in creative: `/time`, `/gamemode`, `/give`,
@@ -584,12 +668,13 @@ With cheats on (a world option) or in creative: `/time`, `/gamemode`, `/give`,
 takes a size and `/summon villager mason` a trade;
 `/locate village|fortress|stronghold|end_city|catacombs|spider_cave` finds the nearest one, and
 `/dimension overworld|nether|end` crosses over as if through a portal, `/space` launches to orbit and
-`/space land` or `/space home` comes back down; `/seed` and `/help` for
-everyone. An online guest cannot run the ones that change the shared world.
+`/space land` or `/space home` comes back down; `/sky now`, `/sky date`, `/sky moon`, `/sky eclipse`,
+`/sky chase`, `/sky shower` and `/sky place home` move the sky (see [The real sky](#the-real-sky));
+`/sky`, `/seed` and `/help` for everyone. An online guest cannot run the ones that change the shared world.
 
 ## Mods
 
-The game borrows seventeen of the best-loved ideas from the Minecraft modding
+The game borrows eighteen of the best-loved ideas from the Minecraft modding
 community — each rebuilt in this game's own code and art, credited by name
 and link in `engine/mods.ts`, on the **Mods…** screen (from the pause menu and
 when creating a world), and in the credits after the dragon. Most can be
@@ -611,6 +696,7 @@ choices, which travel in the welcome and whenever they change.
 | Catacombs and spider caves | YUNG's Better Dungeons, When Dungeons Arise | `engine/dungeons.ts` |
 | Cooking pot — soups and stews over heat | Farmer's Delight | `engine/cooking.ts` |
 | Wildlife — tameable wolves, deer, bears | Alex's Mobs, Naturalist | `engine/mobs.ts`, `engine/wildlife.ts` |
+| The real sky — the Sun, Moon, stars, planets, comets, meteors and eclipses over the world's place on Earth, on its own date (see [The real sky](#the-real-sky)) | Stellarium, Enhanced Celestials | `space/sky.ts`, `render/realSky.ts` |
 
 A tamed wolf sits and follows at its owner's word, defends them, and is known
 again by name when they reconnect. Dungeons are part of the terrain, so the

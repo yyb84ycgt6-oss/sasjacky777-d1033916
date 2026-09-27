@@ -40,28 +40,40 @@ export interface OverviewRow {
 
 export type OverviewTab = "planets" | "moons" | "small" | "all";
 
-/** Which latitude and longitude a world's origin sits at: somewhere people live, chosen from the seed. */
-export function worldAnchor(seed: number): { lat: number; lon: number } {
+export interface Place { lat: number; lon: number }
+
+/**
+ * Which latitude and longitude a world's origin sits at: somewhere people live, chosen from the seed — or wherever
+ * the world has been moved to (/sky chase takes it under an eclipse's path).
+ */
+export function worldAnchor(seed: number, place?: Place | null): Place {
+  if (place) return place;
   const a = Math.abs(Math.sin(seed * 12.9898) * 43758.5453) % 1, b = Math.abs(Math.sin(seed * 78.233) * 12543.123) % 1;
   return { lat: -40 + a * 95, lon: -180 + b * 360 };
 }
 
 /** A block position in the world as a place on Earth. */
-export function blockToLatLon(seed: number, x: number, z: number): { lat: number; lon: number } {
-  const o = worldAnchor(seed);
+export function blockToLatLon(seed: number, x: number, z: number, place?: Place | null): Place {
+  const o = worldAnchor(seed, place);
   const lat = Math.max(-89, Math.min(89, o.lat - z / M_PER_DEG_LAT));
   const lon = ((o.lon + x / (M_PER_DEG_LON * Math.cos((lat * Math.PI) / 180)) + 540) % 360) - 180;
   return { lat, lon };
 }
 
 /** A place on Earth as a block position in the world — kept inside the world's border. */
-export function latLonToBlock(seed: number, lat: number, lon: number): { x: number; z: number } {
-  const o = worldAnchor(seed);
+export function latLonToBlock(seed: number, lat: number, lon: number, place?: Place | null): { x: number; z: number } {
+  const o = worldAnchor(seed, place);
   const dLon = ((lon - o.lon + 540) % 360) - 180;
   const x = dLon * M_PER_DEG_LON * Math.cos((lat * Math.PI) / 180);
   const z = (o.lat - lat) * M_PER_DEG_LAT;
   const clamp = (v: number) => Math.max(-WORLD_REACH, Math.min(WORLD_REACH, v));
   return { x: clamp(x), z: clamp(z) };
+}
+
+/** Where the world's origin must be for the block (x, z) to stand at a latitude and longitude. */
+export function placeFor(x: number, z: number, lat: number, lon: number): Place {
+  const originLat = Math.max(-89, Math.min(89, lat + z / M_PER_DEG_LAT));
+  return { lat: originLat, lon: ((lon - x / (M_PER_DEG_LON * Math.cos((lat * Math.PI) / 180)) + 540) % 360) - 180 };
 }
 
 /** How far each body's neighbourhood reaches (km): its sphere of influence, or a patch of space around a small one. */
@@ -101,7 +113,7 @@ export class SpaceSession {
   private readonly places = reaches();
   private clock = 0;
 
-  constructor(readonly seed: number, launch: { lat: number; lon: number }, jd = jdFromMs(Date.now())) {
+  constructor(readonly seed: number, launch: { lat: number; lon: number }, jd = jdFromMs(Date.now()), readonly place: Place | null = null) {
     this.jd = jd;
     const up = aboveEarth(launch.lat, launch.lon, 400, gmst(jd), eqToEcl);
     this.ship = newShip(SCOUT, "earth", up.pos, up.heading);
@@ -279,7 +291,7 @@ export class SpaceSession {
   landingBlock(): { x: number; z: number; lat: number; lon: number } | null {
     const s = this.landingSite();
     if (!s) return null;
-    return { ...latLonToBlock(this.seed, s.lat, s.lon), lat: s.lat, lon: s.lon };
+    return { ...latLonToBlock(this.seed, s.lat, s.lon, this.place), lat: s.lat, lon: s.lon };
   }
 
   /** Local solar time at a longitude, in hours: for setting the day to match where the ship came down. */

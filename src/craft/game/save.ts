@@ -83,6 +83,13 @@ export interface WorldMeta {
   mode?: ModeState;
   /** Mod-inspired features switched off for this world (engine/mods.ts ids); everything else is on. */
   disabledMods?: string[];
+  /**
+   * The real date (a Julian day, at midnight) the world's day 0 fell on: the sky (space/sky.ts) counts a real day
+   * for every game day from it. Set the first time the world is played, so its first day is that real day.
+   */
+  skyEpoch?: number;
+  /** Where on the Earth the world's origin is, when it has been moved from where its seed put it (/sky chase). */
+  place?: { lat: number; lon: number };
   /** Every waystone in the world, by key (engine/waystones.ts). Who has found which is on each player. */
   waystones?: Record<string, Waystone>;
   /** The dimension the player (online, the host) is in; absent is the overworld. */

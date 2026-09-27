@@ -24,6 +24,7 @@ import { col, createChunkMaterial, createCrackMaterial, createLitBlockMaterial, 
 import { buildModel, ItemView, nameTag, pose, type ModelInstance } from "./models";
 import { Particles } from "./particles";
 import { Sky, skyState } from "./sky";
+import type { SkyObjects } from "../space/sky";
 import { Weather } from "./weather";
 import { blockGeometry, itemModel, spriteGeometry } from "./itemModels";
 import { GAME_NAME } from "../edition";
@@ -98,6 +99,8 @@ export interface FrameState {
   season?: [number, number, number, number];
   /** A blood moon: the sky and the fog run red. */
   bloodMoon?: boolean;
+  /** The real sky over the player (space/sky.ts); absent keeps the old clockwork one. */
+  celestial?: SkyObjects | null;
   /** A mode's world border (a square of half-width `radius`), drawn as a striped wall when near. */
   border?: { x: number; z: number; radius: number } | null;
   /** A mission's marks: glowing columns where something is to be done. */
@@ -713,7 +716,7 @@ export class WorldRenderer {
     if (this.contextLost) return;
     this.lastFrameState = frame;
     this.time += frame.dt;
-    const sky = skyState(frame.time, frame.rain, frame.thunder);
+    const sky = skyState(frame.time, frame.rain, frame.thunder, frame.dimension ? null : frame.celestial);
     if (frame.lightning > 0) this.flash = 1;
     this.flash = Math.max(0, this.flash - frame.dt * 4);
     const u = this.shared;
@@ -779,7 +782,7 @@ export class WorldRenderer {
     u.uFogFar.value = far;
     this.sky.cloudsVisible = frame.clouds && !frame.underwater && !dim;
     this.sky.group.visible = !dim;
-    this.sky.update(cam, sky, this.time * 20, renderFar);
+    this.sky.update(cam, sky, this.time * 20, renderFar, this.renderer.getPixelRatio());
     this.renderer.setClearColor(fogColor);
 
     this.updateSelection(frame.target);

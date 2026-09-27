@@ -11,6 +11,8 @@ import { layerPixels } from "../engine/atlas";
 import { Simplex } from "../engine/noise";
 import { Rng } from "../engine/rng";
 import { col } from "./materials";
+import { eclipseLight, type SkyObjects } from "../space/sky";
+import { RealSky } from "./realSky";
 
 export interface SkyState {
   /** Sun direction, unit vector. */
@@ -22,35 +24,55 @@ export interface SkyState {
   stars: number;
   sunset: number;
   cloud: THREE.Color;
+  /** How much the Moon lights the night (0..1): its phase, its height, and whether the Earth's shadow is on it. */
+  moonlight: number;
+  /** The real sky, when the world shows it. */
+  celestial: SkyObjects | null;
+  rain: number;
 }
 
 const DAY_TOP = col("#5f9bff");
 const DAY_HORIZON = col("#b9d4ff");
 const NIGHT_TOP = col("#02040d");
 const NIGHT_HORIZON = col("#0b1022");
+const MOONLIT_TOP = col("#16264a");
 const SUNSET = col("#ff8a3d");
 const RAIN_TOP = col("#5b6573");
 const RAIN_HORIZON = col("#8b929c");
 
-export function skyState(time: number, rain: number, thunder: number): SkyState {
-  const angle = ((time % DAY_TICKS) / DAY_TICKS) * Math.PI * 2;
-  const sun = new THREE.Vector3(Math.cos(angle), Math.sin(angle), 0.12).normalize();
-  const elevation = Math.sin(angle);
-  let daylight = Math.max(0, Math.min(1, elevation * 2.2 + 0.45));
-  daylight *= 1 - rain * 0.25 - thunder * 0.25;
-  const day = Math.max(0, Math.min(1, elevation * 2 + 0.4));
-  const top = NIGHT_TOP.clone().lerp(DAY_TOP, day);
-  const horizon = NIGHT_HORIZON.clone().lerp(DAY_HORIZON, day);
+const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+const smooth = (a: number, b: number, v: number) => { const t = clamp01((v - a) / (b - a)); return t * t * (3 - 2 * t); };
+
+export function skyState(time: number, rain: number, thunder: number, celestial: SkyObjects | null = null): SkyState {
+  let sun: THREE.Vector3, elevation: number;
+  if (celestial) {
+    sun = new THREE.Vector3(celestial.sun[0], celestial.sun[1], celestial.sun[2]);
+    elevation = sun.y;
+  } else {
+    const angle = ((time % DAY_TICKS) / DAY_TICKS) * Math.PI * 2;
+    sun = new THREE.Vector3(Math.cos(angle), Math.sin(angle), 0.12).normalize();
+    elevation = Math.sin(angle);
+  }
+  // An eclipse takes the day's light with it, and at totality leaves a sunset all the way round the horizon.
+  const eclipsed = celestial ? eclipseLight(celestial.eclipse) : 1;
+  let daylight = clamp01(elevation * 2.2 + 0.45);
+  daylight *= (1 - rain * 0.25 - thunder * 0.25) * eclipsed;
+  const day = clamp01(elevation * 2 + 0.4) * eclipsed;
+  const moonlight = celestial ? celestial.moonLit * smooth(-0.02, 0.3, celestial.moon[1]) * (1 - celestial.umbra * 0.9) * (1 - rain) : 0;
+  const top = NIGHT_TOP.clone().lerp(MOONLIT_TOP, moonlight * 0.45).lerp(DAY_TOP, day);
+  const horizon = NIGHT_HORIZON.clone().lerp(MOONLIT_TOP, moonlight * 0.3).lerp(DAY_HORIZON, day);
   if (rain > 0) {
     top.lerp(RAIN_TOP.clone().multiplyScalar(0.3 + day * 0.7), rain * 0.8);
     horizon.lerp(RAIN_HORIZON.clone().multiplyScalar(0.3 + day * 0.7), rain * 0.8);
   }
   // A warm band while the sun is within ~20° of the horizon.
   const sunset = Math.max(0, 1 - Math.abs(elevation) * 4) * (1 - rain * 0.7);
-  horizon.lerp(SUNSET, sunset * 0.35);
-  const cloud = new THREE.Color(1, 1, 1).multiplyScalar(0.15 + day * 0.85).lerp(col("#ffb680"), sunset * 0.35);
+  horizon.lerp(SUNSET, sunset * 0.35 + (elevation > 0 ? (1 - eclipsed) * 0.45 : 0));
+  const cloud = new THREE.Color(1, 1, 1).multiplyScalar(0.15 + day * 0.85 + moonlight * 0.12).lerp(col("#ffb680"), sunset * 0.35);
   if (rain > 0) cloud.multiplyScalar(1 - rain * 0.35);
-  return { sun, daylight: Math.max(0.12, daylight), top, horizon, stars: Math.max(0, 1 - day * 1.6) * (1 - rain), sunset, cloud };
+  // Nights are as dark as the Moon leaves them: a new moon's darker than the old sky's, a full moon's brighter.
+  const floor = celestial ? 0.1 + 0.08 * moonlight : 0.12;
+  return { sun, daylight: Math.max(floor, daylight), top, horizon, stars: Math.max(0, 1 - day * 1.6) * (1 - rain), sunset, cloud, moonlight, celestial, rain };
 }
 
 function canvasFrom(name: string, scale = 1): THREE.CanvasTexture {
@@ -83,6 +105,8 @@ export class Sky {
   readonly clouds: THREE.Mesh;
   private cloudMat: THREE.ShaderMaterial;
   cloudsVisible = true;
+  /** The real sky's stars, Moon and all (realSky.ts), built the first time a world shows it. */
+  private real: RealSky | null = null;
 
   constructor() {
     this.domeMat = new THREE.ShaderMaterial({
@@ -91,6 +115,7 @@ export class Sky {
         uHorizon: { value: new THREE.Color() },
         uSunset: { value: 0 },
         uSun: { value: new THREE.Vector3() },
+        uGlare: { value: 0 },
       },
       vertexShader: `
         varying vec3 vDir;
@@ -103,6 +128,7 @@ export class Sky {
         uniform vec3 uHorizon;
         uniform float uSunset;
         uniform vec3 uSun;
+        uniform float uGlare;
         varying vec3 vDir;
         void main() {
           vec3 d = normalize(vDir);
@@ -113,6 +139,9 @@ export class Sky {
           float toward = max(dot(normalize(vec3(d.x, 0.0, d.z) + 1e-5), flatSun), 0.0);
           float glow = pow(toward, 6.0) * uSunset * (1.0 - clamp(abs(h) * 2.5, 0.0, 1.0));
           col = mix(col, vec3(1.0, 0.5, 0.2), glow * 0.75);
+          // The real Sun's glare: the sky whitens round it, a little way out and then a long way out faintly.
+          float toSun = max(dot(d, normalize(uSun)), 0.0);
+          col += vec3(1.0, 0.9, 0.75) * uGlare * (pow(toSun, 900.0) * 0.5 + pow(toSun, 24.0) * 0.1);
           gl_FragColor = vec4(col, 1.0);
         }`,
       side: THREE.BackSide,
@@ -213,7 +242,7 @@ export class Sky {
     this.clouds.frustumCulled = false;
   }
 
-  update(camera: THREE.Camera, state: SkyState, time: number, fadeDistance: number): void {
+  update(camera: THREE.Camera, state: SkyState, time: number, fadeDistance: number, pixelRatio = 1): void {
     const cam = camera.position;
     this.dome.position.copy(cam);
     this.domeMat.uniforms.uTop.value.copy(state.top);
@@ -221,17 +250,26 @@ export class Sky {
     this.domeMat.uniforms.uSunset.value = state.sunset;
     this.domeMat.uniforms.uSun.value.copy(state.sun);
 
+    const real = state.celestial;
+    this.domeMat.uniforms.uGlare.value = real ? Math.max(0, Math.min(1, (state.sun.y + 0.05) / 0.15)) * eclipseLight(real.eclipse) ** 3 * (1 - state.rain) : 0;
+    if (real && !this.real) {
+      this.real = new RealSky();
+      this.group.add(this.real.group);
+    }
+    if (this.real) this.real.group.visible = !!real;
+    if (real) this.real!.update(camera, state, real, time / 20, pixelRatio);
+
     this.sunMesh.position.copy(cam).addScaledVector(state.sun, 40);
     this.sunMesh.lookAt(cam);
     this.moonMesh.position.copy(cam).addScaledVector(state.sun, -40);
     this.moonMesh.lookAt(cam);
-    this.sunMesh.visible = state.sun.y > -0.2;
-    this.moonMesh.visible = state.sun.y < 0.2;
+    this.sunMesh.visible = !real && state.sun.y > -0.2;
+    this.moonMesh.visible = !real && state.sun.y < 0.2;
 
     this.stars.position.copy(cam);
     this.stars.rotation.z = Math.atan2(state.sun.y, state.sun.x);
     this.starMat.opacity = state.stars;
-    this.stars.visible = state.stars > 0.01;
+    this.stars.visible = !real && state.stars > 0.01;
 
     this.clouds.visible = this.cloudsVisible;
     this.clouds.position.set(cam.x, 108, cam.z);

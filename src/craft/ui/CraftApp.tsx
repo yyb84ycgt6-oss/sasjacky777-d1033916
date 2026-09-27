@@ -55,6 +55,8 @@ function guestWorld(w: Welcome, room: string): WorldMeta {
     waystones: sanitizeWaystones(w.waystones),
     map: isMapId(w.map) ? w.map : undefined,
     mode: w.mode && typeof w.mode.id === "string" ? { id: w.mode.id.slice(0, 40), data: {} } : undefined,
+    skyEpoch: typeof w.skyEpoch === "number" && Number.isFinite(w.skyEpoch) ? w.skyEpoch : undefined,
+    place: w.place && Number.isFinite(w.place.lat) && Number.isFinite(w.place.lon) && Math.abs(w.place.lat) <= 90 ? { lat: w.place.lat, lon: w.place.lon } : undefined,
     version: 1,
   };
 }
