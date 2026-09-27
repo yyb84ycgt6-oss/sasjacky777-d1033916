@@ -88,6 +88,9 @@ async function listTasks(sb, userId, args) {
 async function createTask(sb, userId, args) {
   const title = typeof args.title === "string" ? args.title.trim() : "";
   if (!title) return fail("title is required");
+  if (args.status !== void 0 && !isOneOf(TASK_STATUSES, args.status)) {
+    return fail(`status must be one of: ${TASK_STATUSES.join(", ")}`);
+  }
   if (args.priority !== void 0 && !isOneOf(TASK_PRIORITIES, args.priority)) {
     return fail(`priority must be one of: ${TASK_PRIORITIES.join(", ")}`);
   }
@@ -95,6 +98,7 @@ async function createTask(sb, userId, args) {
     user_id: userId,
     title: title.slice(0, 500),
     description: typeof args.description === "string" ? args.description : null,
+    status: args.status ?? "todo",
     priority: args.priority ?? "medium",
     category: typeof args.category === "string" ? args.category : null,
     due_date: typeof args.due_date === "string" && args.due_date ? args.due_date : null
@@ -299,6 +303,7 @@ var create_task_default = defineTool2({
   inputSchema: {
     title: z2.string().trim().min(1).describe("Short task title."),
     description: z2.string().optional().describe("Optional longer detail."),
+    status: z2.enum(TASK_STATUSES).optional().describe("Column to start in (default todo)."),
     priority: z2.enum(TASK_PRIORITIES).optional().describe("Priority (default medium)."),
     category: z2.string().optional().describe("Optional grouping category."),
     due_date: z2.string().optional().describe("Optional ISO 8601 due date.")

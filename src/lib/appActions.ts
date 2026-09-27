@@ -81,10 +81,16 @@ export async function listTasks(
 export async function createTask(
   sb: Client,
   userId: string,
-  args: { title?: unknown; description?: unknown; priority?: unknown; category?: unknown; due_date?: unknown },
+  args: { title?: unknown; description?: unknown; status?: unknown; priority?: unknown; category?: unknown; due_date?: unknown },
 ): Promise<ActionResult> {
   const title = typeof args.title === "string" ? args.title.trim() : "";
   if (!title) return fail("title is required");
+  // The board adds a card straight into the column it was asked from. Without a
+  // status here that took a create and then an update, and a failed update left
+  // the card sitting in "todo" after the person had watched it land elsewhere.
+  if (args.status !== undefined && !isOneOf(TASK_STATUSES, args.status)) {
+    return fail(`status must be one of: ${TASK_STATUSES.join(", ")}`);
+  }
   if (args.priority !== undefined && !isOneOf(TASK_PRIORITIES, args.priority)) {
     return fail(`priority must be one of: ${TASK_PRIORITIES.join(", ")}`);
   }
@@ -94,6 +100,7 @@ export async function createTask(
       user_id: userId,
       title: title.slice(0, 500),
       description: typeof args.description === "string" ? args.description : null,
+      status: (args.status as TaskStatus | undefined) ?? "todo",
       priority: (args.priority as TaskPriority | undefined) ?? "medium",
       category: typeof args.category === "string" ? args.category : null,
       due_date: typeof args.due_date === "string" && args.due_date ? args.due_date : null,
