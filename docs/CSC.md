@@ -6,7 +6,8 @@ tradition of Minecraft:
 survival, creative and hardcore; mining, crafting, smelting, farming; mobs,
 water and lava, TNT, beds, day and night, weather; saves on the device, in a
 file or in the cloud; the Nether and the End, with strongholds, End cities,
-shulkers, the Ender Dragon, elytra and fireworks; 50 advancements to earn;
+shulkers, the Ender Dragon, elytra and fireworks; a starship to the real Solar
+System, at its real size (see [Space](#space)); 51 advancements to earn;
 seventeen features borrowed from the best-loved mods (minimap, waystones,
 seasons, gravestones, tameable wolves, catacombs and more — see [Mods](#mods));
 thirty-seven game modes on sixteen map packs, among them Primal (after ARK:
@@ -504,6 +505,77 @@ drive, rob and get chased through.
   world, a record to beat), Rampage (three-minute rounds of scored mayhem)
   and Cops & Robbers (rob stores, bank the bag before you are caught).
 
+## Space
+
+A Starship (iron blocks, glass, an eye of ender and firework rockets, or
+`/space` with cheats on) launches from wherever you stand, after a
+countdown, into orbit 400 km above that same spot on Earth. Out there is the
+Solar System as it really is, at its real size and where everything really is
+today — flown the way EVE Online flies ships.
+
+- **The world is the Earth.** Each world sits somewhere on the globe (a
+  latitude and longitude chosen from its seed) at one block to the metre, so
+  a launch rises from the right spot and a landing (`D`, or Land, from under
+  2,000 km over the Earth) comes down wherever the ship is — which is
+  somewhere in this world, perhaps thousands of kilometres from home. The day
+  is set to the Sun's hour there. Return home lands at the launch site. The
+  body you left behind is out of harm's way until you are back.
+- **Where things are** (`space/ephemeris.ts`, tested against real events —
+  the 2024 total eclipse, the 2022 lunar eclipse, the 2020 great conjunction
+  and Mars's opposition, both of Halley's perihelia):
+  - The planets and Pluto from JPL's Keplerian elements for approximate
+    positions (Standish): good to seconds of arc for the inner planets and
+    minutes for the outer ones, 1800–2050, and still close from 3000 BC to
+    3000 AD. The Earth is placed off the Earth–Moon barycentre by the Moon.
+  - The Moon from the largest terms of the ELP-2000/82 lunar theory, as Meeus
+    tabulates them.
+  - 29 moons in their planets' equatorial planes, with their real sizes,
+    shapes, tilts and periods (their places along the orbit are approximate);
+    Triton goes backwards.
+  - Asteroids (Vesta, Pallas, Juno, Hygiea, Psyche, Eros, Bennu, Ryugu,
+    Apophis, Phaethon), dwarf planets (Pluto, Ceres, Eris, Haumea, Makemake,
+    Sedna, Quaoar) and comets (Halley, Encke, Swift–Tuttle, Tempel–Tuttle,
+    Hale–Bopp, Hyakutake, McNaught, NEOWISE, 67P) from Minor Planet Center
+    and JPL elements, the old catalogues' B1950 ones precessed to J2000.
+    Periodic comets are timed between real perihelia: Halley's next is
+    28 July 2061. ʻOumuamua and Borisov pass through on open hyperbolas.
+  - The main belt with its Kirkwood gaps, the Hildas, Jupiter's Trojans and
+    the Kuiper belt, as a few thousand representative orbits.
+  - The Webb telescope at L2, and the two Voyagers heading out.
+- **Flying** (`space/flight.ts`): orders, not a joystick. Approach (`Q`),
+  orbit (`W`), keep at range (`E`), align (`A`), warp (`S`) to within 0,
+  10, 100 or 1,000 km; double-click space to fly that way; `M` the
+  microwarpdrive; `Space` stops. Velocity closes on what the order wants
+  exponentially, with an align time; warp needs the ship aligned and at three
+  quarters of its speed, then builds exponentially to 5 AU/s and falls off
+  toward the destination — seconds to the Moon, under twenty to Jupiter.
+  The ship keeps station relative to whatever it is near (its sphere of
+  influence), so a planet does not slide away at 30 km/s.
+- **The clock** runs in real time or up to three million times faster (`,`
+  and `.`), and can be set back to now; orbits, phases and comet tails follow.
+- **The overview** lists planets, the moons where you are, small bodies, or
+  everything, nearest first; Show Info (`I`) gives each body's facts and
+  numbers — size, mass, gravity, escape velocity, day, orbit, and how long
+  its light takes to reach the Earth.
+- **The view** (`space/spaceView.ts`): every body drawn in its own depth
+  range, far to near, so a 42-metre ship and Neptune 4.5 billion km away are
+  both sharp. The sky is the real one: the 5,044 stars to magnitude 6 with
+  their colours, and the Milky Way's measured outline. Worlds are painted by
+  code with their real features where known — the Earth's real coastlines
+  from Natural Earth, with clouds, deserts, ice and city lights on the night
+  side; the Moon's seas and Tycho's rays; Mars's dark Syrtis Major, bright
+  Hellas and caps; Jupiter's belts and Great Red Spot; Saturn's rings with
+  the Cassini Division and the planet's shadow; Pluto's heart; Iapetus's two
+  faces. Comets grow a blue ion tail and a curved dust tail inside five AU.
+
+Sources: JPL Solar System Dynamics (planetary elements and physical
+parameters), the Minor Planet Center, the IAU WGCCRE (poles and rotation),
+Jean Meeus's *Astronomical Algorithms* (the lunar series); stars from XHIP
+(Anderson & Francis 2012) and the Milky Way outline by Jose R. Vieira, both as
+packaged by d3-celestial (© 2015 Olaf Frohn, BSD 3-Clause — see
+`space/skyData.ts`); Earth's coastlines from Natural Earth (public domain).
+`scripts/csc-space-data.mjs` rebuilds the sky data from those sources.
+
 ## Commands
 
 With cheats on (a world option) or in creative: `/time`, `/gamemode`, `/give`,
@@ -511,7 +583,8 @@ With cheats on (a world option) or in creative: `/time`, `/gamemode`, `/give`,
 `/clear`, `/spawnpoint`, `/difficulty`, `/gamerule`, `/enchant`; `/summon slime 4`
 takes a size and `/summon villager mason` a trade;
 `/locate village|fortress|stronghold|end_city|catacombs|spider_cave` finds the nearest one, and
-`/dimension overworld|nether|end` crosses over as if through a portal; `/seed` and `/help` for
+`/dimension overworld|nether|end` crosses over as if through a portal, `/space` launches to orbit and
+`/space land` or `/space home` comes back down; `/seed` and `/help` for
 everyone. An online guest cannot run the ones that change the shared world.
 
 ## Mods

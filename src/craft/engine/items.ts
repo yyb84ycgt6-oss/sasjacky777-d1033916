@@ -73,7 +73,9 @@ export type ItemUse =
   /** Opened in the hand: a satchel of 27 slots carried with you. */
   | "backpack"
   /** Critters: an orb starts a battle with the wild critter it is aimed at (and catches, thrown in one); a medicine opens the party to give it. */
-  | "orb" | "critter_medicine";
+  | "orb" | "critter_medicine"
+  /** Launches its holder into space (space/): the ship waits in orbit above wherever they stand. */
+  | "launch";
 
 export type Category = "building" | "colored" | "natural" | "functional" | "redstone" | "tools" | "combat" | "food" | "ingredients";
 
@@ -483,6 +485,8 @@ item("revival_herb", "Revival Herb", { use: "critter_medicine", category: "tools
 item("honey_cake", "Honey Cake", { use: "critter_medicine", category: "tools", maxStack: 16 });
 // The city modes: a wad of bills dropped in the street. Picked up in a city, it goes straight to your cash (game.ts).
 item("cash", "Wad of Cash", { category: "tools" });
+// Space: a starship, kept folded in a pocket in the way of every other item, launched from wherever its holder stands.
+item("starship", "Starship", { use: "launch", category: "tools", maxStack: 1 });
 
 // ---- lookups -----------------------------------------------------------------------
 

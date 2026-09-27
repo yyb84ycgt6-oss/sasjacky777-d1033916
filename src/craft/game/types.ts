@@ -81,6 +81,8 @@ export type Screen =
   | { kind: "party"; give?: string; tab?: "party" | "dex" }
   | { kind: "starter"; rentals?: boolean }
   | { kind: "center"; x: number; y: number; z: number }
+  /** In space (space/): the ship's view and its overview. */
+  | { kind: "space" }
   /** Another player's ask to battle or trade, and a critter trade in progress (game/critterLink.ts). */
   | { kind: "link" }
   | { kind: "critter_trade" }
@@ -163,6 +165,9 @@ export interface Hud {
   hurtAt: number;
   sleeping: number;
   hudHidden: boolean;
+  /** In space, and a launch's countdown (seconds left). */
+  space?: boolean;
+  launch?: number | null;
   debug: string[] | null;
   coords: string | null;
   fps: number;

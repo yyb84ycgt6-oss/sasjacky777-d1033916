@@ -45,6 +45,8 @@ import { isDino, pickCreatures } from "../engine/creatures";
 import { canLearn, engramFor, ENGRAMS, type Engram } from "../engine/engrams";
 import { CritterPlay, type CritterOp } from "./critterPlay";
 import type { LinkMsg } from "./critterLink";
+import { SpaceSession, blockToLatLon } from "../space/session";
+import { SpaceView } from "../space/spaceView";
 import { BREAK_FALL, SICKNESS_TICKS, sicknessChance, statusLine, vitalsSecond, waterFrom, type VitalsRules } from "../engine/vitals";
 import { CREATURES, maxTorpor } from "../engine/creatures";
 import { favouriteFoods } from "../engine/dinoAi";
@@ -166,6 +168,11 @@ export interface NetLink {
 }
 
 /** Where a player lands after changing dimension. */
+/** "51.5°N 0.1°W", for a place on Earth. */
+export function latLonText(lat: number, lon: number): string {
+  return `${Math.abs(lat).toFixed(1)}°${lat >= 0 ? "N" : "S"} ${Math.abs(lon).toFixed(1)}°${lon >= 0 ? "E" : "W"}`;
+}
+
 export type Arrival =
   /** Through a portal: into the recorded one at x,y,z when `known`, else a new one built near there. */
   | { kind: "portal"; x: number; y: number; z: number; axis: PortalAxis; known: boolean }
@@ -280,6 +287,11 @@ export class Game {
   perspective: 0 | 1 | 2 = 0;
   hudHidden = false;
   debug = false;
+  /** A trip to space (space/session.ts): while it lasts, the player's body waits where they launched, out of harm's way. */
+  space: SpaceSession | null = null;
+  private spaceView: SpaceView | null = null;
+  /** Seconds left of a launch's countdown. */
+  private launchCountdown: number | null = null;
   hurtTilt = 0;
   lastHurtAt = 0;
   private running = false;
@@ -486,6 +498,7 @@ export class Game {
     const c = this.renderer.canvas;
     const w = c.clientWidth || window.innerWidth, h = c.clientHeight || window.innerHeight;
     this.renderer.resize(w, h, Math.min(window.devicePixelRatio || 1, this.settings.maxPixelRatio));
+    this.spaceView?.resize(w, h);
   }
 
   get isMobile(): boolean {
@@ -1272,7 +1285,8 @@ export class Game {
   // ---- effects ---------------------------------------------------------------------------
 
   sound(name: string, x: number | null, y = 0, z = 0, volume = 1, pitch = 1): void {
-    this.audio.play(name, x, y, z, volume, pitch);
+    // Space is silent: the world's sounds go on, but not for someone in orbit.
+    if (!this.space || x === null) this.audio.play(name, x, y, z, volume, pitch);
     // A local world opened to others mid-game is hosting too: the link, not the role it started with, decides.
     if (x !== null) this.net?.effect("sound", [name, round2(x), round2(y), round2(z), volume, pitch]);
   }
@@ -1635,6 +1649,8 @@ export class Game {
 
   hurtLocal(amount: number, source: DamageSource, fx?: number, fz?: number, kb = 0, attacker?: number): void {
     if (!this.meta.rules.doFallDamage && source === "fall") return;
+    // In space the body left behind is out of reach: nothing on the ground can hurt someone in orbit.
+    if (this.space || this.launchCountdown !== null) return;
     const dealt = this.player.hurt(amount, source, fx, fz, kb);
     if (dealt > 0) this.wound(amount, source, attacker);
     // A fireball's heat stays: the player burns for a few seconds after the hit.
@@ -1793,6 +1809,8 @@ export class Game {
   }
 
   setScreen(screen: Screen | null): void {
+    // In space, closing whatever is open (the pause menu, the chat) goes back to the ship.
+    if (!screen && this.space) screen = { kind: "space" };
     const was = this.screen;
     if (was && (was.kind === "inventory" || was.kind === "crafting" || was.kind === "enchanting" || was.kind === "anvil" || was.kind === "smithing" || was.kind === "cooking")) this.returnGrid();
     if (this.cursor && (!screen || screen.kind === "pause")) {
@@ -2055,7 +2073,10 @@ export class Game {
       }
     }
     const target = this.actions.target?.block ?? null;
-    this.renderer.render({
+    if (this.launchCountdown !== null) this.countdown(dt);
+    if (this.space) {
+      this.renderSpace(dt);
+    } else this.renderer.render({
       dt, alpha,
       // Behind a car the camera rides higher and further back, as a chase camera does.
       camera: { x: ix, y: eye + (localCar && this.perspective !== 0 ? 1.2 : 0), z: iz, yaw: p.yaw, pitch: p.pitch, fov: this.settings.fov * (p.sprinting ? 1.1 : 1) * (this.actions.bowFov()) * (localCar ? 1 + Math.min(0.15, Math.abs(localCar.speed) * 0.1) : 1) },
@@ -3004,6 +3025,97 @@ export class Game {
     this.loadingSince = performance.now();
   }
 
+  // ---- space -------------------------------------------------------------------------------------
+
+  /**
+   * Starts a launch from where the player stands: a countdown, then up — into
+   * orbit 400 km above the same spot on Earth (space/session.ts places this
+   * world on the globe). Only from the overworld: the Nether and the End are
+   * not under the sky.
+   */
+  launch(): void {
+    if (this.space || this.launchCountdown !== null) return;
+    if (this.dimension !== "overworld") { this.showActionbar("There is no sky to launch into here."); return; }
+    if (this.player.dead) return;
+    this.launchCountdown = 4;
+    this.sound("countdown", null, 0, 0, 0.9, 0.8);
+    this.showTitle("T minus 3", "Launch sequence started");
+  }
+
+  /** The countdown's seconds: fire and smoke under the ship, then the climb. */
+  private countdown(dt: number): void {
+    const before = this.launchCountdown!;
+    const t = Math.max(0, before - dt);
+    this.launchCountdown = t;
+    const b = this.player.body;
+    for (const mark of [3, 2, 1]) if (before > mark && t <= mark) { this.showTitle(mark === 1 ? "Liftoff!" : `T minus ${mark - 1}`, mark === 1 ? "" : "Launch sequence started"); this.sound("countdown", null, 0, 0, 0.9, mark === 1 ? 1.4 : 0.8); }
+    if (t < 3) {
+      this.renderer.particles.emit("smoke", b.x + (Math.random() - 0.5) * 2, b.y, b.z + (Math.random() - 0.5) * 2, 3, 0);
+      this.renderer.particles.emit("flame", b.x + (Math.random() - 0.5), b.y, b.z + (Math.random() - 0.5), 2, 0);
+      this.hurtTilt = Math.min(0.4, 0.1 + (3 - t) * 0.1);
+    }
+    if (before > 1 && t <= 1) this.sound("firework_launch", null, 0, 0, 1, 0.5);
+    if (t <= 0) {
+      this.launchCountdown = null;
+      const { lat, lon } = blockToLatLon(this.meta.seed, b.x, b.z);
+      this.spaceView ??= new SpaceView(this.renderer.renderer);
+      const c = this.renderer.canvas;
+      this.spaceView.resize(c.clientWidth || window.innerWidth, c.clientHeight || window.innerHeight);
+      this.space = new SpaceSession(this.meta.seed, { lat, lon });
+      this.space.say(`In orbit, 400 km above ${latLonText(lat, lon)}`);
+      this.setScreen({ kind: "space" });
+      this.advance({ kind: "space" });
+    }
+  }
+
+  /** One frame in space: the session moves on, and the space view is drawn instead of the world. */
+  private renderSpace(dt: number): void {
+    const s = this.space!;
+    // Paused alone, the clock stops; online, the Solar System goes on without the menu.
+    const paused = this.screen?.kind === "pause" && !this.net;
+    if (!paused) s.update(dt);
+    this.spaceView!.render(s.frame(paused ? 0 : dt));
+    if (s.landing === 0) this.land();
+  }
+
+  /** The overlay the space view draws its orbits and brackets on. */
+  setSpaceOverlay(canvas: HTMLCanvasElement | null): void {
+    this.spaceView?.setOverlay(canvas);
+  }
+
+  /** The body under a point of the screen, for clicks in space. */
+  spacePick(x: number, y: number): string | null {
+    return this.spaceView?.pick(x, y) ?? null;
+  }
+
+  spaceDirection(x: number, y: number): [number, number, number] | null {
+    return this.spaceView?.directionAt(x, y) ?? null;
+  }
+
+  /**
+   * Comes down wherever on Earth the ship is — which is somewhere in this
+   * world — and, playing alone or hosting, sets the day to the sun's hour
+   * there. `home` lands at the launch site instead.
+   */
+  land(home = false): void {
+    const s = this.space;
+    if (!s) return;
+    const site = home ? null : s.landingBlock();
+    const b = this.player.body;
+    const x = site ? site.x + 0.5 : b.x, z = site ? site.z + 0.5 : b.z;
+    const where = site ? latLonText(site.lat, site.lon) : "the launch site";
+    if (this.simulates && site) {
+      // Noon is 6000 ticks into the day; each hour of solar time is a thousand ticks.
+      const hours = s.solarHours(site.lon);
+      this.time = Math.floor(this.time / 24000) * 24000 + Math.round(((hours - 6 + 24) % 24) * 1000);
+    }
+    this.space = null;
+    this.setScreen(null);
+    this.travelTo(x, null, z);
+    this.showTitle("Welcome home", `Landed at ${where}`);
+    this.sound("portal_travel", null, 0, 0, 0.6, 1.3);
+  }
+
   /** Chunks edited since they were last painted onto the map, a few repainted each second. */
   private readonly mapDirty = new Set<number>();
 
@@ -3434,6 +3546,8 @@ export class Game {
       hurtAt: this.lastHurtAt,
       sleeping: p.sleeping ? Math.min(1, p.sleepTicks / 100) : 0,
       hudHidden: this.hudHidden,
+      space: !!this.space,
+      launch: this.launchCountdown,
       debug: this.debug ? this.debugLines() : null,
       coords: this.settings.showCoordinates ? `${Math.floor(b.x)}, ${Math.floor(b.y)}, ${Math.floor(b.z)}` : null,
       fps: this.fps,

@@ -133,7 +133,8 @@ export function sanitizeModeTell(v: unknown): ModeTell {
 //    confiscations, captions and mission markers — a guest on 5 could not build a single one of them.
 // 7: link battles and critter trades between players (the "cv" op), Team Copium, and the meme critters — a
 //    guest on 6 would meet species and trainers it has never heard of, and could not answer a challenge.
-const PROTOCOL = 7;
+// 8: the Starship item (a new item id) and the space trip it starts — a guest on 7 would hold an item it cannot draw.
+const PROTOCOL = 8;
 const FLUSH_TICKS = 2;
 const ENTITY_TICKS = 4;
 const ENV_TICKS = 40;

@@ -30,6 +30,7 @@ import { ModsScreen } from "./ModsScreen";
 import { BattleScreen, CenterScreen, CritterTradeScreen, LinkScreen, PartyScreen, PartyStrip, StarterScreen } from "./CritterScreens";
 import { CasinoScreen } from "./CasinoScreens";
 import { ShopScreen } from "./CityScreens";
+import { SpaceScreen } from "./SpaceScreen";
 
 export interface GameViewProps {
   meta: WorldMeta;
@@ -202,7 +203,7 @@ function Overlay({ game, input, settings, onSettings, onQuit, onExitApp }: GameV
           <Minimap game={game} />
         </>
       )}
-      <Hud hud={hud} mobile={mobile} crosshair={!mobile || settings.touchMode === "buttons"} />
+      {!hud.space && <Hud hud={hud} mobile={mobile} crosshair={!mobile || settings.touchMode === "buttons"} />}
       {hud.critters && !screen && !hud.hudHidden && !hud.loading && <PartyStrip party={hud.critters.party} />}
 
       {!mobile && !screen && !locked && !hud.loading && !hud.dead && (
@@ -254,6 +255,11 @@ function Overlay({ game, input, settings, onSettings, onQuit, onExitApp }: GameV
       {screen?.kind === "party" && <PartyScreen key={`${screen.give ?? ""}${screen.tab ?? ""}`} game={game} give={screen.give} tab={screen.tab} />}
       {screen?.kind === "starter" && <StarterScreen game={game} rentals={screen.rentals} />}
       {screen?.kind === "center" && <CenterScreen game={game} x={screen.x} y={screen.y} z={screen.z} />}
+      {/* In space the ship's screen stays up under the pause menu and the chat, which open over it. */}
+      {hud.space && (screen?.kind === "space" || screen?.kind === "pause" || screen?.kind === "chat" || screen?.kind === "options") && <SpaceScreen game={game} />}
+      {hud.launch !== null && hud.launch !== undefined && hud.launch < 1 && (
+        <div className="absolute inset-0 pointer-events-none" style={{ background: `rgba(0,0,0,${1 - hud.launch})` }} />
+      )}
       {screen?.kind === "link" && <LinkScreen game={game} />}
       {screen?.kind === "critter_trade" && <CritterTradeScreen game={game} />}
       {screen?.kind === "engrams" && <EngramScreen game={game} onBack={() => game.setScreen(screen.from === "pause" ? { kind: "pause" } : { kind: "inventory" })} />}
