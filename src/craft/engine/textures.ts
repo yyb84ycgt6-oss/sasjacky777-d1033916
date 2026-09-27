@@ -2621,6 +2621,25 @@ const ITEM_TEMPLATES: Record<string, string[]> = {
     "..hha...........",
     "..hh............",
   ],
+  // A starship standing on its fins: a white hull, a window, and a flame under it.
+  starship: [
+    ".......aa.......",
+    "......abba......",
+    "......abba......",
+    ".....abbbba.....",
+    ".....abwwba.....",
+    ".....abwwba.....",
+    ".....abbbba.....",
+    ".....abccba.....",
+    ".....abbbba.....",
+    "....aabbbbaa....",
+    "...adabbbbada...",
+    "..adddabbadda...",
+    "..aaa.acca.aaa..",
+    "......affa......",
+    ".......ff.......",
+    "................",
+  ],
   // A folded wad of banknotes, a band round the middle.
   bills: [
     "................",
@@ -2908,6 +2927,7 @@ art("strong_tonic", "vial", paletteOf("#d8508a", { h: hex("#d8d8d8") }));
 art("cure_all", "vial", paletteOf("#f0d040", { h: hex("#8a6536") }));
 art("revival_herb", "herb", { b: hex("#3c9a3a"), c: hex("#6ad06a"), g: hex("#2a6a2a"), f: hex("#f0c040"), w: hex("#fff8d0") });
 art("honey_cake", "bread", paletteOf("#e0a030", { c: hex("#f8d870") }));
+art("starship", "starship", { a: hex("#2a2e36"), b: hex("#e8ecf0"), c: hex("#c8742c"), d: hex("#8a3a2a"), w: hex("#6ab8f0"), f: hex("#ffc040") });
 art("cash", "bills", { a: hex("#1e3a1e"), b: hex("#5aa84a"), c: hex("#8ad07a"), d: hex("#2a6a2a"), w: hex("#f0f0d8") });
 art("bread", "bread", paletteOf("#b8843a"));
 art("carrot", "carrot", paletteOf("#ef8a1c", { g: hex("#4c9a2a") }));

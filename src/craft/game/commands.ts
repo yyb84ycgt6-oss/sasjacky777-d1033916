@@ -47,6 +47,7 @@ const HELP = [
   "/summon <mob> [size|profession]  (pig, cow, ..., slime 4, villager librarian, iron_golem)",
   "/critter give <species> [level] | wild <species> [level] | heal | coins <n> | list",
   "/battle <player>, /trade <player>, /accept, /decline   (critter link battles and trades)",
+  "/space, /space land, /space home   (launch to orbit, and come back down)",
   "/effect <speed|strength|fire_resistance|...> [seconds] [level] | /effect clear",
   "/enchant <enchantment> [level]   (the held item, e.g. /enchant sharpness 5)",
   "/xp add <amount>, /clear, /kill, /seed, /spawnpoint",
@@ -272,6 +273,20 @@ export function runCommand(game: Game, line: string): Line[] {
       const r = game.critters.link.byName(who);
       if (!r) return [{ text: `No player called ${who} here.`, color: ERR }];
       return [{ text: game.critters.link.ask(r.id, what) }];
+    }
+    case "space": {
+      // Straight to orbit, or straight home: a starship without the crafting.
+      const denied = needCheats();
+      if (denied) return denied;
+      const sub = (args[0] ?? "").toLowerCase();
+      if (sub === "land" || sub === "home") {
+        if (!game.space) return [{ text: "You are not in space.", color: ERR }];
+        game.land(sub === "home");
+        return [{ text: "Coming down." }];
+      }
+      if (game.space) return [{ text: "Already in space. /space land comes down where you are, /space home at the launch site." }];
+      game.launch();
+      return [{ text: "Launch sequence started." }];
     }
     case "accept": return [{ text: game.critters.link.accept() }];
     case "decline": return [{ text: game.critters.link.decline() }];

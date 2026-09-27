@@ -156,6 +156,8 @@ export class Actions {
       // Escape backs out of whatever is open; the death screen stays until a choice is made, a battle until it is
       // run from or won, and a new trainer's first critter until it is chosen.
       if (g.screen?.kind === "battle" || (g.screen?.kind === "starter" && !p.card.party.length)) return;
+      // In space, Escape opens the pause menu over the ship's view rather than closing it.
+      if (g.screen?.kind === "space") { g.setScreen({ kind: "pause" }); return; }
       // Walking away from a trade calls it off, so the other player is not left waiting on an empty table.
       if (g.screen?.kind === "critter_trade") { g.critters.link.endTrade("You called off the trade."); return; }
       if (g.screen && g.screen.kind !== "death") g.setScreen(null);
@@ -171,7 +173,7 @@ export class Actions {
       if (!g.screen) g.setScreen({ kind: "pause" });
       return;
     }
-    if (a.type === "chat") { if (!g.screen) g.setScreen({ kind: "chat", text: a.text ?? "" }); return; }
+    if (a.type === "chat") { if (!g.screen || g.screen.kind === "space") g.setScreen({ kind: "chat", text: a.text ?? "" }); return; }
     if (a.type === "inventory") {
       const k = g.screen?.kind;
       if (k === "inventory" || k === "crafting" || k === "furnace" || k === "chest" || k === "brewing" || k === "enchanting" || k === "anvil" || k === "smithing" || k === "trade" || k === "backpack" || k === "cooking") g.setScreen(null);
@@ -714,6 +716,7 @@ export class Actions {
       g.showActionbar(g.critters.on ? "Aim at a wild critter and use the orb to battle it." : "There are no critters in this world.");
       return;
     }
+    if (def.use === "launch") { g.launch(); return; }
     if (def.use === "critter_medicine") {
       if (g.critters.on && p.card.party.length) g.setScreen({ kind: "party", give: def.name });
       else g.showActionbar("You have no critters to give it to.");

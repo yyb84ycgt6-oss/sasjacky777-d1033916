@@ -127,6 +127,11 @@ export class DesktopInput {
       a.push({ type: g.screen ? "close" : "pause" });
       return;
     }
+    // In space the ship's screen has its own keys (ui/SpaceScreen.tsx); only chat is the game's.
+    if (g.screen?.kind === "space") {
+      if (e.code === "KeyT" || e.code === "Enter" || e.code === "Slash") { a.push({ type: "chat", text: e.code === "Slash" ? "/" : undefined }); e.preventDefault(); }
+      return;
+    }
     if (e.code === "KeyE" && g.screen && g.screen.kind !== "chat" && g.screen.kind !== "pause" && g.screen.kind !== "options" && g.screen.kind !== "death" && g.screen.kind !== "share") {
       a.push({ type: "inventory" });
       e.preventDefault();

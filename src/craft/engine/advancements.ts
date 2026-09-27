@@ -25,7 +25,7 @@ export type Trigger =
   | { kind: "brew" }
   | { kind: "dimension"; dimension: Dimension }
   /** Something that happened once, named: the dragon slain, a stronghold found, a gateway taken. */
-  | { kind: "event"; event: "dragon" | "stronghold" | "gateway" | "city" | "levitate" | "waystone" | "tame" | "catch" | "badge" | "champion" | "casino_win" | "jackpot" | "millionaire" | "link_win" | "trade" | "copium" };
+  | { kind: "event"; event: "dragon" | "stronghold" | "gateway" | "city" | "levitate" | "waystone" | "tame" | "catch" | "badge" | "champion" | "casino_win" | "jackpot" | "millionaire" | "link_win" | "trade" | "copium" | "space" };
 
 export interface Advancement {
   id: string;
@@ -87,6 +87,8 @@ export const ADVANCEMENTS: readonly Advancement[] = [
   { id: "copium", title: "Cope Harder", description: "Defeat Maximus Hype, the CEO of Team Copium", icon: "silver_orb", trigger: { kind: "event", event: "copium" } },
   { id: "link_win", title: "GG", description: "Win a link battle against another player", icon: "capture_orb", trigger: { kind: "event", event: "link_win" } },
   { id: "trade", title: "Fair Trade", description: "Trade a critter with another player", icon: "emerald", trigger: { kind: "event", event: "trade" } },
+  // Space.
+  { id: "space", title: "We Have Liftoff", description: "Launch a starship into orbit", icon: "starship", trigger: { kind: "event", event: "space" } },
   // The casino.
   { id: "casino_win", title: "Winner Winner", description: "Win at a casino table", icon: "gold_nugget", trigger: { kind: "event", event: "casino_win" } },
   { id: "jackpot", title: "Stonks", description: "Win a hundred times your stake at once", icon: "gold_block", trigger: { kind: "event", event: "jackpot" } },
@@ -120,7 +122,7 @@ export type AdvancementEvent =
   | { kind: "kill"; hostile: boolean } | { kind: "sleep" } | { kind: "eat" } | { kind: "enchant" } | { kind: "brew" }
   | { kind: "dimension"; dimension: Dimension } | { kind: "dragon" } | { kind: "stronghold" } | { kind: "gateway" }
   | { kind: "city" } | { kind: "levitate" } | { kind: "waystone" } | { kind: "tame" } | { kind: "catch" } | { kind: "badge" } | { kind: "champion" }
-  | { kind: "casino_win" } | { kind: "jackpot" } | { kind: "millionaire" } | { kind: "link_win" } | { kind: "trade" } | { kind: "copium" };
+  | { kind: "casino_win" } | { kind: "jackpot" } | { kind: "millionaire" } | { kind: "link_win" } | { kind: "trade" } | { kind: "copium" } | { kind: "space" };
 
 /**
  * Which not-yet-earned advancements the player has now earned: from their

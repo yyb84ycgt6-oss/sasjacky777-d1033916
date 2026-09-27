@@ -480,6 +480,8 @@ shaped("quartz_block", ["##", "##"], { "#": "quartz" }, "quartz_block");
 shaped("magma_block", ["##", "##"], { "#": "magma_cream" }, "magma_block");
 shaped("nether_wart_block", ["###", "###", "###"], { "#": "nether_wart" }, "nether_wart_block");
 shaped("bone_block", ["###", "###", "###"], { "#": "bone_meal" }, "bone_block");
+// Space: iron for the hull, glass for the window, an eye of ender to steer by, rockets to go up on.
+shaped("starship", [" G ", "IEI", "IRI"], { G: "glass", I: "iron_block", E: "eye_of_ender", R: "firework_rocket" }, "starship");
 shapeless("bone_meal_from_block", ["bone_block"], "bone_meal", 9);
 shapeless("netherite_ingot", ["netherite_scrap", "netherite_scrap", "netherite_scrap", "netherite_scrap", "gold_ingot", "gold_ingot", "gold_ingot", "gold_ingot"], "netherite_ingot");
 shapeless("fire_charge", ["gunpowder", "blaze_powder", "#coals"], "fire_charge", 3);
