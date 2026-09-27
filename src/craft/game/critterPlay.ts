@@ -26,6 +26,7 @@ import { BADGES, prizeFor, towerTrainer, trainerById, trainerTeam, trainerTitle,
 import { mapLayout, type CritterArea, type MapLayout } from "../engine/maps";
 import { Generator } from "../engine/worldgen";
 import { modeDef } from "../modes/modes";
+import { CritterLink, type LinkBattle } from "./critterLink";
 
 /** A battle on the local player's screen, and what in the world it is with. */
 export interface BattleSession {
@@ -40,6 +41,8 @@ export interface BattleSession {
   /** One-life rules: whether this critter may be caught (the first met in its area only). */
   catchable: boolean;
   area: string | null;
+  /** A link battle against another player (game/critterLink.ts). */
+  link?: LinkBattle;
 }
 
 /** What one "ck" message asks of the host. */
@@ -86,8 +89,12 @@ export class CritterPlay {
   private challenge: { entity: number; ticks: number } | null = null;
   private ticks = 0;
   private walkingSent: string | null = null;
+  /** Battles and trades with other players. */
+  readonly link: CritterLink;
 
-  constructor(private readonly g: Game) {}
+  constructor(private readonly g: Game) {
+    this.link = new CritterLink(g, this);
+  }
 
   /** Whether this world is one of the critter modes. */
   get on(): boolean {
@@ -238,6 +245,7 @@ export class CritterPlay {
   act(action: Action): BattleEvent[] {
     const s = this.battle;
     if (!s || s.b.over) return [];
+    if (s.link) return this.link.act(action);
     if (action.kind === "item") {
       const name = this.nameOf(action.item);
       if (this.count(action.item) <= 0) return [{ t: "text", text: `You have no ${name} left.` }];
@@ -262,6 +270,8 @@ export class CritterPlay {
     switch (e.t) {
       case "move": g.sound("critter_move", p.x, p.y, p.z, 0.6, 0.9 + Math.random() * 0.3); break;
       case "hit":
+        // In a link battle each player's machine sparks its own critter: the other's is theirs to show.
+        if (s.b.kind === "link" && e.side !== "player") break;
         if (e.type && e.side) {
           if (e.side === "foe" && s.wild !== null) this.request(["fxe", s.wild, e.type, 1]);
           else this.request(["fx", e.side === "player" ? "mine" : "foe", e.type, 1]);
@@ -296,6 +306,15 @@ export class CritterPlay {
     const b = s.b;
     const result = b.over ?? "ran";
     const lines: string[] = [];
+    if (s.link) {
+      // Copies fought, so there is nothing to settle but the record.
+      this.link.left();
+      const rec = (card.link ??= { wins: 0, losses: 0, trades: 0 });
+      if (result === "win") { rec.wins++; g.advance({ kind: "link_win" }); lines.push(`You won the link battle against ${s.link.peerName}!`); }
+      else if (result === "lose") { rec.losses++; lines.push(`${s.link.peerName} won the link battle. GG.`); }
+      lines.push(`Link record: ${rec.wins} won, ${rec.losses} lost.`);
+      return this.close(lines);
+    }
     if (result === "caught" && b.caught) {
       const c = b.caught;
       c.ot = g.player.name;
@@ -332,6 +351,10 @@ export class CritterPlay {
           g.showTitle("Champion!", `${g.player.name} and ${card.party.map(displayName).join(", ")}`);
           g.advance({ kind: "champion" });
         }
+        if (t.cls === "ceo") {
+          g.showTitle("Team Copium disbanded", "…and rebranded. It's Team Hopium now.");
+          g.advance({ kind: "copium" });
+        }
       }
     }
     if (s.trainer && (s.trainer.cls === "tower" || s.trainer.cls === "tycoon") && result === "lose") {
@@ -355,8 +378,13 @@ export class CritterPlay {
       }
     }
     for (const e of evolveAfter(card.party)) { lines.push(e.text); g.showTitle(`${SPECIES[e.to].name}!`, e.text); g.sound("level_up", null); }
-    // The world lets go: the critters out for the battle go back, and whoever was walking comes out again.
     if (s.trainer && s.trainerEntity === null) this.request(["in", "npc"]);
+    return this.close(lines);
+  }
+
+  /** The world lets go: the critters out for the battle go back, and whoever was walking comes out again. */
+  private close(lines: string[]): string[] {
+    const g = this.g;
     this.request(["in", "foe"]);
     this.battle = null;
     this.walkingSent = null;
@@ -387,6 +415,7 @@ export class CritterPlay {
     if (!this.on) return;
     const g = this.g;
     this.ticks++;
+    this.link.tick();
     if (this.challenge) {
       if (--this.challenge.ticks <= 0) {
         const e = g.entities.get(this.challenge.entity);
@@ -684,10 +713,24 @@ export class CritterPlay {
     const c = activeOf(s.b, "player");
     if (!c) return;
     const p = this.g.player.body;
-    const pos = at ?? this.inFront(s.wild !== null ? this.g.entities.get(s.wild)?.x ?? p.x : fx, s.wild !== null ? this.g.entities.get(s.wild)?.z ?? p.z : fz);
-    const foe = s.wild !== null ? this.g.entities.get(s.wild) : null;
-    const face = foe ? { x: foe.x, z: foe.z } : { x: fx || p.x, z: fz || p.z };
+    // What it faces: the wild critter, the spot it was sent toward, or (a switch mid-battle) the foe's critter —
+    // not (0, 0), which a switch once turned it to face, sending it out toward the world's centre.
+    const wild = s.wild !== null ? this.g.entities.get(s.wild) : null;
+    const face = wild ? { x: wild.x, z: wild.z } : at ? { x: fx, z: fz } : this.lastFoe ? { x: this.lastFoe.x, z: this.lastFoe.z } : { x: fx || p.x, z: fz || p.z };
+    const pos = at ?? this.inFront(face.x, face.z);
     this.request(["out", "mine", c.uid, c.species, c.level, c.shiny ? 1 : 0, pos.x, this.groundY(pos.x, pos.z, p.y), pos.z, face.x, face.z, 0]);
+  }
+
+  /** A link battle begins: this player's critter comes out facing the other player, and the view turns to them. */
+  linkStart(px: number, pz: number): void {
+    this.lastFoe = { x: px, z: pz, face: { x: px, z: pz } };
+    this.sendMine(this.inFront(px, pz), px, pz);
+    this.look(px, this.g.player.body.y + 0.6, pz);
+  }
+
+  /** The world's side of a link battle's turn: this player's critter switched out, if it was. */
+  linkWorld(events: BattleEvent[]): void {
+    if (events.some((e) => e.t === "switch" && e.side === "player")) this.sendMine(null, 0, 0);
   }
 
   private lastFoe: { x: number; z: number; face: { x: number; z: number } } | null = null;
@@ -725,7 +768,7 @@ export class CritterPlay {
     return near;
   }
 
-  private see(species: string): void {
+  see(species: string): void {
     const card = this.card;
     if (!card.seen.includes(species)) card.seen.push(species);
   }

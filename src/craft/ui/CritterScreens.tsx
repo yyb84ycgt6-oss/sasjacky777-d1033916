@@ -7,6 +7,10 @@
  * each, health bars sliding, sparks in the world where a move lands — then
  * offers the next choice. A click hurries it along. The world stays in view
  * above: this is a battle in the world, not a cut to somewhere else.
+ *
+ * A link battle against another player plays the same way, except that a
+ * turn waits for both players' choices: the screen says whom it is waiting
+ * for, and plays the turn the moment it comes back.
  */
 import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import type { Game } from "../game/game";
@@ -68,7 +72,7 @@ interface Shown { name: string; level: number; hp: number; max: number; status: 
 
 const shownOf = (c: Critter): Shown => ({ name: displayName(c), level: c.level, hp: c.hp, max: maxHp(c), status: c.status, shiny: c.shiny, types: SPECIES[c.species]?.types ?? [] });
 
-type Phase = "playing" | "menu" | "fight" | "bag" | "party" | "medicine" | "switch" | "learn" | "end";
+type Phase = "playing" | "menu" | "fight" | "bag" | "party" | "medicine" | "switch" | "learn" | "end" | "waiting";
 
 export function BattleScreen({ game }: { game: Game }) {
   const cp = game.critters;
@@ -83,9 +87,12 @@ export function BattleScreen({ game }: { game: Game }) {
   const [mine, setMine] = useState<Shown | null>(() => (b && b.kind !== "safari" && activeOf(b, "player") ? shownOf(activeOf(b, "player")) : null));
   const [foe, setFoe] = useState<Shown | null>(() => (b ? shownOf(activeOf(b, "foe")) : null));
   const timer = useRef<number | null>(null);
+  /** Whether events are being played out now: another player's turn arriving mid-play joins the queue, not a second chain. */
+  const playing = useRef(true);
 
   const settle = () => {
     if (!b) return;
+    playing.current = false;
     if (b.kind !== "safari" && activeOf(b, "player")) setMine(shownOf(activeOf(b, "player")));
     setFoe(shownOf(activeOf(b, "foe")));
     if (b.over) setPhase(b.offers.length ? "learn" : "end");
@@ -113,7 +120,14 @@ export function BattleScreen({ game }: { game: Game }) {
 
   useEffect(() => {
     timer.current = window.setTimeout(step, 250);
-    return () => { if (timer.current) window.clearTimeout(timer.current); };
+    // A link battle: the other player's turn (or their leaving) arrives when it arrives, and is played as it does.
+    const poll = session?.link ? window.setInterval(() => {
+      const ev = cp.link.takeIncoming();
+      if (!ev.length) return;
+      queue.current.push(...ev);
+      if (!playing.current) { playing.current = true; setPhase("playing"); step(); }
+    }, 150) : null;
+    return () => { if (timer.current) window.clearTimeout(timer.current); if (poll) window.clearInterval(poll); };
     // Once, on opening: the battle's own opening lines.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -128,13 +142,18 @@ export function BattleScreen({ game }: { game: Game }) {
 
   const act = (a: Action) => {
     const events = cp.act(a);
-    if (!events.length) return;
+    if (!events.length) {
+      if (session.link?.mine) { setPhase("waiting"); setMessage(`Waiting for ${session.link.peerName}…`); }
+      return;
+    }
     queue.current.push(...events);
+    playing.current = true;
     setPhase("playing");
     setMedicine(null);
     step();
     refresh();
   };
+  const link = b.kind === "link";
 
   const player = b.kind !== "safari" ? activeOf(b, "player") : null;
   const inBag = (item: string) => cp.count(item);
@@ -151,7 +170,7 @@ export function BattleScreen({ game }: { game: Game }) {
       <div style={{ margin: `${u(1)} 0` }}>{s.types.map((t) => <TypeBadge key={t} type={t} />)}</div>
       <Bar value={s.hp} max={s.max} />
       {side === "player" && <div className="bc-sub" style={{ fontSize: u(5) }}>{Math.max(0, s.hp)}/{s.max}</div>}
-      {side === "player" && player && (
+      {side === "player" && player && !link && (
         <div style={{ marginTop: u(1) }}>
           <Bar value={player.xp - xpForLevel(player.level)} max={xpForLevel(player.level + 1) - xpForLevel(player.level)} color="#4ab0f0" height={1.2} />
         </div>
@@ -180,9 +199,9 @@ export function BattleScreen({ game }: { game: Game }) {
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: u(3) }} data-testid="battle-menu">
           <Button onClick={() => setPhase("fight")}>Fight</Button>
-          <Button onClick={() => setPhase("bag")}>Bag</Button>
+          <Button onClick={() => setPhase("bag")} disabled={link}>Bag</Button>
           <Button onClick={() => setPhase("party")}>Critters</Button>
-          <Button onClick={() => act({ kind: "run" })} disabled={b.kind === "trainer"}>Run</Button>
+          <Button onClick={() => act({ kind: "run" })} disabled={b.kind === "trainer"}><span data-testid="battle-run">{link ? "Forfeit" : "Run"}</span></Button>
         </div>
       );
       break;
@@ -254,6 +273,13 @@ export function BattleScreen({ game }: { game: Game }) {
         </div>
       ) : null;
       break;
+    case "waiting":
+      menu = (
+        <div style={{ display: "flex", justifyContent: "flex-end" }} data-testid="battle-waiting">
+          <Button onClick={() => act({ kind: "run" })}>Forfeit</Button>
+        </div>
+      );
+      break;
     case "end":
       menu = (
         <div style={{ display: "flex", flexDirection: "column", gap: u(3) }}>
@@ -289,20 +315,21 @@ export function BattleScreen({ game }: { game: Game }) {
 export function PartyScreen({ game, give, tab: startTab }: { game: Game; give?: string; tab?: "party" | "dex" }) {
   const cp = game.critters, card = game.player.card;
   const [, refresh] = useReducer((n: number) => n + 1, 0);
-  const [tab, setTab] = useState<"party" | "dex">(startTab ?? "party");
+  const [tab, setTab] = useState<"party" | "dex" | "link">(startTab ?? "party");
   const [note, setNote] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const spire = cp.rules.spire;
   return (
-    <MenuFrame title={give ? `Give ${cp.nameOf(give)}` : tab === "party" ? "Your Critters" : "Field Guide"} width={300}>
+    <MenuFrame title={give ? `Give ${cp.nameOf(give)}` : tab === "party" ? "Your Critters" : tab === "dex" ? "Field Guide" : "Link"} width={300}>
       <div className="bc-sub" style={{ textAlign: "center" }} data-testid="party-summary">
         {card.coins} coins · {card.badges.length}/{BADGES.length} badges · caught {card.caught.length} of {SPECIES_IDS.length}
         {spire ? ` · Spire streak ${card.spire?.streak ?? 0} (best ${card.spireBest ?? 0})` : ""}
       </div>
       {!give && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: u(3) }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: u(3) }}>
           <Button disabled={tab === "party"} onClick={() => setTab("party")}>Party</Button>
           <Button disabled={tab === "dex"} onClick={() => setTab("dex")}>Field Guide</Button>
+          <Button disabled={tab === "link"} onClick={() => setTab("link")}><span data-testid="party-link-tab">Link</span></Button>
         </div>
       )}
       {note && <div className="bc-sub" style={{ color: "#ffff99", textAlign: "center" }}>{note}</div>}
@@ -332,7 +359,11 @@ export function PartyScreen({ game, give, tab: startTab }: { game: Game; give?: 
                       </div>
                     ))}
                   </div>
-                  {SPECIES[c.species].evolves && <div className="bc-sub">Evolves into {SPECIES[SPECIES[c.species].evolves!.to].name} at level {SPECIES[c.species].evolves!.level}.</div>}
+                  {SPECIES[c.species].evolves && (
+                    <div className="bc-sub">
+                      Evolves into {SPECIES[SPECIES[c.species].evolves!.to].name} {SPECIES[c.species].evolves!.trade ? "when it is traded" : `at level ${SPECIES[c.species].evolves!.level}`}.
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -353,10 +384,127 @@ export function PartyScreen({ game, give, tab: startTab }: { game: Game; give?: 
           })}
         </div>
       )}
+      {tab === "link" && <LinkList game={game} onNote={setNote} />}
       {spire && card.party.length > 0 && !give && (
         <Button wide onClick={() => { game.setScreen(null); cp.startSpire(); }}>Face the next challenger</Button>
       )}
       <Button wide onClick={() => game.setScreen(null)}>Done</Button>
+    </MenuFrame>
+  );
+}
+
+/** The other players in the world, each with a challenge and a trade to offer them, and this trainer's record. */
+function LinkList({ game, onNote }: { game: Game; onNote: (t: string) => void }) {
+  const link = game.critters.link, rec = game.player.card.link;
+  const [, refresh] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => { const id = window.setInterval(refresh, 1000); return () => window.clearInterval(id); }, []);
+  const players = link.players();
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: u(2) }} data-testid="link-list">
+      <div className="bc-sub" style={{ textAlign: "center", lineHeight: 1.5 }}>
+        Link battles use copies of both teams at full health: nothing that happens in one lasts. A trade is for keeps —
+        and some critters only evolve when they change hands.
+      </div>
+      <div className="bc-sub" style={{ textAlign: "center" }}>Record: {rec?.wins ?? 0} won · {rec?.losses ?? 0} lost · {rec?.trades ?? 0} traded</div>
+      {!players.length && <div className="bc-sub" style={{ textAlign: "center" }}>Nobody else is in this world. Open it to friends to battle and trade.</div>}
+      {link.invite && (
+        <div style={{ display: "flex", gap: u(2), alignItems: "center", padding: u(2), background: "rgba(40,60,100,0.6)" }}>
+          <div style={{ flex: 1 }}>{link.invite.name} wants to {link.invite.what === "battle" ? "battle" : "trade"}!</div>
+          <Button onClick={() => { onNote(link.accept()); refresh(); }}>Accept</Button>
+          <Button onClick={() => { onNote(link.decline()); refresh(); }}>Decline</Button>
+        </div>
+      )}
+      {players.map((r) => (
+        <div key={r.id} style={{ display: "flex", gap: u(2), alignItems: "center", padding: u(2), background: "rgba(0,0,0,0.5)" }}>
+          <div style={{ flex: 1 }}>{r.name} <span className="bc-sub">{Math.round(r.dist)} blocks away</span></div>
+          <Button disabled={!!link.asking} onClick={() => { onNote(link.ask(r.id, "battle")); refresh(); }}><span data-testid={`link-battle-${r.name}`}>Battle</span></Button>
+          <Button disabled={!!link.asking} onClick={() => { onNote(link.ask(r.id, "trade")); refresh(); }}><span data-testid={`link-trade-${r.name}`}>Trade</span></Button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ---- another player's ask, and a trade ------------------------------------------------------------------------------
+
+export function LinkScreen({ game }: { game: Game }) {
+  const link = game.critters.link, inv = link.invite;
+  const answer = (yes: boolean) => {
+    const text = yes ? link.accept() : link.decline();
+    if (game.screen?.kind === "link") game.setScreen(null);
+    game.message(text, "#aaddff");
+  };
+  return (
+    <MenuFrame title={inv ? (inv.what === "battle" ? "A challenge!" : "A trade offer") : "Link"} width={240}>
+      {inv ? (
+        <>
+          <div style={{ textAlign: "center", fontSize: u(7) }} data-testid="link-invite">
+            {inv.name} wants to {inv.what === "battle" ? "have a link battle" : "trade critters"} with you.
+          </div>
+          <div className="bc-sub" style={{ textAlign: "center", lineHeight: 1.5 }}>
+            {inv.what === "battle"
+              ? "Both teams fight as copies at full health: win or lose, your critters come home as they left."
+              : "You each put one critter on the table, and trade only when you both say yes to the same pair."}
+          </div>
+          <Button wide onClick={() => answer(true)}><span data-testid="link-accept">Accept</span></Button>
+          <Button wide onClick={() => answer(false)}>Decline</Button>
+        </>
+      ) : (
+        <>
+          <div className="bc-sub" style={{ textAlign: "center" }}>Nobody is asking you anything right now.</div>
+          <Button wide onClick={() => game.setScreen(null)}>Done</Button>
+        </>
+      )}
+    </MenuFrame>
+  );
+}
+
+export function CritterTradeScreen({ game }: { game: Game }) {
+  const link = game.critters.link, card = game.player.card;
+  const [, refresh] = useReducer((n: number) => n + 1, 0);
+  const [note, setNote] = useState<string | null>(null);
+  // The other player's offer and their yes arrive over the network: look again a few times a second.
+  useEffect(() => { const id = window.setInterval(refresh, 250); return () => window.clearInterval(id); }, []);
+  const t = link.trade;
+  if (!t) return null;
+  const theirs = t.theirs;
+  const evolvesOnArrival = theirs ? SPECIES[theirs.species].evolves?.trade : false;
+  return (
+    <MenuFrame title={`Trade with ${t.peerName}`} width={320}>
+      <div className="bc-sub" style={{ textAlign: "center", color: "#ffff99" }} data-testid="trade-note">{t.done ? t.note : note ?? t.note}</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: u(3) }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: u(2) }}>
+          <div className="bc-sub">Your offer — tap one of your party</div>
+          {card.party.map((c, i) => (
+            <CritterRow key={c.uid} c={c} testid={`trade-mine-${i}`} active={t.mine === c.uid}
+              onClick={t.done ? undefined : () => { setNote(null); link.offer(t.mine === c.uid ? null : c.uid); refresh(); }} />
+          ))}
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: u(2) }}>
+          <div className="bc-sub">{t.peerName}'s offer</div>
+          {theirs ? (
+            <>
+              <CritterRow c={theirs} testid="trade-theirs" />
+              <div style={{ padding: u(2), background: "rgba(0,0,0,0.45)", fontSize: u(5), lineHeight: 1.5 }}>
+                <div>{SPECIES[theirs.species].note}</div>
+                <div className="bc-sub">Caught by {theirs.ot ?? "?"}. Knows {theirs.moves.map((m) => MOVES[m.id].name).join(", ")}.</div>
+                {evolvesOnArrival && !t.done && <div style={{ color: "#aaffaa" }}>It will evolve when it arrives!</div>}
+              </div>
+              {t.okTheirs && !t.done && <div style={{ color: "#aaffaa" }}>✓ {t.peerName} said yes</div>}
+            </>
+          ) : <div className="bc-sub">Nothing on the table yet.</div>}
+        </div>
+      </div>
+      {t.done ? (
+        <Button wide onClick={() => link.endTrade()}><span data-testid="trade-done">Done</span></Button>
+      ) : (
+        <>
+          <Button wide disabled={!t.mine || !theirs || t.okMine} onClick={() => { const n = link.agree(); if (n) setNote(n); refresh(); }}>
+            <span data-testid="trade-agree">{t.okMine ? `Waiting for ${t.peerName}…` : "Trade!"}</span>
+          </Button>
+          <Button wide onClick={() => link.endTrade("You called off the trade.")}>Cancel</Button>
+        </>
+      )}
     </MenuFrame>
   );
 }

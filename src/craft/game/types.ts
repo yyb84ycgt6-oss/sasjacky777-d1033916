@@ -81,6 +81,9 @@ export type Screen =
   | { kind: "party"; give?: string; tab?: "party" | "dex" }
   | { kind: "starter"; rentals?: boolean }
   | { kind: "center"; x: number; y: number; z: number }
+  /** Another player's ask to battle or trade, and a critter trade in progress (game/critterLink.ts). */
+  | { kind: "link" }
+  | { kind: "critter_trade" }
   /** The casino: its lobby, or one game's table. */
   | { kind: "casino"; game: CasinoGame }
   | { kind: "shop"; shop: ShopKind };

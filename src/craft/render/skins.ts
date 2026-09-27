@@ -231,6 +231,9 @@ const TRAINER_OUTFITS: Record<string, { shirt: string; pants: string; hair?: str
   ranger: { shirt: "#a8986a", pants: "#5a6a3a" }, mystic: { shirt: "#6a3a9a", pants: "#4a2a6a" }, tamer: { shirt: "#8a2a2a", pants: "#2a2a2a" },
   gym_leader: { shirt: "#f0f0f0", pants: "#d8b040" }, champion: { shirt: "#2a4aa8", pants: "#e8c040" }, rival: { shirt: "#e8782a", pants: "#2a3a5a" },
   professor: { shirt: "#f4f4f4", pants: "#5a5a60" }, tower: { shirt: "#1a1a22", pants: "#3a3a44" }, tycoon: { shirt: "#1a1a22", pants: "#c8a030" },
+  // Team Copium: purple hoodies for the grunts, a gold-trimmed blazer for the execs, and the CEO's black turtleneck.
+  grunt: { shirt: "#6a2a9a", pants: "#2a2a32", shoes: "#e8e8e8" }, exec: { shirt: "#4a1a6a", pants: "#c8a030", shoes: "#1a1a1a" },
+  ceo: { shirt: "#141418", pants: "#2a2a34", hair: "#8a8a90", shoes: "#e8e8e8" },
 };
 export const TRAINER_CLASS_ORDER = Object.keys(TRAINER_OUTFITS);
 
@@ -246,6 +249,12 @@ function paintTrainer(p: SkinPainter, variant: number): void {
   if (cls === "hiker") for (let x = 9; x < 15; x++) for (let y = 13; y < 16; y++) p.px(x, y, hair, 0.1);
   if (cls === "professor") for (let y = 20; y < 32; y++) { p.px(23, y, hex("#6a8ab8"), 0); p.px(24, y, hex("#6a8ab8"), 0); }
   if (cls === "champion" || cls === "gym_leader") for (let x = 20; x < 28; x++) p.px(x, 21, hex("#e8c040"), 0);
+  // Team Copium's mark on the chest: a gold "C", which the grunts are told stands for Conviction.
+  if (cls === "grunt" || cls === "exec" || cls === "ceo") {
+    const gold = hex("#f0c040");
+    for (const [x, y] of [[23, 22], [24, 22], [25, 22], [22, 23], [22, 24], [22, 25], [23, 26], [24, 26], [25, 26]]) p.px(x, y, gold, 0);
+    if (cls === "grunt") for (let x = 20; x < 28; x++) p.px(x, 20, hex("#4a1a70"), 0);
+  }
 }
 
 /**

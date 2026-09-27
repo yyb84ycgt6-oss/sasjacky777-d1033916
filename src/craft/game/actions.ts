@@ -156,6 +156,8 @@ export class Actions {
       // Escape backs out of whatever is open; the death screen stays until a choice is made, a battle until it is
       // run from or won, and a new trainer's first critter until it is chosen.
       if (g.screen?.kind === "battle" || (g.screen?.kind === "starter" && !p.card.party.length)) return;
+      // Walking away from a trade calls it off, so the other player is not left waiting on an empty table.
+      if (g.screen?.kind === "critter_trade") { g.critters.link.endTrade("You called off the trade."); return; }
       if (g.screen && g.screen.kind !== "death") g.setScreen(null);
       return;
     }

@@ -6,13 +6,13 @@ tradition of Minecraft:
 survival, creative and hardcore; mining, crafting, smelting, farming; mobs,
 water and lava, TNT, beds, day and night, weather; saves on the device, in a
 file or in the cloud; the Nether and the End, with strongholds, End cities,
-shulkers, the Ender Dragon, elytra and fireworks; 47 advancements to earn;
+shulkers, the Ender Dragon, elytra and fireworks; 50 advancements to earn;
 seventeen features borrowed from the best-loved mods (minimap, waystones,
 seasons, gravestones, tameable wolves, catacombs and more — see [Mods](#mods));
 thirty-seven game modes on sixteen map packs, among them Primal (after ARK:
 tame, saddle and ride dinosaurs), Dead Zone (after DayZ) with four more zombie
 modes, five critter modes (after Pokémon, Pixelmon and Cobblemon: catch,
-battle and evolve original monsters), and six city and casino modes (after
+battle, evolve and trade original monsters, and battle your friends), and six city and casino modes (after
 the crime-sandbox games: two drivable cities with traffic, police, jobs, a
 car radio and a working casino — see [Game modes](#game-modes)); and
 multiplayer online, over a LAN or between tabs. It is an original
@@ -379,13 +379,18 @@ The five zombie modes:
 
 ### Critters (after Pokémon, and the mods Pixelmon and Cobblemon)
 
-Thirty-six original species over twelve types (`engine/critters.ts`). The
+Fifty-two original species over twelve types (`engine/critters.ts`). The
 types are normal, fire, water, grass, electric, ice, earth, air, bug, stone,
 spirit and dragon, and their chart follows elemental common sense. The
 species include three starter lines, commons, rares, a dragon line and one
-legend. About seventy moves, all named by this game, fill their learnsets.
-Evolutions come with level. Every name, model and number is this game's
-own; the idea is what is borrowed.
+legend, and sixteen meme critters — the internet set loose in the long
+grass: Dogeling and Wowdoge, Chonklet and Megachonk, Froggo and Vibefrog,
+Stonkfish and Moonfin, Bonkbat and Bonkarang, Rickrock and Neverroll,
+Copiumite and Hopium, and Sussling, which evolves into Susquatch only when it
+is traded. Eighty-seven moves, all named by this game (Bonk, Yeet, Ratio,
+Cope, Vibe Check, Emotional Damage, To the Moon…), fill their learnsets.
+Evolutions come with level, or by trade. Every name, model and number is
+this game's own; only the jokes are borrowed.
 
 - **Battles** (`engine/battle.ts`) are a pure turn engine:
   - Priority first, then speed, decides who goes first.
@@ -412,8 +417,31 @@ own; the idea is what is borrowed.
 - **Healing stations** heal the party, sell orbs and medicine for coins,
   hold the storage box, and are where a trainer wakes if every critter
   falls.
-- **Keys and cheats:** P opens the party and field guide. `/critter give`
-  and `/critter wild` summon critters with cheats on.
+- **Team Copium** (after the genre's villain teams) is a start-up that
+  wants every critter turned into a token. Three grunts, two execs (Hodl
+  Hank and Doomscroll Dana) and their CEO, Maximus Hype, stand along the
+  region's routes, and one wanderer in seven is a grunt. Beating the CEO is
+  an advancement.
+- **Link battles and trades** (`game/critterLink.ts`) are between players,
+  after the link cable. Ask from the party screen's Link tab, or with
+  `/battle <player>` and `/trade <player>`; answer with the screen that
+  opens, or `/accept` and `/decline`.
+  - A link battle uses copies of both teams at full health, so nothing in it
+    lasts but the record. It runs on the challenger's machine, which plays
+    each turn once it has both players' choices and sends the other what
+    happened (the "cv" message, straight to that player — the host is not
+    involved). Every line names whose critter it is, so both read it true;
+    a fainted critter is replaced by the next in line; there are no items
+    and no experience; either player can forfeit.
+  - A trade is an offer each and a yes each to the pair on the table. Each
+    side hands over its critter only when it holds the other's yes to that
+    same pair, so a changed offer is never taken on an old agreement. A
+    traded critter keeps who caught it and earns half as much experience
+    again.
+  - Everything that arrives is checked as a stranger's words: every critter
+    through the save sanitiser, every battle line and number clamped.
+- **Keys and cheats:** P opens the party, field guide and Link tab.
+  `/critter give` and `/critter wild` summon critters with cheats on.
 
 The five critter modes:
 

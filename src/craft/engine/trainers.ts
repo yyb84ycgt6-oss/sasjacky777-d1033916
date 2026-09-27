@@ -15,11 +15,12 @@ import { Rng, seedFromString } from "./rng";
 
 export type TrainerClass =
   | "youngster" | "lass" | "hiker" | "swimmer" | "bug_catcher" | "ace" | "ranger" | "mystic" | "tamer"
-  | "gym_leader" | "champion" | "rival" | "professor" | "tower" | "tycoon";
+  | "gym_leader" | "champion" | "rival" | "professor" | "tower" | "tycoon" | "grunt" | "exec" | "ceo";
 
 export const CLASS_NAMES: Record<TrainerClass, string> = {
   youngster: "Youngster", lass: "Lass", hiker: "Hiker", swimmer: "Swimmer", bug_catcher: "Bug Collector", ace: "Veteran", ranger: "Ranger",
   mystic: "Mystic", tamer: "Drake Tamer", gym_leader: "Leader", champion: "Champion", rival: "Rival", professor: "Professor", tower: "Spire Challenger", tycoon: "Spire Master",
+  grunt: "Team Copium Grunt", exec: "Copium Exec", ceo: "Copium CEO",
 };
 
 export interface TrainerDef {
@@ -40,7 +41,7 @@ export interface TrainerDef {
 
 const T = (id: string, cls: TrainerClass, name: string, team: [string, number][], intro: string, defeat: string, extra: Partial<TrainerDef> = {}): TrainerDef => ({
   id, cls, name, team, intro, defeat, sight: 7,
-  prize: cls === "champion" ? 200 : cls === "gym_leader" ? 100 : cls === "rival" ? 60 : cls === "ace" || cls === "tamer" ? 40 : 20, ...extra,
+  prize: cls === "champion" ? 200 : cls === "ceo" ? 150 : cls === "gym_leader" ? 100 : cls === "rival" || cls === "exec" ? 60 : cls === "ace" || cls === "tamer" ? 40 : cls === "grunt" ? 25 : 20, ...extra,
 });
 
 /** The four badges, in the order the road reaches their gyms. */
@@ -81,6 +82,21 @@ const REGION: TrainerDef[] = [
   T("g4_veil", "gym_leader", "Veil", [["wisplet", 36], ["lanternwisp", 38], ["lanternwisp", 40]],
     "Welcome to the dark. My critters see in it. Do yours?", "You carried your own light through. Take the Lantern Badge.",
     { badge: "Lantern Badge", type: "spirit" }),
+  // Team Copium, the region's villains (after the genre's evil teams, though these ones mostly hurt themselves):
+  // a start-up that wants every critter turned into a token, run on hype and staffed by the very online.
+  T("tc_grunt1", "grunt", "Brayden", [["sussling", 11], ["stonkfish", 12]],
+    "Team Copium is here to make everyone cope! Hand over your critters. It's for, uh, research.", "It's fine. I'm fine. This is fine. Losing was part of the plan."),
+  T("tc_grunt2", "grunt", "Kayleigh", [["bonkbat", 18], ["copiumite", 20]],
+    "Our CEO says critters are just unrealised assets. I don't know what that means, but I'm paid in exposure!", "Can I put this loss on my résumé as 'leadership experience'?"),
+  T("tc_hank", "exec", "Hodl Hank", [["stonkfish", 22], ["rickrock", 22], ["moonfin", 25]],
+    "I bought the top on every critter I own, and I will never sell. Diamond hands, kid!", "Down ninety percent. Still not selling. See you on the moon."),
+  T("tc_grunt3", "grunt", "Jaxon", [["sussling", 30], ["bonkarang", 31], ["copiumite", 32]],
+    "You again? Dana said you'd come this way. Dana's been awake since Tuesday.", "Ratio'd. By a kid with a backpack."),
+  T("tc_dana", "exec", "Doomscroll Dana", [["sussling", 33], ["vibefrog", 33], ["copiumite", 35], ["wowdoge", 36]],
+    "I've been scrolling since four in the morning. Everything is terrible, and now it's your turn to feel it.", "…Okay, that was actually kind of wholesome. Don't post it."),
+  T("tc_ceo", "ceo", "Maximus Hype", [["hopium", 44], ["neverroll", 44], ["moonfin", 45], ["susquatch", 45], ["megachonk", 47]],
+    "Welcome to the pitch. Team Copium is disrupting the critter space: every critter a token, every trainer a bag-holder. Invest, or be invested in!",
+    "A setback. A learning. A pivot. …Team Copium is now Team Hopium. Please clap."),
   // The League
   T("league_aria", "champion", "Aria", [["stormhawk", 50], ["blizzfang", 50], ["mireback", 51], ["lanternwisp", 50], ["wyrmlord", 55]],
     "So you are the trainer everyone is talking about. I'm the Champion. Show me everything!", "…That was the best battle I have had in years. You are the Champion now.",
@@ -117,6 +133,14 @@ function rival(stage: 1 | 2 | 3, playerStarter: string | undefined): TrainerDef 
 
 const FIRST_NAMES = ["Ada", "Bo", "Cy", "Dee", "Eli", "Fay", "Gil", "Hana", "Ira", "Jo", "Kai", "Lu", "Max", "Nell", "Oz", "Pia", "Quin", "Rae", "Sam", "Tess", "Uma", "Vic", "Wes", "Yan", "Zoe"];
 const WANDER_CLASSES: TrainerClass[] = ["youngster", "lass", "hiker", "bug_catcher", "ranger", "ace", "mystic"];
+/** A Copium grunt met in the wilds brings the start-up's own critters, grown to the land's level. */
+const COPIUM_POOL = ["sussling", "stonkfish", "bonkbat", "copiumite", "chonklet", "dogeling", "rickrock", "froggo"];
+const COPIUM_LINES: [string, string][] = [
+  ["Stop right there! Team Copium needs your critters for our next funding round!", "We'll call it a strategic retreat. Very strategic."],
+  ["Have you heard the good news about Copium? It's a critter, a lifestyle and a coin.", "The coin just dropped ninety percent. Not because of you. Mostly."],
+  ["The CEO says if I win ten battles I get equity! This is battle one.", "Zero for one. Still early!"],
+  ["Touch grass? I'd rather touch your wallet. Battle me!", "Okay, I'll go touch some grass."],
+];
 const WANDER_LINES: [string, string][] = [
   ["Our eyes met! That means we battle!", "Good match. I'll remember that one."],
   ["I've been waiting all day for someone to battle!", "Worth the wait."],
@@ -138,6 +162,8 @@ export function trainerById(id: string, playerStarter?: string): TrainerDef | nu
   if (w) {
     const rng = new Rng(Number(w[1]) | 0);
     const level = Math.max(2, Math.min(70, Number(w[2])));
+    // One wanderer in seven is a Team Copium grunt. Read from its own stream, so the rest are who they always were.
+    if (new Rng((Number(w[1]) ^ 0xc0b1) | 0).next() < 1 / 7) return copiumWanderer(id, rng, level);
     const cls = WANDER_CLASSES[rng.int(WANDER_CLASSES.length)];
     const n = 1 + rng.int(level > 20 ? 3 : 2);
     const team: [string, number][] = [];
@@ -152,6 +178,17 @@ export function trainerById(id: string, playerStarter?: string): TrainerDef | nu
   const t = /^tower:(\d+):(-?\d+)$/.exec(id);
   if (t) return towerTrainer(Number(t[1]), Number(t[2]) | 0);
   return null;
+}
+
+function copiumWanderer(id: string, rng: Rng, level: number): TrainerDef {
+  const n = 1 + rng.int(level > 20 ? 3 : 2);
+  const team: [string, number][] = [];
+  for (let i = 0; i < n; i++) {
+    const lv = Math.max(2, level - 2 + rng.int(4));
+    team.push([grown(COPIUM_POOL[rng.int(COPIUM_POOL.length)], lv), lv]);
+  }
+  const [intro, defeat] = COPIUM_LINES[rng.int(COPIUM_LINES.length)];
+  return T(id, "grunt", FIRST_NAMES[rng.int(FIRST_NAMES.length)], team, intro, defeat);
 }
 
 /** Final forms and single-stage critters: what a Spire challenger brings. */
