@@ -30,6 +30,12 @@ commands — `/verify` (every check, in the order that fails fastest), `/engine`
 (add an engine to the chat's fallback chain, all five places) and `/edge`
 (scaffold an edge function with the gate wired correctly).
 
+## Where this is going
+
+[MISSION_PLAN.md](MISSION_PLAN.md) is the long-range plan: the role of every
+repository in the fleet, what gets consolidated into this one, and the order the
+work goes in. Tick a mission there in the same commit that finishes it.
+
 ## The Index Forge
 
 `/forge` crafts the specialised micro-AI indexes the chat and the guide route

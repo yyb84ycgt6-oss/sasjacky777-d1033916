@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { PRIORITY_RANK } from "@/lib/taskBoard";
 
 // ── Types ──
 export interface JackieTask {
@@ -29,12 +30,22 @@ export async function getTasks(status?: TaskStatus): Promise<JackieTask[]> {
   let query = supabase
     .from("jackie_tasks")
     .select("*")
-    .order("priority", { ascending: true })
     .order("created_at", { ascending: false });
   if (status) query = query.eq("status", status);
   const { data, error } = await query;
   if (error) throw error;
-  return (data ?? []) as JackieTask[];
+  return sortByPriority((data ?? []) as JackieTask[]);
+}
+
+/**
+ * Most urgent first, newest first within a priority. This used to be
+ * `.order("priority")`, which sorts the *text* — critical, high, low, medium —
+ * so `/task list` showed low above medium, and `buildTaskContext`, which keeps
+ * only the first fifteen, could hand Jackie low-priority work and drop medium.
+ * Array sort is stable, so the database's created_at order survives the tie.
+ */
+export function sortByPriority<T extends { priority: TaskPriority }>(tasks: T[]): T[] {
+  return [...tasks].sort((a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority]);
 }
 
 export async function createTask(

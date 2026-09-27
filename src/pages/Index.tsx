@@ -871,7 +871,7 @@ const Index = () => {
           for (const t of tasks) {
             out += `- ${statusEmoji[t.status] || ''} ${prioEmoji[t.priority] || ''} **${t.title}** _(${t.status})_ \`${t.id.slice(0, 8)}\`\n`;
           }
-          return out;
+          return out + "\n_All of them, by column: 📋 Task Board in the menu, at `/tasks`._";
         }
         try {
           const task = await createTask(args);
