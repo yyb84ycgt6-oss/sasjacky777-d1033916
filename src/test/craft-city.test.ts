@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { B } from "@/craft/engine/blocks";
 import { Car, CAR_MODEL_IDS, CAR_MODELS } from "@/craft/engine/cars";
 import { Chunk } from "@/craft/engine/chunk";
-import { City, GROUND, isRoadBlock, LOT, NEON_BAY, PITCH, ROAD, STREET, cityOf } from "@/craft/engine/city";
+import { City, GOLDEN_COAST, GROUND, isRoadBlock, LOT, NEON_BAY, PITCH, ROAD, STREET, cityOf } from "@/craft/engine/city";
 import { blockIndex, CHUNK_VOLUME } from "@/craft/engine/constants";
 import type { Entity, EntityContext, PlayerRef } from "@/craft/engine/entities";
 import { itemByName } from "@/craft/engine/items";
@@ -401,5 +401,43 @@ describe("the map pack", () => {
   it("is the same city whichever worker lays it out", () => {
     expect(cityOf("neon_bay", 77)).toBe(cityOf("neon_bay", 77));
     expect(PITCH - ROAD).toBe(LOT);
+  });
+});
+
+describe("Golden Coast", () => {
+  const gc = new City(GOLDEN_COAST, 77);
+
+  it("keeps every building inside its lot, and every district it names", () => {
+    const seen = new Set<string>();
+    for (let i = 0; i < GOLDEN_COAST.cols; i++) for (let j = 0; j < GOLDEN_COAST.rows; j++) {
+      const lot = gc.lot(i, j);
+      seen.add(lot.district);
+      for (const b of lot.buildings) {
+        expect(b.x0).toBeGreaterThanOrEqual(lot.x0);
+        expect(b.z1).toBeLessThanOrEqual(lot.z0 + LOT - 1);
+        expect(b.y0 + b.h).toBeLessThan(127);
+      }
+    }
+    for (const d of ["desert", "vegas", "suburb", "downtown", "beach", "strip", "docks", "park", "villas", "little", "midtown"]) expect(seen, d).toContain(d);
+  });
+
+  it("paves its lanes clear from one end to the other, desert and all", () => {
+    const out = { blocks: new Uint8Array(CHUNK_VOLUME), meta: new Uint8Array(CHUNK_VOLUME), biomes: new Uint8Array(256) };
+    const x = gc.laneLine({ axis: "z", road: 11, dir: -1 });
+    for (let z = gc.minZ + 2; z <= gc.maxZ - 2; z += 3) {
+      gc.fill(x >> 4, z >> 4, out);
+      expect(isRoadBlock(out.blocks[blockIndex(x & 15, GROUND, z & 15)]), `${x},${z}`).toBe(true);
+      for (let y = STREET; y < STREET + 4; y++) expect(out.blocks[blockIndex(x & 15, y, z & 15)]).toBe(B.AIR);
+    }
+  });
+
+  it("names its own police and its own streets", () => {
+    expect(GOLDEN_COAST.landmarks.find((l) => l.kind === "police")?.sign).toBe("SYPD");
+    expect(GOLDEN_COAST.avenues).toHaveLength(GOLDEN_COAST.cols + 1);
+    expect(GOLDEN_COAST.streets).toHaveLength(GOLDEN_COAST.rows + 1);
+    const layout = mapLayout("golden_coast", 77, new Generator({ seed: 77, type: "default", dimension: "overworld" }));
+    expect(layout.city?.spec.id).toBe("golden_coast");
+    expect(layout.casino!.length).toBeGreaterThan(20);
+    expect(layout.shops!.length).toBeGreaterThan(5);
   });
 });

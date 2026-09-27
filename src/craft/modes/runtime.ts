@@ -58,7 +58,7 @@ export abstract class ModeRuntime {
   /** A player took a car from whoever was driving it (the city modes). */
   onCarjack(_player: string): void {}
   /** A car blew up (the city modes). */
-  onCarWrecked(): void {}
+  onCarWrecked(_car: Entity): void {}
   /** A player struck a mob (the city modes' police take note). */
   onHit(_player: string, _victim: Entity): void {}
   /** A player made a noise a long way round: a gunshot (the city modes' people scatter, and the police hear). */

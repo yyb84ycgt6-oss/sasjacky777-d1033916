@@ -38,12 +38,14 @@ const SIDE = 2;
 const wool = (c: (typeof WOOL_COLORS)[number]) => B.WHITE_WOOL + WOOL_COLORS.indexOf(c);
 
 export type CityId = "neon_bay" | "golden_coast";
-export type District = "strip" | "beach" | "downtown" | "midtown" | "little" | "docks" | "park" | "villas" | "desert" | "suburb";
+export type District = "strip" | "beach" | "downtown" | "midtown" | "little" | "docks" | "park" | "villas" | "desert" | "suburb" | "vegas";
 export type LandmarkKind = "police" | "hospital" | "guns" | "respray" | "casino" | "tower" | "mall" | "safehouse" | "dealer";
 
 export interface Landmark {
   kind: LandmarkKind;
   name: string;
+  /** What its sign says, where the default will not do (the other city's police are not the NBPD). */
+  sign?: string;
   /** The lot it stands on. */
   i: number;
   j: number;
@@ -82,7 +84,7 @@ export interface Lane {
 
 const NEON_DISTRICTS: Record<District, string> = {
   strip: "Neon Drive", beach: "Glowstick Beach", downtown: "Downtown Doge", midtown: "Mid Town", little: "Little Stonkville",
-  docks: "Copium Docks", park: "Touch Grass Park", villas: "Rizz Hills", desert: "The Salt Flats", suburb: "Boomerville",
+  docks: "Copium Docks", park: "Touch Grass Park", villas: "Rizz Hills", desert: "The Salt Flats", suburb: "Boomerville", vegas: "The Glitter Mile",
 };
 
 /**
@@ -122,7 +124,54 @@ export const NEON_BAY: CitySpec = {
   beach: 44,
 };
 
-export const CITIES: Record<CityId, CitySpec> = { neon_bay: NEON_BAY, golden_coast: NEON_BAY };
+/**
+ * Golden Coast: San Yeeto, a sprawl in a sunny state — desert to the north
+ * and west, a casino strip glittering out of the sand, a downtown of towers,
+ * suburbs of lawns and palm trees, docks, and a beach along the east — after
+ * the crime-sandbox games' sunny-state city and its desert gambling town,
+ * with its own streets and people.
+ */
+export const GOLDEN_COAST: CitySpec = {
+  id: "golden_coast",
+  name: "Golden Coast",
+  cols: 14, rows: 12,
+  x0: -290, z0: -250,
+  dry: true,
+  district(i, j) {
+    if (i === 13) return j >= 5 ? "strip" : "vegas";
+    if (i >= 9 && j <= 4) return "vegas";
+    if (i >= 11) return "beach";
+    if (j <= 1 || i <= 1) return i <= 2 && j >= 8 ? "villas" : "desert";
+    if (j === 11 && i <= 8) return "docks";
+    if (i >= 6 && i <= 7 && j >= 7 && j <= 8) return "park";
+    if (i >= 5 && i <= 8 && j >= 2 && j <= 5) return "downtown";
+    if (i >= 2 && i <= 4 && j >= 3 && j <= 5) return "little";
+    if (i <= 5 && j >= 6) return i === 2 && j >= 8 ? "villas" : "suburb";
+    return "midtown";
+  },
+  landmarks: [
+    { kind: "safehouse", name: "Your Other Crib", i: 4, j: 7 },
+    { kind: "police", name: "SYPD", i: 7, j: 6, sign: "SYPD" },
+    { kind: "hospital", name: "Mercy Me General", i: 3, j: 4 },
+    { kind: "guns", name: "Bullet Bazaar West", i: 2, j: 5 },
+    { kind: "respray", name: "Spray & Pray West", i: 8, j: 9 },
+    { kind: "casino", name: "The Golden Stonk", i: 10, j: 2, sign: "STONK" },
+    { kind: "tower", name: "Hodl Tower", i: 6, j: 3, sign: "HODL" },
+    { kind: "mall", name: "Mall of Copium West", i: 5, j: 9, sign: "COPE" },
+    { kind: "dealer", name: "Yeet Motors West", i: 9, j: 6 },
+  ],
+  avenues: ["Tumbleweed Ave", "Cactus Blvd", "Mirage Ave", "Dune Rd", "Sunburn Ave", "Heatwave Blvd", "Jackpot Ave", "Snake Eyes Ave", "Double Down Dr",
+    "High Roller Ave", "Big Blind Blvd", "All-In Ave", "Royal Flush Rd", "Bust Ave", "Coast Hwy"],
+  streets: ["Dry Heat St", "Mesa St", "Adobe St", "Sagebrush St", "Coyote St", "Lowrider Ln", "Hood St", "Boomer Blvd", "Salsa St", "Taco Tuesday St",
+    "Surf St", "Boardwalk", "Pier Rd"],
+  districtNames: {
+    strip: "Surf Row", beach: "Sunburn Beach", downtown: "Downtown San Yeeto", midtown: "Mid Yeeto", little: "Taco Town", docks: "Rustbucket Docks",
+    park: "Chill Pill Park", villas: "Clout Canyon", desert: "The Salty Flats", suburb: "Boomerville", vegas: "The Yeet Strip",
+  },
+  beach: 40,
+};
+
+export const CITIES: Record<CityId, CitySpec> = { neon_bay: NEON_BAY, golden_coast: GOLDEN_COAST };
 
 // ---- lots ------------------------------------------------------------------------------------------
 
@@ -431,12 +480,79 @@ export class City {
         p.palms.push([x0 + 2, Z1 - 2, 7], [X1 - 2, Z1 - 2, 8], [x0 + 2, z0 + 15, 6]);
         break;
       }
-      case "desert": case "suburb": {
-        this.planQuad(p, [B.SANDSTONE, B.WHITE_TERRACOTTA, B.ORANGE_TERRACOTTA], 4, 8);
+      case "desert": this.planDesert(p); break;
+      case "suburb": {
+        // Lawns kept green against the desert, and a palm to every house.
+        p.ground = B.GRASS;
+        this.planQuad(p, [wool("white"), wool("yellow"), wool("light_blue"), B.WHITE_TERRACOTTA, B.ORANGE_TERRACOTTA, wool("pink")], 4, 4);
+        for (const b of p.buildings) { b.style = "villa"; b.x0 += 1; b.z0 += 1; b.x1 -= 1; b.z1 -= 1; }
+        for (const [dx, dz] of [[1, 1], [LOT - 2, 1], [1, LOT - 2], [LOT - 2, LOT - 2]]) p.palms.push([x0 + dx, z0 + dz, 5 + Math.floor(r(dx + dz) * 3)]);
+        break;
+      }
+      case "vegas": {
+        // A casino hotel: a gold-trimmed tower on a podium, its name in lights, a fountain out front.
+        p.ground = B.WHITE_TERRACOTTA;
+        const wall = wool(pick(["yellow", "magenta", "red", "purple", "white", "cyan"], 1));
+        const h = 24 + Math.floor(r(2) * 6) * 4;
+        const neon = pick([B.GLOWSTONE, B.SEA_LANTERN, B.SHROOMLIGHT], 3);
+        add({ x0: x0 + 2, z0: z0 + 2, x1: X1 - 2, z1: z0 + 16, h: 8, style: "deco", wall, trim: B.GOLD_BLOCK, neon, open: true, capped: true, lit: 0.8 });
+        add({ x0: x0 + 5, z0: z0 + 4, x1: X1 - 5, z1: z0 + 13, y0: STREET + 8, h, style: "glass", wall: B.GOLD_BLOCK, trim: B.GOLD_BLOCK, lit: 0.8 });
+        const name = pick(["YOLO", "LUCKY", "BONK", "RICH", "STONK", "HODL", "WOW", "ALLIN", "SLAY", "BASED"], 4);
+        const len = signLength(name);
+        p.signs.push({ text: name, x: x0 + Math.floor((LOT - len) / 2), y: STREET + 8 + h - 6, z: z0 + 14, dx: 1, dz: 0, id: neon });
+        p.extra = (c) => {
+          const mx = x0 + 13, mz = Z1 - 5;
+          for (let dx = -3; dx <= 3; dx++) for (let dz = -3; dz <= 3; dz++) {
+            const d = Math.hypot(dx, dz);
+            if (d <= 3.4) c.set(mx + dx, GROUND, mz + dz, d > 2.4 ? B.GOLD_BLOCK : B.WATER);
+          }
+          c.box(mx, STREET, mz, mx, STREET + 3, mz, B.QUARTZ_BLOCK);
+          c.set(mx, STREET + 4, mz, B.GLOWSTONE);
+        };
+        p.palms.push([x0 + 1, Z1 - 1, 7], [X1 - 1, Z1 - 1, 7]);
         break;
       }
     }
     return p;
+  }
+
+  /** The desert: a motel, a gas station, or sand with cacti and dead bushes. */
+  private planDesert(p: LotPlan): void {
+    const X1 = p.x0 + LOT - 1, Z1 = p.z0 + LOT - 1;
+    const r = (salt: number) => this.rnd(p.i, p.j, salt);
+    p.ground = B.SAND;
+    const kind = r(1);
+    const b = (x0: number, z0: number, x1: number, z1: number, h: number, wall: number, trim: number, extra: Partial<Building> = {}) =>
+      p.buildings.push({ x0, z0, x1, z1, y0: STREET, h, style: "villa", wall, trim, lit: 0.5, open: true, ...extra });
+    if (kind < 0.4) {
+      // A motel: a long low block of rooms, its name on the roof, its pool empty.
+      b(p.x0 + 2, p.z0 + 2, X1 - 2, p.z0 + 8, 5, wool(r(2) < 0.5 ? "pink" : "cyan"), B.WHITE_TERRACOTTA);
+      b(p.x0 + 2, p.z0 + 9, p.x0 + 8, Z1 - 4, 5, wool(r(2) < 0.5 ? "pink" : "cyan"), B.WHITE_TERRACOTTA);
+      p.signs.push({ text: "MOTEL", x: p.x0 + 4, y: STREET + 6, z: p.z0 + 5, dx: 1, dz: 0, id: B.SEA_LANTERN });
+      p.extra = (c) => c.box(p.x0 + 13, GROUND - 1, p.z0 + 13, X1 - 4, GROUND, Z1 - 5, B.SMOOTH_STONE);
+    } else if (kind < 0.7) {
+      // A gas station: a lit canopy over the pumps, and the shop behind.
+      p.ground = B.SMOOTH_STONE;
+      b(p.x0 + 4, p.z0 + 2, X1 - 4, p.z0 + 8, 5, B.WHITE_TERRACOTTA, B.RED_TERRACOTTA, { style: "civic" });
+      p.extra = (c) => {
+        const y = STREET + 5;
+        c.box(p.x0 + 4, y, p.z0 + 12, X1 - 4, y, Z1 - 4, B.QUARTZ_BLOCK);
+        c.box(p.x0 + 4, y, p.z0 + 12, X1 - 4, y, p.z0 + 12, B.SEA_LANTERN);
+        c.box(p.x0 + 4, y, Z1 - 4, X1 - 4, y, Z1 - 4, B.SEA_LANTERN);
+        for (const x of [p.x0 + 5, X1 - 5]) for (const z of [p.z0 + 13, Z1 - 5]) c.box(x, STREET, z, x, y - 1, z, B.IRON_BARS);
+        for (const x of [p.x0 + 10, p.x0 + 16]) { c.set(x, STREET, p.z0 + 17, B.IRON_BLOCK); c.set(x, STREET + 1, p.z0 + 17, B.REDSTONE_LAMP_ON); }
+      };
+      p.signs.push({ text: "GAS", x: p.x0 + 9, y: STREET + 6, z: p.z0 + 5, dx: 1, dz: 0, id: B.GLOWSTONE });
+    } else {
+      // Open sand: cacti, dead bushes, the odd skeleton of a car's worth of scrap.
+      p.extra = (c) => {
+        for (let k = 0; k < 10; k++) {
+          const x = p.x0 + 1 + Math.floor(r(200 + k) * (LOT - 2)), z = p.z0 + 1 + Math.floor(r(220 + k) * (LOT - 2));
+          if (k % 3 === 0) c.set(x, STREET, z, B.DEAD_BUSH);
+          else c.box(x, STREET, z, x, STREET + 1 + (k % 3), z, B.CACTUS);
+        }
+      };
+    }
   }
 
   /** Four shops or walk-ups round a cross of alleys. */
@@ -514,7 +630,7 @@ export class City {
       case "police":
         p.ground = B.SMOOTH_STONE;
         b(x0 + 2, z0 + 2, X1 - 2, z0 + 14, 12, "civic", wool("blue"), B.QUARTZ_BLOCK);
-        p.signs.push({ text: "NBPD", x: x0 + 7, y: STREET + 13, z: z0 + 14, dx: 1, dz: 0, id: B.SEA_LANTERN });
+        p.signs.push({ text: m.sign ?? "NBPD", x: x0 + Math.floor((LOT - signLength(m.sign ?? "NBPD")) / 2), y: STREET + 13, z: z0 + 14, dx: 1, dz: 0, id: B.SEA_LANTERN });
         for (let x = x0 + 3; x + 2 <= X1 - 2; x += 5) p.parking.push([x + 1.5, STREET, z0 + 20.5, 0]);
         break;
       case "hospital":
@@ -532,7 +648,7 @@ export class City {
         p.ground = B.SMOOTH_STONE;
         b(x0 + 3, z0 + 6, X1 - 3, Z1 - 3, 7, "brick", B.BRICKS, B.IRON_BLOCK);
         p.extra = (c) => { for (const f of this.shopPlan(p)) c.set(f.x, f.y, f.z, f.id); };
-        sign("GUNS", STREET + 8, B.REDSTONE_LAMP_ON);
+        sign("GUNS", STREET + 8, B.SHROOMLIGHT);
         break;
       case "respray":
         p.ground = B.SMOOTH_STONE;
@@ -549,7 +665,7 @@ export class City {
         p.ground = B.WHITE_TERRACOTTA;
         b(x0 + 2, z0 + 2, X1 - 2, Z1 - 4, 14, "deco", wool("yellow"), B.GOLD_BLOCK, { neon: B.GLOWSTONE });
         p.extra = (c) => this.casinoInterior(c, p);
-        sign("DOGE", STREET + 15, B.GLOWSTONE);
+        sign(m.sign ?? "DOGE", STREET + 15, B.GLOWSTONE);
         break;
       case "tower": {
         p.ground = B.SMOOTH_STONE;
@@ -561,14 +677,14 @@ export class City {
           c.box(cx, STREET + 57, cz, cx, STREET + 62, cz, B.IRON_BARS);
           c.set(cx, STREET + 63, cz, B.REDSTONE_BLOCK);
         };
-        p.signs.push({ text: "STONKS", x: x0 + 3, y: STREET + 40, z: Z1 - 5 + 1, dx: 1, dz: 0, id: B.EMERALD_BLOCK });
+        p.signs.push({ text: m.sign ?? "STONKS", x: x0 + Math.floor((LOT - signLength(m.sign ?? "STONKS")) / 2), y: STREET + 40, z: Z1 - 5 + 1, dx: 1, dz: 0, id: B.EMERALD_BLOCK });
         break;
       }
       case "mall":
         p.ground = B.SMOOTH_STONE;
         b(x0 + 2, z0 + 2, X1 - 2, z0 + 15, 10, "deco", wool("pink"), B.QUARTZ_BLOCK, { neon: B.SEA_LANTERN });
         for (let x = x0 + 3; x + 2 <= X1 - 2; x += 4) p.parking.push([x + 1.5, STREET, z0 + 21.5, Math.PI]);
-        p.signs.push({ text: "COPIUM", x: x0 + 3, y: STREET + 11, z: z0 + 15, dx: 1, dz: 0, id: B.SEA_LANTERN });
+        p.signs.push({ text: m.sign ?? "COPIUM", x: x0 + Math.floor((LOT - signLength(m.sign ?? "COPIUM")) / 2), y: STREET + 11, z: z0 + 15, dx: 1, dz: 0, id: B.SEA_LANTERN });
         break;
       case "dealer":
         p.ground = B.QUARTZ_BLOCK;

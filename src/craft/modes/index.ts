@@ -18,3 +18,4 @@ import "./deadzone";
 import "./zombies";
 import "./critterModes";
 import "./cityModes";
+import "./cityGames";

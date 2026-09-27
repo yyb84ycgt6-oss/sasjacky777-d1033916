@@ -108,6 +108,36 @@ export abstract class CityRuntime extends ModeRuntime {
   private readonly sprayed = new Map<number, number>();
   /** People the city must not tidy away: a mission's target and their friends. */
   protected readonly keep = new Set<number>();
+  /** Lines of dialogue waiting to be shown, per player; and the marks each player was last sent. */
+  protected readonly lines = new Map<string, { at: number; who: string; text: string; color: string }[]>();
+  private readonly marked = new Map<string, string>();
+
+  /** A line of dialogue for one player, now or after a pause. */
+  protected say(id: string, who: string, text: string, color: string, delayTicks = 0): void {
+    const q = this.lines.get(id) ?? [];
+    q.push({ at: this.game.tickCount + delayTicks, who, text, color });
+    this.lines.set(id, q);
+  }
+
+  private flushLines(): void {
+    const now = this.game.tickCount;
+    for (const [id, q] of this.lines) {
+      while (q.length && q[0].at <= now) {
+        const l = q.shift()!;
+        if (this.isLocal(id)) this.game.caption(l.who, l.text, l.color);
+        else this.game.modeTell(id, { caption: { who: l.who, text: l.text, color: l.color } });
+      }
+      if (!q.length) this.lines.delete(id);
+    }
+  }
+
+  /** Sets the marks a player sees, sending them only when they change. */
+  protected mark(id: string, out: Marker[]): void {
+    const key = out.map((m) => `${m.color}${Math.round(m.x)},${Math.round(m.z)}`).join("|");
+    if (this.marked.get(id) === key) return;
+    this.marked.set(id, key);
+    if (this.isLocal(id)) this.game.markers = out; else this.game.modeTell(id, { markers: out });
+  }
 
   city(): City | null {
     return this.layout()?.city ?? null;
@@ -121,7 +151,7 @@ export abstract class CityRuntime extends ModeRuntime {
     for (const e of g.entities.values()) {
       if (!(e instanceof Car) || e.removed) continue;
       if (e.wrecked === 2 && this.state.started) {
-        this.onCarWrecked();
+        this.onCarWrecked(e);
         if (e.lastAttacker) this.crime(e.lastAttacker, "carBombed");
       }
       if (e.rider) { e.lastDriver = e.rider; this.brains.delete(e.id); this.chases.delete(e.id); continue; }
@@ -136,6 +166,7 @@ export abstract class CityRuntime extends ModeRuntime {
       }
       trafficDrive(city, e, st, g.ctx, g.ctx.entitiesNear(e.x, e.y, e.z, 18), players);
     }
+    this.flushLines();
     if (g.tickCount % 5 === 0) this.checkBusts(city, players);
     if (g.tickCount % 20 === 0) { this.populate(city); if (this.police) this.dispatch(city); }
   }
@@ -369,7 +400,7 @@ export abstract class CityRuntime extends ModeRuntime {
   }
 
   /** Tidies away what nobody is near, and fills the streets round whoever is. */
-  private populate(city: City): void {
+  protected populate(city: City): void {
     const g = this.game;
     const here = this.alive().map((p) => ({ x: p.x, z: p.z }));
     const far = (x: number, z: number, d: number) => here.every((p) => Math.hypot(p.x - x, p.z - z) > d);
@@ -434,23 +465,24 @@ export abstract class CityRuntime extends ModeRuntime {
   }
 }
 
-/** Dollars a player starts Neon Bay with. */
+/** Dollars a player starts a city's free roam with. */
 export const NEON_BAY_STAKE = 500;
+
+/** What each city says when you arrive. */
+const TAGLINES: Record<string, string> = { neon_bay: "Sun, sand, and questionable decisions.", golden_coast: "Sun, sand, and slot machines." };
 
 /**
  * Neon Bay, free roam: the whole city, a car of your own outside your
  * crib, and five hundred dollars. Take any car you like — the one you are
  * standing next to, or the one somebody is driving.
  */
-class NeonBayRuntime extends CityRuntime {
+class FreeRoamRuntime extends CityRuntime {
   private get given(): string[] { return ((this.data.given as string[] | undefined) ??= []); }
   private count(key: string, by = 1): void { this.data[key] = ((this.data[key] as number | undefined) ?? 0) + by; }
 
   // ---- missions (engine/missions.ts) ---------------------------------------------------------------
 
   private readonly jobs = new Map<string, Job>();
-  private readonly lines = new Map<string, { at: number; who: string; text: string; color: string }[]>();
-  private readonly marked = new Map<string, string>();
   private spots: [number, number, number][] | null = null;
 
   /** How many of each contact's jobs a player has done, by player name (so it survives a new connection). */
@@ -463,24 +495,6 @@ class NeonBayRuntime extends CityRuntime {
     return (this.spots ??= CONTACTS.map((c) => contactSpot(city, c)));
   }
 
-  /** A line of dialogue for one player, now or after a pause. */
-  private say(id: string, who: string, text: string, color: string, delayTicks = 0): void {
-    const q = this.lines.get(id) ?? [];
-    q.push({ at: this.game.tickCount + delayTicks, who, text, color });
-    this.lines.set(id, q);
-  }
-
-  private flushLines(): void {
-    const now = this.game.tickCount;
-    for (const [id, q] of this.lines) {
-      while (q.length && q[0].at <= now) {
-        const l = q.shift()!;
-        if (this.isLocal(id)) this.game.caption(l.who, l.text, l.color);
-        else this.game.modeTell(id, { caption: { who: l.who, text: l.text, color: l.color } });
-      }
-      if (!q.length) this.lines.delete(id);
-    }
-  }
 
   /** Walked into a contact's mark with no stars: their next job. */
   private offerJobs(city: City): void {
@@ -649,10 +663,7 @@ class NeonBayRuntime extends CityRuntime {
       } else if (this.stars(p.id) === 0) {
         CONTACTS.forEach((c, k) => { if (nextMission(c, this.done(p.name)[c.id] ?? 0)) at(spots[k], c.color, 2.5); });
       }
-      const key = out.map((m) => `${m.color}${Math.round(m.x)},${Math.round(m.z)}`).join("|");
-      if (this.marked.get(p.id) === key) continue;
-      this.marked.set(p.id, key);
-      if (this.isLocal(p.id)) this.game.markers = out; else this.game.modeTell(p.id, { markers: out });
+      this.mark(p.id, out);
     }
   }
 
@@ -660,13 +671,12 @@ class NeonBayRuntime extends CityRuntime {
     super.tick();
     const city = this.city();
     if (!city || !this.home) return;
-    this.flushLines();
     if (this.game.tickCount % 5 === 0) this.runJobs();
     if (this.game.tickCount % 10 === 0) this.markJobs(city);
   }
 
   start(): void {
-    this.title(null, "Neon Bay", "Sun, sand, and questionable decisions.");
+    this.title(null, this.city()?.spec.name ?? "The City", TAGLINES[this.city()?.spec.id ?? ""] ?? "");
     this.tell(null, "Your ride is parked outside your crib. Use a car to get in, sneak to get out; W and S for the pedals, A and D to steer, Space for the handbrake. Any car is your car if you want it badly enough.", "#ff9ad8");
     const city = this.city();
     const home = city?.landmark("safehouse");
@@ -710,7 +720,7 @@ class NeonBayRuntime extends CityRuntime {
     const n = (k: string) => String((this.data[k] as number | undefined) ?? 0);
     const name = this.players().find((p) => p.id === playerId)?.name ?? "";
     const done = Object.values(this.done(name)).reduce((t, v) => t + v, 0);
-    return { title: "Neon Bay", lines: [["Jobs done", `${done} of ${ALL_MISSIONS.length}`], ["Cars jacked", n("jacked")], ["Cars wrecked", n("wrecked")], ["People bonked", n("bonked")]] };
+    return { title: this.city()?.spec.name ?? "The City", lines: [["Jobs done", `${done} of ${ALL_MISSIONS.length}`], ["Cars jacked", n("jacked")], ["Cars wrecked", n("wrecked")], ["People bonked", n("bonked")]] };
   }
 
   restart(): string {
@@ -720,4 +730,5 @@ class NeonBayRuntime extends CityRuntime {
   }
 }
 
-registerRuntime("neon_bay", (g, d, s) => new NeonBayRuntime(g, d, s));
+registerRuntime("neon_bay", (g, d, s) => new FreeRoamRuntime(g, d, s));
+registerRuntime("golden_coast", (g, d, s) => new FreeRoamRuntime(g, d, s));

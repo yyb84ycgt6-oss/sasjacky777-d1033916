@@ -23,7 +23,7 @@ import type { CasinoGame } from "./casino";
 import { cityOf, STREET, type City } from "./city";
 import type { ShopKind } from "./shops";
 
-export const MAP_IDS = ["skyblock", "oneblock", "void", "parkour", "colosseum", "tnt_run", "sg_arena", "primal_island", "dead_zone", "zombie_bunker", "critter_region", "safari_park", "battle_spire", "high_roller", "neon_bay"] as const;
+export const MAP_IDS = ["skyblock", "oneblock", "void", "parkour", "colosseum", "tnt_run", "sg_arena", "primal_island", "dead_zone", "zombie_bunker", "critter_region", "safari_park", "battle_spire", "high_roller", "neon_bay", "golden_coast"] as const;
 export type MapId = (typeof MAP_IDS)[number];
 export const isMapId = (v: unknown): v is MapId => typeof v === "string" && (MAP_IDS as readonly string[]).includes(v);
 
@@ -48,6 +48,7 @@ export const MAPS: Record<MapId, MapInfo> = {
   battle_spire: { name: "The Battle Spire", description: "A round arena at the top of a spire, where challengers step up one after another." },
   high_roller: { name: "The Golden Stonk", description: "A casino floor: rows of slots, blackjack and roulette tables, a video poker bar, the wheel and the Stonks terminal." },
   neon_bay: { name: "Neon Bay", description: "An island city some five hundred blocks across: a beach strip of pastel hotels, a glass downtown, docks, a park, and a casino — with traffic, people and a car of your own." },
+  golden_coast: { name: "Golden Coast", description: "San Yeeto: desert, a casino strip glittering out of the sand, suburbs of lawns and palms, a downtown of towers, docks and a beach — with traffic, people and a car of your own." },
 };
 
 /** Loot tables a map's chests are filled from (see mapLoot). */
@@ -839,12 +840,12 @@ function casinoFloor(): Omit<MapLayout, "map"> {
 }
 
 /**
- * Neon Bay: a whole city, built chunk by chunk as the world generates
- * (engine/city.ts). You start outside your crib on the beach side; the Lucky
- * Doge's tables are listed so using one deals you in.
+ * A city (Neon Bay, Golden Coast): built chunk by chunk as the world
+ * generates (engine/city.ts). You start outside your crib; the casino's
+ * tables and the shops' counters are listed so using one deals you in.
  */
-function neonBay(seed: number): Omit<MapLayout, "map"> {
-  const city = cityOf("neon_bay", seed);
+function cityMap(id: "neon_bay" | "golden_coast", seed: number): Omit<MapLayout, "map"> {
+  const city = cityOf(id, seed);
   const home = city.landmark("safehouse");
   const casinoLot = city.landmark("casino");
   const casino = casinoLot ? city.casinoPlan(casinoLot).map(({ game, x, y, z }) => ({ game, x, y, z })) : [];
@@ -899,7 +900,7 @@ export function mapLayout(map: MapId, seed: number, base: Generator): MapLayout 
     const made = map === "skyblock" ? skyblock() : map === "oneblock" ? oneblock() : map === "void" ? voidMap()
       : map === "parkour" ? parkour(seed) : map === "colosseum" ? colosseum() : map === "tnt_run" ? tntRun()
         : map === "primal_island" ? primalIsland(base) : map === "dead_zone" ? deadZone(seed, base) : map === "zombie_bunker" ? zombieBunker()
-          : map === "critter_region" ? critterRegion(seed, base) : map === "safari_park" ? safariPark(seed, base) : map === "battle_spire" ? battleSpire() : map === "high_roller" ? casinoFloor() : map === "neon_bay" ? neonBay(seed) : sgArena(seed, base);
+          : map === "critter_region" ? critterRegion(seed, base) : map === "safari_park" ? safariPark(seed, base) : map === "battle_spire" ? battleSpire() : map === "high_roller" ? casinoFloor() : map === "neon_bay" || map === "golden_coast" ? cityMap(map, seed) : sgArena(seed, base);
     l = { map, ...made };
     if (layouts.size > 16) layouts.clear();
     layouts.set(key, l);
