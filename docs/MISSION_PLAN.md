@@ -100,6 +100,7 @@ work that has a four-in-five chance of landing somewhere you will not look.
 | 1.2 Diff `sas-jacky2`, `SAS_JACKY_X`, `ocd-jacky-777-forked` against the mothership; list anything unique. | A table of unique files per repo exists, or "none". |
 | 1.3 Port the donor pages from `jackie-core-keeper` one at a time, through `appActions.ts` and the gate. Task board first: the MCP tools already manage tasks and no screen shows them. | Each port has a route in `routeManifest.ts`, a test, and passes `/verify`. |
 | ✅ 1.3a **Task board** — `/tasks`, 2026-09-27. Four columns including Blocked (the donor had three); reads and writes through `appActions.ts`; a refused move puts the card back and says why. `create_task` gained a `status` so a card lands in its column in one write. Remaining donor pages: `TaskCalendar`, `SecretsAudit`, `Files`, `Setup`. | Done. |
+| ✅ 1.3b **Task calendar** — `/tasks/calendar`, 2026-09-27. The donor keyed days by the raw timestamp and so showed every day empty against this database; days now come from the board's `dueDay`. Late work and undated open work are listed, not hidden. Board and calendar share one data hook (`useTasks`). The chat's `/task list` and Jackie's task context now rank medium above low. Remaining donor pages: `SecretsAudit`, `Files`, `Setup`. | Done. |
 | 1.4 Retire each donor once its useful part is in. | The Fleet table above has no "Donor" rows left. |
 
 ## Layer 2 — Nothing fake (make the furniture real)
@@ -182,6 +183,6 @@ learning as they go and agents working across sessions stay aligned.
 
 1. **You:** archive `sasjacky777` on GitHub, and attach `jacky` to the next
    session. Both are decisions only the account owner can make.
-2. ~~Mission 1.3 — the task board port.~~ Done. Next port: `TaskCalendar`, which
-   reads the same `due_date` and can reuse `src/lib/taskBoard.ts`'s day handling.
+2. ~~Mission 1.3 — the task board and calendar.~~ Done. Next port: `SecretsAudit`,
+   which has to be checked against `SECURITY_HARDENING.md` before a line of it moves.
 3. **Then:** mission 2.1 — decide what Sentinel watches, or take it out of the nav.

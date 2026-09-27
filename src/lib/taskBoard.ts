@@ -150,3 +150,52 @@ export function withSaved(tasks: readonly BoardTask[], saved: BoardTask): BoardT
   const found = tasks.some((t) => t.id === saved.id);
   return found ? tasks.map((t) => (t.id === saved.id ? saved : t)) : [saved, ...tasks];
 }
+
+// ── Calendar ─────────────────────────────────────────────────────────────
+
+/**
+ * Dated tasks grouped by the day they are due, open work before finished and
+ * the most urgent first within that. Keyed by `dueDay`, never by the raw
+ * column: the donor calendar keyed by `due_date` itself, which comes back as
+ * "2026-10-01T00:00:00+00:00" and so matched no day it was ever asked about.
+ */
+export function groupByDueDay(tasks: readonly BoardTask[]): Map<string, BoardTask[]> {
+  const days = new Map<string, BoardTask[]>();
+  for (const task of tasks) {
+    const day = dueDay(task.due_date);
+    if (!day) continue;
+    const list = days.get(day);
+    if (list) list.push(task);
+    else days.set(day, [task]);
+  }
+  for (const list of days.values()) {
+    list.sort((a, b) => Number(a.status === "done") - Number(b.status === "done") || byUrgency(a, b));
+  }
+  return days;
+}
+
+/**
+ * The calendar widget works in local dates; a due day is a calendar date.
+ * `new Date("2026-10-01")` is UTC midnight — the previous evening west of
+ * Greenwich — so the day is built from its parts instead.
+ */
+export function dayToLocalDate(day: string): Date {
+  const [y, m, d] = day.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+/** Open tasks that are late, soonest-missed first. */
+export function overdueTasks(tasks: readonly BoardTask[], today: string): BoardTask[] {
+  return tasks
+    .filter((t) => isOverdue(t, today))
+    .sort((a, b) => (dueDay(a.due_date) as string).localeCompare(dueDay(b.due_date) as string) || byUrgency(a, b));
+}
+
+/**
+ * Open tasks with no due date. A calendar cannot place them, so it has to say
+ * how many there are — otherwise they are simply absent from the view, and an
+ * empty week reads as a free one.
+ */
+export function openUndated(tasks: readonly BoardTask[]): BoardTask[] {
+  return tasks.filter((t) => t.status !== "done" && dueDay(t.due_date) === null);
+}

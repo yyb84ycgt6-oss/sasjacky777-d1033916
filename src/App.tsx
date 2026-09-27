@@ -33,6 +33,7 @@ const Play = lazy(() => import("./pages/Play"));
 const TelegramShell = lazy(() => import("./pages/TelegramShell"));
 const Vault = lazy(() => import("./pages/Vault"));
 const TaskBoard = lazy(() => import("./pages/TaskBoard"));
+const TaskCalendar = lazy(() => import("./pages/TaskCalendar"));
 const BotFoundry = lazy(() => import("./pages/BotFoundry"));
 const BotSwarm = lazy(() => import("./pages/BotSwarm"));
 const ApiKeyManager = lazy(() => import("./pages/ApiKeyManager"));
@@ -230,6 +231,14 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <TaskBoard />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/tasks/calendar"
+                    element={
+                      <ProtectedRoute>
+                        <TaskCalendar />
                       </ProtectedRoute>
                     }
                   />

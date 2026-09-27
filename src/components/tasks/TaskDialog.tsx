@@ -39,6 +39,8 @@ interface TaskDialogProps {
   task: BoardTask | null;
   /** The column a new task starts in. */
   initialStatus: TaskStatus;
+  /** The due day a new task starts with — the calendar passes the day it was opened on. */
+  initialDue?: string;
   onClose: () => void;
   /** Resolves to an error message when the save was refused, null when it landed. */
   onSave: (draft: TaskDraft) => Promise<string | null>;
@@ -55,8 +57,8 @@ const SELECT_CLASS =
  * donor closed on failure and raised a toast, which threw away whatever the
  * person had typed along with the only copy of why it failed.
  */
-export const TaskDialog = ({ open, task, initialStatus, onClose, onSave, onDelete }: TaskDialogProps) => {
-  const [draft, setDraft] = useState<TaskDraft>(blankDraft(initialStatus));
+export const TaskDialog = ({ open, task, initialStatus, initialDue, onClose, onSave, onDelete }: TaskDialogProps) => {
+  const [draft, setDraft] = useState<TaskDraft>(blankDraft(initialStatus, initialDue));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -72,11 +74,11 @@ export const TaskDialog = ({ open, task, initialStatus, onClose, onSave, onDelet
             priority: task.priority,
             due: dueDay(task.due_date) ?? "",
           }
-        : blankDraft(initialStatus),
+        : blankDraft(initialStatus, initialDue),
     );
     setError(null);
     setSaving(false);
-  }, [open, task, initialStatus]);
+  }, [open, task, initialStatus, initialDue]);
 
   const set = <K extends keyof TaskDraft>(key: K, value: TaskDraft[K]) =>
     setDraft((d) => ({ ...d, [key]: value }));
@@ -238,6 +240,6 @@ export const TaskDialog = ({ open, task, initialStatus, onClose, onSave, onDelet
   );
 };
 
-function blankDraft(status: TaskStatus): TaskDraft {
-  return { title: "", description: "", status, priority: "medium", due: "" };
+function blankDraft(status: TaskStatus, due = ""): TaskDraft {
+  return { title: "", description: "", status, priority: "medium", due };
 }

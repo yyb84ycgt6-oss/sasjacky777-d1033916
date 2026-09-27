@@ -3,7 +3,11 @@ import { TASK_STATUSES } from "@/lib/appActions";
 import {
   BOARD_COLUMNS,
   arrangeBoard,
+  dayToLocalDate,
   dueDay,
+  groupByDueDay,
+  openUndated,
+  overdueTasks,
   formatDueDay,
   isOverdue,
   localDayKey,
@@ -111,5 +115,48 @@ describe("moving and saving", () => {
     const before = [task({ id: "a" })];
     expect(withSaved(before, task({ id: "a", title: "renamed" }))[0].title).toBe("renamed");
     expect(withSaved(before, task({ id: "b" })).map((t) => t.id)).toEqual(["b", "a"]);
+  });
+});
+
+describe("the task calendar's days", () => {
+  it("finds a task on its day when the database returns the due date as a full timestamp", () => {
+    // The donor keyed by the raw column and looked up "2026-10-01", so this
+    // task — and every other — was on no day at all.
+    const days = groupByDueDay([task({ id: "a", due_date: "2026-10-01T00:00:00+00:00" })]);
+    expect(days.get("2026-10-01")?.map((t) => t.id)).toEqual(["a"]);
+  });
+
+  it("lists a day's open work before its finished work, most urgent first", () => {
+    const due = "2026-10-01T00:00:00+00:00";
+    const days = groupByDueDay([
+      task({ id: "done-critical", status: "done", priority: "critical", due_date: due }),
+      task({ id: "open-low", priority: "low", due_date: due }),
+      task({ id: "open-high", priority: "high", due_date: due }),
+    ]);
+    expect(days.get("2026-10-01")?.map((t) => t.id)).toEqual(["open-high", "open-low", "done-critical"]);
+  });
+
+  it("leaves undated tasks off the calendar and counts the open ones instead", () => {
+    const tasks = [task({ id: "undated" }), task({ id: "finished", status: "done" }), task({ id: "dated", due_date: "2026-10-01" })];
+    expect([...groupByDueDay(tasks).keys()]).toEqual(["2026-10-01"]);
+    expect(openUndated(tasks).map((t) => t.id)).toEqual(["undated"]);
+  });
+
+  it("lists late work soonest-missed first and leaves out what is done or due today", () => {
+    const late = overdueTasks(
+      [
+        task({ id: "yesterday", due_date: "2026-09-30" }),
+        task({ id: "last-week", due_date: "2026-09-24" }),
+        task({ id: "today", due_date: "2026-10-01" }),
+        task({ id: "finished", status: "done", due_date: "2026-09-01" }),
+      ],
+      "2026-10-01",
+    );
+    expect(late.map((t) => t.id)).toEqual(["last-week", "yesterday"]);
+  });
+
+  it("turns a due day into that same local calendar day for the date picker", () => {
+    const date = dayToLocalDate("2026-10-01");
+    expect([date.getFullYear(), date.getMonth(), date.getDate()]).toEqual([2026, 9, 1]);
   });
 });
