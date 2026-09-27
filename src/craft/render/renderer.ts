@@ -30,6 +30,8 @@ import { GAME_NAME } from "../edition";
 import { CREATURES, isDino } from "../engine/creatures";
 import { SPECIES } from "../engine/critters";
 import { trainerById, trainerTitle } from "../engine/trainers";
+import { Car } from "../engine/cars";
+import { buildCar, poseCar, type CarView } from "./carModels";
 import { seedFromString } from "../engine/rng";
 import { TRAINER_CLASS_ORDER } from "./skins";
 import { isInfectedMob } from "../engine/infected";
@@ -50,6 +52,8 @@ export interface RemotePlayerView {
   invisible?: boolean;
   sitting?: boolean;
   gliding?: boolean;
+  /** At a car's wheel: drawn a little smaller, so they fit under its roof. */
+  inCar?: boolean;
 }
 
 export interface FrameState {
@@ -58,6 +62,8 @@ export interface FrameState {
   camera: { x: number; y: number; z: number; yaw: number; pitch: number; fov: number };
   /** 0 first person, 1 behind, 2 in front. */
   perspective: 0 | 1 | 2;
+  /** How far behind a third-person camera sits (a car wants more room than a player). */
+  cameraDistance?: number;
   bob: { walk: number; amount: number };
   hurtTilt: number;
   time: number;
@@ -116,6 +122,9 @@ interface EntityView {
   crystal?: { cage: THREE.Object3D; core: THREE.Object3D; beam: THREE.Mesh };
   /** Materials this view owns (an item frame's board, shaded by its own light). */
   mats?: THREE.MeshBasicMaterial[];
+  /** A car, and whoever the city put at its wheel. */
+  car?: CarView;
+  driver?: ModelInstance;
 }
 
 export class WorldRenderer {
@@ -278,7 +287,9 @@ export class WorldRenderer {
     let v = this.views.get(e.id);
     // A villager who takes up a trade changes clothes: rebuild its model.
     // So does a critter that evolves, or is swapped for another in a battle: its species is its model.
-    if (v && v.entity === e && (!(e instanceof Mob) || (v.variant === skinVariant(e) && v.modelKey === modelKey(e))) && (!(e instanceof ItemFrame) || v.variant === (e.item?.id ?? 0))) return v;
+    if (v && v.entity === e && (!(e instanceof Mob) || (v.variant === skinVariant(e) && v.modelKey === modelKey(e))) && (!(e instanceof ItemFrame) || v.variant === (e.item?.id ?? 0))
+      // A car resprayed, blown up, or given a driver is built again.
+      && (!(e instanceof Car) || (v.car?.color === e.color && v.car.model === e.model && v.car.wrecked === (e.wrecked > 0) && !!v.driver === e.npc))) return v;
     if (v) this.dropView(e.id);
     const object = new THREE.Group();
     v = { entity: e, object };
@@ -323,6 +334,13 @@ export class WorldRenderer {
         base.scale.set(0.75, 0.25, 0.75);
         base.position.set(-0.375, 0, -0.375);
         object.add(base);
+      }
+    } else if (e instanceof Car) {
+      v.car = buildCar(e.model, e.color, e.wrecked > 0);
+      object.add(v.car.root);
+      if (e.npc) {
+        v.driver = buildModel("citizen", e.id % 24);
+        v.car.body.add(v.driver.root);
       }
     } else if (e instanceof Vehicle) {
       v.model = buildModel(e instanceof Boat ? "boat" : "minecart", e instanceof Boat ? e.wood : 0);
@@ -397,6 +415,17 @@ export class WorldRenderer {
     if (v.nameTag) v.nameTag.position.set(x, y + e.body.height + 0.6, z);
   }
 
+  /** What a citizen just said, over their head while they say it. */
+  private quipTag(v: EntityView, e: Mob, x: number, y: number, z: number): void {
+    const text = e.quipTicks > 0 && e.quip ? e.quip : "";
+    if (text !== v.tagText) {
+      if (v.nameTag) { this.scene.remove(v.nameTag); v.nameTag.material.map?.dispose(); v.nameTag.material.dispose(); v.nameTag = undefined; }
+      v.tagText = text;
+      if (text) { v.nameTag = nameTag(text); this.scene.add(v.nameTag); }
+    }
+    if (v.nameTag) v.nameTag.position.set(x, y + e.body.height + 0.5, z);
+  }
+
   /** A critter's name and level (and whose it is), or a trainer's title, floating over them when near. */
   private critterTag(v: EntityView, e: Mob, x: number, y: number, z: number, cam: THREE.Vector3): void {
     // Near enough to read, but not so near it fills the screen (a partner at its trainer's side).
@@ -430,6 +459,8 @@ export class WorldRenderer {
     v.model?.wool?.dispose();
     v.model?.gel?.dispose();
     for (const m of v.mats ?? []) m.dispose();
+    if (v.car) { for (const s of v.car.shaded) s.mat.dispose(); for (const m of v.car.lamps) m.dispose(); v.car.glass.dispose(); v.car.siren?.forEach((m) => m.dispose()); }
+    v.driver?.material.dispose();
     if (v.crystal) this.scene.remove(v.crystal.beam);
     this.views.delete(id);
   }
@@ -476,6 +507,7 @@ export class WorldRenderer {
         });
         if (isDino(e.kind)) this.creatureTag(v, e, x, y, z);
         if (e.kind === "critter" || e.kind === "trainer") this.critterTag(v, e, x, y, z, camPos);
+        if (e.kind === "citizen") this.quipTag(v, e, x, y, z);
         if (e.kind === "ender_dragon") {
           // It is perched when its phase says so; the flag doubles as "wings folded".
           if (e.dragon?.phase === "perch") pose(v.model, e.kind, { x, y, z, yaw, pitch: 0, walk, speed, light: bright, hurt: e.hurtTime > 0, death: 0, time: this.time, swing: 0, size: 4, onGround: true });
@@ -486,6 +518,24 @@ export class WorldRenderer {
           v.lit.uniforms.uSky.value = s; v.lit.uniforms.uBlock.value = b;
         }
         v.model.root.visible = !e.hasEffect("invisibility");
+        v.object.position.set(0, 0, 0);
+        continue;
+      }
+      if (v.car && e instanceof Car) {
+        const yaw = e.prevYaw + angleDelta(e.prevYaw, e.yaw) * a;
+        const turn = angleDelta(e.prevYaw, e.yaw);
+        const roll = e.prevWalkDist + (e.walkDist - e.prevWalkDist) * a;
+        poseCar(v.car, {
+          x, y, z, yaw, light: bright, roll: roll * 3.3, steer: e.steer, lean: Math.max(-0.08, Math.min(0.08, turn * 1.2)),
+          rock: e.hurtTime > 0 ? Math.sin((e.hurtTime - a) * 1.2) * e.hurtTime * 0.006 : 0, time: this.time, siren: e.siren,
+          night: this.shared.uDaylight.value < 0.45,
+        });
+        if (v.driver) {
+          v.driver.root.position.copy(v.car.seat);
+          pose(v.driver, "citizen", { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, walk: 0, speed: 0, light: bright, hurt: false, death: 0, swing: 0, time: this.time, sitting: true, size: 0.85 });
+          v.driver.root.position.copy(v.car.seat);
+          v.driver.root.rotation.set(0, 0, 0);
+        }
         v.object.position.set(0, 0, 0);
         continue;
       }
@@ -616,7 +666,7 @@ export class WorldRenderer {
       pose(v.model!, "player", {
         x: p.x, y: p.y, z: p.z, yaw: p.yaw, pitch: p.pitch, walk: p.walk, speed: p.speed,
         light: this.brightness(p.x, p.y + 1.6, p.z), hurt: p.hurt, death: 0, swing: p.swing, time: this.time, sneaking: p.sneaking,
-        sitting: p.sitting, gliding: p.gliding,
+        sitting: p.sitting, gliding: p.gliding, size: p.inCar ? 0.85 : 1,
       });
       const [s, b] = this.lightAt(p.x, p.y + 1, p.z);
       this.attachHeld(p.id, v.model!, p.heldItem, s, b);
@@ -641,7 +691,7 @@ export class WorldRenderer {
       pose(this.localModel, "player", {
         x: lp.x, y: lp.y, z: lp.z, yaw: lp.yaw, pitch: lp.pitch, walk: lp.walk, speed: lp.speed,
         light: this.brightness(lp.x, lp.y + 1.6, lp.z), hurt: lp.hurt, death: 0, swing: lp.swing, time: this.time, sneaking: lp.sneaking,
-        sitting: lp.sitting, gliding: lp.gliding,
+        sitting: lp.sitting, gliding: lp.gliding, size: lp.inCar ? 0.85 : 1,
       });
       const [s, b] = this.lightAt(lp.x, lp.y + 1, lp.z);
       this.attachHeld("__local", this.localModel, lp.heldItem, s, b);
@@ -692,8 +742,9 @@ export class WorldRenderer {
       const back = frame.perspective === 1 ? 1 : -1;
       if (back < 0) { yaw += Math.PI; pitch = -pitch; }
       const dx = Math.sin(yaw) * Math.cos(pitch), dy = -Math.sin(pitch), dz = Math.cos(yaw) * Math.cos(pitch);
-      let dist = 4;
-      for (let t = 0.5; t <= 4; t += 0.25) {
+      const reach = frame.cameraDistance ?? 4;
+      let dist = reach;
+      for (let t = 0.5; t <= reach; t += 0.25) {
         const id = this.world.blockAt(Math.floor(cx + dx * t), Math.floor(cy + dy * t), Math.floor(cz + dz * t));
         if (id && block(id).opaque) { dist = Math.max(0.5, t - 0.3); break; }
       }
@@ -854,6 +905,7 @@ function skinVariant(e: Mob): number {
   // A wolf's collar when tame; red eyes when angry.
   if (e.kind === "wolf") return (e.owner ? 1 : 0) | (e.anger > 0 ? 2 : 0);
   if (e.kind === "tribute") return e.id % 24;
+  if (e.kind === "citizen") return e.id % 64;
   if (isDino(e.kind)) return e.id % 4;
   if (isInfectedMob(e.kind)) return e.id % 8;
   if (e.kind === "critter") return e.shiny ? 1 : 0;

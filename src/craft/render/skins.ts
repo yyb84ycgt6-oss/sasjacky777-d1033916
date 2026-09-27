@@ -249,6 +249,57 @@ function paintTrainer(p: SkinPainter, variant: number): void {
 }
 
 /**
+ * The city's people, eight ways of dressing for Neon Bay: a tourist in a
+ * loud shirt and shorts, someone off the beach, a suit, a jogger in neon,
+ * shades and pastels, a boomer in a polo, a hoodie with headphones, and an
+ * influencer in pink. Their faces and hair vary with the rest of the number.
+ */
+function paintCitizen(p: SkinPainter, variant: number): void {
+  const style = variant % 8;
+  const r = new Rng(variant * 6151 + 29);
+  const pick = <T,>(a: T[]): T => a[r.int(a.length)];
+  const skin = hex(pick(["#e8c09a", "#c89a78", "#a8744e", "#7a5236", "#5a3a24", "#f0d0b0"]));
+  const hair = hex(style === 5 ? pick(["#c8c8c8", "#e8e8e8", "#a8a8a8"]) : pick(["#3a2412", "#1a1a1a", "#a8742a", "#5a3a1a", "#e0c070", "#8a2a1a", "#d85a9a", "#3ac0d8"]));
+  const bright = () => hex(pick(["#f05a8a", "#3ad0d8", "#f4c21a", "#9aff3a", "#ff7a2a", "#b85aff", "#2a8aff"]));
+  const shirt = style === 0 ? bright() : style === 1 ? skin : style === 2 ? hex(pick(["#1c1c24", "#2a2a3a", "#3a3a44"])) : style === 3 ? bright()
+    : style === 4 ? hex(pick(["#f8a8d8", "#8ae8e0", "#c8a8f8"])) : style === 5 ? hex(pick(["#e8e8f0", "#8ab8e8", "#e8c8a8"])) : style === 6 ? hex(pick(["#3a3a3a", "#5a2a6a", "#2a4a3a"])) : hex("#ff6ab8");
+  const pants = style === 0 ? hex("#c8b080") : style === 1 ? bright() : style === 2 ? shirt : style === 3 ? hex("#2a2a3a") : style === 4 ? hex("#e8e8f0")
+    : style === 5 ? hex("#b8a888") : style === 6 ? hex("#2a3a5a") : hex("#f8f8f8");
+  const shoes = style === 1 ? skin : style === 2 ? hex("#141414") : style === 3 ? hex("#f4f4f4") : hex(pick(["#2a2016", "#f0f0f0", "#3a3a3a"]));
+  humanoid(p, skin, hair, shirt, pants, shoes, [30, 30, 30]);
+  const at = (x: number, y: number, c: RGB) => p.px(x, y, c, 0);
+  switch (style) {
+    case 0:
+      // Flowers all over the shirt; the shorts end at the knee.
+      for (let i = 0; i < 30; i++) at(16 + r.int(24), 20 + r.int(10), hex(pick(["#ffffff", "#f4e04a", "#f05a3a"])));
+      for (let x = 0; x < 16; x++) for (let y = 26; y < 30; y++) at(x, y, skin);
+      break;
+    case 1:
+      // Bare to the waist; bare legs below short trunks.
+      for (let x = 0; x < 16; x++) for (let y = 24; y < 30; y++) at(x, y, skin);
+      break;
+    case 2:
+      // A white shirt and a tie down the front of the jacket.
+      for (let y = 20; y < 28; y++) { at(23, y, hex("#f0f0f0")); at(24, y, hex("#f0f0f0")); }
+      for (let y = 20; y < 27; y++) at(y < 22 ? 23 : 24, y, hex("#b82a2a"));
+      break;
+    case 3:
+      // Stripes down the sides of the tracksuit.
+      for (let y = 20; y < 32; y++) { at(40, y, hex("#f4f4f4")); at(0, y, hex("#f4f4f4")); at(16, y, hex("#f4f4f4")); }
+      break;
+    case 4: case 7:
+      // Shades.
+      for (let x = 9; x < 15; x++) at(x, 12, hex("#141418"));
+      break;
+    case 6:
+      // Headphones over the hood.
+      for (let y = 9; y < 14; y++) { at(0, y, hex("#141414")); at(16, y, hex("#141414")); }
+      for (let x = 8; x < 16; x++) at(x, 0, hex("#141414"));
+      break;
+  }
+}
+
+/**
  * The infected: grey-green skin, clothes torn and darkened with old blood,
  * eyes gone pale — each kind with a tell: a runner lean and pale, a brute
  * blotched and bare-chested, a spitter's jaw green with acid, a screamer's
@@ -631,6 +682,9 @@ export function skin(kind: string, variant = 0): HTMLCanvasElement {
     }
     case "trainer":
       paintTrainer(p, variant);
+      break;
+    case "citizen":
+      paintCitizen(p, variant);
       break;
     case "tribute": {
       // Every tribute dressed differently: their district's colours, their own skin and hair.

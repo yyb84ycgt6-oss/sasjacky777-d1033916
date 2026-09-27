@@ -114,6 +114,34 @@ export function Hud({ hud, mobile, crosshair }: { hud: HudState; mobile: boolean
         </div>
       )}
 
+      {hud.zone?.fresh && !hud.screen && (
+        // The district, announced on the way in, the way the city games do: big, slanted, bottom right.
+        <div data-testid="hud-zone" className="absolute" style={{
+          right: "calc(var(--u) * 4)", ...(mobile ? { top: "calc(var(--u) * 40)" } : { bottom: `calc(var(--u) * ${hud.vehicle ? 44 : 14})` }),
+          fontSize: "calc(var(--u) * 13)", fontStyle: "italic", fontWeight: 700, color: "#ffe25a", letterSpacing: "calc(var(--u) * 0.4)",
+          WebkitTextStroke: "1px #3a1a00", textShadow: "calc(var(--u) * 0.8) calc(var(--u) * 0.8) 0 #ff3aa8",
+        }}>{hud.zone.name}</div>
+      )}
+
+      {hud.vehicle && !hud.screen && (
+        // The speedometer: the car's name, its speed, and how much of it is left.
+        <div data-testid="hud-vehicle" className="absolute" style={{
+          right: "calc(var(--u) * 4)", ...(mobile ? { top: "calc(var(--u) * 58)" } : { bottom: "calc(var(--u) * 12)" }),
+          minWidth: "calc(var(--u) * 64)", padding: "calc(var(--u) * 2) calc(var(--u) * 3)", background: "rgba(10,6,24,0.55)",
+          borderLeft: "calc(var(--u) * 1) solid #ff3aa8", textAlign: "right",
+        }}>
+          <div style={{ fontSize: "calc(var(--u) * 5.5)", color: "#9ad8ff", letterSpacing: "calc(var(--u) * 0.6)", textTransform: "uppercase" }}>{hud.vehicle.name}</div>
+          <div style={{ fontFamily: "monospace", fontSize: "calc(var(--u) * 16)", fontStyle: "italic", color: "#ffffff", lineHeight: 1 }}>
+            {hud.vehicle.kmh}<span style={{ fontSize: "calc(var(--u) * 6)", color: "#c0c0d0" }}> km/h</span>
+          </div>
+          <div style={{ marginTop: "calc(var(--u) * 1.5)", height: "calc(var(--u) * 2)", background: "rgba(255,255,255,0.15)" }}>
+            <div style={{ width: `${Math.round(hud.vehicle.health * 100)}%`, height: "100%", background: hud.vehicle.health < 0.25 ? "#ff3a2a" : hud.vehicle.health < 0.45 ? "#ffb02a" : "#5aff7a" }} />
+          </div>
+          {hud.zone?.street && <div style={{ fontSize: "calc(var(--u) * 5)", color: "#d0d0e0", marginTop: "calc(var(--u) * 1)" }}>{hud.zone.street}</div>}
+          {hud.vehicle.police && <div style={{ fontSize: "calc(var(--u) * 4.5)", color: hud.vehicle.siren ? "#ff6a6a" : "#8a8a9a" }}>Siren {hud.vehicle.siren ? "on" : "off"}</div>}
+        </div>
+      )}
+
       {hud.objective && !hud.screen && (
         // The sidebar scoreboard, where servers have always put a minigame's state: right edge, middle.
         <div data-testid="objective" className="absolute" style={{ right: "calc(var(--u) * 2)", top: "50%", transform: "translateY(-50%)", minWidth: "calc(var(--u) * 70)", maxWidth: "calc(var(--u) * 110)", background: "rgba(0,0,0,0.45)", fontSize: "calc(var(--u) * 6)", lineHeight: 1.35 }}>

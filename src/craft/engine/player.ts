@@ -65,7 +65,7 @@ const DEATH_MESSAGES: Record<DamageSource, string> = {
   mob: "was slain", arrow: "was shot", explosion: "blew up", fall: "hit the ground too hard", fire: "burned to death",
   lava: "tried to swim in lava", drown: "drowned", starve: "starved to death", void: "fell out of the world",
   cactus: "was pricked to death", player: "was slain", magic: "died", suffocation: "suffocated in a wall",
-  wither: "withered away", fireball: "was fireballed", fly_into_wall: "experienced kinetic energy",
+  wither: "withered away", fireball: "was fireballed", fly_into_wall: "experienced kinetic energy", vehicle: "was run over",
   thirst: "died of thirst", cold: "froze to death", heat: "succumbed to the heat", bleeding: "bled out", sickness: "died of a fever",
 };
 

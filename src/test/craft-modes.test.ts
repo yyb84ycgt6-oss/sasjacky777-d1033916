@@ -1,3 +1,4 @@
+import { blockIndex } from "@/craft/engine/constants";
 import { describe, expect, it } from "vitest";
 import { B } from "@/craft/engine/blocks";
 import { itemByName, itemId, type ItemStack } from "@/craft/engine/items";
@@ -32,13 +33,11 @@ describe("map packs", () => {
     for (const id of MAP_IDS) {
       const l = mapLayout(id, 5, base(5));
       if (l.terrain) continue;
-      const [sx, sy, sz] = l.spawn;
-      const below = [...l.blocks.values()].flat();
-      let solid = false;
-      for (let i = 0; i < below.length; i += 5) {
-        if (below[i] === Math.floor(sx) && below[i + 1] === Math.floor(sy) - 1 && below[i + 2] === Math.floor(sz) && below[i + 3] !== B.AIR) solid = true;
-      }
-      expect(solid, id).toBe(true);
+      // Built as the world would build it: from the map's pieces, or (a city) from its chunk-by-chunk plan.
+      const [sx, sy, sz] = l.spawn.map(Math.floor);
+      const chunk = new MapGenerator(id, base(5)).generate(sx >> 4, sz >> 4);
+      expect(chunk.blocks[blockIndex(sx & 15, sy - 1, sz & 15)], id).not.toBe(B.AIR);
+      expect(chunk.blocks[blockIndex(sx & 15, sy, sz & 15)], id).toBe(B.AIR);
     }
   });
 

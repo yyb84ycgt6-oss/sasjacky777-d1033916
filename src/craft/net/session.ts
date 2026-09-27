@@ -34,6 +34,7 @@ import { Mob, isMobKind } from "../engine/mobs";
 import { TORPOR } from "../engine/creatures";
 import { canRide } from "../engine/dinoAi";
 import { isVehicleKind, Vehicle, vehicleFromSnapshot } from "../engine/vehicles";
+import { Car } from "../engine/cars";
 import { B, block, Face } from "../engine/blocks";
 import type { PlayerSave } from "../engine/player";
 import type { AdvancementEvent } from "../engine/advancements";
@@ -446,7 +447,8 @@ export class NetSession implements NetLink {
   trade(entityId: number, offer: number): void { this.push(["tr", entityId, offer]); }
   vehiclePose(v: Vehicle | Mob): void {
     const b = v.body;
-    this.push(["vp", v.id, r3(b.x), r3(b.y), r3(b.z), r3(v.yaw), r3(b.vx), r3(b.vy), r3(b.vz)]);
+    // A car's driver also reports what their crashes cost it: the host is the one that sets it burning.
+    this.push(["vp", v.id, r3(b.x), r3(b.y), r3(b.z), r3(v.yaw), r3(b.vx), r3(b.vy), r3(b.vz), ...(v instanceof Car ? [Math.round(v.health)] : [])]);
   }
   launchFirework(x: number, y: number, z: number, rocket: Rocket): void {
     this.push(["fw", r3(x), r3(y), r3(z), rocket]);
@@ -960,10 +962,12 @@ export class NetSession implements NetLink {
       else if (on === 0 && v.rider === from) v.rider = null;
       return;
     }
-    if (!(v instanceof Vehicle)) return;
+    if (!(v instanceof Vehicle) || !v.rideable) return;
     // First come, first seated; a guest can only climb out of their own seat.
-    if (on === 1 && (v.rider === null || v.rider === from)) v.rider = from;
-    else if (on === 0 && v.rider === from) v.rider = null;
+    if (on === 1 && (v.rider === null || v.rider === from)) {
+      v.rider = from;
+      if (v instanceof Car) g.carjack(v, from);
+    } else if (on === 0 && v.rider === from) v.rider = null;
   }
 
   private onTrade(from: string, op: Op): void {
@@ -980,12 +984,14 @@ export class NetSession implements NetLink {
   }
 
   private onVehiclePose(from: string, op: Op): void {
-    const [, id, x, y, z, yaw, vx, vy, vz] = op;
+    const [, id, x, y, z, yaw, vx, vy, vz, hp] = op;
     const v = this.game!.entities.get(id as number);
     if (!(v instanceof Vehicle || v instanceof Mob) || v.rider !== from || !finite(x, y, z, yaw, vx, vy, vz)) return;
     const b = v.body;
-    // A rider reports where their vehicle went; a jump further than a fast cart could go is not believed.
+    // A rider reports where their vehicle went; a jump further than a fast car could go is not believed.
     if (Math.hypot((x as number) - b.x, (z as number) - b.z) > 4) return;
+    // Damage the driver's crashes did is believed; repairs are not.
+    if (v instanceof Car && typeof hp === "number" && Number.isFinite(hp) && hp < v.health) v.damageBy(this.game!.ctx, v.health - Math.max(0, hp));
     b.x = x as number; b.y = y as number; b.z = z as number;
     b.vx = vx as number; b.vy = vy as number; b.vz = vz as number;
     v.yaw = yaw as number;

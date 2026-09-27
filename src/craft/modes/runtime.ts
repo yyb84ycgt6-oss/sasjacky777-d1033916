@@ -54,6 +54,10 @@ export abstract class ModeRuntime {
   onRespawn(): void {}
   /** A player caught a critter of this species (the critter modes). */
   onCritterCaught(_player: string, _species: string): void {}
+  /** A player took a car from whoever was driving it (the city modes). */
+  onCarjack(_player: string): void {}
+  /** A car blew up (the city modes). */
+  onCarWrecked(): void {}
   /** A drop, as this mode would have it (Random Drops swaps it for another). */
   transformDrop(s: ItemStack): ItemStack { return s; }
   /** The scoreboard for one player; null for none. */

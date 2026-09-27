@@ -9,6 +9,7 @@
  * block needs: torches want a wall or floor, crops want farmland, doors want
  * two blocks of room, a slab on a slab makes a double slab.
  */
+import { Car } from "../engine/cars";
 import * as THREE from "three";
 import {
   B, block, CLOCKWISE_FACING, collisionBoxes, CROP_MAX_AGE, Face, FACE_DIRS, FACE_OF_FACING, FACING_DIRS, isBerryBush, isButton, isCrop, isDoor, isFluid, isLeaves, isPillar,
@@ -284,8 +285,12 @@ export class Actions {
     const attack = active && c.attack;
     const use = active && c.use;
 
-    // Attack.
-    if (attack && p.gameMode !== "spectator") {
+    // At the wheel of a car, the attack button is the horn.
+    const car = g.ridden();
+    if (car instanceof Car) {
+      if (attack && !this.attackPrev) car.honk(g.ctx);
+      this.attackPrev = attack;
+    } else if (attack && p.gameMode !== "spectator") {
       const t = this.target;
       if (t?.entity || t?.remote) {
         if (!this.attackPrev || p.attackStrength() >= 1) this.attackTarget(t);
@@ -297,7 +302,7 @@ export class Actions {
         this.mining = null;
       }
     } else this.mining = null;
-    this.attackPrev = attack;
+    if (!(car instanceof Car)) this.attackPrev = attack;
 
     if (this.gunCooldown > 0) this.gunCooldown--;
     // Use.
@@ -594,7 +599,7 @@ export class Actions {
       return;
     }
 
-    if (t?.entity instanceof Vehicle && fresh && !p.sneaking) {
+    if (t?.entity instanceof Vehicle && t.entity.rideable && fresh && !p.sneaking) {
       g.mount(t.entity);
       this.swing();
       return;

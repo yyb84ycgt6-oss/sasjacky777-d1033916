@@ -191,6 +191,11 @@ export const MODES: readonly ModeDef[] = [
     inspiredBy: "The casinos of Las Vegas, and every game that ever put one in a city",
     description: "A thousand dollars and the run of the Golden Stonk: slots, blackjack, roulette, video poker, the wheel, and Stonks the crash game. Real odds; play money.",
     goal: "Turn $1,000 into $1,000,000." },
+  { id: "neon_bay", name: "Neon Bay", category: "city", icon: "cash", gameMode: "adventure", map: "neon_bay", difficulty: 1, multiplayer: true,
+    rules: { doMobSpawning: false, keepInventory: true },
+    inspiredBy: "The seaside crime-sandbox games of the 2000s, and the city they set in the 1980s",
+    description: "An island city of pastel hotels, glass towers and palm trees, with traffic on the streets and people on the sidewalks. Five hundred dollars and a Boomer Blaster outside your crib — and any other car you can get into.",
+    goal: "Drive it, jack it, wreck it, own it." },
 ];
 
 export function modeDef(id: string | undefined): ModeDef | undefined {

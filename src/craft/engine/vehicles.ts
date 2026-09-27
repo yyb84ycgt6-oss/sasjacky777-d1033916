@@ -31,8 +31,19 @@ export interface DriveInput {
 /** Wood types a boat can be made of, in variant order. */
 export const BOAT_WOODS = ["oak", "spruce", "birch", "jungle", "acacia"] as const;
 
-export type VehicleKind = "boat" | "minecart" | "tnt_minecart";
-export const isVehicleKind = (k: unknown): k is VehicleKind => k === "boat" || k === "minecart" || k === "tnt_minecart";
+export type VehicleKind = "boat" | "minecart" | "tnt_minecart" | "car";
+export const isVehicleKind = (k: unknown): k is VehicleKind => k === "boat" || k === "minecart" || k === "tnt_minecart" || k === "car";
+
+/**
+ * Vehicles defined in their own modules (cars, engine/cars.ts), which build
+ * on this one: they register how to rebuild themselves from a snapshot, so
+ * this module need not import theirs — an import the other way round would
+ * be a cycle, and a class cannot extend one not yet defined.
+ */
+const registered = new Map<VehicleKind, (s: EntitySnapshot) => Vehicle>();
+export function registerVehicle(kind: VehicleKind, make: (s: EntitySnapshot) => Vehicle): void {
+  registered.set(kind, make);
+}
 
 export abstract class Vehicle extends Entity {
   abstract readonly kind: VehicleKind;
@@ -46,6 +57,8 @@ export abstract class Vehicle extends Entity {
 
   /** Where the rider's feet go: low, so a seated player's hips rest in the vehicle. */
   abstract riderY(): number;
+  /** Whether anyone can sit in it now (a burnt-out car cannot be driven). */
+  get rideable(): boolean { return true; }
   /** The item it drops when broken. */
   abstract itemName(): string;
 
@@ -333,6 +346,7 @@ export function vehicleFromSnapshot(s: EntitySnapshot): Vehicle | null {
   let v: Vehicle | null = null;
   if (s.kind === "boat") v = new Boat(s.x, s.y, s.z, Number(s.data?.w ?? 0), s.id);
   else if (s.kind === "minecart" || s.kind === "tnt_minecart") v = new Minecart(s.kind, s.x, s.y, s.z, s.id);
+  else if (isVehicleKind(s.kind)) v = registered.get(s.kind)?.(s) ?? null;
   v?.applySnapshot(s);
   return v;
 }

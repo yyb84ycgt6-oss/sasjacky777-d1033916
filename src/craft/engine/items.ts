@@ -481,6 +481,8 @@ item("strong_tonic", "Strong Tonic", { use: "critter_medicine", category: "tools
 item("cure_all", "Cure-All", { use: "critter_medicine", category: "tools", maxStack: 16 });
 item("revival_herb", "Revival Herb", { use: "critter_medicine", category: "tools", maxStack: 16 });
 item("honey_cake", "Honey Cake", { use: "critter_medicine", category: "tools", maxStack: 16 });
+// The city modes: a wad of bills dropped in the street. Picked up in a city, it goes straight to your cash (game.ts).
+item("cash", "Wad of Cash", { category: "tools" });
 
 // ---- lookups -----------------------------------------------------------------------
 

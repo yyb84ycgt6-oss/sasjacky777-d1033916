@@ -23,12 +23,12 @@ export type EntityKind =
   | "ender_pearl" | "eye_of_ender" | "dragon_fireball" | "end_crystal" | "area_cloud" | "enderman" | "silverfish" | "ender_dragon"
   | "pig" | "cow" | "sheep" | "chicken" | "zombie" | "skeleton" | "creeper" | "spider" | "slime" | "villager" | "iron_golem"
   | "zombified_piglin" | "ghast" | "magma_cube" | "blaze" | "wither_skeleton" | "piglin" | "hoglin"
-  | "boat" | "minecart" | "tnt_minecart"
+  | "boat" | "minecart" | "tnt_minecart" | "car"
   | "shulker" | "shulker_bullet" | "item_frame" | "firework_rocket"
   | "wolf" | "deer" | "bear" | "tribute"
   | "dodo" | "dilo" | "parasaur" | "raptor" | "trike" | "stego" | "rex" | "bronto" | "ptero" | "gigantoraptor"
   | "infected" | "runner" | "brute" | "spitter" | "screamer" | "bloater"
-  | "critter" | "trainer";
+  | "critter" | "trainer" | "citizen";
 
 export interface PlayerRef {
   id: string;
@@ -49,6 +49,8 @@ export interface PlayerRef {
   pitch?: number;
   /** A carved pumpkin on the head: endermen cannot tell they are being looked at. */
   pumpkin?: boolean;
+  /** Sitting in a vehicle or on a mount (so a car hits the car, not them). */
+  riding?: boolean;
 }
 
 export type DamageSource = "mob" | "arrow" | "explosion" | "fall" | "fire" | "lava" | "drown" | "starve" | "void" | "cactus" | "player" | "magic" | "suffocation"
@@ -56,6 +58,8 @@ export type DamageSource = "mob" | "arrow" | "explosion" | "fall" | "fire" | "la
   | "wither" | "fireball"
   /** Gliding into a wall too fast. */
   | "fly_into_wall"
+  /** Run over, or rammed. */
+  | "vehicle"
   /** The vitals some modes keep (engine/vitals.ts). */
   | "thirst" | "cold" | "heat" | "bleeding" | "sickness";
 
@@ -74,8 +78,8 @@ export interface EntityContext {
   giveXp(id: string, amount: number): void;
   spawn(e: Entity): void;
   dropItem(x: number, y: number, z: number, stack: ItemStack, vx?: number, vy?: number, vz?: number): void;
-  /** `fire` leaves flames among the rubble (a ghast's fireball). */
-  explode(x: number, y: number, z: number, power: number, cause: Entity | null, fire?: boolean): void;
+  /** `fire` leaves flames among the rubble (a ghast's fireball); `blocks: false` spares the blocks (a car going up). */
+  explode(x: number, y: number, z: number, power: number, cause: Entity | null, fire?: boolean, blocks?: boolean): void;
   /** A mob's blow carried an effect (a wither skeleton's wither). */
   effectPlayer?(id: string, effect: StatusEffect, seconds: number, amp: number): void;
   sound(name: string, x: number, y: number, z: number, volume?: number, pitch?: number): void;

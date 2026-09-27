@@ -319,6 +319,15 @@ export class GameAudio {
       case "lose": this.tone(out, t, "sawtooth", 300 * p, 140 * p, 0.35, 0.15); break;
       case "crash_boom": this.noiseBurst(out, t, 0.8, "lowpass", 700, 0.8, 0.7, 0.2); this.tone(out, t, "sawtooth", 400, 50, 0.6, 0.25); break;
       case "cashout": [880, 1175, 1760].forEach((f, i) => this.tone(out, t + i * 0.05, "square", f, f, 0.08, 0.14)); break;
+      // The streets: a two-note horn (lower for the big ones), the police whoop, a crunch of metal and glass, a dent.
+      case "car_horn": this.tone(out, t, "sawtooth", 415 * p, 415 * p, 0.35, 0.16); this.tone(out, t, "sawtooth", 523 * p, 523 * p, 0.35, 0.12); break;
+      case "siren_whoop": this.tone(out, t, "square", 600, 1500, 0.35, 0.14); this.tone(out, t + 0.35, "square", 1500, 700, 0.3, 0.12); break;
+      case "car_crash":
+        this.noiseBurst(out, t, 0.45, "lowpass", 1100 * p, 0.8, 0.9, 0.35);
+        this.tone(out, t, "square", 140 * p, 60 * p, 0.3, 0.3);
+        for (let i = 0; i < 5; i++) this.tone(out, t + 0.04 + i * 0.03, "sine", 2600 + Math.random() * 2400, 2000, 0.12, 0.08);
+        break;
+      case "car_hit": this.tone(out, t, "triangle", 900 * p, 500 * p, 0.12, 0.3); this.noiseBurst(out, t, 0.08, "bandpass", 2200, 2, 0.3); break;
       case "trainer_spot": this.tone(out, t, "square", 1047, 1047, 0.08, 0.2); this.tone(out, t + 0.1, "square", 1397, 1397, 0.18, 0.2); break;
       default:
         this.mob(name, out, t, p);
@@ -376,6 +385,8 @@ export class GameAudio {
         this.noiseBurst(out, t, 0.15, "lowpass", 700 * z, 1, 0.25);
         break;
       }
+      // A person: an "oof" when hurt, a longer fall-away when it is the end of them.
+      case "citizen": this.tone(out, t, "triangle", (death ? 300 : 360) * p, (death ? 120 : 220) * p, death ? 0.5 : 0.16, 0.35, 0.02); this.noiseBurst(out, t, 0.06, "lowpass", 900, 1, 0.2); break;
       case "hoglin": this.tone(out, t, "sawtooth", 110 * p * low, 70 * p * low, 0.4, 0.3, 0.05); this.noiseBurst(out, t, 0.3, "lowpass", 400, 1, 0.3); break;
       // A wolf barks when hurt, whines as it dies, and pants or yips otherwise.
       case "wolf":
@@ -545,6 +556,44 @@ export class GameAudio {
   }
 
   /** Called every second or so; starts a short generative piece now and then. */
+  private motor: { osc: OscillatorNode; sub: OscillatorNode; gain: GainNode; filter: BiquadFilterNode } | null = null;
+  /**
+   * The engine of the car being driven: a growl whose pitch climbs with the
+   * speed through four gears, and dips as each one changes. Null stops it.
+   */
+  engine(state: { speed: number; top: number; throttle: number } | null): void {
+    if (!state) {
+      if (this.motor && this.ctx) {
+        const m = this.motor, t = this.ctx.currentTime;
+        m.gain.gain.setTargetAtTime(0, t, 0.1);
+        m.osc.stop(t + 0.5); m.sub.stop(t + 0.5);
+        this.motor = null;
+      }
+      return;
+    }
+    if (!this.ready()) return;
+    const ctx = this.ctx!;
+    if (!this.motor) {
+      const osc = ctx.createOscillator(), sub = ctx.createOscillator(), gain = ctx.createGain(), filter = ctx.createBiquadFilter();
+      osc.type = "sawtooth"; sub.type = "square";
+      filter.type = "lowpass"; filter.frequency.value = 600;
+      gain.gain.value = 0;
+      osc.connect(filter); sub.connect(filter); filter.connect(gain); gain.connect(this.sfx);
+      osc.start(); sub.start();
+      this.motor = { osc, sub, gain, filter };
+    }
+    const f = Math.min(1, Math.abs(state.speed) / Math.max(0.1, state.top));
+    // Four gears: within each the revs climb, and fall back a little at the change.
+    const gear = Math.min(3, Math.floor(f * 4));
+    const rev = f * 4 - gear;
+    const hz = 45 + gear * 8 + rev * 55;
+    const t = ctx.currentTime;
+    this.motor.osc.frequency.setTargetAtTime(hz, t, 0.05);
+    this.motor.sub.frequency.setTargetAtTime(hz / 2, t, 0.05);
+    this.motor.filter.frequency.setTargetAtTime(400 + rev * 500 + state.throttle * 400, t, 0.08);
+    this.motor.gain.gain.setTargetAtTime(0.05 + state.throttle * 0.04 + f * 0.03, t, 0.1);
+  }
+
   tickMusic(dt: number, calm: boolean): void {
     if (!this.ready() || this.volumes.music <= 0) return;
     this.nextMusic -= dt;

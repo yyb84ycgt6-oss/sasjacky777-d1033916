@@ -20,8 +20,9 @@ import { itemByName, type ItemStack } from "./items";
 import { hash4, Rng } from "./rng";
 import type { ChunkGenerator, GeneratedChunk, Generator, Tints } from "./worldgen";
 import type { CasinoGame } from "./casino";
+import { cityOf, STREET, type City } from "./city";
 
-export const MAP_IDS = ["skyblock", "oneblock", "void", "parkour", "colosseum", "tnt_run", "sg_arena", "primal_island", "dead_zone", "zombie_bunker", "critter_region", "safari_park", "battle_spire", "high_roller"] as const;
+export const MAP_IDS = ["skyblock", "oneblock", "void", "parkour", "colosseum", "tnt_run", "sg_arena", "primal_island", "dead_zone", "zombie_bunker", "critter_region", "safari_park", "battle_spire", "high_roller", "neon_bay"] as const;
 export type MapId = (typeof MAP_IDS)[number];
 export const isMapId = (v: unknown): v is MapId => typeof v === "string" && (MAP_IDS as readonly string[]).includes(v);
 
@@ -45,6 +46,7 @@ export const MAPS: Record<MapId, MapInfo> = {
   safari_park: { name: "The Safari Park", description: "A fenced park of meadow, pond, grove, rocks and marsh, full of critters to catch." },
   battle_spire: { name: "The Battle Spire", description: "A round arena at the top of a spire, where challengers step up one after another." },
   high_roller: { name: "The Golden Stonk", description: "A casino floor: rows of slots, blackjack and roulette tables, a video poker bar, the wheel and the Stonks terminal." },
+  neon_bay: { name: "Neon Bay", description: "An island city some five hundred blocks across: a beach strip of pastel hotels, a glass downtown, docks, a park, and a casino — with traffic, people and a car of your own." },
 };
 
 /** Loot tables a map's chests are filled from (see mapLoot). */
@@ -102,6 +104,8 @@ export interface MapLayout {
   legend?: [number, number, number];
   /** Casino machines and tables: every block of each, and the game it plays. */
   casino?: { game: CasinoGame; x: number; y: number; z: number }[];
+  /** A city built chunk by chunk from the seed (engine/city.ts), rather than from `blocks`. */
+  city?: City;
 }
 
 /** A named stretch of a critter map. */
@@ -831,6 +835,21 @@ function casinoFloor(): Omit<MapLayout, "map"> {
   return { spawn: [0.5, Y + 1, Z1 - 2.5], blocks: p.blocks, terrain: false, chests: [], center: [0, 0], radius: 40, floorY: Y - 10, casino };
 }
 
+/**
+ * Neon Bay: a whole city, built chunk by chunk as the world generates
+ * (engine/city.ts). You start outside your crib on the beach side; the Lucky
+ * Doge's tables are listed so using one deals you in.
+ */
+function neonBay(seed: number): Omit<MapLayout, "map"> {
+  const city = cityOf("neon_bay", seed);
+  const home = city.landmark("safehouse");
+  const casinoLot = city.landmark("casino");
+  const casino = casinoLot ? city.casinoPlan(casinoLot).map(({ game, x, y, z }) => ({ game, x, y, z })) : [];
+  const spawn: [number, number, number] = home ? [home.x0 + 8.5, STREET, home.z0 + 19.5] : [0.5, STREET, 0.5];
+  const cx = Math.round((city.minX + city.maxX) / 2), cz = Math.round((city.minZ + city.maxZ) / 2);
+  return { spawn, blocks: new Map(), terrain: false, chests: [], center: [cx, cz], radius: 420, floorY: 0, casino, city };
+}
+
 function sgArena(seed: number, base: Generator): Omit<MapLayout, "map"> {
   const p = new Plan();
   const s = base.findSpawn();
@@ -876,7 +895,7 @@ export function mapLayout(map: MapId, seed: number, base: Generator): MapLayout 
     const made = map === "skyblock" ? skyblock() : map === "oneblock" ? oneblock() : map === "void" ? voidMap()
       : map === "parkour" ? parkour(seed) : map === "colosseum" ? colosseum() : map === "tnt_run" ? tntRun()
         : map === "primal_island" ? primalIsland(base) : map === "dead_zone" ? deadZone(seed, base) : map === "zombie_bunker" ? zombieBunker()
-          : map === "critter_region" ? critterRegion(seed, base) : map === "safari_park" ? safariPark(seed, base) : map === "battle_spire" ? battleSpire() : map === "high_roller" ? casinoFloor() : sgArena(seed, base);
+          : map === "critter_region" ? critterRegion(seed, base) : map === "safari_park" ? safariPark(seed, base) : map === "battle_spire" ? battleSpire() : map === "high_roller" ? casinoFloor() : map === "neon_bay" ? neonBay(seed) : sgArena(seed, base);
     l = { map, ...made };
     if (layouts.size > 16) layouts.clear();
     layouts.set(key, l);
@@ -909,6 +928,7 @@ export class MapGenerator implements ChunkGenerator {
     let out: GeneratedChunk;
     if (this.layout.terrain) out = this.base.generate(cx, cz);
     else out = { blocks: new Uint8Array(CHUNK_VOLUME), meta: new Uint8Array(CHUNK_VOLUME), biomes: new Uint8Array(256).fill(BiomeId.Plains) };
+    this.layout.city?.fill(cx, cz, out);
     const list = this.layout.blocks.get(`${cx},${cz}`) ?? [];
     for (let i = 0; i < list.length; i += 5) {
       const idx = blockIndex(list[i] - cx * 16, list[i + 1], list[i + 2] - cz * 16);

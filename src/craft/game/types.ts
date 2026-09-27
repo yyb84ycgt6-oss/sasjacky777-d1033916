@@ -176,4 +176,8 @@ export interface Hud {
   critters: { party: { name: string; species: string; level: number; hp: number; max: number; status: string | null }[]; coins: number; badges: number } | null;
   /** The city and casino modes: the player's dollars, shown as the city shows them; null elsewhere. */
   cash: number | null;
+  /** At the wheel of a car: its name, speed, how much of it is left (0-1), and its siren. */
+  vehicle: { name: string; kmh: number; health: number; siren: boolean; police: boolean } | null;
+  /** In a city: the district (announced for a few seconds on the way in) and the street underfoot. */
+  zone: { name: string; street: string | null; fresh: boolean } | null;
 }

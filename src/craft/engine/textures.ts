@@ -2621,6 +2621,25 @@ const ITEM_TEMPLATES: Record<string, string[]> = {
     "..hha...........",
     "..hh............",
   ],
+  // A folded wad of banknotes, a band round the middle.
+  bills: [
+    "................",
+    "................",
+    "................",
+    "................",
+    "..aaaaaaaaaaaa..",
+    ".abbbbbbbbbbbba.",
+    ".abccbbwwbbccba.",
+    ".abcbbwddwbbcba.",
+    ".aaaaaaaaaaaaaa.",
+    ".awwwwwwwwwwwwa.",
+    ".aaaaaaaaaaaaaa.",
+    ".abcbbwddwbbcba.",
+    ".abccbbwwbbccba.",
+    ".abbbbbbbbbbbba.",
+    "..aaaaaaaaaaaa..",
+    "................",
+  ],
   roll: [
     "................", "................", "................",
     "....aaaaaaa.....",
@@ -2889,6 +2908,7 @@ art("strong_tonic", "vial", paletteOf("#d8508a", { h: hex("#d8d8d8") }));
 art("cure_all", "vial", paletteOf("#f0d040", { h: hex("#8a6536") }));
 art("revival_herb", "herb", { b: hex("#3c9a3a"), c: hex("#6ad06a"), g: hex("#2a6a2a"), f: hex("#f0c040"), w: hex("#fff8d0") });
 art("honey_cake", "bread", paletteOf("#e0a030", { c: hex("#f8d870") }));
+art("cash", "bills", { a: hex("#1e3a1e"), b: hex("#5aa84a"), c: hex("#8ad07a"), d: hex("#2a6a2a"), w: hex("#f0f0d8") });
 art("bread", "bread", paletteOf("#b8843a"));
 art("carrot", "carrot", paletteOf("#ef8a1c", { g: hex("#4c9a2a") }));
 art("potato", "potato", paletteOf("#c8a254"));

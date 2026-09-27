@@ -24,7 +24,7 @@ import {
   type DamageSource, type Entity, type EntityContext, type EntitySnapshot, type PlayerRef, type ProjectileKind,
 } from "../engine/entities";
 import { blastImpact, explosionBlocks, exposure } from "../engine/explosion";
-import { itemDef, itemId, itemLight, maxStack, resolveDrops, type ItemStack, type StatusEffect } from "../engine/items";
+import { itemByName, itemDef, itemId, itemLight, maxStack, resolveDrops, type ItemStack, type StatusEffect } from "../engine/items";
 import { modEnabled } from "../engine/mods";
 import { WorldMap } from "./worldMap";
 import { withDeathPoint } from "../engine/waypoints";
@@ -64,6 +64,9 @@ import { bottleBits, tickBrewing } from "../engine/brewing";
 import { levelOf } from "../engine/enchanting";
 import { potionOfItem, splashSeconds } from "../engine/potions";
 import { Boat, Minecart, Vehicle, vehicleFromSnapshot } from "../engine/vehicles";
+import { Car, kmh } from "../engine/cars";
+import type { City } from "../engine/city";
+import { CARJACK_QUIPS, pick as pickQuip, toughCitizen } from "../engine/citizens";
 import { golemParts, villageLoot } from "../engine/villages";
 import { fortressesTouching, fortressLoot, inFortress, NETHER_LAVA_LEVEL, SPAWNER_MOBS } from "../engine/nether";
 import { planPortal, type PortalAxis } from "../engine/portal";
@@ -210,6 +213,8 @@ export interface GameOptions {
 }
 
 const AUTOSAVE_TICKS = 600;
+/** A wad of cash, which in a city is money the moment it is picked up. */
+const CASH_ID = itemByName("cash").id;
 const MAX_HOSTILE = 14;
 const MAX_PASSIVE = 10;
 /** Primal's creatures per player: enough that the wilds feel alive, few enough to keep a phone smooth. */
@@ -564,7 +569,8 @@ export class Game {
   private persistentEntities(): EntitySnapshot[] {
     return [...this.entities.values()]
       // A dragon keeps even its death throes: reloading mid-fall finishes the fall rather than losing the reward.
-      .filter((e) => (e instanceof Mob && e.persistent && (!e.dying || e.kind === "ender_dragon")) || e instanceof ItemEntity || e instanceof Vehicle || e instanceof EndCrystal || e instanceof ItemFrame)
+      // The city's own cars (traffic, the parked ones) are its to make again, not the save's to keep.
+      .filter((e) => (e instanceof Mob && e.persistent && (!e.dying || e.kind === "ender_dragon")) || e instanceof ItemEntity || (e instanceof Vehicle && !(e instanceof Car && e.ambient)) || e instanceof EndCrystal || e instanceof ItemFrame)
       .slice(0, 600)
       .map((e) => e.snapshot());
   }
@@ -1181,6 +1187,12 @@ export class Game {
         else this.net?.hurtRemote(id, amount, source, fx, fz, kb, attacker);
       },
       givePlayer: (id, stack) => {
+        // Cash picked up in a city goes to the player's money, not their pockets.
+        if (stack.id === CASH_ID && modeDef(this.meta.mode?.id)?.category === "city") {
+          if (id === this.player.id) { this.player.cash += stack.count; this.sound("cashout", null, 0, 0, 0.5, 1.2); }
+          else this.net?.modeTell(id, { cash: stack.count });
+          return 0;
+        }
         if (id === this.player.id) {
           const left = this.player.inventory.add(stack);
           if (left < stack.count) this.bumpInv();
@@ -1200,7 +1212,7 @@ export class Game {
       },
       spawn: (e) => this.spawn(e),
       dropItem: (x, y, z, stack, vx, vy, vz) => this.dropItem(x, y, z, stack, vx, vy, vz),
-      explode: (x, y, z, power, cause, fire) => this.explode(x, y, z, power, cause, fire),
+      explode: (x, y, z, power, cause, fire, blocks) => this.explode(x, y, z, power, cause, fire, blocks),
       sound: (name, x, y, z, v, p) => this.sound(name, x, y, z, v, p),
       particles: (kind, x, y, z, count, data) => this.particles(kind, x, y, z, count, data),
       entitiesNear: (x, y, z, r) => {
@@ -1235,7 +1247,7 @@ export class Game {
         id: p.id, name: p.name, x: p.body.x, y: p.body.y, z: p.body.z, width: p.body.width, height: p.body.height,
         targetable: p.survivalLike, heldItem: p.inventory.held?.id ?? -1, sneaking: p.sneaking, invisible: p.hasEffect("invisibility"),
         goldArmor: p.inventory.armor.some((a) => !!a && itemDef(a.id)?.armor?.material === "golden"),
-        yaw: p.yaw, pitch: p.pitch, pumpkin: p.inventory.armor[0]?.id === B.CARVED_PUMPKIN,
+        yaw: p.yaw, pitch: p.pitch, pumpkin: p.inventory.armor[0]?.id === B.CARVED_PUMPKIN, riding: p.riding !== null,
       });
     }
     for (const r of this.remote.values()) {
@@ -1243,7 +1255,7 @@ export class Game {
       refs.push({
         id: r.id, name: r.name, x: r.x, y: r.y, z: r.z, width: 0.6, height: r.sneaking ? 1.5 : 1.8,
         targetable: r.gameMode === "survival" || r.gameMode === "adventure", heldItem: r.held ?? -1, sneaking: r.sneaking, invisible: r.invisible,
-        goldArmor: r.goldArmor, yaw: r.yaw, pitch: r.pitch, pumpkin: r.pumpkin,
+        goldArmor: r.goldArmor, yaw: r.yaw, pitch: r.pitch, pumpkin: r.pumpkin, riding: r.riding,
       });
     }
     return refs;
@@ -1268,13 +1280,13 @@ export class Game {
   }
 
   /** `fire` leaves flames among the rubble (a bed in the Nether, a ghast's fireball). */
-  explode(x: number, y: number, z: number, power: number, cause: Entity | null, fire = false): void {
+  explode(x: number, y: number, z: number, power: number, cause: Entity | null, fire = false, blocks = true): void {
     if (!this.simulates) return;
     this.makeNoise(x, y, z, 24 + power * 8, null);
     this.sound("explode", x, y, z, 1, 0.9 + Math.random() * 0.2);
     this.particles("explosion", x, y, z, 24, 0, false);
     this.net?.effect("explosion", [round2(x), round2(y), round2(z), power]);
-    const griefing = this.meta.rules.mobGriefing || !(cause instanceof Mob);
+    const griefing = blocks && (this.meta.rules.mobGriefing || !(cause instanceof Mob));
     if (griefing) {
       for (const [bx, by, bz] of explosionBlocks(this.world, x, y, z, power, Math.random)) {
         const id = this.world.blockAt(bx, by, bz);
@@ -2005,11 +2017,15 @@ export class Game {
     const blockLight = Math.max(worldBlock, held / 15);
     const biome = biomeDef(this.world.chunkAt(Math.floor(b.x), Math.floor(b.z))?.biomes[((Math.floor(b.z) & 15) << 4) | (Math.floor(b.x) & 15)] ?? 7);
 
+    const ridingNow = p.riding !== null ? this.entities.get(p.riding) : undefined;
+    const localCar = ridingNow instanceof Car ? ridingNow : null;
     const local: RemotePlayerView = {
       id: p.id, name: p.name, x: ix, y: iy, z: iz, yaw: p.yaw, pitch: p.pitch, walk, speed, swing: this.actions.swingProgress(alpha),
       sneaking: p.sneaking, heldItem: heldId, variant: this.settings.skin, hurt: p.hurtTime > 0, dead: p.dead,
-      sitting: p.riding !== null, gliding: p.gliding,
+      sitting: p.riding !== null, gliding: p.gliding, inCar: localCar !== null,
     };
+    const carRiders = new Set<string>();
+    for (const e of this.entities.values()) if (e instanceof Car && e.rider) carRiders.add(e.rider);
     const remote: RemotePlayerView[] = [];
     for (const r of this.remote.values()) {
       const t = Math.min(1, (now - r.receivedAt) / 120);
@@ -2017,7 +2033,7 @@ export class Game {
         id: r.id, name: r.name, x: r.px + (r.x - r.px) * t, y: r.py + (r.y - r.py) * t, z: r.pz + (r.z - r.pz) * t,
         yaw: r.pyaw + angleDiff(r.pyaw, r.yaw) * t, pitch: r.pitch, walk: r.walk, speed: r.speed, swing: r.swing,
         sneaking: r.sneaking, heldItem: r.held, variant: r.variant, hurt: r.hurt, dead: r.dead || r.gameMode === "spectator",
-        invisible: r.invisible, sitting: r.riding, gliding: r.gliding,
+        invisible: r.invisible, sitting: r.riding, gliding: r.gliding, inCar: carRiders.has(r.id),
       });
     }
 
@@ -2033,8 +2049,10 @@ export class Game {
     const target = this.actions.target?.block ?? null;
     this.renderer.render({
       dt, alpha,
-      camera: { x: ix, y: eye, z: iz, yaw: p.yaw, pitch: p.pitch, fov: this.settings.fov * (p.sprinting ? 1.1 : 1) * (this.actions.bowFov()) },
+      // Behind a car the camera rides higher and further back, as a chase camera does.
+      camera: { x: ix, y: eye + (localCar && this.perspective !== 0 ? 1.2 : 0), z: iz, yaw: p.yaw, pitch: p.pitch, fov: this.settings.fov * (p.sprinting ? 1.1 : 1) * (this.actions.bowFov()) * (localCar ? 1 + Math.min(0.15, Math.abs(localCar.speed) * 0.1) : 1) },
       perspective: this.perspective,
+      cameraDistance: localCar ? localCar.spec.l + 3.5 : 4,
       bob: { walk, amount: bobAmount },
       hurtTilt: this.hurtTilt,
       time: this.time + alpha,
@@ -2069,6 +2087,7 @@ export class Game {
     });
     this.lightning = 0;
     this.audio.setListener(ix, eye, iz, p.yaw);
+    this.audio.engine(localCar && !localCar.wrecked && !this.screen ? { speed: localCar.speed, top: localCar.spec.top, throttle: Math.abs(this.controls.forward) } : null);
 
     this.hudTimer -= dt;
     if (this.hudTimer <= 0) {
@@ -2267,6 +2286,13 @@ export class Game {
       if ((e instanceof Vehicle || e instanceof Mob) && e.rider && e.rider !== this.player.id && this.remote.has(e.rider)) continue;
       e.tick(ctx);
     }
+    // Cars run into things only here, where the world is simulated — whoever is at the wheel.
+    let refs: PlayerRef[] | null = null;
+    for (const e of this.entities.values()) {
+      if (!(e instanceof Car) || e.removed || e.wrecked) continue;
+      refs ??= this.playerRefs();
+      e.impacts(ctx, ctx.entitiesNear(e.x, e.y, e.z, 6), refs);
+    }
     // A vehicle whose rider left the game is free again.
     for (const e of this.entities.values()) {
       if ((e instanceof Vehicle || e instanceof Mob) && e.rider && e.rider !== this.player.id && !this.remote.has(e.rider)) e.rider = null;
@@ -2285,7 +2311,7 @@ export class Game {
     const p = this.player;
     if (p.riding === null) return null;
     const v = this.entities.get(p.riding);
-    const mount = v instanceof Vehicle || (v instanceof Mob && v.saddled && !v.dying && !v.unconscious);
+    const mount = (v instanceof Vehicle && v.rideable) || (v instanceof Mob && v.saddled && !v.dying && !v.unconscious);
     if (!mount || v.removed || p.dead || (v.rider !== null && v.rider !== p.id) || (v.rider === null && this.simulates)) {
       this.dismount();
       return null;
@@ -2302,7 +2328,32 @@ export class Game {
     p.riding = v.id;
     p.sleeping = null;
     this.net?.mount?.(v.id, true);
-    this.showActionbar("Sneak to get out");
+    if (v instanceof Car) {
+      if (this.simulates) this.carjack(v, p.id);
+      // Driving is done from behind the car, the way the city games do it.
+      if (this.perspective === 0) { this.perspective = 1; this.carCamera = true; }
+      this.showActionbar(`${v.spec.name} — sneak to get out`);
+    } else this.showActionbar("Sneak to get out");
+  }
+
+  /** Set when getting into a car switched the view to behind it, so getting out switches it back. */
+  private carCamera = false;
+
+  /**
+   * Taking a car somebody is driving: they are pulled out of the other side,
+   * and they are not happy about it — most run, some swing.
+   */
+  carjack(car: Car, by: string): void {
+    car.lastDriver = by;
+    if (!car.npc) return;
+    car.npc = false;
+    const side = car.spec.w / 2 + 0.8;
+    const x = car.x - Math.cos(car.yaw) * side, z = car.z + Math.sin(car.yaw) * side;
+    const m = new Mob("citizen", x, car.y, z);
+    m.say(pickQuip(CARJACK_QUIPS, Math.random));
+    if (toughCitizen(m)) { m.targetId = by; m.anger = 400; } else { m.panic = 160; m.scare = { x: car.x, z: car.z }; }
+    this.spawn(m);
+    if (this.meta.mode?.started) this.mode?.onCarjack(by);
   }
 
   /** Climbs out, onto a free spot beside the vehicle. */
@@ -2311,6 +2362,7 @@ export class Game {
     if (p.riding === null) return;
     const v = this.entities.get(p.riding);
     p.riding = null;
+    if (this.carCamera) { this.perspective = 0; this.carCamera = false; }
     if (!(v instanceof Vehicle || v instanceof Mob)) return;
     if (v.rider === p.id) v.rider = null;
     this.net?.mount?.(v.id, false);
@@ -2331,9 +2383,14 @@ export class Game {
     const v = this.ridden();
     if (!v) return;
     const b = this.player.body;
-    b.x = v.x; b.y = v.riderY(); b.z = v.z;
-    // A boat turns its rider with it.
-    if (v instanceof Boat) this.player.yaw += v.yaw - v.prevYaw;
+    if (v instanceof Car) {
+      const seat = v.seat();
+      b.x = seat.x; b.y = seat.y; b.z = seat.z;
+    } else {
+      b.x = v.x; b.y = v.riderY(); b.z = v.z;
+    }
+    // A boat or a car turns its rider (and so the camera) with it.
+    if (v instanceof Boat || v instanceof Car) this.player.yaw += angleDiff(v.prevYaw, v.yaw);
   }
 
   /** Sets a rocket off from (x, y, z), straight up (the host's half of firing one). */
@@ -3317,7 +3374,39 @@ export class Game {
       minimap: this.modOn("minimap"),
       critters: this.critters?.hud() ?? null,
       cash: modeDef(this.meta.mode?.id)?.category === "city" ? p.cash : null,
+      vehicle: this.carHud(),
+      zone: this.zoneHud(),
     };
+  }
+
+  /** The car being driven: its name, speed and state, for the speedometer. */
+  private carHud(): Hud["vehicle"] {
+    const p = this.player;
+    const v = p.riding !== null ? this.entities.get(p.riding) : undefined;
+    if (!(v instanceof Car)) return null;
+    return { name: v.spec.name, kmh: kmh(v.speed), health: Math.max(0, v.health / v.spec.health), siren: v.siren, police: v.model === "police" };
+  }
+
+  private zoneSeen: { name: string; at: number } | null = null;
+  /** The district the player is in, announced on the way in, and the street under them. */
+  private zoneHud(): Hud["zone"] {
+    const city = this.cityNow();
+    if (!city) return null;
+    const b = this.player.body;
+    const d = city.districtAt(Math.floor(b.x), Math.floor(b.z));
+    if (!this.zoneSeen || this.zoneSeen.name !== d.name) this.zoneSeen = { name: d.name, at: performance.now() };
+    return { name: d.name, street: city.streetAt(Math.floor(b.x), Math.floor(b.z)), fresh: performance.now() - this.zoneSeen.at < 4000 };
+  }
+
+  private cityCache: City | null | undefined;
+  /** The city this world is played in (a city map pack, in the overworld), or null. */
+  cityNow(): City | null {
+    if (this.dimension !== "overworld") return null;
+    if (this.cityCache === undefined) {
+      const m = this.meta;
+      this.cityCache = m.map ? mapLayout(m.map, m.seed, new Generator({ seed: m.seed, type: m.type, dimension: "overworld" })).city ?? null : null;
+    }
+    return this.cityCache;
   }
 
   private debugLines(): string[] {
