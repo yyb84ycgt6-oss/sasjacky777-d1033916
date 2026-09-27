@@ -37,7 +37,8 @@ surrounds it:
 2. **Furniture.** `/sentinel` and `/sentinel/board` still render 624 lines of
    fixtures from `src/sentinel/lib/mockData.ts`. `docs/FEATURE_AUDIT.md` named
    this; it is still open. A page full of plausible rows that come from nowhere
-   is rule 8 broken at the scale of a whole feature.
+   is rule 8 broken at the scale of a whole feature. *(Closed by mission 2.1:
+   Sentinel is removed.)*
 3. **The missing engine.** `yyb84ycgt6-oss/jacky` — the Flask engine the Jacky
    Engine and Ollama Host stations probe — is not attached to this session, so
    nothing here can see or test it. `FLEET_PARITY_PLAN.md` calls a shared
@@ -111,6 +112,7 @@ has to be honest about itself before it gets bigger.
 | Mission | Done when |
 | --- | --- |
 | 2.1 Decide what Sentinel watches. Candidates that already produce real data: the audit log, the edge-function logs, the API-key usage table. Until decided, remove it from the nav. | `src/sentinel/lib/mockData.ts` is deleted, like the Vault's was. |
+| ✅ 2.1 **Sentinel taken out** — 2026-09-27. The owner's call: nothing real to watch yet, so it goes rather than shows fixtures. The sidebar link, both routes, both pages and all of `src/sentinel/` are deleted (git history keeps them); the old URLs reach the not-found page. Bringing it back starts from deciding what it watches. | Done. |
 | 2.2 Attach `jacky`, write `jackyClient` once, shared by the chain's first link, `/workstation` and the PC embed. | The Jacky Engine station reports `live` from a real `/api/status`, with a test for the unreachable case. |
 | 2.3 Regenerate `PARITY_MATRIX.md` and fill in the PC column from `my-pc-companion`. | No `?` left in the PC column. |
 
@@ -185,4 +187,5 @@ learning as they go and agents working across sessions stay aligned.
    session. Both are decisions only the account owner can make.
 2. ~~Mission 1.3 — the task board and calendar.~~ Done. Next port: `SecretsAudit`,
    which has to be checked against `SECURITY_HARDENING.md` before a line of it moves.
-3. **Then:** mission 2.1 — decide what Sentinel watches, or take it out of the nav.
+3. ~~Mission 2.1 — decide what Sentinel watches, or take it out of the nav.~~ Taken
+   out. **Then:** mission 2.2, which waits on `jacky` being attached.

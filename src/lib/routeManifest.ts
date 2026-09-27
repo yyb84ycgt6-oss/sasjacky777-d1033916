@@ -65,8 +65,6 @@ export const CORE_ROUTES: RouteEntry[] = [
   { path: "/gunit/keys", label: "G-Unit API Keys", group: "ops" },
   { path: "/sphere", label: "Sphere Command", group: "ops" },
   { path: "/veilops", label: "VeilOps Threat Intel", group: "ops" },
-  { path: "/sentinel", label: "Crypto Sentinel", group: "ops" },
-  { path: "/sentinel/board", label: "Sentinel Board", group: "ops" },
   { path: "/apex", label: "Apex Hub", group: "ops" },
   { path: "/marvels", label: "Microscopic Marvels", group: "ops" },
   { path: "/pods", label: "eYe Pod Station", group: "ops" },

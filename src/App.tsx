@@ -49,8 +49,6 @@ const JackieControl = lazy(() => import("./pages/JackieControl"));
 const VeilOps = lazy(() => import("./pages/VeilOps"));
 const MarvelsRace = lazy(() => import("./pages/MarvelsRace"));
 const BlockCraft = lazy(() => import("./pages/BlockCraft"));
-const SentinelDashboard = lazy(() => import("./pages/SentinelDashboard"));
-const SentinelBoard = lazy(() => import("./pages/SentinelBoard"));
 const ApexHub = lazy(() => import("./pages/ApexHub"));
 const AIProviders = lazy(() => import("./pages/AIProviders"));
 const GrokStudio = lazy(() => import("./pages/GrokStudio"));
@@ -317,8 +315,6 @@ const App = () => (
                   <Route path="/craft" element={<ProtectedRoute><BlockCraft /></ProtectedRoute>} />
                   <Route path="/minecraft" element={<Navigate to="/craft" replace />} />
                   <Route path="/csc" element={<Navigate to="/craft" replace />} />
-                  <Route path="/sentinel" element={<ProtectedRoute><SentinelDashboard /></ProtectedRoute>} />
-                  <Route path="/sentinel/board" element={<ProtectedRoute><SentinelBoard /></ProtectedRoute>} />
                   <Route path="/apex" element={<ProtectedRoute><ApexHub /></ProtectedRoute>} />
                   <Route path="/providers" element={<ProtectedRoute><AIProviders /></ProtectedRoute>} />
                   <Route path="/grok" element={<ProtectedRoute><GrokStudio /></ProtectedRoute>} />
