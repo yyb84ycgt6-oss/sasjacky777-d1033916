@@ -544,6 +544,8 @@ function critterRegion(seed: number, base: Generator): Omit<MapLayout, "map"> {
   const TOWN_NAMES = ["Home Town", "Granite Town", "Tide Town", "Static Town", "Lantern Town", "the League"];
   const ROUTES: [string, [number, number]][] = [["Route 1", [2, 5]], ["Route 2", [8, 13]], ["Route 3", [16, 24]], ["Route 4", [28, 36]], ["Victory Road", [38, 46]]];
   const ROUTE_TRAINERS = [["r1_tom", "r1_ivy", "rival1"], ["r2_finn", "r2_coral", "r2_sol"], ["r3_rowan", "r3_selene", "rival2", "r3_gus"], ["r4_jun", "r4_lin", "r4_reyes"], []];
+  /** Team Copium by route: an id, how far along the road, and which side of it (0: in the road). */
+  const COPIUM: [string, number, number][][] = [[], [["tc_grunt1", 0.38, -1]], [["tc_grunt2", 0.3, -1], ["tc_hank", 0.7, 1]], [["tc_grunt3", 0.375, 1], ["tc_dana", 0.625, -1]], [["tc_ceo", 0.5, 0]]];
 
   // The road, town to town: gravel three wide on the ground, planks where it crosses water, cleared above.
   for (let i = 0; i < 5; i++) {
@@ -577,6 +579,13 @@ function critterRegion(seed: number, base: Generator): Omit<MapLayout, "map"> {
       const y = Math.max(base.surfaceY(x, z), 63) + 1;
       npcs.push({ id, x: x + 0.5, y, z: z + 0.5, yaw: onRoad ? facing(-ux, -uz) : facing(uz * side, -ux * side) });
     });
+    // Team Copium stands between the route's own trainers (their places are unchanged); the CEO blocks Victory Road itself.
+    for (const [id, f, side] of COPIUM[i]) {
+      const cx = ax + (bx - ax) * f, cz = az + (bz - az) * f;
+      const x = Math.round(cx - uz * side * 3), z = Math.round(cz + ux * side * 3);
+      const y = Math.max(base.surfaceY(x, z), 63) + 1;
+      npcs.push({ id, x: x + 0.5, y, z: z + 0.5, yaw: side === 0 ? facing(-ux, -uz) : facing(uz * side, -ux * side) });
+    }
     const [name, levels] = ROUTES[i];
     areas.push({ name, x0: Math.min(ax, bx) - 60, z0: Math.min(az, bz) - 20, x1: Math.max(ax, bx) + 60, z1: Math.max(az, bz) + 20, levels });
   }
@@ -642,7 +651,7 @@ function critterRegion(seed: number, base: Generator): Omit<MapLayout, "map"> {
   for (const n of npcs) {
     const nx = Math.floor(n.x), nz = Math.floor(n.z);
     // Indoors (the lab, the gyms, the League) and on the road itself (the rival), the ground is already right.
-    if (n.id === "professor" || n.id.startsWith("g") || n.id === "league_aria" || n.id.startsWith("rival")) continue;
+    if (n.id === "professor" || n.id.startsWith("g") || n.id === "league_aria" || n.id.startsWith("rival") || n.id === "tc_ceo") continue;
     for (let x = nx - 1; x <= nx + 1; x++) for (let z = nz - 1; z <= nz + 1; z++) {
       const sy = base.surfaceY(x, z);
       if (sy >= 63) p.set(x, sy, z, B.GRASS);

@@ -44,6 +44,7 @@ import { isSlimeChunk, Mob, MOB_KINDS, MOB_SPECS, type MobKind } from "../engine
 import { isDino, pickCreatures } from "../engine/creatures";
 import { canLearn, engramFor, ENGRAMS, type Engram } from "../engine/engrams";
 import { CritterPlay, type CritterOp } from "./critterPlay";
+import type { LinkMsg } from "./critterLink";
 import { BREAK_FALL, SICKNESS_TICKS, sicknessChance, statusLine, vitalsSecond, waterFrom, type VitalsRules } from "../engine/vitals";
 import { CREATURES, maxTorpor } from "../engine/creatures";
 import { favouriteFoods } from "../engine/dinoAi";
@@ -141,6 +142,8 @@ export interface NetLink {
   noise?(x: number, y: number, z: number, radius: number): void;
   /** Guest → host: a battle's needs in the world (game/critterPlay.ts). */
   critter?(op: CritterOp): void;
+  /** To one other player: a link battle's or a trade's message (game/critterLink.ts). */
+  link?(to: string, msg: LinkMsg): void;
   /** Host → guests: the world's mod switches changed. */
   modsChanged?(): void;
   /** Host → guests: the world's waystones changed (one found, named or broken). */

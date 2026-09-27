@@ -180,6 +180,22 @@ const MOVE_LIST: MoveDef[] = [
   mv("drake_pulse", "Drake Pulse", "dragon", "special", 85, 100, 10),
   mv("war_dance", "War Dance", "dragon", "status", 0, 0, 20, { self: { atk: 1, spd: 1 } }),
   mv("dragon_fury", "Dragon Fury", "dragon", "physical", 120, 90, 10),
+  // The internet's own: the meme critters' moves (and anyone else's who learns them).
+  mv("bonk", "Bonk", "normal", "physical", 80, 100, 15, { status: "paralysis", chance: 10 }),
+  mv("yeet", "Yeet", "normal", "physical", 95, 85, 10),
+  mv("zoomies", "Zoomies", "normal", "status", 0, 0, 20, { self: { spd: 2 } }),
+  mv("skill_issue", "Skill Issue", "normal", "status", 0, 100, 20, { foe: { def: -2 } }),
+  mv("chonk_slam", "Chonk Slam", "normal", "physical", 110, 90, 10, { recoil: 0.25 }),
+  mv("cope", "Cope", "normal", "status", 0, 0, 10, { heal: 0.25, self: { def: 1 } }),
+  mv("ratio", "Ratio", "spirit", "status", 0, 100, 15, { foe: { atk: -1, sp: -1 } }),
+  mv("vibe_check", "Vibe Check", "spirit", "special", 70, 100, 15, { status: "sleep", chance: 15 }),
+  mv("emotional_damage", "Emotional Damage", "spirit", "special", 105, 90, 5),
+  mv("sus_stare", "Sus Stare", "spirit", "status", 0, 80, 15, { status: "paralysis", chance: 100 }),
+  mv("to_the_moon", "To the Moon", "air", "special", 95, 95, 10),
+  mv("diamond_hands", "Diamond Hands", "stone", "status", 0, 0, 15, { self: { def: 1, sp: 1 } }),
+  mv("rug_pull", "Rug Pull", "earth", "physical", 70, 100, 15, { foe: { spd: -1 } }),
+  mv("rickroll", "Rickroll", "stone", "physical", 90, 90, 10, { status: "paralysis", chance: 20 }),
+  mv("chill_pill", "Chill Pill", "ice", "special", 60, 100, 15, { status: "sleep", chance: 20 }),
 ];
 
 export const MOVES: Record<string, MoveDef> = Object.fromEntries(MOVE_LIST.map((m) => [m.id, m]));
@@ -202,7 +218,8 @@ export interface SpeciesDef {
   xpYield: number;
   /** Moves it learns, by level; at level 1, what it hatches knowing. */
   learnset: [number, string][];
-  evolves?: { to: string; level: number };
+  /** What it becomes: at a level, or (`trade`) when it changes hands. */
+  evolves?: { to: string; level: number; trade?: boolean };
   /** Its box in the world, in blocks; drawn from render/critterModels.ts at `scale`. */
   width: number;
   height: number;
@@ -234,6 +251,14 @@ const FROST_LINE: [number, string][] = [[1, "scratch"], [1, "chill"], [6, "ice_d
 const WISP_LINE: [number, string][] = [[1, "spook"], [1, "leer"], [6, "lull"], [11, "cinders"], [17, "shadow_orb"], [25, "focus"], [30, "flame_jet"], [38, "mind_blast"]];
 const FIN_LINE: [number, string][] = [[1, "tackle"], [1, "bubbles"], [6, "water_jet"], [12, "headbutt"], [18, "wave_pulse"], [24, "brace"], [30, "frostbite"], [36, "rampage"]];
 const SCALE_LINE: [number, string][] = [[1, "scratch"], [1, "leer"], [7, "drake_breath"], [14, "headbutt"], [20, "drake_claw"], [28, "war_dance"], [34, "wing_strike"], [40, "drake_pulse"], [48, "dragon_fury"], [55, "sky_dive"]];
+const DOGE_LINE: [number, string][] = [[1, "tackle"], [1, "growl"], [6, "spook"], [11, "quick_strike"], [16, "vibe_check"], [21, "bonk"], [27, "zoomies"], [33, "mind_blast"], [40, "emotional_damage"]];
+const CHONK_LINE: [number, string][] = [[1, "tackle"], [1, "growl"], [8, "brace"], [12, "headbutt"], [18, "cope"], [24, "body_slam"], [30, "chonk_slam"], [38, "mend"], [44, "rampage"]];
+const FROG_LINE: [number, string][] = [[1, "bubbles"], [1, "growl"], [6, "vine_lash"], [11, "water_jet"], [16, "vibe_check"], [22, "sap_drain"], [28, "tidal_wave"], [35, "petal_storm"]];
+const STONK_LINE: [number, string][] = [[1, "bubbles"], [1, "leer"], [5, "water_jet"], [10, "diamond_hands"], [15, "wave_pulse"], [21, "quicken"], [27, "to_the_moon"], [35, "torrent"]];
+const SUS_LINE: [number, string][] = [[1, "spook"], [1, "leer"], [6, "sus_stare"], [12, "venom_sting"], [17, "shadow_orb"], [23, "silk_snare"], [29, "ratio"], [36, "emotional_damage"]];
+const BONK_LINE: [number, string][] = [[1, "peck"], [1, "leer"], [5, "gust"], [10, "quick_strike"], [15, "wing_strike"], [20, "bonk"], [26, "air_blade"], [32, "yeet"], [38, "sky_dive"]];
+const RICK_LINE: [number, string][] = [[1, "tackle"], [1, "toughen"], [6, "pebble_toss"], [12, "diamond_hands"], [17, "rug_pull"], [23, "rockfall"], [29, "rickroll"], [37, "quake"], [45, "shard_strike"]];
+const COPE_LINE: [number, string][] = [[1, "spook"], [1, "chill"], [7, "lull"], [12, "cope"], [18, "chill_pill"], [24, "ratio"], [30, "shadow_orb"], [38, "frost_beam"], [46, "emotional_damage"]];
 const BOG_LINE: [number, string][] = [[1, "tackle"], [1, "mud_splash"], [6, "sand_toss"], [11, "tremor"], [17, "headbutt"], [23, "mud_ball"], [30, "wave_pulse"], [36, "quake"], [44, "rampage"]];
 
 const SPECIES_SPECS: Record<string, SpeciesSpec> = {
@@ -431,6 +456,95 @@ const SPECIES_SPECS: Record<string, SpeciesSpec> = {
     width: 1.0, height: 1.1, scale: 1.25, moves: "walk", ride: "walk", rarity: "uncommon", habitat: [["Badlands", 6], ["Desert", 3], ["Savanna", 2]],
     note: "Its horns stay hot enough to cook on. Herders in the badlands follow the flock for warmth at night.",
   },
+  // The meme critters: the internet, set loose in the long grass. All original; only the jokes are borrowed.
+  dogeling: {
+    name: "Dogeling", types: ["normal", "spirit"], base: { hp: 50, atk: 50, def: 45, sp: 55, spd: 60 }, catchRate: 150, xpYield: 70, learnset: DOGE_LINE,
+    evolves: { to: "wowdoge", level: 30 }, width: 0.6, height: 0.6, scale: 0.8, moves: "walk", rarity: "common",
+    habitat: [["Plains", 5], ["Taiga", 5], ["Meadow", 4], ["Snowy Plains", 3]],
+    note: "Such critter. Very small. It says 'wow' at everything it sees, and means it every time.",
+  },
+  wowdoge: {
+    name: "Wowdoge", types: ["normal", "spirit"], base: { hp: 75, atk: 80, def: 70, sp: 90, spd: 95 }, catchRate: 60, xpYield: 175, learnset: DOGE_LINE,
+    width: 1.0, height: 1.1, scale: 1.3, moves: "walk", ride: "walk", rarity: "uncommon", habitat: [],
+    note: "Much loyal. Very strong. Its bark is heard in capital letters and a font nobody can name.",
+  },
+  chonklet: {
+    name: "Chonklet", types: ["normal"], base: { hp: 90, atk: 55, def: 60, sp: 35, spd: 20 }, catchRate: 180, xpYield: 68, learnset: CHONK_LINE,
+    evolves: { to: "megachonk", level: 28 }, width: 0.7, height: 0.6, scale: 0.85, moves: "walk", rarity: "common",
+    habitat: [["Plains", 4], ["Flower Plains", 4], ["Savanna", 2]],
+    note: "It is not fat. It is big-boned. It is also a little fat, and it knows, and it does not care.",
+  },
+  megachonk: {
+    name: "Megachonk", types: ["normal"], base: { hp: 150, atk: 90, def: 90, sp: 50, spd: 25 }, catchRate: 60, xpYield: 180, learnset: CHONK_LINE,
+    width: 1.4, height: 1.2, scale: 1.6, moves: "walk", ride: "walk", rarity: "uncommon", habitat: [],
+    note: "An absolute unit. When it sits down, the ground has to deal with it.",
+  },
+  froggo: {
+    name: "Froggo", types: ["water", "grass"], base: { hp: 55, atk: 50, def: 50, sp: 60, spd: 55 }, catchRate: 170, xpYield: 66, learnset: FROG_LINE,
+    evolves: { to: "vibefrog", level: 26 }, width: 0.6, height: 0.4, scale: 0.8, moves: "swim", rarity: "common",
+    habitat: [["Swamp", 8], ["River", 5], ["Jungle", 2]],
+    note: "It sits on a lily pad all day, vibing. Nobody knows what it is vibing to. Nobody dares ask.",
+  },
+  vibefrog: {
+    name: "Vibefrog", types: ["water", "grass"], base: { hp: 80, atk: 70, def: 75, sp: 95, spd: 85 }, catchRate: 70, xpYield: 170, learnset: FROG_LINE,
+    width: 1.0, height: 0.7, scale: 1.2, moves: "swim", rarity: "uncommon", habitat: [["Swamp", 1]],
+    note: "It croaks one note, perfectly on the beat, and every frog in the swamp joins in. The vibes are immaculate.",
+  },
+  stonkfish: {
+    name: "Stonkfish", types: ["water"], base: { hp: 45, atk: 55, def: 45, sp: 50, spd: 70 }, catchRate: 200, xpYield: 60, learnset: STONK_LINE,
+    evolves: { to: "moonfin", level: 30 }, width: 0.5, height: 0.6, scale: 0.75, moves: "swim", rarity: "common",
+    habitat: [["Ocean", 8], ["Beach", 4], ["River", 3]],
+    note: "It only ever swims up. When it cannot swim up any more, it jumps. Line goes up.",
+  },
+  moonfin: {
+    name: "Moonfin", types: ["water", "air"], base: { hp: 70, atk: 80, def: 70, sp: 95, spd: 110 }, catchRate: 70, xpYield: 175, learnset: STONK_LINE,
+    width: 0.9, height: 0.9, scale: 1.25, moves: "fly", rarity: "uncommon", habitat: [],
+    note: "Once it leapt so high it came down with frost on its fins. Its fans say it is going to the moon. It keeps coming back.",
+  },
+  sussling: {
+    name: "Sussling", types: ["spirit", "bug"], base: { hp: 45, atk: 45, def: 55, sp: 65, spd: 60 }, catchRate: 120, xpYield: 80, learnset: SUS_LINE,
+    evolves: { to: "susquatch", level: 101, trade: true }, width: 0.5, height: 0.8, scale: 0.8, moves: "walk", rarity: "uncommon",
+    habitat: [["Dark Forest", 5], ["Swamp", 3], ["Taiga", 2]],
+    note: "Nobody saw it arrive. Everybody saw it vent. It evolves only when it is traded away — voted out of one party, into another.",
+  },
+  susquatch: {
+    name: "Susquatch", types: ["spirit", "bug"], base: { hp: 75, atk: 90, def: 80, sp: 105, spd: 90 }, catchRate: 45, xpYield: 190, learnset: SUS_LINE,
+    width: 0.9, height: 1.5, scale: 1.3, moves: "walk", rarity: "rare", habitat: [],
+    note: "It evolved the day it was traded, ejected from one party and welcomed into another. It remembers who called it sus.",
+  },
+  bonkbat: {
+    name: "Bonkbat", types: ["air", "normal"], base: { hp: 40, atk: 55, def: 40, sp: 40, spd: 75 }, catchRate: 190, xpYield: 58, learnset: BONK_LINE,
+    evolves: { to: "bonkarang", level: 24 }, width: 0.5, height: 0.5, scale: 0.7, moves: "fly", rarity: "common",
+    habitat: [["Dark Forest", 6], ["Taiga", 4], ["Windswept Hills", 3], ["Badlands", 2]],
+    note: "It bonks. That is it. That is the critter.",
+  },
+  bonkarang: {
+    name: "Bonkarang", types: ["air", "normal"], base: { hp: 70, atk: 90, def: 65, sp: 60, spd: 105 }, catchRate: 90, xpYield: 160, learnset: BONK_LINE,
+    width: 0.9, height: 0.8, scale: 1.15, moves: "fly", rarity: "uncommon", habitat: [],
+    note: "It flies out, bonks something, and comes back. Every time. Scientists are furious.",
+  },
+  rickrock: {
+    name: "Rickrock", types: ["stone"], base: { hp: 60, atk: 70, def: 90, sp: 40, spd: 35 }, catchRate: 150, xpYield: 70, learnset: RICK_LINE,
+    evolves: { to: "neverroll", level: 34 }, width: 0.7, height: 0.7, scale: 0.9, moves: "walk", rarity: "common",
+    habitat: [["Badlands", 5], ["Windswept Hills", 5], ["Stony Peaks", 4], ["Desert", 2]],
+    note: "It rolls up to you very, very slowly. It will never give you up.",
+  },
+  neverroll: {
+    name: "Neverroll", types: ["stone", "earth"], base: { hp: 90, atk: 105, def: 125, sp: 55, spd: 45 }, catchRate: 60, xpYield: 185, learnset: RICK_LINE,
+    width: 1.3, height: 1.2, scale: 1.55, moves: "walk", ride: "walk", rarity: "uncommon", habitat: [],
+    note: "It has never once let anybody down. It has never run around, nor deserted anyone. It is, frankly, a lot.",
+  },
+  copiumite: {
+    name: "Copiumite", types: ["spirit", "ice"], base: { hp: 50, atk: 45, def: 55, sp: 70, spd: 55 }, catchRate: 90, xpYield: 90, learnset: COPE_LINE,
+    evolves: { to: "hopium", level: 36 }, width: 0.5, height: 0.7, scale: 0.8, moves: "fly", rarity: "uncommon",
+    habitat: [["Snowy Plains", 4], ["Snowy Taiga", 4], ["Dark Forest", 2]],
+    note: "Team Copium's own. It breathes in disappointment and breathes out excuses, and it is never, ever wrong. Ask it.",
+  },
+  hopium: {
+    name: "Hopium", types: ["spirit", "air"], base: { hp: 75, atk: 60, def: 80, sp: 115, spd: 100 }, catchRate: 45, xpYield: 190, learnset: COPE_LINE,
+    width: 0.8, height: 1.1, scale: 1.2, moves: "fly", rarity: "rare", habitat: [],
+    note: "What copium becomes when it stops coping and starts hoping. It floats a little higher on good days.",
+  },
   // The legend: never wild. It waits at the summit of the region (maps.ts), or the end of a long road.
   glaciarch: {
     name: "Glaciarch", types: ["ice", "air"], base: { hp: 90, atk: 85, def: 100, sp: 125, spd: 85 }, catchRate: 3, xpYield: 290, learnset: [
@@ -561,7 +675,17 @@ export function restore(c: Critter): void {
 /** Whether a species' level has reached its evolution, and what it becomes. */
 export function evolutionFor(c: Critter): string | null {
   const e = SPECIES[c.species]?.evolves;
-  return e && c.level >= e.level ? e.to : null;
+  return e && !e.trade && c.level >= e.level ? e.to : null;
+}
+
+/** What a critter becomes on changing hands, if it is one that evolves by trade; the critter is changed in place. */
+export function tradeEvolve(c: Critter): string | null {
+  const e = SPECIES[c.species]?.evolves;
+  if (!e?.trade) return null;
+  const share = c.hp / Math.max(1, maxHp(c));
+  c.species = e.to;
+  c.hp = Math.max(c.hp > 0 ? 1 : 0, Math.round(maxHp(c) * share));
+  return e.to;
 }
 
 /** Turns a critter into what it evolves into, keeping its health's share and its moves. */
@@ -768,6 +892,8 @@ export interface TrainerCard {
   spireBest?: number;
   /** The critter walking with them, out of its orb, by uid. */
   walking?: string;
+  /** Against other players: link battles won and lost, and critters traded away. */
+  link?: { wins: number; losses: number; trades: number };
 }
 
 export const freshCard = (): TrainerCard => ({ party: [], box: [], seen: [], caught: [], badges: [], beaten: [], coins: 100 });
@@ -795,6 +921,11 @@ export function sanitizeCard(v: unknown): TrainerCard {
   if (sp && typeof sp.streak === "number" && typeof sp.seed === "number") c.spire = { streak: Math.max(0, Math.floor(sp.streak)), seed: Math.floor(sp.seed) | 0 };
   if (typeof o.spireBest === "number") c.spireBest = Math.max(0, Math.floor(o.spireBest));
   if (typeof o.walking === "string" && c.party.some((k) => k.uid === o.walking)) c.walking = o.walking;
+  const ln = o.link as Record<string, unknown> | undefined;
+  if (ln && typeof ln === "object") {
+    const n = (x: unknown) => (typeof x === "number" && Number.isFinite(x) ? Math.max(0, Math.min(999_999, Math.floor(x))) : 0);
+    c.link = { wins: n(ln.wins), losses: n(ln.losses), trades: n(ln.trades) };
+  }
   return c;
 }
 

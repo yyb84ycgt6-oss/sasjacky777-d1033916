@@ -27,7 +27,7 @@ import { Minimap, WaypointLabels, WorldMapScreen } from "./MapView";
 import { WaystoneScreen } from "./WaystoneScreen";
 import { EngramScreen } from "./EngramScreen";
 import { ModsScreen } from "./ModsScreen";
-import { BattleScreen, CenterScreen, PartyScreen, PartyStrip, StarterScreen } from "./CritterScreens";
+import { BattleScreen, CenterScreen, CritterTradeScreen, LinkScreen, PartyScreen, PartyStrip, StarterScreen } from "./CritterScreens";
 import { CasinoScreen } from "./CasinoScreens";
 import { ShopScreen } from "./CityScreens";
 
@@ -254,6 +254,8 @@ function Overlay({ game, input, settings, onSettings, onQuit, onExitApp }: GameV
       {screen?.kind === "party" && <PartyScreen key={`${screen.give ?? ""}${screen.tab ?? ""}`} game={game} give={screen.give} tab={screen.tab} />}
       {screen?.kind === "starter" && <StarterScreen game={game} rentals={screen.rentals} />}
       {screen?.kind === "center" && <CenterScreen game={game} x={screen.x} y={screen.y} z={screen.z} />}
+      {screen?.kind === "link" && <LinkScreen game={game} />}
+      {screen?.kind === "critter_trade" && <CritterTradeScreen game={game} />}
       {screen?.kind === "engrams" && <EngramScreen game={game} onBack={() => game.setScreen(screen.from === "pause" ? { kind: "pause" } : { kind: "inventory" })} />}
       {screen?.kind === "map" && <WorldMapScreen game={game} mobile={mobile} onClose={() => game.setScreen(null)} />}
       {screen?.kind === "poem" && <EndPoem name={game.player.name} onDone={() => game.setScreen(null)} />}

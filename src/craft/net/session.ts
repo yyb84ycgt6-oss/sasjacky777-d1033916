@@ -44,6 +44,7 @@ import type { Arrival, Game, NetLink, RemotePlayer } from "../game/game";
 import { packChunk, toBase64, fromBase64, unpackChunk, type ChunkData, type GameRules } from "../game/save";
 import { clientId, connectionId, DeviceTransport, LanTransport, MAX_PART, OnlineTransport, type LinkKind, type NetMessage, type Transport } from "./transport";
 import { parseCritterOp, type CritterOp } from "../game/critterPlay";
+import { parseLinkMsg, type LinkMsg } from "../game/critterLink";
 
 type Op = unknown[];
 
@@ -130,7 +131,9 @@ export function sanitizeModeTell(v: unknown): ModeTell {
 //    would see neither, and the world's new healing station block would be a block it has never heard of.
 // 6: the cities — cars (a vehicle kind), citizens and cops (mob kinds), and the tell's cash, wanted stars,
 //    confiscations, captions and mission markers — a guest on 5 could not build a single one of them.
-const PROTOCOL = 6;
+// 7: link battles and critter trades between players (the "cv" op), Team Copium, and the meme critters — a
+//    guest on 6 would meet species and trainers it has never heard of, and could not answer a challenge.
+const PROTOCOL = 7;
 const FLUSH_TICKS = 2;
 const ENTITY_TICKS = 4;
 const ENV_TICKS = 40;
@@ -455,6 +458,8 @@ export class NetSession implements NetLink {
   noise(x: number, y: number, z: number, radius: number): void { if (this.role === "guest") this.push(["nz", r2(x), r2(y), r2(z), r2(radius)]); }
   /** Guest → host: something a battle needs the world to show (game/critterPlay.ts). */
   critter(op: CritterOp): void { if (this.role === "guest") this.push(["ck", op]); }
+  /** To one other player, host or guest: a link battle's or a trade's message. Everyone hears it; only they act on it. */
+  link(to: string, msg: LinkMsg): void { this.push(["cv", to, msg]); }
   teleportRemote(id: string, to: Arrival): void { this.push(["tp", id, to]); }
   placeCrystal(x: number, y: number, z: number): void { this.push(["ec", x, y, z]); }
   mount(entityId: number, on: boolean): void { if (this.role === "guest") this.push(["mo", entityId, on ? 1 : 0]); }
@@ -715,6 +720,12 @@ export class NetSession implements NetLink {
           // A guest's battle, shown in the world: the host holds the wild critter still, sends out theirs, sparks the hits.
           const c = this.role === "host" ? parseCritterOp(op[1]) : null;
           if (c) g.critters.host(from, g.remote.get(from)?.name ?? "?", c);
+          break;
+        }
+        case "cv": {
+          // Another player's link battle or trade, for this player only: checked as a stranger's words.
+          const lm = op[1] === this.myId ? parseLinkMsg(op[2]) : null;
+          if (lm) g.critters.link.receive(from, lm);
           break;
         }
         case "nz":

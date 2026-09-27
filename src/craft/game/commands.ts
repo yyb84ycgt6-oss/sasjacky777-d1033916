@@ -46,6 +46,7 @@ const HELP = [
   "/weather clear|rain|thunder",
   "/summon <mob> [size|profession]  (pig, cow, ..., slime 4, villager librarian, iron_golem)",
   "/critter give <species> [level] | wild <species> [level] | heal | coins <n> | list",
+  "/battle <player>, /trade <player>, /accept, /decline   (critter link battles and trades)",
   "/effect <speed|strength|fire_resistance|...> [seconds] [level] | /effect clear",
   "/enchant <enchantment> [level]   (the held item, e.g. /enchant sharpness 5)",
   "/xp add <amount>, /clear, /kill, /seed, /spawnpoint",
@@ -263,6 +264,17 @@ export function runCommand(game: Game, line: string): Line[] {
       game.spawn(mob);
       return [{ text: `Summoned new ${kind}` }];
     }
+    case "battle": case "trade": {
+      // Asking another player for a link battle or a trade: no cheats needed, it is how the modes are played.
+      const who = args.join(" ").trim();
+      const what = cmd.toLowerCase() === "battle" ? "battle" : "trade";
+      if (!who) return [{ text: `Usage: /${what} <player>`, color: ERR }];
+      const r = game.critters.link.byName(who);
+      if (!r) return [{ text: `No player called ${who} here.`, color: ERR }];
+      return [{ text: game.critters.link.ask(r.id, what) }];
+    }
+    case "accept": return [{ text: game.critters.link.accept() }];
+    case "decline": return [{ text: game.critters.link.decline() }];
     case "critter": {
       // The critter modes' cheats: a critter for the party or in the wild, a full heal, coins, and the species list.
       const denied = needCheats();

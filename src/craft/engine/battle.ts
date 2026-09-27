@@ -11,6 +11,11 @@
  * and the ratio of attack to defence, half again for a move of the user's
  * own type, times how the types meet, a one-in-sixteen critical, and a
  * little randomness. The numbers are this game's own.
+ *
+ * A link battle is two players' teams against each other. One machine (the
+ * challenger's) runs it with both players' choices; the other shows the same
+ * battle from its own side (game/critterLink.ts). So its lines name both
+ * trainers ("Ada's Sussling used Ratio!") and read true from either side.
  */
 import {
   catchOdds, displayName, effectiveness, evolve, evolutionFor, gainXp, maxHp, MOVES, ORBS, SPECIES, STATUS_NAMES, statsOf, throwOrb, TYPE_NAMES,
@@ -18,7 +23,7 @@ import {
 } from "./critters";
 
 export type SideId = "player" | "foe";
-export type BattleKind = "wild" | "trainer" | "safari";
+export type BattleKind = "wild" | "trainer" | "safari" | "link";
 export type BattleResult = "win" | "lose" | "caught" | "ran" | "fled";
 
 export interface Side {
@@ -104,6 +109,13 @@ export function newBattle(kind: BattleKind, playerName: string, party: Critter[]
 export function openingEvents(b: Battle): BattleEvent[] {
   const foe = activeOf(b, "foe");
   const out: BattleEvent[] = [];
+  if (b.kind === "link") {
+    const mine = activeOf(b, "player");
+    out.push({ t: "text", text: `${b.player.name} and ${b.foe.name} begin a link battle!` });
+    out.push({ t: "switch", side: "foe", text: `${b.foe.name} sends out ${displayName(foe)}!`, hp: foe.hp, max: maxHp(foe) });
+    out.push({ t: "switch", side: "player", text: `${b.player.name} sends out ${displayName(mine)}!`, hp: mine.hp, max: maxHp(mine) });
+    return out;
+  }
   if (b.kind === "trainer") out.push({ t: "switch", side: "foe", text: `${b.foe.name} wants to battle! They send out ${displayName(foe)}.`, hp: foe.hp, max: maxHp(foe) });
   else out.push({ t: "switch", side: "foe", text: `A wild ${displayName(foe)} appeared!`, hp: foe.hp, max: maxHp(foe) });
   if (b.kind !== "safari") {
@@ -135,6 +147,23 @@ export function damageRoll(level: number, power: number, attack: number, defence
 
 function moveOf(id: string): MoveDef {
   return id === "struggle" ? STRUGGLE : MOVES[id];
+}
+
+/**
+ * A critter as the lines name it. In a link battle every critter carries its
+ * trainer's name, since both players read the same words and may well have
+ * the same species out; otherwise the classic "The wild…" and "Brom's…".
+ */
+function nameIn(b: Battle, s: SideId, c: Critter = activeOf(b, s), classic = false): string {
+  if (b.kind === "link") return `${b[s].name}'s ${displayName(c)}`;
+  if (!classic) return displayName(c);
+  return s === "foe" && b.kind !== "trainer" ? `The wild ${displayName(c)}` : s === "foe" ? `${b.foe.name}'s ${displayName(c)}` : displayName(c);
+}
+
+/** A move a side may use: the one chosen if it has uses left, the first that has otherwise, or none (it struggles). */
+function usableMove(c: Critter, index: number): number {
+  if (index >= 0 && c.moves[index]?.pp > 0) return index;
+  return c.moves.findIndex((m) => m.pp > 0);
 }
 
 // ---- the foe's choice ------------------------------------------------------------------------------------
@@ -172,15 +201,15 @@ export function foeChoice(b: Battle, random: () => number): Action {
  * and whether the action was taken at all — a medicine that would do nothing,
  * or a switch to a fainted critter, costs no turn and changes nothing.
  */
-export function runTurn(b: Battle, action: Action, random: () => number): { events: BattleEvent[]; spent: boolean } {
+export function runTurn(b: Battle, action: Action, random: () => number, foeAction?: Action): { events: BattleEvent[]; spent: boolean } {
   const forced = b.mustSwitch;
-  const r = step(b, action, random);
+  const r = step(b, action, random, foeAction);
   // A refused action is no turn at all; nor is sending out a replacement for a fainted critter.
   if (r.spent && !forced) b.turn++;
   return r;
 }
 
-function step(b: Battle, action: Action, random: () => number): { events: BattleEvent[]; spent: boolean } {
+function step(b: Battle, action: Action, random: () => number, foeAct?: Action): { events: BattleEvent[]; spent: boolean } {
   const ev: BattleEvent[] = [];
   if (b.over) return { events: ev, spent: false };
 
@@ -193,6 +222,7 @@ function step(b: Battle, action: Action, random: () => number): { events: Battle
   }
 
   if (b.kind === "safari") return { events: safariTurn(b, action, random, ev), spent: true };
+  if (b.kind === "link") return { events: linkTurn(b, action, foeAct ?? { kind: "move", index: -1 }, random, ev), spent: true };
 
   // What goes before any move: running, switching, items.
   if (action.kind === "run") {
@@ -251,7 +281,10 @@ function switchIn(b: Battle, s: SideId, to: number, ev: BattleEvent[]): boolean 
   const was = activeOf(b, s);
   side.active = to;
   side.stages = freshStages();
-  if (s === "player") {
+  if (b.kind === "link") {
+    if (was.hp > 0) ev.push({ t: "text", text: `${side.name} withdrew ${displayName(was)}.` });
+    ev.push({ t: "switch", side: s, text: `${side.name} sends out ${displayName(c)}!`, hp: c.hp, max: maxHp(c), uid: c.uid });
+  } else if (s === "player") {
     if (was.hp > 0) ev.push({ t: "text", text: `Come back, ${displayName(was)}!` });
     if (!b.fought.includes(c.uid)) b.fought.push(c.uid);
     ev.push({ t: "switch", side: s, text: `Go, ${displayName(c)}!`, hp: c.hp, max: maxHp(c), uid: c.uid });
@@ -297,7 +330,7 @@ function performMove(b: Battle, s: SideId, index: number, random: () => number, 
   const me = activeOf(b, s), them = activeOf(b, other(s));
   const known = index >= 0 ? me.moves[index] : undefined;
   const move = known && known.pp > 0 ? MOVES[known.id] : STRUGGLE;
-  const who = s === "foe" && b.kind !== "trainer" ? `The wild ${displayName(me)}` : s === "foe" ? `${b.foe.name}'s ${displayName(me)}` : displayName(me);
+  const who = nameIn(b, s, me, true);
 
   // Asleep or paralysed, it may not act at all.
   if (me.status === "sleep") {
@@ -322,7 +355,7 @@ function performMove(b: Battle, s: SideId, index: number, random: () => number, 
   if (move.category !== "status") {
     const types = SPECIES[them.species].types;
     const eff = effectiveness(move.type, types);
-    if (eff === 0) { ev.push({ t: "text", text: `It doesn't affect ${displayName(them)}…` }); return; }
+    if (eff === 0) { ev.push({ t: "text", text: `It doesn't affect ${nameIn(b, other(s), them)}…` }); return; }
     const physical = move.category === "physical";
     const crit = random() < (move.highCrit ? 1 / 4 : 1 / 16);
     const a = stat(b, s, physical ? "atk" : "sp"), d = stat(b, other(s), physical ? "def" : "sp");
@@ -336,7 +369,7 @@ function performMove(b: Battle, s: SideId, index: number, random: () => number, 
     ev.push({ t: "hit", side: other(s), text: `${note}${effText}`.trim(), hp: them.hp, max: maxHp(them), eff, crit, type: move.type, move: move.id });
     if (move.drain && dmg > 0 && me.hp > 0) {
       me.hp = Math.min(maxHp(me), me.hp + Math.max(1, Math.floor(dmg * move.drain)));
-      ev.push({ t: "heal", side: s, text: `${displayName(them)} had its energy drained!`, hp: me.hp, max: maxHp(me) });
+      ev.push({ t: "heal", side: s, text: `${nameIn(b, other(s), them)} had its energy drained!`, hp: me.hp, max: maxHp(me) });
     }
     if (move.recoil && dmg > 0) {
       me.hp = Math.max(0, me.hp - Math.max(1, Math.floor(dmg * move.recoil)));
@@ -370,7 +403,7 @@ function sideEffects(b: Battle, s: SideId, move: MoveDef, random: () => number, 
     for (const [k, by] of Object.entries(changes) as [Stage, number][]) {
       const cur = b[side].stages[k];
       const next = Math.max(-6, Math.min(6, cur + by));
-      const name = side === "foe" && b.kind !== "trainer" ? `The wild ${displayName(activeOf(b, side))}` : displayName(activeOf(b, side));
+      const name = b.kind === "link" ? nameIn(b, side) : side === "foe" && b.kind !== "trainer" ? `The wild ${displayName(activeOf(b, side))}` : displayName(activeOf(b, side));
       if (next === cur) { if (!damaging) ev.push({ t: "text", text: `${name}'s ${STAGE_NAMES[k]} won't go any ${by > 0 ? "higher" : "lower"}!` }); continue; }
       b[side].stages[k] = next;
       ev.push({ t: "stage", side, text: `${name}'s ${STAGE_NAMES[k]} ${by > 0 ? (by > 1 ? "rose sharply" : "rose") : by < -1 ? "harshly fell" : "fell"}!` });
@@ -386,12 +419,12 @@ function inflict(b: Battle, s: SideId, status: Status, random: () => number, ev:
   // Fire does not burn, lightning does not stun its own kind.
   const immune = (status === "burn" && types.includes("fire")) || (status === "paralysis" && types.includes("electric"));
   if (c.status || immune) {
-    if (loud) ev.push({ t: "text", text: c.status ? `${displayName(c)} is already ${STATUS_NAMES[c.status]}.` : `It doesn't affect ${displayName(c)}…` });
+    if (loud) ev.push({ t: "text", text: c.status ? `${nameIn(b, s, c)} is already ${STATUS_NAMES[c.status]}.` : `It doesn't affect ${nameIn(b, s, c)}…` });
     return;
   }
   c.status = status;
   if (status === "sleep") c.sleep = 1 + Math.floor(random() * 3);
-  ev.push({ t: "status", side: s, text: `${displayName(c)} is ${STATUS_NAMES[status]}!` });
+  ev.push({ t: "status", side: s, text: `${nameIn(b, s, c)} is ${STATUS_NAMES[status]}!` });
 }
 
 /** Burns and poison bite at the end of the turn. */
@@ -401,7 +434,7 @@ function endOfTurn(b: Battle, ev: BattleEvent[]): void {
     if (c.hp <= 0 || (c.status !== "burn" && c.status !== "poison")) continue;
     const dmg = Math.min(c.hp, Math.max(1, Math.floor(maxHp(c) / (c.status === "burn" ? 16 : 8))));
     c.hp -= dmg;
-    ev.push({ t: "hit", side: s, text: `${displayName(c)} is hurt by its ${c.status === "burn" ? "burn" : "poison"}!`, hp: c.hp, max: maxHp(c) });
+    ev.push({ t: "hit", side: s, text: `${nameIn(b, s, c)} is hurt by its ${c.status === "burn" ? "burn" : "poison"}!`, hp: c.hp, max: maxHp(c) });
     if (checkFaints(b, ev)) return;
   }
 }
@@ -409,6 +442,7 @@ function endOfTurn(b: Battle, ev: BattleEvent[]): void {
 /** Whoever fainted: experience for the winner, the next critter out (or the end). True when anything fainted. */
 function checkFaints(b: Battle, ev: BattleEvent[]): boolean {
   let any = false;
+  if (b.kind === "link") return linkFaints(b, ev);
   const foe = activeOf(b, "foe");
   if (foe.hp <= 0 && !b.over) {
     any = true;
@@ -444,12 +478,128 @@ function awardXp(b: Battle, foe: Critter, ev: BattleEvent[]): void {
   if (!takers.length) return;
   const each = Math.max(1, Math.floor(xpReward(foe.species, foe.level, b.kind === "trainer") / takers.length));
   for (const c of takers) {
-    const r = gainXp(c, each);
-    ev.push({ t: "xp", text: `${displayName(c)} gained ${each} experience.`, uid: c.uid });
+    // A critter that came in a trade learns faster, as it does in the games this follows: it has something to prove.
+    const traded = !!c.ot && c.ot !== b.player.name;
+    const gain = traded ? Math.floor(each * 1.5) : each;
+    const r = gainXp(c, gain);
+    ev.push({ t: "xp", text: `${displayName(c)} gained ${traded ? "a boosted " : ""}${gain} experience.`, uid: c.uid });
     for (const l of r.levels) ev.push({ t: "level", text: `${displayName(c)} grew to level ${l}!`, uid: c.uid, side: c === activeOf(b, "player") ? "player" : undefined, hp: c.hp, max: maxHp(c) });
     for (const m of r.learned) ev.push({ t: "learn", text: `${displayName(c)} learned ${MOVES[m].name}!`, uid: c.uid });
     for (const m of r.offered) b.offers.push({ uid: c.uid, move: m });
   }
+}
+
+// ---- a link battle -----------------------------------------------------------------------------------------
+
+/**
+ * A link battle's turn: both players' choices at once. Forfeits first, then
+ * switches, then the moves in priority and speed order. There are no items
+ * and no experience: the teams are copies, healed for the battle, and nothing
+ * that happens to them lasts. A critter that faints is replaced by the next in
+ * line, so a turn never waits on a third message.
+ */
+function linkTurn(b: Battle, mine: Action, theirs: Action, random: () => number, ev: BattleEvent[]): BattleEvent[] {
+  if (mine.kind === "run") { forfeit(b, "player", ev); return ev; }
+  if (theirs.kind === "run") { forfeit(b, "foe", ev); return ev; }
+  const picks: [SideId, Action][] = [["player", mine], ["foe", theirs]];
+  // A switch to a fainted or missing critter is no switch: the critter out stays and fights.
+  const moves: [SideId, number][] = [];
+  for (const [side, a] of picks) {
+    if (a.kind === "switch" && switchIn(b, side, a.to, ev)) continue;
+    moves.push([side, usableMove(activeOf(b, side), a.kind === "move" ? a.index : -1)]);
+  }
+  if (moves.length === 2) {
+    const [pm, fm] = moves.map(([side, i]) => moveOf(i >= 0 ? activeOf(b, side).moves[i].id : "struggle"));
+    const pp = pm.priority ?? 0, fp = fm.priority ?? 0;
+    const ps = stat(b, "player", "spd"), fs = stat(b, "foe", "spd");
+    if (!(pp !== fp ? pp > fp : ps !== fs ? ps > fs : random() < 0.5)) moves.reverse();
+  }
+  for (const [side, index] of moves) {
+    if (b.over || activeOf(b, side).hp <= 0 || activeOf(b, other(side)).hp <= 0) continue;
+    performMove(b, side, index, random, ev);
+    if (linkFaints(b, ev, side)) break;
+  }
+  if (!b.over) endOfTurn(b, ev);
+  return ev;
+}
+
+function forfeit(b: Battle, s: SideId, ev: BattleEvent[]): void {
+  b.over = s === "player" ? "lose" : "win";
+  ev.push({ t: "end", text: `${b[s].name} forfeits! ${b[other(s)].name} wins the battle.`, result: b.over });
+}
+
+/**
+ * A link battle's faints: the next in line goes out, or that trainer has lost.
+ * Both last critters down at once (the finishing blow's recoil) goes to the
+ * attacker, as the newer games rule it: the one that was hit fell first.
+ */
+function linkFaints(b: Battle, ev: BattleEvent[], attacker: SideId = "player"): boolean {
+  let any = false;
+  const down: SideId[] = [];
+  for (const s of [other(attacker), attacker]) {
+    const c = activeOf(b, s);
+    if (c.hp > 0 || b.over) continue;
+    any = true;
+    ev.push({ t: "faint", side: s, text: `${nameIn(b, s, c)} fainted!`, uid: c.uid });
+    down.push(s);
+  }
+  for (const s of down) {
+    if (b.over) break;
+    const next = b[s].team.findIndex((c) => c.hp > 0);
+    if (next >= 0) { switchIn(b, s, next, ev); continue; }
+    b.over = s === "player" ? "lose" : "win";
+    ev.push({ t: "end", text: `${b[s].name} is out of usable critters! ${b[other(s)].name} wins the battle.`, result: b.over });
+  }
+  return any;
+}
+
+/** One side of a link battle, as the challenger's machine tells the other what it now looks like. */
+export interface LinkSideState { active: number; team: { hp: number; status: Status | null; sleep?: number; pp: number[] }[] }
+export interface LinkState { player: LinkSideState; foe: LinkSideState; over: BattleResult | null; turn: number }
+
+const sideState = (s: Side): LinkSideState => ({
+  active: s.active,
+  team: s.team.map((c) => ({ hp: c.hp, status: c.status, ...(c.sleep ? { sleep: c.sleep } : {}), pp: c.moves.map((m) => m.pp) })),
+});
+
+export function linkState(b: Battle): LinkState {
+  return { player: sideState(b.player), foe: sideState(b.foe), over: b.over, turn: b.turn };
+}
+
+const flipResult = (r: BattleResult | null | undefined): BattleResult | null =>
+  r === "win" ? "lose" : r === "lose" ? "win" : r ?? null;
+
+/**
+ * The other player's copy of the battle brought up to date: the challenger's
+ * "player" is this machine's "foe". Every number is clamped to what the
+ * critter could have, so a bad message can move a health bar and no more.
+ */
+export function applyLinkState(b: Battle, st: LinkState): void {
+  const put = (side: Side, s: LinkSideState | undefined) => {
+    if (!s || !Array.isArray(s.team)) return;
+    side.team.forEach((c, i) => {
+      const t = s.team[i];
+      if (!t) return;
+      c.hp = Math.max(0, Math.min(maxHp(c), Math.floor(Number(t.hp) || 0)));
+      c.status = t.status === "burn" || t.status === "poison" || t.status === "paralysis" || t.status === "sleep" ? t.status : null;
+      if (c.status === "sleep") c.sleep = Math.max(0, Math.min(3, Math.floor(Number(t.sleep) || 0))); else delete c.sleep;
+      c.moves.forEach((m, k) => { m.pp = Math.max(0, Math.min(MOVES[m.id]?.pp ?? 0, Math.floor(Number(t.pp?.[k]) || 0))); });
+    });
+    const a = Math.floor(Number(s.active));
+    if (a >= 0 && a < side.team.length) side.active = a;
+  };
+  put(b.player, st.foe);
+  put(b.foe, st.player);
+  b.over = flipResult(st.over);
+  if (Number.isFinite(st.turn)) b.turn = Math.max(0, Math.floor(st.turn));
+}
+
+/** The challenger's events as the other player sees them: their "player" is our "foe", their win our loss. */
+export function mirrorEvent(e: BattleEvent): BattleEvent {
+  const out: BattleEvent = { ...e };
+  if (e.side) out.side = other(e.side);
+  if (e.result) out.result = flipResult(e.result)!;
+  return out;
 }
 
 // ---- the safari --------------------------------------------------------------------------------------------
