@@ -35,6 +35,7 @@ export const CORE_ROUTES: RouteEntry[] = [
   { path: "/minecraft", label: "CollinSurvivalCraft (alias)", group: "core", alias: true },
   { path: "/csc", label: "CollinSurvivalCraft (alias)", group: "core", alias: true },
   { path: "/hub", label: "Telegram Hub", group: "core" },
+  { path: "/tasks", label: "Task Board (everything you and your agents are working on)", group: "core" },
   { path: "/vault", label: "Vault", group: "core" },
   { path: "/sandbox", label: "Sandbox", group: "core" },
   { path: "/welcome", label: "Welcome (what this is)", group: "core" },

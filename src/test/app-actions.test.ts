@@ -88,6 +88,26 @@ describe("acting on tasks", () => {
     expect(r).toEqual({ ok: true, data: { id: "t9" } });
     expect(calls[0].payload).toMatchObject({ user_id: USER, title: "ship it", priority: "medium" });
   });
+
+  it("creates a task straight into the column it was asked for, in one write", async () => {
+    const { sb, calls } = fakeSupabase([{ data: [{ id: "t9" }] }]);
+    await createTask(sb, USER, { title: "unblock deploy", status: "blocked" });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ op: "insert", payload: { status: "blocked", user_id: USER } });
+  });
+
+  it("starts a task in todo when no column is named", async () => {
+    const { sb, calls } = fakeSupabase([{ data: [{ id: "t9" }] }]);
+    await createTask(sb, USER, { title: "x" });
+    expect(calls[0].payload).toMatchObject({ status: "todo" });
+  });
+
+  it("refuses to create a task in a column the database does not have", async () => {
+    const { sb, calls } = fakeSupabase();
+    const r = await createTask(sb, USER, { title: "x", status: "pending" });
+    expect(r).toEqual({ ok: false, error: "status must be one of: todo, in_progress, done, blocked" });
+    expect(calls).toHaveLength(0);
+  });
 });
 
 describe("acting on memory", () => {

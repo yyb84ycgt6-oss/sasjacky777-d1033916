@@ -5,7 +5,7 @@ run `node scripts/gen-parity-matrix.mjs` to rebuild it from `src/lib/routeManife
 and `src/eru/routes.generated.ts`, so a renamed route changes this file in the same
 commit instead of quietly making it wrong.
 
-Last generated: 2026-09-12 · 45 native routes + 84 Eru modules.
+Last generated: 2026-09-27 · 49 native routes + 84 Eru modules.
 
 ## How to read the status column
 
@@ -35,9 +35,12 @@ this tracker, and pretending otherwise is what §6 was trying to avoid.
 | `/repair` | Repair Bay | native | ? | ? |
 | `/bridge` | Local Bridge (terminal + model vault) | native | ? | ? |
 | `/play` | Play | native | ? | ? |
+| `/craft` | CollinSurvivalCraft (Minecraft-style block building and survival) | native | ? | ? |
 | `/hub` | Telegram Hub | native | ? | ? |
+| `/tasks` | Task Board (everything you and your agents are working on) | native | ? | ? |
 | `/vault` | Vault | native | ? | ? |
 | `/sandbox` | Sandbox | native | ? | ? |
+| `/welcome` | Welcome (what this is) | native | ? | ? |
 | `/auth` | Sign in | native | ? | ? |
 
 ## AI
@@ -49,6 +52,7 @@ this tracker, and pretending otherwise is what §6 was trying to avoid.
 | `/control` | Jackie Control | native | ? | ? |
 | `/providers` | AI Providers | native | ? | ? |
 | `/grok` | Grok Studio | native | ? | ? |
+| `/forge` | Index Forge (craft your own micro-AI indexes) | native | ? | ? |
 | `/agent-lab` | Agent Lab | native | ? | ? |
 | `/agent-compare` | Agent Compare | native | ? | ? |
 | `/local-ai` | Local AI Test (Ollama on this machine) | native | ? | ? |

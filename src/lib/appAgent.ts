@@ -44,7 +44,7 @@ export interface AgentTool {
 
 export const AGENT_TOOLS: readonly AgentTool[] = [
   { name: "list_tasks", description: "List the user's tasks, newest first.", args: `{"status"?: ${TASK_STATUSES.map((s) => `"${s}"`).join("|")}, "limit"?: number}` },
-  { name: "create_task", description: "Create a task on the user's task board.", args: `{"title": string, "description"?: string, "priority"?: ${TASK_PRIORITIES.map((s) => `"${s}"`).join("|")}, "due_date"?: "YYYY-MM-DD"}` },
+  { name: "create_task", description: "Create a task on the user's task board.", args: `{"title": string, "description"?: string, "status"?: ${TASK_STATUSES.map((s) => `"${s}"`).join("|")}, "priority"?: ${TASK_PRIORITIES.map((s) => `"${s}"`).join("|")}, "due_date"?: "YYYY-MM-DD"}` },
   { name: "update_task", description: "Change a task. Give only the fields to change.", args: `{"id": string, "status"?: ${TASK_STATUSES.map((s) => `"${s}"`).join("|")}, "priority"?: string, "title"?: string, "description"?: string, "due_date"?: string}` },
   { name: "delete_task", description: "Permanently delete a task. Prefer update_task with status \"done\".", args: `{"id": string}`, destructive: true },
   { name: "search_memory", description: "Search Jackie's long-term memory. Omit query to list recent entries.", args: `{"query"?: string, "category"?: ${MEMORY_CATEGORIES.map((s) => `"${s}"`).join("|")}, "limit"?: number}` },
