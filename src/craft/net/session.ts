@@ -128,7 +128,9 @@ export function sanitizeModeTell(v: unknown): ModeTell {
 //    (the "nz" op, and the tell's reset and bloodMoon) — a guest on 3 would see none of it.
 // 5: critters, their trainers and the critter maps (the "ck" op, and the critter and trainer mob kinds) — a guest on 4
 //    would see neither, and the world's new healing station block would be a block it has never heard of.
-const PROTOCOL = 5;
+// 6: the cities — cars (a vehicle kind), citizens and cops (mob kinds), and the tell's cash, wanted stars,
+//    confiscations, captions and mission markers — a guest on 5 could not build a single one of them.
+const PROTOCOL = 6;
 const FLUSH_TICKS = 2;
 const ENTITY_TICKS = 4;
 const ENV_TICKS = 40;
