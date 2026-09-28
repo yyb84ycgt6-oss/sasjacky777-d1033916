@@ -39,8 +39,8 @@ describe("what the nav bar can hold", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("offers every one of Cybernetic's forty-two pages alongside Jackie's own", () => {
-    expect(CYBERNETIC_PAGE_IDS).toHaveLength(42);
+  it("offers every one of Cybernetic's forty-three pages alongside Jackie's own", () => {
+    expect(CYBERNETIC_PAGE_IDS).toHaveLength(43);
     const ids = new Set(NAV_PAGES.map((p) => p.id));
     for (const id of CYBERNETIC_PAGE_IDS) expect(ids.has(id), id).toBe(true);
   });

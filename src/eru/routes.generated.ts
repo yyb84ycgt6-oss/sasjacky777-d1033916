@@ -1,4 +1,4 @@
-// AUTO-GENERATED from Eru's App.jsx — do not hand-edit.
+// AUTO-GENERATED from Eru's App.jsx by scripts/import-eru.mjs — do not hand-edit.
 // Each entry mounts under /eru/<path>.
 export type EruRouteDef = { path: string; name: string; loader: () => Promise<any> };
 export const ERU_ROUTES: EruRouteDef[] = [
@@ -63,6 +63,7 @@ export const ERU_ROUTES: EruRouteDef[] = [
   { path: "admin/review", name: "AdminReviewCenter", loader: () => import('@/eru/pages/AdminReviewCenter.jsx') },
   { path: "admin/security", name: "SecurityCommandCenter", loader: () => import('@/eru/pages/SecurityCommandCenter.jsx') },
   { path: "admin/security-test", name: "SecurityTestRunner", loader: () => import('@/eru/pages/SecurityTestRunner.jsx') },
+  { path: "admin/secure-slice", name: "SecureSliceLab", loader: () => import('@/eru/pages/SecureSliceLab.jsx') },
   { path: "language-diagnostics", name: "LanguageDiagnostics", loader: () => import('@/eru/pages/LanguageDiagnostics.jsx') },
   { path: "player-progress", name: "PlayerProgress", loader: () => import('@/eru/pages/PlayerProgress.jsx') },
   { path: "lore-insights", name: "LoreInsights", loader: () => import('@/eru/pages/LoreInsights.jsx') },
@@ -78,6 +79,7 @@ export const ERU_ROUTES: EruRouteDef[] = [
   { path: "community", name: "Community", loader: () => import('@/eru/pages/Community.jsx') },
   { path: "bot-lab", name: "SimTradingLab", loader: () => import('@/eru/pages/SimTradingLab.jsx') },
   { path: "bot-forge", name: "BotForge", loader: () => import('@/eru/pages/BotForge.jsx') },
+  { path: "bot-studio", name: "BotStudio", loader: () => import('@/eru/pages/BotStudio.jsx') },
   { path: "media-converter", name: "MediaConverter", loader: () => import('@/eru/pages/MediaConverter.jsx') },
   { path: "music", name: "MediaLibrary", loader: () => import('@/eru/pages/MediaLibrary.jsx') },
   { path: "playlists", name: "Playlists", loader: () => import('@/eru/pages/Playlists.jsx') },
@@ -86,4 +88,7 @@ export const ERU_ROUTES: EruRouteDef[] = [
   { path: "p/:id", name: "SharedPlaylist", loader: () => import('@/eru/pages/SharedPlaylist.jsx') },
   { path: "discover", name: "Discover", loader: () => import('@/eru/pages/Discover.jsx') },
   { path: "listening", name: "Listening", loader: () => import('@/eru/pages/Listening.jsx') },
+  { path: "team-builder", name: "TeamBuilder", loader: () => import('@/eru/pages/TeamBuilder.jsx') },
+  { path: "command", name: "AppCommander", loader: () => import('@/eru/pages/AppCommander.jsx') },
+  { path: "data", name: "DataPortability", loader: () => import('@/eru/pages/DataPortability.jsx') },
 ];
