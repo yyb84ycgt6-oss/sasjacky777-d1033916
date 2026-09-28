@@ -206,7 +206,13 @@ async function main() {
   try {
     await guidePage.goto(BASE + "/workstation", { waitUntil: "domcontentloaded" });
     await guidePage.waitForTimeout(2000);
-    await guidePage.getByLabel("Open the guide").click({ timeout: 15000 });
+    // The Guide opens from the one nav bar now; it used to be its own floating
+    // button ("Open the guide"), and this check went on clicking that button
+    // after it was gone.
+    await guidePage
+      .getByRole("navigation", { name: "Main navigation" })
+      .getByRole("button", { name: "Guide", exact: true })
+      .click({ timeout: 15000 });
     await guidePage.getByPlaceholder("How do I… / Where is…").fill("where do I manage my api keys");
     await guidePage.keyboard.press("Enter");
     await guidePage.waitForTimeout(3000);

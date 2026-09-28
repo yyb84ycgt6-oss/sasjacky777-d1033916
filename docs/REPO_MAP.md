@@ -55,6 +55,13 @@ replaced four that stacked on top of each other, and can hold every page and
 every PC app, discovered from the manifest so new ones appear on their own. See
 [NAV_BAR.md](NAV_BAR.md).
 
+## Eru
+
+Eru (Cybernetic67) is mounted at `/eru/*` from `src/eru/`, and still develops
+on its own. A newer copy comes in with `node scripts/import-eru.mjs`, which
+keeps Jackie's bridge files and says what it changed. See
+[ERU_IMPORT.md](ERU_IMPORT.md).
+
 ## CollinSurvivalCraft
 
 `/craft` is a block-building survival game — desktop and touch controls,

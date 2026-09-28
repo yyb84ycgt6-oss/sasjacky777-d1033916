@@ -46,17 +46,24 @@ export const AuthProvider = ({ children }) => {
     setUser(mapUser(data.user));
   }, []);
 
+  // The newer Eru's pages read `currentUser` and call `navigateToLogin()` and
+  // `checkAppState()`. Eru's own provider has them; this shim did not, so those
+  // pages would have hit "navigateToLogin is not a function" on mount. They
+  // map onto the same Jackie session as everything else here.
   const value = {
     user,
+    currentUser: user,
     isAuthenticated: !!user,
     isLoadingAuth,
     isLoadingPublicSettings: false,
     authError: null,
     appPublicSettings: { id: 'jackie', public_settings: {} },
     login,
+    navigateToLogin: login,
     logout,
     refreshUser,
     checkUserAuth: refreshUser,
+    checkAppState: refreshUser,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -67,9 +74,10 @@ export const useAuth = () => {
   if (!ctx) {
     // Standalone fallback so Eru components used outside the provider don't crash
     return {
-      user: null, isAuthenticated: false, isLoadingAuth: false,
+      user: null, currentUser: null, isAuthenticated: false, isLoadingAuth: false,
       isLoadingPublicSettings: false, authError: null, appPublicSettings: null,
-      login: () => {}, logout: async () => {}, refreshUser: async () => {}, checkUserAuth: async () => {},
+      login: () => {}, navigateToLogin: () => {}, logout: async () => {}, refreshUser: async () => {},
+      checkUserAuth: async () => {}, checkAppState: async () => {},
     };
   }
   return ctx;
