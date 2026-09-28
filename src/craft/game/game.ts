@@ -50,6 +50,8 @@ import { clockFor, eclipseLight, epochForToday, skyAt, skyJd, type SkyObjects } 
 import { jdFromMs } from "../space/kepler";
 import { localClock, placeText } from "../space/skyReport";
 import { SpaceView } from "../space/spaceView";
+import { GalaxyView } from "../space/galaxyView";
+import type { Star } from "../space/galaxy";
 import { BREAK_FALL, SICKNESS_TICKS, sicknessChance, statusLine, vitalsSecond, waterFrom, type VitalsRules } from "../engine/vitals";
 import { CREATURES, maxTorpor } from "../engine/creatures";
 import { favouriteFoods } from "../engine/dinoAi";
@@ -293,6 +295,8 @@ export class Game {
   /** A trip to space (space/session.ts): while it lasts, the player's body waits where they launched, out of harm's way. */
   space: SpaceSession | null = null;
   private spaceView: SpaceView | null = null;
+  /** The galaxy map's renderer, made the first time the map is opened. */
+  private galaxyView: GalaxyView | null = null;
   /** Seconds left of a launch's countdown. */
   private launchCountdown: number | null = null;
   /** How the starship flies: real physics (gravity, orbits) or the arcade's EVE rules. Kept between trips. */
@@ -3204,9 +3208,31 @@ export class Game {
     // Paused alone, the clock stops; online, the Solar System goes on without the menu.
     const paused = this.screen?.kind === "pause" && !this.net;
     if (!paused) s.update(dt);
-    this.spaceView!.render(s.frame(paused ? 0 : dt));
+    if (s.galaxy) {
+      // The map is drawn instead of the Solar System; the ship flies on underneath it.
+      s.galaxy.tick();
+      const c = this.renderer.canvas;
+      this.galaxyView ??= new GalaxyView(this.renderer.renderer);
+      this.galaxyView.resize(c.clientWidth || window.innerWidth, c.clientHeight || window.innerHeight);
+      this.galaxyView.render(s.galaxy);
+    } else this.spaceView!.render(s.frame(paused ? 0 : dt));
     // Down under a parachute (real physics) or through the arcade's re-entry: into the world where the ship came down.
     if (s.landing === 0 || s.ship.landed) this.land();
+  }
+
+  /** The overlay the galaxy map draws its names and scale on. */
+  setGalaxyOverlay(canvas: HTMLCanvasElement | null): void {
+    this.galaxyView?.setOverlay(canvas);
+    if (canvas && !this.galaxyView) {
+      this.galaxyView = new GalaxyView(this.renderer.renderer);
+      this.galaxyView.setOverlay(canvas);
+    }
+  }
+
+  /** The star under a point of the galaxy map. */
+  galaxyPick(x: number, y: number): Star | null {
+    const map = this.space?.galaxy;
+    return map && this.galaxyView ? this.galaxyView.pick(map, x, y) : null;
   }
 
   /** The overlay the space view draws its orbits and brackets on. */
