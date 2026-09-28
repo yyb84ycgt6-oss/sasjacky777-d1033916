@@ -89,6 +89,17 @@ export const ARM_LEFT = 4, ARM_RIGHT = 8;
 /** A garage door's meta: bits 0-1 facing, bit 2 rolled up. */
 export const GARAGE_OPEN = 4;
 
+/**
+ * An outside wall's meta: bits 0-1 the way its outside faces, bits 2-4 the
+ * finish on its inside face — so a brick house is brick outside and papered
+ * inside, one block thick. 0 is no finish: the wall's own material all round,
+ * as anything a player builds is.
+ */
+export const WALL_FINISHES = ["", "drywall", "floral_wallpaper", "striped_wallpaper", "plaid_wallpaper", "wood_paneling", "wall_tile", "cream_paint"] as const;
+export const withFinish = (facing: number, finish: number): number => (facing & 3) | ((finish & 7) << 2);
+/** The face opposite each facing's outward face (faces as the registry numbers them: +x, -x, +y, -y, +z, -z). */
+const OPPOSITE = [4, 5, 0, 1];
+
 // ---- what defining a block needs from the registry -------------------------------------------------
 
 type Opts = { [K in keyof BlockDef]?: BlockDef[K] };
@@ -141,7 +152,13 @@ export function defineCountyBlocks(api: BlockApi): void {
   add(C.CRACKED_ASPHALT, "cracked_asphalt", "Cracked Asphalt", { hardness: 1.5, tool: P, harvestTier: 0 });
 
   // ---- walls -------------------------------------------------------------------------------------------
-  const siding = (id: number, name: string, display: string) => add(id, name, display, { hardness: 1, tool: A, material: "wood", flammable: true });
+  // An outside wall shows its finish on the face opposite the one it was set facing.
+  const finished = (meta: number, _box: number, face: number): string | undefined => {
+    const fin = (meta >> 2) & 7;
+    return fin && face === OPPOSITE[meta & 3] ? WALL_FINISHES[fin] : undefined;
+  };
+  const wallOpts = { facing: "player" as const, boxTexture: finished };
+  const siding = (id: number, name: string, display: string) => add(id, name, display, { hardness: 1, tool: A, material: "wood", flammable: true, ...wallOpts });
   siding(C.SIDING_WHITE, "white_siding", "White Siding");
   siding(C.SIDING_CREAM, "cream_siding", "Cream Siding");
   siding(C.SIDING_BLUE, "blue_siding", "Blue Siding");
@@ -151,11 +168,11 @@ export function defineCountyBlocks(api: BlockApi): void {
   siding(C.SIDING_PINK, "pink_siding", "Pink Siding");
   siding(C.SIDING_BROWN, "brown_siding", "Brown Siding");
   siding(C.BARN_SIDING, "barn_siding", "Barn Siding");
-  add(C.TAN_BRICK, "tan_bricks", "Tan Bricks", { hardness: 2, tool: P, harvestTier: 0 });
-  add(C.BROWN_BRICK, "brown_bricks", "Brown Bricks", { hardness: 2, tool: P, harvestTier: 0 });
-  add(C.WHITE_BRICK, "white_bricks", "Painted Bricks", { hardness: 2, tool: P, harvestTier: 0 });
-  add(C.CINDER_BLOCK, "cinder_block", "Cinder Block", { hardness: 2, tool: P, harvestTier: 0 });
-  add(C.STUCCO, "stucco", "Stucco", { hardness: 1.5, tool: P, harvestTier: 0 });
+  add(C.TAN_BRICK, "tan_bricks", "Tan Bricks", { hardness: 2, tool: P, harvestTier: 0, ...wallOpts });
+  add(C.BROWN_BRICK, "brown_bricks", "Brown Bricks", { hardness: 2, tool: P, harvestTier: 0, ...wallOpts });
+  add(C.WHITE_BRICK, "white_bricks", "Painted Bricks", { hardness: 2, tool: P, harvestTier: 0, ...wallOpts });
+  add(C.CINDER_BLOCK, "cinder_block", "Cinder Block", { hardness: 2, tool: P, harvestTier: 0, ...wallOpts });
+  add(C.STUCCO, "stucco", "Stucco", { hardness: 1.5, tool: P, harvestTier: 0, ...wallOpts });
   const wall = (id: number, name: string, display: string) => add(id, name, display, { hardness: 0.8, tool: A, material: "wood" });
   wall(C.DRYWALL, "drywall", "Drywall");
   wall(C.WALLPAPER_FLORAL, "floral_wallpaper", "Floral Wallpaper");

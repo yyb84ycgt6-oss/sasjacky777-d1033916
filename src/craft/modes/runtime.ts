@@ -10,7 +10,7 @@
 import type { Game } from "../game/game";
 import type { Objective } from "../game/types";
 import type { BlockChange } from "../engine/world";
-import type { Entity } from "../engine/entities";
+import type { DamageSource, Entity } from "../engine/entities";
 import { itemByName, type ItemStack, type StatusEffect } from "../engine/items";
 import type { GameMode } from "../engine/player";
 import { mapLayout, type MapLayout } from "../engine/maps";
@@ -160,6 +160,12 @@ export abstract class ModeRuntime {
   }
 
   /** A status effect on a player, here or online. */
+  /** Hurts a player, here or online, as the world would (a fall, a shot). */
+  hurt(id: string, amount: number, source: DamageSource = "magic"): void {
+    if (this.isLocal(id)) this.game.hurtLocal(amount, source);
+    else this.game.net?.hurtRemote(id, amount, source, 0, 0, 0);
+  }
+
   effect(id: string, effect: StatusEffect, seconds: number, amp: number): void {
     if (this.isLocal(id)) this.game.player.applyEffect(effect, seconds, amp);
     else this.game.net?.effectRemote?.(id, effect, seconds, amp);

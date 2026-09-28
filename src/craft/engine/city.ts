@@ -194,7 +194,7 @@ interface Building {
   capped?: boolean;
 }
 
-interface Sign { text: string; x: number; y: number; z: number; dx: number; dz: number; id: number; back?: number }
+export interface Sign { text: string; x: number; y: number; z: number; dx: number; dz: number; id: number; back?: number }
 
 export interface LotPlan {
   i: number;
@@ -270,7 +270,7 @@ export function signLength(text: string): number {
  * the text runs to that person's right: along +x on a sign facing south,
  * along -z on one facing east.
  */
-function letter(c: Clip, s: Sign): void {
+export function letter(c: Clip, s: Sign): void {
   let at = 0;
   for (const ch of s.text.toUpperCase()) {
     const rows = (FONT[ch] ?? FONT[" "]).split("|");

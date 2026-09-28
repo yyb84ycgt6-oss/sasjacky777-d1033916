@@ -1308,6 +1308,7 @@ export class Actions {
         g.setScreen({ kind: "furnace", x, y, z });
         return true;
       case "chest":
+        g.lootIfFresh(x, y, z);
         g.containerAt(x, y, z, "chest");
         g.sound("chest_open", x + 0.5, y + 0.5, z + 0.5, 0.5);
         g.setScreen({ kind: "chest", x, y, z });

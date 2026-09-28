@@ -33,7 +33,9 @@ import { ambientCue } from "../engine/ambience";
 import { POT_SLOTS } from "../engine/cooking";
 import { pickWildlife } from "../engine/wildlife";
 import { dungeonLoot } from "../engine/dungeons";
-import { MapGenerator, mapLayout, mapLoot } from "../engine/maps";
+import { fillLoot, MapGenerator, mapLayout, mapLoot } from "../engine/maps";
+import type { County } from "../engine/county";
+import { COUNTY_LOOT, countyLootTable } from "../engine/countyLoot";
 import type { CasinoGame } from "../engine/casino";
 import { luckyOutcome } from "../engine/lucky";
 import { createRuntime, modeDef, type ModeRuntime } from "../modes";
@@ -85,7 +87,7 @@ import { rocketLife, rocketOf, type Rocket } from "../engine/fireworks";
 import { buildGateway, cityLoot, END_SPAWN, EndGenerator, endCitiesTouching, GATEWAY_COUNT, gatewayPosition, type EndCity } from "../engine/end";
 import { EndFight } from "./endFight";
 import { FRAME_EYE } from "../engine/blocks";
-import { hash4 } from "../engine/rng";
+import { hash4, Rng } from "../engine/rng";
 import { Actions, lookFacing } from "./actions";
 import type { ThrowExtra } from "../net/session";
 import type { LinkKind } from "../net/transport";
@@ -1556,6 +1558,34 @@ export class Game {
       this.world.setEntity(x, y, z, e);
     }
     return e;
+  }
+
+  /** The county this world is built on (engine/county.ts), if it is one. */
+  county(): County | null {
+    return this.dimension === "overworld" && this.generator instanceof MapGenerator ? this.generator.layout.county ?? null : null;
+  }
+
+  /** Where a point is in the county, in words; empty anywhere else. */
+  countyPlace(x: number, z: number): string {
+    return this.county()?.placeName(Math.floor(x), Math.floor(z)) ?? "";
+  }
+
+  /**
+   * A county cupboard, fridge or shelf nobody has opened yet is filled as it is
+   * first opened (engine/countyLoot.ts says why not before), from what it is
+   * and the building it stands in, seeded by its place so everyone who opens
+   * it finds the same things. Once it has been opened it keeps what is in it.
+   */
+  lootIfFresh(x: number, y: number, z: number): void {
+    const county = this.county();
+    if (!county || this.world.getEntity(x, y, z)) return;
+    const loot = block(this.world.blockAt(x, y, z)).loot;
+    if (!loot) return;
+    const table = COUNTY_LOOT[countyLootTable(loot, county.buildingAt(x, z))];
+    const e = this.containerAt(x, y, z, "chest");
+    if (e.kind !== "chest" || !table) return;
+    fillLoot(e.items, new Rng(hash4(this.meta.seed ^ 0xc0117, x, y, z)), table, false);
+    this.containerChanged(x, y, z);
   }
 
   /** A mode's chest at x, y, z — placed if missing, emptied if not — filled by `fill`, and sent to everyone. */

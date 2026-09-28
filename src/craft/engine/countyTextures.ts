@@ -129,6 +129,7 @@ export function paintCounty(api: PaintApi): void {
   def("cinder_block", (p, r) => api.bricks(p, r, hex("#9c9c98"), hex("#76766f"), 8, 16));
   def("stucco", (p, r) => { noisy(p, r, hex("#d6c6a4"), 0.1, 8); speckle(p, r, [hex("#c2b290"), hex("#e4d6b8")], 0.25); });
   def("drywall", (p, r) => noisy(p, r, hex("#e3e1da"), 0.025, 4));
+  def("cream_paint", (p, r) => noisy(p, r, hex("#e8dcc0"), 0.02, 4));
   def("floral_wallpaper", (p, r) => {
     noisy(p, r, hex("#e8dcbe"), 0.03, 4);
     for (const [x, y] of [[3, 3], [11, 3], [7, 11], [15, 11]]) {
