@@ -9,7 +9,7 @@
  */
 import {
   isBerryBush,
-  B, block, chorusJoins, CROP_MAX_AGE, FACE_DIRS, FACING_DIRS, isButton, isCrop, isDoor, isFire, isFluid, isLeaves, isLog, isNylium, isRedstoneTorch, isSapling,
+  B, block, chorusJoins, CROP_MAX_AGE, FACE_DIRS, FACING_DIRS, isBed, isButton, isCrop, isDoor, isFire, isFluid, isLeaves, isLog, isNylium, isRedstoneTorch, isSapling,
   isSlab, OPPOSITE_FACING,
 } from "./blocks";
 import { findPortalFrame, portalHolds, type PortalAxis } from "./portal";
@@ -166,18 +166,18 @@ export function supported(world: World, x: number, y: number, z: number, id: num
     }
     case B.SNOW: case B.LANTERN:
       return belowDef.solid && below !== B.ICE;
-    case B.OAK_DOOR: case B.IRON_DOOR: {
-      const upper = (meta & 8) !== 0;
-      if (upper) return world.blockAt(x, y - 1, z) === id;
-      return belowDef.opaque && world.blockAt(x, y + 1, z) === id;
-    }
-    case B.RED_BED: {
-      const head = (meta & 4) !== 0;
-      const [dx, dz] = FACING_DIRS[meta & 3];
-      const ox = head ? x - dx : x + dx, oz = head ? z - dz : z + dz;
-      return world.blockAt(ox, y, oz) === B.RED_BED;
-    }
     default: {
+      if (isDoor(id)) {
+        const upper = (meta & 8) !== 0;
+        if (upper) return world.blockAt(x, y - 1, z) === id;
+        return belowDef.opaque && world.blockAt(x, y + 1, z) === id;
+      }
+      if (isBed(id)) {
+        const head = (meta & 4) !== 0;
+        const [dx, dz] = FACING_DIRS[meta & 3];
+        const ox = head ? x - dx : x + dx, oz = head ? z - dz : z + dz;
+        return world.blockAt(ox, y, oz) === id;
+      }
       const def = block(id);
       if (def.shape === "cross" || isSapling(id)) return SOIL.has(below) || below === B.SAND && id === B.DEAD_BUSH;
       return belowDef.solid;
@@ -201,7 +201,7 @@ export class BlockRules {
       if (isCrop(id) || id === B.NETHER_WART) stacks = cropDrops(id, meta, this.ctx.random);
       // A door or bed drops once, from its lower half / foot.
       if (isDoor(id) && meta & 8) stacks = [];
-      if (id === B.RED_BED && meta & 4) stacks = [];
+      if (isBed(id) && meta & 4) stacks = [];
       this.ctx.dropItems(x + 0.5, y + 0.3, z + 0.5, stacks);
     }
     this.world.setBlock(x, y, z, B.AIR, 0, "world");

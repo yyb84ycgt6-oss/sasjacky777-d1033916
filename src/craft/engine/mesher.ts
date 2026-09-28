@@ -14,7 +14,7 @@
  * plain floats would be four times that, across a few hundred chunks.
  */
 import {
-  block, BLOCK_ID_LIMIT, faceTexture, isDoor, isLeaves, isRedstoneTorch, modelBoxes, B, Face, FACING_DIRS, type BlockDef, type Box,
+  block, BLOCK_ID_LIMIT, faceTexture, isBed, isDoor, isLeaves, isRedstoneTorch, modelBoxes, B, Face, FACING_DIRS, type BlockDef, type Box,
 } from "./blocks";
 import { dustColor, dustConnection } from "./redstone";
 import { railShape, isSlope } from "./rails";
@@ -376,7 +376,7 @@ export class Mesher {
     const { blocks, light } = input;
     const list = modelBoxes(def, m);
     const facing = m & 3;
-    const bed = def.id === B.RED_BED;
+    const bed = isBed(def.id);
     // A wall torch is the standing torch moved; its texture must not move with it.
     const torchUV: Box | null = (def.id === B.TORCH || isRedstoneTorch(def.id)) && m > 0 ? [7, 0, 7, 9, 10, 9] : null;
     for (let bi = 0; bi < list.length; bi++) {
@@ -391,7 +391,7 @@ export class Mesher {
         const ni = padIndex(x + n[0], y + n[1], z + n[2]);
         if (onEdge && this.opaque[blocks[ni]]) continue;
         // Faces flush against the same block (glass pane arms, double slabs) would z-fight.
-        if (onEdge && blocks[ni] === def.id && !isDoor(def.id) && def.id !== B.RED_BED) continue;
+        if (onEdge && blocks[ni] === def.id && !isDoor(def.id) && !isBed(def.id)) continue;
         const corners = FACE_CORNERS[f];
         const l = light[onEdge ? ni : padIndex(x, y, z)];
         const lookFrom = onEdge ? l : Math.max(l, light[ni]);

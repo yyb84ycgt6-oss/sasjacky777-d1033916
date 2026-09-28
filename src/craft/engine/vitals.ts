@@ -6,6 +6,8 @@
  * surroundings and carries out what they decide.
  */
 
+import { COUNTY_WATER } from "./countyItems";
+
 export interface Vitals {
   /** 0..20, as food is. */
   water: number;
@@ -123,7 +125,7 @@ export function waterFrom(item: string): number {
     case "mejoberry": return 2;
     case "apple": case "carrot": return 1;
     case "mushroom_stew": case "beef_stew": case "venison_stew": case "chicken_soup": case "vegetable_soup": case "pumpkin_soup": case "hearty_stew": return 4;
-    default: return 0;
+    default: return COUNTY_WATER[item] ?? 0;
   }
 }
 

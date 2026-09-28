@@ -14,6 +14,8 @@
 import { allBlocks, B, block, type Drop, type ToolType } from "./blocks";
 import { POTIONS } from "./potions";
 import type { Burst, Rocket } from "./fireworks";
+import { defineCountyItems } from "./countyItems";
+import { FIRST_WIDE_BLOCK } from "./countyBlocks";
 
 export interface ToolInfo {
   type: ToolType;
@@ -75,7 +77,9 @@ export type ItemUse =
   /** Critters: an orb starts a battle with the wild critter it is aimed at (and catches, thrown in one); a medicine opens the party to give it. */
   | "orb" | "critter_medicine"
   /** Launches its holder into space (space/): the ship waits in orbit above wherever they stand. */
-  | "launch";
+  | "launch"
+  /** Read (the county): a skill book or magazine teaches, anything else passes the time. */
+  | "read";
 
 export type Category = "building" | "colored" | "natural" | "functional" | "redstone" | "tools" | "combat" | "food" | "ingredients";
 
@@ -103,6 +107,8 @@ export interface ItemDef {
   hidden?: boolean;
   /** Dropped in lava or fire it floats and survives (netherite). */
   fireproof?: boolean;
+  /** A drink's container once it is drunk: an item name, or null for nothing left (a carton, crushed). Absent is a glass bottle. */
+  empty?: string | null;
 }
 
 const ITEMS: ItemDef[] = [];
@@ -110,6 +116,8 @@ const BY_NAME = new Map<string, ItemDef>();
 
 function add(def: Partial<ItemDef> & { id: number; name: string; displayName: string }): ItemDef {
   if (ITEMS[def.id]) throw new Error(`item id ${def.id} used twice (${ITEMS[def.id].name}, ${def.name})`);
+  // A second item by the same name would quietly take the name over, and every table naming it would get the wrong one.
+  if (BY_NAME.has(def.name)) throw new Error(`item name ${def.name} used twice (ids ${BY_NAME.get(def.name)!.id} and ${def.id})`);
   const full: ItemDef = {
     maxStack: 64,
     damage: 1,
@@ -165,7 +173,9 @@ for (const def of allBlocks()) {
   if (def.hidden || def.id === 0) continue;
   const flat = FLAT_BLOCK_ICONS[def.name] ?? (def.shape === "cross" ? def.textures.side : undefined);
   const woodBurns = def.material === "wood" && def.flammable;
-  const category: Category = REDSTONE.has(def.name)
+  // The county's furniture and fittings are for using or setting up; its siding, flooring and roofs are for building.
+  const countyFitting = def.id >= FIRST_WIDE_BLOCK && (def.shape === "boxes" || def.interact !== undefined);
+  const category: Category = countyFitting ? "functional" : REDSTONE.has(def.name)
     ? "redstone"
     : COLORED.test(def.name)
     ? "colored"
@@ -487,6 +497,10 @@ item("honey_cake", "Honey Cake", { use: "critter_medicine", category: "tools", m
 item("cash", "Wad of Cash", { category: "tools" });
 // Space: a starship, kept folded in a pocket in the way of every other item, launched from wherever its holder stands.
 item("starship", "Starship", { use: "launch", category: "tools", maxStack: 1 });
+// The county (engine/countyItems.ts): food, drink, first aid, tools, weapons, books — appended here, so their ids follow on.
+defineCountyItems(item);
+// Plain items and blocks share one numbering; the sixteen-bit blocks start where plain items must stop.
+if (next > FIRST_WIDE_BLOCK) throw new Error(`plain item ids have reached ${next}, into the block ids that start at ${FIRST_WIDE_BLOCK}`);
 
 // ---- lookups -----------------------------------------------------------------------
 

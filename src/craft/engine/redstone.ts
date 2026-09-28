@@ -27,7 +27,7 @@
  * block changes from the host.
  */
 import {
-  B, block, containerSize, FACE_DIRS, FACE_OF_FACING, FACING_DIRS, FACING_OF_FACE, Face, isButton, isDoor,
+  B, block, containerSize, FACE_DIRS, FACE_OF_FACING, FACING_DIRS, FACING_OF_FACE, Face, isBed, isButton, isDoor,
   isFluid, isPiston, isPlate, isRedstoneTorch, isTrapdoor, OPPOSITE_FACE,
 } from "./blocks";
 import { entityStacks, type BlockEntity, type Chunk } from "./chunk";
@@ -153,7 +153,7 @@ function immovable(id: number, meta: number): boolean {
   if (id === B.BEDROCK || id === B.OBSIDIAN || id === B.PISTON_HEAD) return true;
   if (isPiston(id) && (meta & 8) !== 0) return true;
   if (containerSize(id) > 0 || id === B.FURNACE || id === B.LIT_FURNACE) return true;
-  if (id === B.OAK_DOOR || id === B.IRON_DOOR || id === B.RED_BED) return true;
+  if (isDoor(id) || isBed(id)) return true;
   return block(id).hardness < 0;
 }
 

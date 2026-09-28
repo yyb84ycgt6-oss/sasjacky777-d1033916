@@ -12,6 +12,8 @@
  * audio (material). One table means a new block is one entry, not six edits.
  */
 
+import { COUNTY_BLOCKS, defineCountyBlocks, isCountyBed, isCountyDoor, isShingleSlab, isShingleStairs } from "./countyBlocks";
+
 /** Face order used everywhere: +x, -x, +y, -y, +z, -z. */
 export const Face = { East: 0, West: 1, Up: 2, Down: 3, South: 4, North: 5 } as const;
 export type FaceIndex = (typeof Face)[keyof typeof Face];
@@ -106,7 +108,13 @@ export interface BlockDef {
   facing?: "player" | "away" | "wall";
   /** Has an inventory or a screen. */
   interact?: "crafting" | "furnace" | "chest" | "bed" | "door" | "tnt" | "noteblock" | "redstone"
-    | "enchanting" | "anvil" | "brewing" | "cauldron" | "composter" | "bell" | "smithing" | "waystone" | "grave" | "cooking" | "healing";
+    | "enchanting" | "anvil" | "brewing" | "cauldron" | "composter" | "bell" | "smithing" | "waystone" | "grave" | "cooking" | "healing"
+    /** The county's: a window to open, close, climb or board; a tap or tank to drink from; a stove, television, radio, garage door, generator or gas pump. */
+    | "window" | "water" | "stove" | "tv" | "radio" | "garage" | "generator" | "fuel";
+  /** Slots, for a block that keeps an inventory (interact "chest"); absent is the chest's 27 or the old per-block sizes. */
+  container?: number;
+  /** What a county container holds when first opened (engine/countyLoot.ts), before the room it stands in is taken into account. */
+  loot?: string;
   flammable?: boolean;
   /** Hidden from the creative inventory (technical blocks). */
   hidden?: boolean;
@@ -1159,6 +1167,9 @@ add(255, "healing_station", "Healing Station", {
   boxTexture: (_m, box, face) => (box === 1 ? "healing_station_dome" : face === Face.Up ? "healing_station_top" : face === Face.Down ? "healing_station_bottom" : "healing_station_side"),
 });
 
+// The county (engine/countyBlocks.ts): ids from 4096, every one after the one-byte blocks.
+defineCountyBlocks({ add, tex, stairBoxes, slabBoxes, doorBoxes, hFacingBox });
+
 export const BLOCK_COUNT = BLOCKS.length;
 /**
  * One past the highest block id: the size of a table indexed by id. Ids are
@@ -1228,6 +1239,7 @@ export const B = {
   CHORUS_PLANT: 238, CHORUS_FLOWER: 239, END_PORTAL_FRAME: 240, END_PORTAL: 241, END_GATEWAY: 242, DRAGON_EGG: 243,
   IRON_BARS: 244, SHULKER_BOX: 245, DRAGON_HEAD: 246, PURPUR_SLAB: 247, MAGENTA_STAINED_GLASS: 248, WAYSTONE: 249, GRAVESTONE: 250, COOKING_POT: 251, LUCKY_BLOCK: 252,
   MEJOBERRY_BUSH: 253, NARCOBERRY_BUSH: 254, HEALING_STATION: 255,
+  ...COUNTY_BLOCKS,
 } as const;
 
 /** Blocks that stand on an axis kept in meta like a log's (0 up, 1 along x, 2 along z). */
@@ -1243,10 +1255,12 @@ export const isLeaves = (id: number): boolean =>
   id === B.OAK_LEAVES || id === B.BIRCH_LEAVES || id === B.SPRUCE_LEAVES || id === B.JUNGLE_LEAVES || id === B.ACACIA_LEAVES;
 export const isCrop = (id: number): boolean => id === B.WHEAT || id === B.CARROTS || id === B.POTATOES;
 export const isSapling = (id: number): boolean => id >= B.OAK_SAPLING && id <= B.ACACIA_SAPLING;
-export const isSlab = (id: number): boolean => (id >= B.OAK_SLAB && id <= B.STONE_BRICK_SLAB) || id === B.PURPUR_SLAB;
+export const isSlab = (id: number): boolean => (id >= B.OAK_SLAB && id <= B.STONE_BRICK_SLAB) || id === B.PURPUR_SLAB || isShingleSlab(id);
 export const isStairs = (id: number): boolean =>
-  (id >= B.OAK_STAIRS && id <= B.STONE_BRICK_STAIRS) || id === B.NETHER_BRICK_STAIRS || id === B.PURPUR_STAIRS;
-export const isDoor = (id: number): boolean => id === B.OAK_DOOR || id === B.IRON_DOOR;
+  (id >= B.OAK_STAIRS && id <= B.STONE_BRICK_STAIRS) || id === B.NETHER_BRICK_STAIRS || id === B.PURPUR_STAIRS || isShingleStairs(id);
+export const isDoor = (id: number): boolean => id === B.OAK_DOOR || id === B.IRON_DOOR || isCountyDoor(id);
+/** Every bed: two blocks, a foot and a head, slept in and spawned at. */
+export const isBed = (id: number): boolean => id === B.RED_BED || isCountyBed(id);
 export const isTrapdoor = (id: number): boolean => id === B.OAK_TRAPDOOR || id === B.IRON_TRAPDOOR;
 export const isButton = (id: number): boolean => id === B.STONE_BUTTON || id === B.OAK_BUTTON;
 export const isPlate = (id: number): boolean => id === B.STONE_PLATE || id === B.OAK_PLATE;
@@ -1254,6 +1268,8 @@ export const isRedstoneTorch = (id: number): boolean => id === B.REDSTONE_TORCH 
 export const isPiston = (id: number): boolean => id === B.PISTON || id === B.STICKY_PISTON;
 /** Blocks that keep an inventory in a block entity, and how many slots. */
 export function containerSize(id: number): number {
+  const slots = BLOCKS[id]?.container;
+  if (slots) return slots;
   return id === B.CHEST || id === B.BARREL || id === B.SHULKER_BOX ? 27 : id === B.HOPPER ? 5 : id === B.DISPENSER || id === B.DROPPER ? 9 : 0;
 }
 
@@ -1277,12 +1293,15 @@ export function faceTexture(def: BlockDef, meta: number, face: number): string {
     if (t2) return t2;
   }
   if (def.id === B.OAK_DOOR) return (meta & 8) !== 0 ? "oak_door_top" : "oak_door_bottom";
+  if (isCountyDoor(def.id)) return (meta & 8) !== 0 ? t.top : t.side;
   if (def.id === B.IRON_DOOR) return (meta & 8) !== 0 ? "iron_door_top" : "iron_door_bottom";
-  if (def.id === B.RED_BED) {
+  if (isBed(def.id)) {
+    // The red bed came first and has the plain names; the county's carry their own.
+    const pre = def.id === B.RED_BED ? "bed" : def.name;
     const head = (meta & 4) !== 0;
-    if (face === Face.Up) return head ? "bed_head_top" : "bed_foot_top";
+    if (face === Face.Up) return head ? `${pre}_head_top` : `${pre}_foot_top`;
     if (face === Face.Down) return "oak_planks";
-    return head ? "bed_head_side" : "bed_side";
+    return head ? `${pre}_head_side` : `${pre}_side`;
   }
   if (isCrop(def.id)) {
     const base = def.id === B.WHEAT ? "wheat" : def.id === B.CARROTS ? "carrots" : "potatoes";

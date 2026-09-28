@@ -21,6 +21,8 @@
 import { POTIONS } from "./potions";
 import { Rng, seedFromString } from "./rng";
 import { Simplex } from "./noise";
+import { paintCounty } from "./countyTextures";
+import { COUNTY_ART, COUNTY_TEMPLATES } from "./countyItems";
 
 export const TEX = 16;
 export const ANIM_FRAMES = 16;
@@ -3011,6 +3013,14 @@ const BOAT_WOOD_COLORS: Record<string, string> = { oak: "#9c7a45", spruce: "#6b5
 for (const [wood, color] of Object.entries(BOAT_WOOD_COLORS)) art(`${wood}_boat`, "boat", paletteOf(color));
 art("minecart", "cart", paletteOf("#8a8a8e", { f: hex("#2a2a2c"), k: hex("#1e1e20") }));
 art("tnt_minecart", "cart", paletteOf("#8a8a8e", { f: hex("#c8341c"), k: hex("#1e1e20") }));
+
+// The county's blocks and items (engine/countyTextures.ts), painted with the same hand.
+paintCounty({
+  def, art, template: (name, rows) => { ITEM_TEMPLATES[name] = rows; },
+  hex, shade, mix, noisy, speckle, bevel, rect, frame, outline: frame16, planks, bricks: bricksPattern, wool: woolPattern, valueNoise, paletteOf,
+});
+for (const [name, rows] of Object.entries(COUNTY_TEMPLATES)) ITEM_TEMPLATES[name] = rows;
+for (const [name, [shape, colors]] of Object.entries(COUNTY_ART)) art(name, shape, Object.fromEntries(Object.entries(colors).map(([k, v]) => [k, hex(v)])));
 
 function paintItem(p: Pixels, name: string): boolean {
   const a = ITEM_ART[name];

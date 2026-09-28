@@ -286,6 +286,23 @@ shaped("flyer_saddle", ["LLL", "FSF"], { L: "leather", F: "feather", S: "string"
 shapeless("bandage", ["white_wool", "string"], "bandage", 3);
 shapeless("bandage_paper", ["paper", "paper", "string"], "bandage", 2);
 shapeless("splint", ["stick", "stick", "string"], "splint");
+
+// The county: lumber and nails, making do with what is in the house.
+shapeless("plank", ["#planks"], "plank", 2);
+shapeless("spiked_bat", ["baseball_bat", "nails", "nails"], "spiked_bat");
+shapeless("rag", ["bed_sheet"], "rag", 4);
+shapeless("bandage_rag", ["rag", "rag"], "bandage");
+shapeless("sterile_bandage", ["bandage", "bandage", "bandage", "disinfectant"], "sterile_bandage", 3);
+shapeless("sheet_rope", ["bed_sheet", "bed_sheet"], "sheet_rope");
+shapeless("spear", ["plank", "kitchen_knife"], "spear");
+shapeless("sandwich_ham", ["bread", "deli_ham"], "sandwich");
+shapeless("sandwich_cheese", ["bread", "cheese"], "sandwich");
+shapeless("sandwich_pb", ["bread", "peanut_butter"], "sandwich");
+shapeless("barricade", ["plank", "plank", "nails"], "barricade");
+shapeless("nails", ["scrap_metal"], "nails", 4);
+shapeless("scrap_metal", ["empty_can", "empty_can", "empty_can", "empty_can"], "scrap_metal");
+shaped("county_crate", ["###", "#N#", "###"], { "#": "plank", N: "nails" }, "crate");
+shaped("county_workbench", ["###", "P P"], { "#": "plank", P: "#planks" }, "workbench");
 // Critters: orbs from iron and redstone (the better ones with gold and diamond), medicine from what grows, and a
 // healing station for a base of one's own.
 shaped("capture_orb", [" I ", "IRI", " I "], { I: "iron_nugget", R: "redstone" }, "capture_orb", 2);

@@ -13,7 +13,7 @@
  * and asks the host for everything else, so there is exactly one answer to
  * where the water went.
  */
-import { B, block, boxColorOf, containerSize, FACE_DIRS, isFluid, isLeaves, isLog, OPPOSITE_FACING, type Material } from "../engine/blocks";
+import { B, block, boxColorOf, containerSize, FACE_DIRS, isBed, isFluid, isLeaves, isLog, OPPOSITE_FACING, type Material } from "../engine/blocks";
 import { Redstone, type Body as RedstoneBody, type RedstoneContext } from "../engine/redstone";
 import { chunkId, entityStacks, newBrewing, newChest, newFurnace, type BlockEntity, type BrewingEntity, type Chunk, type FurnaceEntity } from "../engine/chunk";
 import { DAY_TICKS, SEA_LEVEL, TICK_MS, WORLD_HEIGHT } from "../engine/constants";
@@ -1990,7 +1990,7 @@ export class Game {
       }
     }
     let spawn = p.spawn;
-    if (spawn && this.world.blockAt(Math.floor(spawn.x), Math.floor(spawn.y), Math.floor(spawn.z)) !== B.RED_BED) {
+    if (spawn && !isBed(this.world.blockAt(Math.floor(spawn.x), Math.floor(spawn.y), Math.floor(spawn.z)))) {
       if (this.world.isLoaded(Math.floor(spawn.x), Math.floor(spawn.z))) {
         this.message("Your home bed was missing or obstructed", "#ffcc55");
         p.spawn = null;

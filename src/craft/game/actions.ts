@@ -10,9 +10,10 @@
  * two blocks of room, a slab on a slab makes a double slab.
  */
 import { Car } from "../engine/cars";
+import { boardsOf } from "../engine/countyBlocks";
 import * as THREE from "three";
 import {
-  B, block, CLOCKWISE_FACING, collisionBoxes, CROP_MAX_AGE, Face, FACE_DIRS, FACE_OF_FACING, FACING_DIRS, isBerryBush, isButton, isCrop, isDoor, isFluid, isLeaves, isPillar,
+  B, block, CLOCKWISE_FACING, collisionBoxes, CROP_MAX_AGE, Face, FACE_DIRS, FACE_OF_FACING, FACING_DIRS, isBed, isBerryBush, isButton, isCrop, isDoor, isFluid, isLeaves, isPillar,
   isRedstoneTorch, isSlab, isStairs, isTrapdoor, OPPOSITE_FACE, OPPOSITE_FACING, FRAME_EYE,
   type BlockDef,
 } from "../engine/blocks";
@@ -84,7 +85,17 @@ export function breakTicks(
  */
 function silkTouchable(id: number): boolean {
   const def = block(id);
-  return def.drops !== undefined && !def.hidden && !!itemDef(id) && !isCrop(id) && !isDoor(id) && id !== B.RED_BED && !isSlab(id);
+  return def.drops !== undefined && !def.hidden && !!itemDef(id) && !isCrop(id) && !isDoor(id) && !isBed(id) && !isSlab(id);
+}
+
+/** The item a door comes away as: the two original doors have items of their own; the county's are their own items. */
+function doorItem(id: number): number {
+  return id === B.OAK_DOOR ? itemId("oak_door") : id === B.IRON_DOOR ? itemId("iron_door") : id;
+}
+
+/** The item a bed comes away as, the same way. */
+function bedItem(id: number): number {
+  return id === B.RED_BED ? itemId("red_bed") : id;
 }
 
 /** Horizontal facing (0 north, 1 south, 2 west, 3 east) the player is looking along. */
@@ -478,7 +489,7 @@ export class Actions {
       else if (silk) stacks = [{ id, count: 1 }];
       else if (isCrop(id) || id === B.NETHER_WART) stacks = cropDrops(id, meta, Math.random);
       else if (isDoor(id) && meta & 8) stacks = [];
-      else if (id === B.RED_BED && meta & 4) stacks = [];
+      else if (isBed(id) && meta & 4) stacks = [];
       else if (isSlab(id) && meta === 2) stacks = [{ id, count: 2 }];
       else stacks = applyFortune(resolveDrops(def.drops, id, Math.random), levelOf(p.inventory.held, "fortune"), Math.random, id);
     }
@@ -493,14 +504,14 @@ export class Actions {
     if (isDoor(id)) {
       const other = meta & 8 ? y - 1 : y + 1;
       if (g.world.blockAt(x, other, z) === id) g.world.setBlock(x, other, z, B.AIR, 0, "player");
-      if (meta & 8 && drops && harvest) stacks = [{ id: itemId(id === B.IRON_DOOR ? "iron_door" : "oak_door"), count: 1 }];
+      if (meta & 8 && drops && harvest) stacks = [{ id: doorItem(id), count: 1 }];
     }
-    if (id === B.RED_BED) {
+    if (isBed(id)) {
       const [dx, dz] = FACING_DIRS[meta & 3];
       const head = (meta & 4) !== 0;
       const ox = head ? x - dx : x + dx, oz = head ? z - dz : z + dz;
-      if (g.world.blockAt(ox, y, oz) === B.RED_BED) g.world.setBlock(ox, y, oz, B.AIR, 0, "player");
-      if (head && drops) stacks = [{ id: itemId("red_bed"), count: 1 }];
+      if (g.world.blockAt(ox, y, oz) === id) g.world.setBlock(ox, y, oz, B.AIR, 0, "player");
+      if (head && drops) stacks = [{ id: bedItem(id), count: 1 }];
     }
     // Ice over something turns to water, as it melts in your hands.
     const replacement = id === B.ICE && drops && !silk && block(g.world.blockAt(x, y - 1, z)).solid ? B.WATER : B.AIR;
@@ -1069,7 +1080,12 @@ export class Actions {
       const potion = potionOfItem(def.name);
       for (const fx of potion?.potion.effects ?? []) p.applyEffect(fx.effect, fx.seconds, fx.amp);
       g.drank(def.name);
-      if (p.survivalLike) this.replaceHeld({ id: itemId(def.name === "water_canteen" ? "canteen" : "glass_bottle"), count: 1 });
+      if (p.survivalLike) {
+        // What the drink came in: a canteen goes back to empty, a carton is crushed, a bottle is kept.
+        const empty = def.empty === undefined ? (def.name === "water_canteen" ? "canteen" : "glass_bottle") : def.empty;
+        if (empty) this.replaceHeld({ id: itemId(empty), count: 1 });
+        else this.consumeHeld();
+      }
       g.bumpInv();
       return;
     }
@@ -1343,19 +1359,21 @@ export class Actions {
         }
         const lowerY = meta & 8 ? y - 1 : y;
         const lower = w.getMeta(x, lowerY, z);
+        // Boards nailed across it hold it shut: they have to come off first.
+        if (boardsOf(lower) > 0) { g.message("It's boarded up. Pry the boards off first.", "#ffcc55"); return true; }
         const open = (lower & 4) === 0;
         const nl = open ? lower | 4 : lower & ~4;
-        w.setBlock(x, lowerY, z, B.OAK_DOOR, nl, "player");
-        if (w.blockAt(x, lowerY + 1, z) === B.OAK_DOOR) w.setBlock(x, lowerY + 1, z, B.OAK_DOOR, nl | 8, "player");
+        w.setBlock(x, lowerY, z, id, nl, "player");
+        if (w.blockAt(x, lowerY + 1, z) === id) w.setBlock(x, lowerY + 1, z, id, nl | 8, "player");
         // Double doors (after Couplings): the other of a pair — beside it, facing the same way, hinged
         // on the other side, and in the same state this one was — swings with it.
         if (g.modOn("double_doors")) {
           for (const [dx, dz] of FACING_DIRS) {
             const om = w.getMeta(x + dx, lowerY, z + dz);
-            if (w.blockAt(x + dx, lowerY, z + dz) !== B.OAK_DOOR || om & 8 || (om & 3) !== (lower & 3) || (om & 16) === (lower & 16) || (om & 4) !== (lower & 4)) continue;
+            if (w.blockAt(x + dx, lowerY, z + dz) !== id || om & 8 || (om & 3) !== (lower & 3) || (om & 16) === (lower & 16) || (om & 4) !== (lower & 4)) continue;
             const on = open ? om | 4 : om & ~4;
-            w.setBlock(x + dx, lowerY, z + dz, B.OAK_DOOR, on, "player");
-            if (w.blockAt(x + dx, lowerY + 1, z + dz) === B.OAK_DOOR) w.setBlock(x + dx, lowerY + 1, z + dz, B.OAK_DOOR, on | 8, "player");
+            w.setBlock(x + dx, lowerY, z + dz, id, on, "player");
+            if (w.blockAt(x + dx, lowerY + 1, z + dz) === id) w.setBlock(x + dx, lowerY + 1, z + dz, id, on | 8, "player");
             break;
           }
         }
@@ -1590,7 +1608,7 @@ export class Actions {
       x = fluid.x; y = fluid.y + 1; z = fluid.z;
       if (w.blockAt(x, y, z) !== 0) return false;
     }
-    const selfChecked = id === B.TORCH || isRedstoneTorch(id) || id === B.LADDER || isDoor(id) || id === B.RED_BED || id === B.LEVER || isButton(id);
+    const selfChecked = id === B.TORCH || isRedstoneTorch(id) || id === B.LADDER || isDoor(id) || isBed(id) || id === B.LEVER || isButton(id);
     if (def.needsSupport && !selfChecked && !supported(w, x, y, z, id, meta)) return false;
 
     if (isDoor(id)) {
@@ -1606,15 +1624,15 @@ export class Actions {
       w.setBlock(x, y + 1, z, id, facing | 8 | hinge, "player");
       return this.afterPlace(x, y, z, def, item);
     }
-    if (id === B.RED_BED) {
+    if (isBed(id)) {
       const facing = look;
       const [dx, dz] = FACING_DIRS[facing];
       const hx = x + dx, hz = z + dz;
       const headCur = w.getBlock(hx, y, hz);
       if (headCur < 0 || !(headCur === 0 || block(headCur).replaceable)) return false;
       if (!block(w.blockAt(x, y - 1, z)).solid || !block(w.blockAt(hx, y - 1, hz)).solid) return false;
-      w.setBlock(x, y, z, B.RED_BED, facing, "player");
-      w.setBlock(hx, y, hz, B.RED_BED, facing | 4, "player");
+      w.setBlock(x, y, z, id, facing, "player");
+      w.setBlock(hx, y, hz, id, facing | 4, "player");
       return this.afterPlace(x, y, z, def, item);
     }
     if (isRail(id)) {
@@ -1736,13 +1754,12 @@ export class Actions {
     const inv = g.player.inventory;
     let id = g.world.blockAt(t.x, t.y, t.z);
     if (id === B.LIT_FURNACE) id = B.FURNACE;
-    if (id === B.OAK_DOOR) id = itemId("oak_door");
-    if (id === B.IRON_DOOR) id = itemId("iron_door");
+    if (isDoor(id)) id = doorItem(id);
     if (id === B.REDSTONE_WIRE) id = itemId("redstone");
     if (id === B.REDSTONE_TORCH_OFF) id = B.REDSTONE_TORCH;
     if (id === B.REDSTONE_LAMP_ON) id = B.REDSTONE_LAMP;
     if (id === B.PISTON_HEAD) id = (g.world.getMeta(t.x, t.y, t.z) & 8) !== 0 ? B.STICKY_PISTON : B.PISTON;
-    if (id === B.RED_BED) id = itemId("red_bed");
+    if (isBed(id)) id = bedItem(id);
     if (id === B.WHEAT) id = itemId("wheat_seeds");
     if (id === B.CARROTS) id = itemId("carrot");
     if (id === B.POTATOES) id = itemId("potato");
