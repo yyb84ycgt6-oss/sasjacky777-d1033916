@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Bot, FlaskConical, Key, Send } from 'lucide-react';
+import { Bot, FlaskConical, Key, Send, MessageSquare } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { base44 } from '@/eru/api/base44Client';
 import JackieHeader from '../components/jackie/JackieHeader';
@@ -20,6 +20,8 @@ import PromptLibraryPanel from '../components/jackie/PromptLibraryPanel.jsx';
 import { VOICES } from '../components/jackie/VoiceSelector.jsx';
 import { selectRelevantMemoryFacts } from '@/eru/lib/jackieMemoryRetrieval';
 import { getCachedOrFetch, invalidateCachedValue, writeCachedValue } from '@/eru/lib/metadataCache';
+import { isLocalProvider, streamProviderChat } from '@/eru/lib/localModelProviders';
+import LocalModelConnector from '../components/jackie/LocalModelConnector.jsx';
 
 const PAGE_NAV_MAP = [
   { keywords: ['ai lab', 'ailab', 'lab', 'bots', 'bot lab'], path: '/ailab' },
@@ -81,6 +83,14 @@ const THINK_MODES = [
   { id: 'explainer', label: 'Explainer',  emoji: '📖', color: 'text-green-400',  desc: 'Simple, clear breakdowns',         prompt: 'THINK MODE: EXPLAINER — Break down every concept into the simplest possible terms. Use analogies, bullet points, and examples. Assume no prior knowledge.' },
 ];
 
+const MODES = [
+  { id: 'chat', label: 'Chat' },
+  { id: 'code', label: 'Code' },
+  { id: 'visual', label: 'Visual' },
+  { id: 'builder', label: 'Builder' },
+  { id: 'conversion', label: 'Convert' },
+];
+
 export default function JackieAI() {
   const navigate = useNavigate();
   const jackieProgressEntity = base44.entities?.JackieProgress || null;
@@ -94,6 +104,10 @@ export default function JackieAI() {
   const [mode, setMode] = useState('chat');
   const [tab, setTab] = useState('main');
   const [showCommands, setShowCommands] = useState(false);
+  const [showChats, setShowChats] = useState(false);
+  const [modelProvider, setModelProvider] = useState(() => { try { return localStorage.getItem('jackie_model_provider') || 'base44'; } catch { return 'base44'; } });
+  const [modelName, setModelName] = useState(() => { try { return localStorage.getItem('jackie_model_name') || ''; } catch { return ''; } });
+  const [showModelConnector, setShowModelConnector] = useState(false);
   const [workingContext, setWorkingContext] = useState('');
   const [voice, setVoice] = useState('default');
   const [pendingFiles, setPendingFiles] = useState([]);
@@ -173,6 +187,30 @@ export default function JackieAI() {
     const history = messages.slice(-20).map(m => `${m.role === 'user' ? 'User' : 'Jackie'}: ${m.content}`).join('\n');
     return `${systemPrompt}${botContext}${keyContext}${contextBlock}${retrievalBlock}\n\nConversation:\n${history}\nUser: ${userMessage}\n\nJackie:`;
   }, [mode, thinkMode, messages, workingContext, voice, userBots, apiKeyCount]);
+
+  const buildMessages = useCallback((userMessage, retrievedFacts = []) => {
+    const voiceStyle = VOICES.find(v => v.id === voice)?.style || '';
+    const thinkModePrompt = THINK_MODES.find(t => t.id === thinkMode)?.prompt || '';
+    const enhancementContext = `\n[ENABLED FEATURES]\n- Educational content suggestions: recommend articles, videos, and webinars when users ask to learn a topic.\n- Feedback awareness: encourage users to submit product feedback and improvement ideas when relevant.\n- API integration awareness: mention that connected data platforms can be used for broader financial analysis.\n- Advanced alerts: discuss price and percentage-change triggers for alert customization.\n- Core programming memory: Jackie has built-in master and per-language knowledge for Python, JavaScript, Java, C++, C#, Ruby, Go, Swift, Kotlin, PHP, C, Rust, Assembly, Bash/Shell, Perl, R, MATLAB, TypeScript, HTML/CSS, Haskell, Scala, Erlang, SQL, Dart, and Lua.\n[END FEATURES]`;
+    const systemPrompt = `${MODE_PROMPTS[mode]}\n\nVoice & Style: ${voiceStyle}${thinkModePrompt ? '\n\n' + thinkModePrompt : ''}${enhancementContext}`;
+    const botContext = userBots.length > 0
+      ? `\n[USER'S AI BOTS]\n${userBots.map(b => `- ${b.name} (${b.role}, Lv${b.level || 1}, ${b.xp || 0}XP): ${b.description || b.instructions?.slice(0, 80) || 'no description'}`).join('\n')}\n[END BOTS]`
+      : '';
+    const keyContext = apiKeyCount > 0
+      ? `\n[API KEYS] User has ${apiKeyCount} active key(s). Bot capabilities unlocked via keys: ${[apiKeyCapabilities.webSearch && 'web-search', apiKeyCapabilities.code && 'code-engine', apiKeyCapabilities.squad && 'squad-pipelines'].filter(Boolean).join(', ') || 'basic-only'}. You can reference these capabilities when advising on bot tasks.`
+      : '';
+    const contextBlock = workingContext ? `\n[ACTIVE CONTEXT]\n${workingContext}\n[END CONTEXT]\n` : '';
+    const retrievalBlock = retrievedFacts.length > 0
+      ? `\n[RELEVANT MEMORY FACTS]\n${retrievedFacts.map((fact) => `- ${fact}`).join('\n')}\n[END RELEVANT MEMORY FACTS]\n`
+      : '';
+    const systemContent = `${systemPrompt}${botContext}${keyContext}${contextBlock}${retrievalBlock}`;
+    const historyMessages = messages.slice(-20).map(m => ({ role: m.role, content: m.content }));
+    return [
+      { role: 'system', content: systemContent },
+      ...historyMessages,
+      { role: 'user', content: userMessage }
+    ];
+  }, [mode, thinkMode, messages, workingContext, voice, userBots, apiKeyCount, apiKeyCapabilities]);
 
   const updateJackieProgress = async (changes) => {
     if (!jackieProgressEntity) return null;
@@ -262,11 +300,21 @@ export default function JackieAI() {
       limit: 6
     });
 
-    const prompt = buildPrompt(msg || 'Analyze the attached files.', relevantFacts);
-    const response = await base44.integrations.Core.InvokeLLM({
-      prompt,
-      ...(fileUrls.length > 0 ? { file_urls: fileUrls } : {}),
-    });
+    let response;
+    if (isLocalProvider(modelProvider)) {
+      const chatMessages = buildMessages(msg || 'Analyze the attached files.', relevantFacts);
+      response = await streamProviderChat({
+        provider: modelProvider,
+        model: modelName || 'automatic',
+        messages: chatMessages,
+      });
+    } else {
+      const prompt = buildPrompt(msg || 'Analyze the attached files.', relevantFacts);
+      response = await base44.integrations.Core.InvokeLLM({
+        prompt,
+        ...(fileUrls.length > 0 ? { file_urls: fileUrls } : {}),
+      });
+    }
 
     setMessages(prev => [...prev, { role: 'assistant', content: response }]);
     setWorkingContext(response);
@@ -447,61 +495,126 @@ export default function JackieAI() {
 
       {tab === 'main' && (
         <>
-          <div className="flex flex-1 flex-col md:flex-row min-h-0">
-            <ConversationSidebar
-              messages={messages}
-              onLoadConversation={loadConversation}
-              onNewConversation={clearChat}
-            />
+          <div className="flex flex-1 min-h-0">
+            {/* Left rail — Cursor-style: mode selector + conversations */}
+            <aside className="hidden md:flex md:w-72 md:min-w-72 flex-col border-r border-border bg-card/40">
+              <div className="flex flex-wrap gap-1.5 px-3 py-2.5 border-b border-border/50">
+                {MODES.map(m => (
+                  <button key={m.id} onClick={() => setMode(m.id)}
+                    className={`flex-shrink-0 px-2.5 py-1.5 rounded-lg text-[11px] font-medium border transition-all ${mode === m.id ? 'bg-primary text-primary-foreground border-primary' : 'bg-secondary text-muted-foreground border-border hover:border-primary/30'}`}>
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+              <div className="flex-1 min-h-0 overflow-hidden">
+                <ConversationSidebar
+                  messages={messages}
+                  onLoadConversation={loadConversation}
+                  onNewConversation={clearChat}
+                />
+              </div>
+            </aside>
 
-            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-              {messages.length === 0 ? (
-                <WelcomeScreen mode={mode} onSend={(s) => setInput(s)} />
-              ) : (
-                messages.map((m, i) => (
-                  <MessageBubble
-                    key={i}
-                    message={m}
-                    onSave={handleSave}
-                    onRefine={handleRefine}
-                    onInject={handleInjectAsset}
+            {/* Center — Lovable-style: centered thread */}
+            <main className="flex-1 flex flex-col min-w-0">
+              {/* Mobile mode pills + chats toggle */}
+              <div className="md:hidden flex items-center gap-1.5 px-4 py-2 border-b border-border/50 overflow-x-auto">
+                {MODES.map(m => (
+                  <button key={m.id} onClick={() => setMode(m.id)}
+                    className={`flex-shrink-0 px-2.5 py-1.5 rounded-full text-xs font-medium border transition-all ${mode === m.id ? 'bg-primary text-primary-foreground border-primary' : 'bg-secondary text-muted-foreground border-border'}`}>
+                    {m.label}
+                  </button>
+                ))}
+                <button onClick={() => setShowChats(p => !p)}
+                  className="flex-shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs font-medium border bg-secondary text-muted-foreground border-border">
+                  <MessageSquare className="w-3 h-3" /> Chats
+                </button>
+              </div>
+
+              {/* Mobile conversations panel */}
+              {showChats && (
+                <div className="md:hidden border-b border-border max-h-[40vh] overflow-y-auto">
+                  <ConversationSidebar
+                    messages={messages}
+                    onLoadConversation={(c) => { loadConversation(c); setShowChats(false); }}
+                    onNewConversation={() => { clearChat(); setShowChats(false); }}
                   />
-                ))
-              )}
-
-              {foundryPreview && (
-                <FoundryControlPanel
-                  preview={foundryPreview}
-                  onConfirm={applyFoundryPreview}
-                  onDiscard={discardFoundryPreview}
-                  busy={applyingFoundry}
-                />
-              )}
-
-              {(mode === 'code' || workspaceCode) && (
-                <CodeWorkspace
-                  content={workspaceCode || workingContext}
-                  onInject={setWorkspaceCode}
-                  onSave={handleSave}
-                />
-              )}
-
-              <TelegramBotSetupPanel onOpenManagement={() => navigate('/telegram-bots')} />
-
-              {loading && (
-                <div className="flex justify-start gap-2">
-                  <div className="w-6 h-6 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0">
-                    <Bot className="w-3 h-3 text-primary" />
-                  </div>
-                  <div className="bg-card border border-border rounded-2xl px-4 py-3 flex items-center gap-1.5">
-                    <div className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <div className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <div className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: '300ms' }} />
-                  </div>
                 </div>
               )}
-              <div ref={bottomRef} />
-            </div>
+
+              <div className="flex-1 overflow-y-auto">
+                <div className="mx-auto w-full max-w-3xl px-4 py-4 space-y-4">
+                  {messages.length === 0 ? (
+                    <WelcomeScreen mode={mode} onSend={(s) => setInput(s)} />
+                  ) : (
+                    messages.map((m, i) => (
+                      <MessageBubble
+                        key={i}
+                        message={m}
+                        onSave={handleSave}
+                        onRefine={handleRefine}
+                        onInject={handleInjectAsset}
+                      />
+                    ))
+                  )}
+                  {loading && (
+                    <div className="flex justify-start gap-2">
+                      <div className="w-6 h-6 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0">
+                        <Bot className="w-3 h-3 text-primary" />
+                      </div>
+                      <div className="bg-card border border-border rounded-2xl px-4 py-3 flex items-center gap-1.5">
+                        <div className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: '0ms' }} />
+                        <div className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: '150ms' }} />
+                        <div className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: '300ms' }} />
+                      </div>
+                    </div>
+                  )}
+                  <div ref={bottomRef} />
+                </div>
+              </div>
+            </main>
+
+            {/* Right panel — workspace/preview (desktop) */}
+            <aside className="hidden lg:flex lg:w-96 lg:min-w-96 flex-col border-l border-border bg-card/40">
+              <div className="flex-1 overflow-y-auto p-3 space-y-3">
+                {foundryPreview && (
+                  <FoundryControlPanel
+                    preview={foundryPreview}
+                    onConfirm={applyFoundryPreview}
+                    onDiscard={discardFoundryPreview}
+                    busy={applyingFoundry}
+                  />
+                )}
+                {(mode === 'code' || workspaceCode) && (
+                  <CodeWorkspace
+                    content={workspaceCode || workingContext}
+                    onInject={setWorkspaceCode}
+                    onSave={handleSave}
+                  />
+                )}
+                <TelegramBotSetupPanel onOpenManagement={() => navigate('/telegram-bots')} />
+              </div>
+            </aside>
+          </div>
+
+          {/* Mobile: workspace content inline */}
+          <div className="lg:hidden px-4 pb-4 space-y-3">
+            {foundryPreview && (
+              <FoundryControlPanel
+                preview={foundryPreview}
+                onConfirm={applyFoundryPreview}
+                onDiscard={discardFoundryPreview}
+                busy={applyingFoundry}
+              />
+            )}
+            {(mode === 'code' || workspaceCode) && (
+              <CodeWorkspace
+                content={workspaceCode || workingContext}
+                onInject={setWorkspaceCode}
+                onSave={handleSave}
+              />
+            )}
+            <TelegramBotSetupPanel onOpenManagement={() => navigate('/telegram-bots')} />
           </div>
 
           <QuickCommands visible={showCommands} onCommand={handleQuickCommand} />
@@ -513,6 +626,9 @@ export default function JackieAI() {
             onToggleCommands={() => setShowCommands(p => !p)}
             voice={voice} setVoice={setVoice}
             onFilesReady={setPendingFiles}
+            modelProvider={modelProvider}
+            modelName={modelName}
+            onOpenModelConnector={() => setShowModelConnector(true)}
           />
         </>
       )}
@@ -531,6 +647,23 @@ export default function JackieAI() {
           </div>
         </div>
       )}
+
+      <LocalModelConnector
+        open={showModelConnector}
+        onClose={() => setShowModelConnector(false)}
+        provider={modelProvider}
+        model={modelName}
+        onChange={({ provider: p, model: m }) => {
+          if (p !== undefined) {
+            setModelProvider(p);
+            try { localStorage.setItem('jackie_model_provider', p); } catch {}
+          }
+          if (m !== undefined) {
+            setModelName(m);
+            try { localStorage.setItem('jackie_model_name', m); } catch {}
+          }
+        }}
+      />
     </div>
   );
 }

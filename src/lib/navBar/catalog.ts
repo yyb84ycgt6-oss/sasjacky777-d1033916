@@ -2,7 +2,7 @@
  * Everything the nav bar can hold — every page and every app this system has.
  *
  * Three sections, because the app is three things sharing one shell: Jackie's
- * own pages, the Eru pages (starting with the forty-two Cybernetic's bar
+ * own pages, the Eru pages (starting with the forty-three Cybernetic's bar
  * offers, at the paths Eru is mounted under here), and the ninety-odd apps
  * inside the PC.
  *
@@ -109,6 +109,7 @@ const CURATED: readonly NavPage[] = [
   eru("reputation", "Reputation", Award, "reputation"),
   eru("tgapps", "TG Apps", Send, "tgapps"),
   eru("ailab", "AI Lab", FlaskConical, "ailab"),
+  eru("teambuilder", "Team of Five", Users, "team-builder"),
   eru("devlab", "Dev Lab", Code2, "dev-lab"),
   eru("cardscan", "Card Scan", ScanLine, "card-scanner"),
   eru("integrations", "Connections", Plug, "integrations"),
@@ -132,7 +133,7 @@ const CURATED: readonly NavPage[] = [
   eru("settings", "Settings", Settings, "settings"),
 ];
 
-/** Cybernetic's forty-two, for the test that holds this list to them. */
+/** Cybernetic's forty-three, for the test that holds this list to them. */
 export const CYBERNETIC_PAGE_IDS: readonly string[] = CURATED.filter((p) => p.section === "eru").map((p) => p.id);
 
 const GROUP_ICON: Record<RouteEntry["group"], LucideIcon> = {
