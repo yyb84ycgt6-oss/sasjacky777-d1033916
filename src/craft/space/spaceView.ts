@@ -51,6 +51,8 @@ export interface SpaceFrame {
   orbits: Set<string>;
   /** The bodies the overview lists, which get brackets. */
   listed: Set<string>;
+  /** Under real physics, the ship's path ahead round the body it is near (session.ts pathAhead), relative to that body. */
+  path?: { frame: string; points: Vec3[]; hits: boolean; leaves: boolean; pe: Vec3 | null; ap: Vec3 | null; peAlt: number; apAlt: number; air: boolean };
 }
 
 /** Where a bracket landed on the screen, for clicking. */
@@ -260,6 +262,9 @@ export class SpaceView {
   private beltJd = NaN;
   private sunGlow!: THREE.Sprite;
   private shipGroup = new THREE.Group();
+  /** The glow of the air burning round the ship on re-entry, and the parachute over it. */
+  private plasma!: THREE.Sprite;
+  private canopy!: THREE.Mesh;
   private shipLight = new THREE.DirectionalLight(0xffffff, 2.6);
   private fillLight = new THREE.DirectionalLight(0xbfd8ff, 0.7);
   private dust!: THREE.Points;
@@ -381,6 +386,15 @@ export class SpaceView {
       glow.name = "engine";
       this.shipGroup.add(glow);
     }
+    // Re-entry: the air ahead of the ship squeezed hot enough to glow.
+    this.plasma = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture([255, 150, 70]), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
+    this.plasma.visible = false;
+    this.shipGroup.add(this.plasma);
+    // The parachute: an orange-and-white dome on its lines, above the ship.
+    const dome = new THREE.SphereGeometry(0.5 * L, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2);
+    this.canopy = new THREE.Mesh(dome, new THREE.MeshLambertMaterial({ color: 0xf08a3c, side: THREE.DoubleSide }));
+    this.canopy.visible = false;
+    this.shipGroup.add(this.canopy);
     // Dust drifting past the camera gives the ship's speed something to be measured against.
     const dn = 260;
     this.dustSeed = new Float32Array(dn * 3);
@@ -706,12 +720,28 @@ export class SpaceView {
     // The fill comes from over the camera's shoulder.
     this.fillLight.position.set(0, 0.5, 0);
     this.fillLight.target = this.shipGroup;
-    const speed = len(f.ship.vel) / Math.max(1e-6, f.ship.cls.maxSpeed);
-    for (const c of this.shipGroup.children) if (c.name === "engine") c.scale.setScalar(0.042 * (0.08 + 0.14 * Math.min(1.5, speed)) * s * (f.ship.warp ? 3 : 1));
+    // The engines: under real physics they burn as hard as the throttle is open; in the arcade, as fast as the ship goes.
+    const real = f.ship.physics === "newton";
+    const speed = real ? f.ship.engine * 1.5 : len(f.ship.vel) / Math.max(1e-6, f.ship.cls.maxSpeed);
+    for (const c of this.shipGroup.children) if (c.name === "engine") c.scale.setScalar(0.042 * ((real ? 0.03 : 0.08) + 0.14 * Math.min(1.5, speed)) * s * (f.ship.warp ? 3 : 1));
+    this.plasma.visible = f.ship.heat > 0.02;
+    if (this.plasma.visible) {
+      // Round the nose, where the shock wave stands: the ship flies into it along its velocity through the air.
+      this.plasma.scale.setScalar(0.042 * (1 + 3.2 * f.ship.heat));
+      (this.plasma.material as THREE.SpriteMaterial).opacity = Math.min(1, f.ship.heat * 1.8);
+      this.plasma.position.set(0, 0, 0.3 * 0.042);
+    }
+    this.canopy.visible = f.ship.chute > 0;
+    if (this.canopy.visible) {
+      const k = Math.max(0.05, f.ship.chute);
+      this.canopy.scale.set(k * 2.2, k * 1.4, k * 2.2);
+      this.canopy.position.set(0, 0.042 * 1.3, -0.042 * 0.2);
+    }
     for (const v of this.views.values()) v.group.visible = false;
     this.shipGroup.visible = true;
-    // Dust, in a box around the camera, streaming past at the ship's speed.
-    if (f.camera.target === "ship" && f.camera.dist < 5) {
+    // Dust, in a box around the camera, streaming past at the ship's speed — the arcade's; in a real orbit there is
+    // nothing out there to stream past, and 7.7 km/s of it would be a blizzard.
+    if (!real && f.camera.target === "ship" && f.camera.dist < 5) {
       const box = Math.max(0.3, f.camera.dist * 3);
       const drift = scale(f.ship.vel, this.time);
       const arr = this.dust.geometry.getAttribute("position") as THREE.BufferAttribute;
@@ -896,6 +926,43 @@ export class SpaceView {
         ctx.fillText(`${def.name}  ${distanceText(Math.max(0, d - def.radius))}`, s[0] + Math.max(9, disc > 20 ? 0 : 9), s[1] + (disc > 20 ? -r - 8 : 0));
       }
       this.brackets.push({ id: def.id, x: s[0], y: s[1], r: Math.max(9, Math.min(disc, 60)) });
+    }
+    // The path ahead under real physics: round the body the ship is near, with its highest and lowest points marked,
+    // and where it comes down into the air if it does.
+    if (f.path) {
+      const origin = f.positions.get(f.path.frame);
+      if (origin) {
+        const at = (q: Vec3) => this.project([origin[0] + q[0], origin[1] + q[1], origin[2] + q[2]]);
+        ctx.strokeStyle = "#6fe8ff";
+        ctx.globalAlpha = 0.85;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        let pen = false;
+        for (const q of f.path.points) {
+          const p = at(q);
+          if (!p || Math.abs(p[0]) > 1e5 || Math.abs(p[1]) > 1e5) { pen = false; continue; }
+          if (pen) ctx.lineTo(p[0], p[1]); else ctx.moveTo(p[0], p[1]);
+          pen = true;
+        }
+        ctx.stroke();
+        ctx.lineWidth = 1;
+        const mark = (q: Vec3 | null, label: string, color: string) => {
+          if (!q) return;
+          const p = at(q);
+          if (!p || p[0] < 0 || p[1] < 0 || p[0] > this.width || p[1] > this.height) return;
+          ctx.fillStyle = color;
+          ctx.beginPath(); ctx.arc(p[0], p[1], 3.5, 0, Math.PI * 2); ctx.fill();
+          ctx.fillText(label, p[0] + 7, p[1] - 8);
+        };
+        const km = (n: number) => `${Math.round(n).toLocaleString("en")} km`;
+        // A near-circle has no highest or lowest point worth marking: the marks would sit wherever rounding put them.
+        if (Math.abs(f.path.apAlt - f.path.peAlt) > 2) {
+          mark(f.path.ap, `Ap ${km(f.path.apAlt)}`, "#9fe8ff");
+          mark(f.path.pe, `Pe ${km(f.path.peAlt)}`, "#9fe8ff");
+        }
+        if (f.path.hits) mark(f.path.points[f.path.points.length - 1] ?? null, f.path.air ? "Into the air" : "Impact", "#ff8a5a");
+        ctx.globalAlpha = 1;
+      }
     }
     // The ship, when the camera is off looking at something else.
     if (f.camera.target !== "ship" || f.camera.dist > 50) {

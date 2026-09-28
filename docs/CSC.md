@@ -511,17 +511,18 @@ drive, rob and get chased through.
 
 A Starship (iron blocks, glass, an eye of ender and firework rockets, or
 `/space` with cheats on) launches from wherever you stand, after a
-countdown, into orbit 400 km above that same spot on Earth. Out there is the
-Solar System as it really is, at its real size and where everything really is
-today — flown the way EVE Online flies ships.
+countdown, into a real orbit 400 km above that same spot on Earth: 7.7 km/s
+eastward, once round every hour and a half. Out there is the Solar System as
+it really is, at its real size and where everything really is today — flown
+under real physics, with EVE Online's orders for an autopilot.
 
 - **The world is the Earth.** Each world sits somewhere on the globe (a
   latitude and longitude chosen from its seed) at one block to the metre, so
-  a launch rises from the right spot and a landing (`D`, or Land, from under
-  2,000 km over the Earth) comes down wherever the ship is — which is
-  somewhere in this world, perhaps thousands of kilometres from home. The day
-  is set to the Sun's hour there. Return home lands at the launch site. The
-  body you left behind is out of harm's way until you are back.
+  a launch rises from the right spot and a landing comes down wherever the
+  ship's path takes it — which is somewhere in this world, perhaps thousands
+  of kilometres from home. The sky's date picks up the trip's. Return home
+  lands at the launch site at once. The body you left behind is out of harm's
+  way until you are back.
 - **Where things are** (`space/ephemeris.ts`, tested against real events —
   the 2024 total eclipse, the 2022 lunar eclipse, the 2020 great conjunction
   and Mars's opposition, both of Halley's perihelia):
@@ -544,15 +545,60 @@ today — flown the way EVE Online flies ships.
   - The main belt with its Kirkwood gaps, the Hildas, Jupiter's Trojans and
     the Kuiper belt, as a few thousand representative orbits.
   - The Webb telescope at L2, and the two Voyagers heading out.
-- **Flying** (`space/flight.ts`): orders, not a joystick. Approach (`Q`),
-  orbit (`W`), keep at range (`E`), align (`A`), warp (`S`) to within 0,
-  10, 100 or 1,000 km; double-click space to fly that way; `M` the
-  microwarpdrive; `Space` stops. Velocity closes on what the order wants
-  exponentially, with an align time; warp needs the ship aligned and at three
-  quarters of its speed, then builds exponentially to 5 AU/s and falls off
-  toward the destination — seconds to the Moon, under twenty to Jupiter.
-  The ship keeps station relative to whatever it is near (its sphere of
-  influence), so a planet does not slide away at 30 km/s.
+- **Real physics** (`space/newton.ts`, on the conics of `space/orbit.ts`;
+  the default, switched on the ship panel):
+  - *Gravity and orbits.* Only the body whose sphere of influence the ship is
+    in pulls on it (patched conics, as Kerbal Space Program and mission
+    planners' first sketches do). With the engine off the ship follows its
+    conic exactly — Kepler's problem solved in universal variables (Vallado,
+    algorithm 8), not stepped — so an orbit stays an orbit at a million times
+    real speed. Crossing into a moon's sphere or out to the Sun's, its
+    velocity is carried across by the two bodies' own velocities, which is
+    what bends a flyby.
+  - *An engine that can only push so hard.* The scout has 5 g (25 g on the
+    microwarpdrive), and every order is flown against gravity with it:
+    approach, keep at range and Hold spend thrust holding the ship up; the
+    panel counts the Δv spent. The burns a pilot makes by hand — prograde,
+    retrograde, normal, anti-normal, radial out and in — and Circularize are
+    buttons; `Space` cuts the engine.
+  - *Changing height the way spacecraft do.* Orbit (`W`) at the world the
+    ship is at flies a Hohmann transfer: round the orbit off, burn to put its
+    far side at the height asked (never below the air, or 2% of the radius),
+    coast half an orbit, round it off again. The autopilot runs the clock
+    through the coast.
+  - *The orbit, as a flight controller reads it.* The panel gives periapsis,
+    apoapsis, period and inclination to the body's equator (a launch due east
+    is tilted by its latitude, as Cape Canaveral's are); the path ahead is
+    drawn round the body with its highest and lowest points marked, and where
+    it comes down into the air.
+  - *Warp* needs the nose on the target and three seconds of spool-up, and
+    drops the ship into a circular orbit where there is gravity to hold one
+    (109 km over the Moon, 1.63 km/s), or holding station where there is not.
+  - *The air.* Earth, Venus, Mars, Titan and the giants have exponential
+    atmospheres (NASA's planetary fact sheets; the Earth's fitted to the
+    50–100 km layer an entry slows in) that turn with their planets. Land (`D`)
+    burns about 100 m/s retrograde to put the orbit's low point 50 km up and
+    lets the air do the rest: drag and heat through the fire (a ballistic
+    entry peaking near 7 g, as a Soyuz's does when it cannot fly a lifting
+    one), a parachute opening over eight seconds under 10 km, 10–15 m/s under
+    the canopy, and touchdown in the world where the path came down. From
+    orbit it takes about a minute and a half of play; the clock runs itself.
+  - *No crashes.* Anywhere without a world to land in, the flight computer
+    will not let the ship fall below a safe height: it pulls up into an
+    orbit and says so.
+  - *The clock* runs at any speed while coasting, is held to fifty times while
+    the engine burns or the ship is in the air (those are flown in
+    quarter-second steps), and slows by itself near a sphere of influence so
+    the ship cannot skip past one.
+- **Arcade flight** (`space/flight.ts`, the other setting): EVE's rules and
+  no gravity. Orders, not a joystick: approach (`Q`), orbit (`W`), keep at
+  range (`E`), align (`A`), warp (`S`) to within 0, 10, 100 or 1,000 km;
+  double-click space to fly that way; `M` the microwarpdrive; `Space` stops.
+  Velocity closes on what the order wants exponentially, with an align time;
+  warp needs the ship aligned and at three quarters of its speed, then builds
+  exponentially to 5 AU/s and falls off toward the destination — seconds to
+  the Moon, under twenty to Jupiter. The ship keeps station relative to
+  whatever it is near, so a planet does not slide away at 30 km/s.
 - **The clock** runs in real time or up to three million times faster (`,`
   and `.`), and can be set back to now; orbits, phases and comet tails follow.
 - **The overview** lists planets, the moons where you are, small bodies, or

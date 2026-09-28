@@ -295,6 +295,8 @@ export class Game {
   private spaceView: SpaceView | null = null;
   /** Seconds left of a launch's countdown. */
   private launchCountdown: number | null = null;
+  /** How the starship flies: real physics (gravity, orbits) or the arcade's EVE rules. Kept between trips. */
+  spacePhysics: "newton" | "arcade" = "newton";
   /** The real sky last worked out (space/sky.ts), and the latitude it was for. */
   private skyCache: { sky: SkyObjects; lat: number } | null = null;
   /** What the sky has done that has been told already (an eclipse, a shower's night), so it is told once. */
@@ -3189,7 +3191,7 @@ export class Game {
       const c = this.renderer.canvas;
       this.spaceView.resize(c.clientWidth || window.innerWidth, c.clientHeight || window.innerHeight);
       // The trip starts on the world's own date, so the sky out there is the one the world was under.
-      this.space = new SpaceSession(this.meta.seed, { lat, lon }, this.realSky() ? this.skyDate() : jdFromMs(Date.now()), this.meta.place);
+      this.space = new SpaceSession(this.meta.seed, { lat, lon }, this.realSky() ? this.skyDate() : jdFromMs(Date.now()), this.meta.place, this.spacePhysics);
       this.space.say(`In orbit, 400 km above ${latLonText(lat, lon)}`);
       this.setScreen({ kind: "space" });
       this.advance({ kind: "space" });
@@ -3203,7 +3205,8 @@ export class Game {
     const paused = this.screen?.kind === "pause" && !this.net;
     if (!paused) s.update(dt);
     this.spaceView!.render(s.frame(paused ? 0 : dt));
-    if (s.landing === 0) this.land();
+    // Down under a parachute (real physics) or through the arcade's re-entry: into the world where the ship came down.
+    if (s.landing === 0 || s.ship.landed) this.land();
   }
 
   /** The overlay the space view draws its orbits and brackets on. */
