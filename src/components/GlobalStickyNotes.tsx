@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useState, useRef, useMemo } from "react";
+import { createContext, useCallback, useContext, useEffect, useState, useRef, useMemo, type ReactNode } from "react";
 import { useAuth } from "@/hooks/useAuth";
-import { DraggableToolbar } from "./DraggableToolbar";
-import { Plus, Pin, X, StickyNote, Link as LinkIcon, Palette, Edit2, Volume2, VolumeX } from "lucide-react";
+import { Pin, X, Link as LinkIcon, Palette, Edit2 } from "lucide-react";
 import { routerNS, FilingSystem } from "@/lib/routerNervousSystem";
 import { voiceManager } from "@/lib/voice-manager";
 import { toast } from "sonner";
@@ -48,7 +47,51 @@ const notesKeyFor = (userId: string) => `jackie.notes.v1:${userId}`;
 const VOICE_KEY = "jackie.notes.voice.v1";
 const COLORS = ["#FFF8C6", "#CDE7FF", "#FFD6E7", "#D6FFEA", "#FFE3C6"];
 
-export function GlobalStickyNotes() {
+/**
+ * The notes' state, shared by the notes layer and the nav bar.
+ *
+ * The notes used to carry their own floating toolbar — voice, show/hide, add,
+ * "N pinned" — stacked on top of three other toolbars. Those controls now live
+ * on the one nav bar, so the state they act on is lifted here and both read it.
+ * Everything about how notes are stored is unchanged.
+ */
+export interface StickyNotesApi {
+  /** False when nobody is signed in: there is nothing to show and nowhere to write. */
+  available: boolean;
+  open: boolean;
+  toggleOpen: () => void;
+  addNote: () => void;
+  pinnedCount: number;
+  speaks: boolean;
+  voiceSupported: boolean;
+  toggleVoice: () => void;
+}
+
+interface StickyNotesState extends StickyNotesApi {
+  notes: Note[];
+  setNotes: React.Dispatch<React.SetStateAction<Note[]>>;
+  confirm: (line: string) => void;
+}
+
+const StickyNotesContext = createContext<StickyNotesState | null>(null);
+
+const UNAVAILABLE: StickyNotesApi = {
+  available: false,
+  open: false,
+  toggleOpen: () => {},
+  addNote: () => {},
+  pinnedCount: 0,
+  speaks: false,
+  voiceSupported: false,
+  toggleVoice: () => {},
+};
+
+/** The nav bar's view of the notes. Inert, not throwing, outside the provider. */
+export function useStickyNotes(): StickyNotesApi {
+  return useContext(StickyNotesContext) ?? UNAVAILABLE;
+}
+
+export function StickyNotesProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const storageKey = user ? notesKeyFor(user.id) : null;
   const [notes, setNotes] = useState<Note[]>([]);
@@ -58,8 +101,6 @@ export function GlobalStickyNotes() {
   // changed — cannot write one account's notes into another's namespace.
   const loadedFor = useRef<string | null>(null);
   const [open, setOpen] = useState(true);
-  const [dragId, setDragId] = useState<string | null>(null);
-  const offset = useRef({ x: 0, y: 0 });
   // Off until asked for. A surface that starts talking the first time you pin
   // something is a worse surprise than one that never speaks — so the setting
   // is opt-in, remembered, and hidden entirely where the browser has no voice.
@@ -127,59 +168,93 @@ export function GlobalStickyNotes() {
     }
   }, [notes, storageKey]);
 
-  const addNote = () => {
+  const addNote = useCallback(() => {
     const id = Math.random().toString(36).slice(2);
     const color = COLORS[Math.floor(Math.random() * COLORS.length)];
     const note: Note = { id, text: "New thought...", color, x: 120 + Math.random() * 200, y: 120 + Math.random() * 200, pinned: false };
     setNotes((n) => [...n, note]);
+    // A note added while the notes are hidden would be saved and invisible,
+    // which reads exactly like the add button doing nothing.
+    setOpen(true);
     routerNS.emit('notes:create', { note });
     confirm("Note added");
     if (navigator.vibrate) navigator.vibrate(15);
-  };
+  }, [confirm]);
+
+  const pinnedCount = useMemo(() => notes.filter((n) => n.pinned).length, [notes]);
+  const toggleOpen = useCallback(() => setOpen((v) => !v), []);
+
+  const value = useMemo<StickyNotesState>(
+    () => ({
+      available: !!storageKey,
+      open,
+      toggleOpen,
+      addNote,
+      pinnedCount,
+      speaks,
+      voiceSupported: voiceSupported.current,
+      toggleVoice,
+      notes,
+      setNotes,
+      confirm,
+    }),
+    [storageKey, open, toggleOpen, addNote, pinnedCount, speaks, toggleVoice, notes, confirm],
+  );
+
+  return <StickyNotesContext.Provider value={value}>{children}</StickyNotesContext.Provider>;
+}
+
+/** The notes themselves, drawn over the page. Mount inside StickyNotesProvider. */
+export function GlobalStickyNotes() {
+  const context = useContext(StickyNotesContext);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const offset = useRef({ x: 0, y: 0 });
+  const setNotes = context?.setNotes;
+  const confirm = context?.confirm;
 
   const updateText = (id: string, text: string) => {
-    setNotes((n) => n.map((note) => (note.id === id ? { ...note, text } : note)));
+    setNotes?.((n) => n.map((note) => (note.id === id ? { ...note, text } : note)));
   };
 
   const togglePin = (id: string) => {
-    setNotes((n) => n.map((note) => {
+    setNotes?.((n) => n.map((note) => {
       if (note.id !== id) return note;
       const pinned = !note.pinned;
       routerNS.emit('notes:pin', { id, pinned });
-      confirm(pinned ? "Pinned" : "Unpinned");
+      confirm?.(pinned ? "Pinned" : "Unpinned");
       if (navigator.vibrate) navigator.vibrate(pinned ? 30 : 10);
       return { ...note, pinned };
     }));
   };
 
   const removeNote = (id: string) => {
-    setNotes((n) => n.filter((note) => note.id !== id));
+    setNotes?.((n) => n.filter((note) => note.id !== id));
   };
 
   const linkToPod = (id: string) => {
     const pod = prompt("Link to Pod ID:");
     if (!pod) return;
-    setNotes(n => n.map(note => note.id === id ? { ...note, pod } : note));
+    setNotes?.(n => n.map(note => note.id === id ? { ...note, pod } : note));
     routerNS.emit('notes:link:pod', { noteId: id, podId: pod });
   };
 
   const linkToAgent = (id: string) => {
     const agent = prompt("Link to Agent ID:");
     if (!agent) return;
-    setNotes(n => n.map(note => note.id === id ? { ...note, agent } : note));
+    setNotes?.(n => n.map(note => note.id === id ? { ...note, agent } : note));
     routerNS.emit('notes:link:agent', { noteId: id, agentId: agent });
   };
 
   const changeColor = (id: string) => {
     const newColor = prompt("Enter hex color");
     if (!newColor) return;
-    setNotes(n => n.map(note => note.id === id ? { ...note, color: newColor } : note));
+    setNotes?.(n => n.map(note => note.id === id ? { ...note, color: newColor } : note));
   };
 
   const renameNote = (id: string) => {
     const title = prompt("Rename note");
     if (!title) return;
-    setNotes(n => n.map(note => note.id === id ? { ...note, title } : note));
+    setNotes?.(n => n.map(note => note.id === id ? { ...note, title } : note));
   };
 
   const startDrag = (e: React.MouseEvent, id: string, note: Note) => {
@@ -190,7 +265,7 @@ export function GlobalStickyNotes() {
   useEffect(() => {
     const move = (e: MouseEvent) => {
       if (!dragId) return;
-      setNotes((n) =>
+      setNotes?.((n) =>
         n.map((note) =>
           note.id === dragId ? { ...note, x: e.clientX - offset.current.x, y: e.clientY - offset.current.y } : note
         )
@@ -203,51 +278,18 @@ export function GlobalStickyNotes() {
       window.removeEventListener("mousemove", move);
       window.removeEventListener("mouseup", up);
     };
-  }, [dragId]);
-
-  const pinnedCount = useMemo(() => notes.filter((n) => n.pinned).length, [notes]);
+  }, [dragId, setNotes]);
 
   // Nothing to show, and nothing that could write, when nobody is signed in.
   // This is mounted outside every ProtectedRoute — including on /auth — so the
-  // check has to live here rather than in the routing.
-  //
-  // It sits after the hooks above, not before them: an early return placed
-  // higher would change how many hooks run between renders, which React
-  // forbids.
-  if (!storageKey) return null;
+  // check has to live here rather than in the routing. It sits after the hooks
+  // above: an early return placed higher would change how many hooks run
+  // between renders, which React forbids.
+  if (!context?.available) return null;
+  const { notes, open } = context;
 
   return (
     <>
-      <DraggableToolbar storageKey="jackie.notes.toolbar.v1" defaultRow={1}>
-        <div className="flex items-center gap-1">
-          {voiceSupported.current && (
-            <button
-              onClick={toggleVoice}
-              title={speaks ? "Voice confirmations on" : "Voice confirmations off"}
-              aria-pressed={speaks}
-              className={`p-1.5 rounded-full ${speaks ? "text-primary bg-secondary" : "text-muted-foreground hover:text-foreground hover:bg-secondary"}`}
-            >
-              {speaks ? <Volume2 size={16} /> : <VolumeX size={16} />}
-            </button>
-          )}
-          <button
-            onClick={() => setOpen((v) => !v)}
-            title="Toggle Notes"
-            className="p-1.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-secondary"
-          >
-            <StickyNote size={16} />
-          </button>
-          <button
-            onClick={addNote}
-            title="New Note"
-            className="p-1.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-secondary"
-          >
-            <Plus size={16} />
-          </button>
-          <span className="text-[10px] px-2 py-0.5 rounded bg-secondary text-muted-foreground">{pinnedCount} pinned</span>
-        </div>
-      </DraggableToolbar>
-
       {open && (
         <div className="fixed inset-0 pointer-events-none z-[60]">
           {notes.map((note) => (

@@ -1,5 +1,11 @@
 # The pill
 
+> **Now SANDi, on the nav bar.** The pill was its own floating bar; it is now
+> the SANDi button on the one nav bar (Ctrl/⌘+K), and questions no crafted
+> index claims go on to a built-in specialist instead of stopping. See
+> [NAV_BAR.md](NAV_BAR.md). What follows still describes how commands and
+> crafted indexes are matched, which is unchanged.
+
 The forge at `/forge` makes indexes. The pill is where they get used. It is
 mounted beside the router rather than on a page, so it is on every screen.
 
