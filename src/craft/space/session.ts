@@ -27,6 +27,7 @@ import {
 } from "./newton";
 import { elementsOf, pathAhead, pointAt, timeToAnomaly, timeToRadius } from "./orbit";
 import type { SpaceCameraState, SpaceFrame } from "./spaceView";
+import { GalaxyMap } from "./galaxyMap";
 
 /** How fast the clock may run: from real time to a month a second. */
 export const TIME_SCALES = [1, 10, 100, 1000, 10_000, 100_000, 1_000_000, 3_000_000];
@@ -138,6 +139,9 @@ export class SpaceSession {
   landing: number | null = null;
   /** The clock speed an autopilot has chosen for a long coast in a manoeuvre, overriding the pilot's while it lasts. */
   autoScale: number | null = null;
+  /** The galaxy map, while it is open (the ship flies on beneath it). */
+  galaxy: GalaxyMap | null = null;
+  private chart: GalaxyMap | null = null;
   /** The clock speed actually used last frame, and why it was held back if it was. */
   shownScale = 1;
   held: string | null = null;
@@ -371,6 +375,13 @@ export class SpaceSession {
       jd: this.jd, dt, positions: this.positions, ship: this.ship, shipHelio: this.shipHelio, camera: this.camera,
       selected: this.selected, hovered: this.hovered, orbits: this.orbits, listed, path: this.pathAhead(),
     };
+  }
+
+  /** Opens the galaxy map (the same one as last time, so its stars need not be charted again), or closes it. */
+  toggleGalaxy(): void {
+    if (this.galaxy) { this.galaxy = null; return; }
+    this.chart ??= new GalaxyMap();
+    this.galaxy = this.chart;
   }
 
   /** Real physics or the arcade's, switched in flight: the ship keeps where it is; going to real, it keeps its speed too. */

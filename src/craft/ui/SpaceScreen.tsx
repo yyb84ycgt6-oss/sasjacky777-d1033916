@@ -20,6 +20,7 @@ import { dateString, len, sub } from "../space/kepler";
 import { distanceText, kindColor, speedText } from "../space/spaceView";
 import { aligned, topSpeed, type BurnDir } from "../space/flight";
 import { periodText, TIME_SCALES, type OverviewTab } from "../space/session";
+import { GalaxyScreen } from "./GalaxyScreen";
 
 const u = (n: number) => `calc(var(--u) * ${n})`;
 
@@ -58,17 +59,19 @@ export function SpaceScreen({ game }: { game: Game }) {
     return () => window.clearInterval(id);
   }, []);
 
-  // The overlay canvas, kept the size of the screen at the device's pixel density.
+  // The overlay canvas, kept the size of the screen at the device's pixel density — set up again when the galaxy map
+  // closes, because the canvas it drew on went away while the map was open.
+  const galaxyOpen = !!s?.galaxy;
   useEffect(() => {
     const c = overlay.current;
-    if (!c) return;
+    if (!c || galaxyOpen) return;
     const fit = () => { const r = c.getBoundingClientRect(); const dpr = window.devicePixelRatio || 1; c.width = Math.max(1, Math.round(r.width * dpr)); c.height = Math.max(1, Math.round(r.height * dpr)); };
     fit();
     game.setSpaceOverlay(c);
     const ro = new ResizeObserver(fit);
     ro.observe(c);
     return () => { ro.disconnect(); game.setSpaceOverlay(null); };
-  }, [game]);
+  }, [game, galaxyOpen]);
 
   const sel = s?.selected ? BODY[s.selected] : null;
 
@@ -78,6 +81,9 @@ export function SpaceScreen({ game }: { game: Game }) {
       const t = e.target as HTMLElement | null;
       if (!s || (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA"))) return;
       if (game.screen?.kind !== "space") return;
+      if (e.code === "KeyG") { s.toggleGalaxy(); e.preventDefault(); refresh(); return; }
+      // The galaxy map has its own keys; the ship's wait until it is closed.
+      if (s.galaxy) return;
       const target = s.selected;
       let used = true;
       switch (e.code) {
@@ -107,6 +113,7 @@ export function SpaceScreen({ game }: { game: Game }) {
   }, [s, game, orbitRange, warpRange]);
 
   if (!s) return null;
+  if (s.galaxy) return <GalaxyScreen game={game} />;
   const ship = s.ship;
   const rows = s.rows();
   const airSpeed = s.airSpeed();
@@ -202,6 +209,7 @@ export function SpaceScreen({ game }: { game: Game }) {
           <span style={{ minWidth: u(30), textAlign: "center" }} data-testid="space-timescale">{clockText}</span>
           <Btn onClick={() => { s.faster(); refresh(); }} title="Faster (.)" disabled={s.timeScale >= TIME_SCALES[TIME_SCALES.length - 1]}>▶</Btn>
           <Btn onClick={() => { s.now(); refresh(); }} title="Back to the real date">Now</Btn>
+          <Btn testid="open-galaxy" onClick={() => { s.toggleGalaxy(); refresh(); }} title="The galaxy map (G)">Galaxy map</Btn>
         </div>
         <div style={{ display: "flex", gap: u(1), flexWrap: "wrap" }}>
           {([["planet", "Planets"], ["moon", "Moons"], ["dwarf", "Dwarfs"], ["comet", "Comets"], ["asteroid", "Asteroids"]] as const).map(([k, label]) => (

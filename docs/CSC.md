@@ -7,7 +7,9 @@ survival, creative and hardcore; mining, crafting, smelting, farming; mobs,
 water and lava, TNT, beds, day and night, weather; saves on the device, in a
 file or in the cloud; the Nether and the End, with strongholds, End cities,
 shulkers, the Ender Dragon, elytra and fireworks; a starship to the real Solar
-System, at its real size (see [Space](#space)), and the real sky over the
+System, at its real size (see [Space](#space)), a map of the whole Milky Way
+with its couple of hundred billion stars made the same every time (see
+[The galaxy](#the-galaxy)), and the real sky over the
 world — the Moon's phases, eclipses, meteor showers and comets on their real
 dates (see [The real sky](#the-real-sky)); 52 advancements to earn;
 eighteen features borrowed from the best-loved mods (minimap, waystones,
@@ -623,6 +625,62 @@ Jean Meeus's *Astronomical Algorithms* (the lunar series); stars from XHIP
 packaged by d3-celestial (© 2015 Olaf Frohn, BSD 3-Clause — see
 `space/skyData.ts`); Earth's coastlines from Natural Earth (public domain).
 `scripts/csc-space-data.mjs` rebuilds the sky data from those sources.
+
+## The galaxy
+
+**Galaxy map** in space (or `G`) opens the Milky Way: all of it, a hundred
+thousand light-years across, down to the red dwarfs a few light-years from
+the Sun. Drag to turn, scroll or pinch to zoom, click a star for its card,
+double-click to fly the map there; `F` centres on the selection, `H` comes
+home to Sol, `G` goes back to the ship. The search finds the real stars and
+landmarks by name ("vega", "pleiades", "centre").
+
+- **The real neighbourhood** (`space/nearStars.ts`): every star system
+  within about thirteen light-years, where they really are — Proxima and
+  Alpha Centauri, Barnard's Star, Wolf 359, Sirius and its white dwarf,
+  Epsilon Eridani, Tau Ceti — and the stars everyone knows or knows of:
+  Vega, Arcturus, Betelgeuse, Rigel, Deneb, Polaris, TRAPPIST-1, 51 Pegasi,
+  Tabby's Star, VY Canis Majoris, Eta Carinae. Landmarks: the Hyades and the
+  Pleiades, the Orion and Crab nebulae, the Vela pulsar, Cygnus X-1, Omega
+  Centauri, 47 Tucanae, M13, and Sagittarius A* at the centre. Nothing is made
+  up inside thirteen light-years of the Sun.
+- **Everything else is made, the same every time** (`space/galaxy.ts`).
+  Space is cut into cubes, big ones for the rare bright kinds and small ones
+  for the common dim ones, and each cube's stars come from a generator seeded
+  by its coordinates, so a star has the same name, place, colour and size in
+  every world and on every machine, and can be made again from its id alone.
+  How many a cube holds is drawn from the galaxy's density there, which is the
+  measured one: a thin disk and a thick disk, a boxy bar and bulge 27° from
+  the line to the centre, four spiral arms pitched 12° (Perseus,
+  Sagittarius–Carina, Scutum–Centaurus, Norma–Outer) with the Orion Spur the
+  Sun sits in, and a halo. Young blue stars keep to the arms and the plane;
+  old red ones are everywhere, thickest in the bar. Here that comes to about
+  a tenth of a star per cubic parsec, three in four of them red dwarfs; in
+  all, about 195 billion.
+- **Thirteen kinds**: O, B, A, F, G, K and M dwarfs, white dwarfs, brown
+  dwarfs, orange and red giants, and blue and red supergiants, each with the
+  temperature, mass, luminosity and size of its kind. Every star gets a name
+  from its sector ("Morsul Crown OSX-CF"), and a card with its type, surface
+  temperature, where it is and how far from Sol, where it sits in our sky,
+  how many planets it probably has (the real ones say how many are known, or
+  that none are confirmed) and its habitable zone.
+- **Seeing it**: out past a few thousand light-years the galaxy is a cloud
+  — the yellow bar, the arms with their pink nebulae, the dark dust lanes, the
+  globular clusters round it. Closer in, the cloud gives way to the stars
+  themselves, charted round wherever the map looks: the bright kinds out to
+  thousands of light-years, the red dwarfs to a hundred. Moving the map
+  charts the stars round the new spot a kind a frame, so the map never stops
+  turning while it does.
+
+Sources: the Sun's distance from the centre from the GRAVITY Collaboration
+(2019) and its height above the plane from Bennett & Bovy (2019); the disks,
+bar and halo after the review by Bland-Hawthorn & Gerhard (2016) and the bar's
+shape after Dwek et al. (1995); the arms after Reid et al. (2019); the local
+census after the RECONS survey and Reylé et al. (2021); stellar parameters by
+spectral type after Pecaut & Mamajek (2013); the equatorial-to-galactic
+rotation from the Hipparcos catalogue (ESA 1997). The procedural scheme —
+cubes seeded by their coordinates — is the one the Elite games made famous;
+the code is our own.
 
 ## The real sky
 
