@@ -3,8 +3,12 @@
  * selected, and the orders — everything between a launch and a landing.
  *
  * The clock is the real one (the planets are where they are today) until
- * the player speeds it up; the ship keeps its own time whatever the clock
- * does, as a ship in EVE would, while the worlds sweep round their orbits.
+ * the player speeds it up. Under real physics (newton.ts, the default) the
+ * ship keeps the Solar System's time: coasting, it follows its orbit exactly
+ * at any speed of the clock; with the engine on or in the air the clock is
+ * held to fifty times real, because those are flown in quarter-second steps.
+ * In the arcade model the ship keeps its own time whatever the clock does, as
+ * a ship in EVE would, while the worlds sweep round their orbits.
  *
  * The Earth under the ship is this world: a launch goes up from where the
  * player stands, placed on the globe from the world's own anchor (a latitude
@@ -13,15 +17,37 @@
  * however far from home.
  */
 import { BODIES, BODY, kindLabel, type BodyDef } from "./bodies";
-import { ephemeris, planetConic } from "./ephemeris";
-import { AU, eclToEq, eqToEcl, gmst, jdFromMs, len, norm, sub, type Vec3 } from "./kepler";
+import { ephemeris, planetConic, velocityOf } from "./ephemeris";
+import { AU, eclToEq, eqToEcl, gmst, jdFromMs, len, norm, raDecToEcl, scale, sub, type Vec3 } from "./kepler";
 import {
   aboveEarth, belowShip, MIN_WARP, newShip, order, SCOUT, shipPosition, step, warpInDistance, warpRefusal, warpTime, type Order, type Ship, type Surroundings,
 } from "./flight";
+import {
+  AIR, airAround, circularVelocity, needsSmallSteps, newtonStep, newtonWarp, orbitSummary, safeAltitude, type FlightEvent,
+} from "./newton";
+import { elementsOf, pathAhead, pointAt, timeToAnomaly, timeToRadius } from "./orbit";
 import type { SpaceCameraState, SpaceFrame } from "./spaceView";
 
 /** How fast the clock may run: from real time to a month a second. */
 export const TIME_SCALES = [1, 10, 100, 1000, 10_000, 100_000, 1_000_000, 3_000_000];
+
+/** The fastest the clock runs while the engine burns or the ship is in the air, which are flown in small steps. */
+export const PHYSICS_WARP = 50;
+/** The most small steps of physics in one frame; past it the clock is held back rather than the physics skimped. */
+const MAX_STEPS = 24;
+
+/** A body's GM: the catalogue's, or for a small body, its size at a rocky (or, for a comet, fluffy) density. */
+function gmOf(b: BodyDef | undefined): number {
+  if (!b) return 0;
+  if (b.gm) return b.gm;
+  const rho = b.kind === "comet" || b.kind === "interstellar" ? 500 : b.kind === "probe" ? 0 : 2000;
+  return 6.6743e-20 * (4 / 3) * Math.PI * Math.pow(b.radius * 1000, 3) * rho;
+}
+
+/** A body's north pole in the ecliptic frame. */
+function poleOf(b: BodyDef | undefined): Vec3 {
+  return b?.pole ? raDecToEcl(b.pole[0], b.pole[1]) : [0, 0, 1];
+}
 
 /** Metres in a degree of latitude, and of longitude at the equator: the world is the Earth at one block to the metre. */
 const M_PER_DEG_LAT = 110_574;
@@ -40,28 +66,40 @@ export interface OverviewRow {
 
 export type OverviewTab = "planets" | "moons" | "small" | "all";
 
-/** Which latitude and longitude a world's origin sits at: somewhere people live, chosen from the seed. */
-export function worldAnchor(seed: number): { lat: number; lon: number } {
+export interface Place { lat: number; lon: number }
+
+/**
+ * Which latitude and longitude a world's origin sits at: somewhere people live, chosen from the seed — or wherever
+ * the world has been moved to (/sky chase takes it under an eclipse's path).
+ */
+export function worldAnchor(seed: number, place?: Place | null): Place {
+  if (place) return place;
   const a = Math.abs(Math.sin(seed * 12.9898) * 43758.5453) % 1, b = Math.abs(Math.sin(seed * 78.233) * 12543.123) % 1;
   return { lat: -40 + a * 95, lon: -180 + b * 360 };
 }
 
 /** A block position in the world as a place on Earth. */
-export function blockToLatLon(seed: number, x: number, z: number): { lat: number; lon: number } {
-  const o = worldAnchor(seed);
+export function blockToLatLon(seed: number, x: number, z: number, place?: Place | null): Place {
+  const o = worldAnchor(seed, place);
   const lat = Math.max(-89, Math.min(89, o.lat - z / M_PER_DEG_LAT));
   const lon = ((o.lon + x / (M_PER_DEG_LON * Math.cos((lat * Math.PI) / 180)) + 540) % 360) - 180;
   return { lat, lon };
 }
 
 /** A place on Earth as a block position in the world — kept inside the world's border. */
-export function latLonToBlock(seed: number, lat: number, lon: number): { x: number; z: number } {
-  const o = worldAnchor(seed);
+export function latLonToBlock(seed: number, lat: number, lon: number, place?: Place | null): { x: number; z: number } {
+  const o = worldAnchor(seed, place);
   const dLon = ((lon - o.lon + 540) % 360) - 180;
   const x = dLon * M_PER_DEG_LON * Math.cos((lat * Math.PI) / 180);
   const z = (o.lat - lat) * M_PER_DEG_LAT;
   const clamp = (v: number) => Math.max(-WORLD_REACH, Math.min(WORLD_REACH, v));
   return { x: clamp(x), z: clamp(z) };
+}
+
+/** Where the world's origin must be for the block (x, z) to stand at a latitude and longitude. */
+export function placeFor(x: number, z: number, lat: number, lon: number): Place {
+  const originLat = Math.max(-89, Math.min(89, lat + z / M_PER_DEG_LAT));
+  return { lat: originLat, lon: ((lon - x / (M_PER_DEG_LON * Math.cos((lat * Math.PI) / 180)) + 540) % 360) - 180 };
 }
 
 /** How far each body's neighbourhood reaches (km): its sphere of influence, or a patch of space around a small one. */
@@ -96,15 +134,23 @@ export class SpaceSession {
   shipHelio: Vec3 = [0, 0, 0];
   /** The last thing worth saying (a warp engaged, an order refused), and when. */
   note: { text: string; at: number } | null = null;
-  /** Counting down to landing, seconds; null when not landing. */
+  /** Counting down to landing, seconds; null when not landing (the arcade model's landing). */
   landing: number | null = null;
+  /** The clock speed an autopilot has chosen for a long coast in a manoeuvre, overriding the pilot's while it lasts. */
+  autoScale: number | null = null;
+  /** The clock speed actually used last frame, and why it was held back if it was. */
+  shownScale = 1;
+  held: string | null = null;
   private readonly places = reaches();
   private clock = 0;
+  private velCache = new Map<string, { jd: number; v: Vec3 }>();
 
-  constructor(readonly seed: number, launch: { lat: number; lon: number }, jd = jdFromMs(Date.now())) {
+  constructor(readonly seed: number, launch: { lat: number; lon: number }, jd = jdFromMs(Date.now()), readonly place: Place | null = null, physics: Ship["physics"] = "newton") {
     this.jd = jd;
     const up = aboveEarth(launch.lat, launch.lon, 400, gmst(jd), eqToEcl);
-    this.ship = newShip(SCOUT, "earth", up.pos, up.heading);
+    this.ship = newShip(SCOUT, "earth", up.pos, up.heading, physics);
+    // Under real physics a launch ends in a real orbit: 7.7 km/s eastward, the way rockets fly to use the Earth's spin.
+    if (physics === "newton") this.ship.vel = scale(norm(up.heading), Math.sqrt((BODY.earth.gm ?? 398600.435) / len(up.pos)));
     // Behind and a little above the ship, looking along its path with the Earth's curve below.
     const back = sub([0, 0, 0], up.heading), radial = norm(up.pos);
     const off = norm([back[0] + radial[0] * 0.35, back[1] + radial[1] * 0.35, back[2] + radial[2] * 0.35]);
@@ -113,7 +159,27 @@ export class SpaceSession {
   }
 
   get surroundings(): Surroundings {
-    return { pos: (id) => this.positions.get(id) ?? null, radius: (id) => BODY[id]?.radius ?? 1, places: this.places };
+    return {
+      pos: (id) => this.positions.get(id) ?? null, radius: (id) => BODY[id]?.radius ?? 1, places: this.places,
+      gm: (id) => gmOf(BODY[id]),
+      vel: (id) => this.velocity(id),
+      parent: (id) => BODY[id]?.parent ?? null,
+      pole: (id) => poleOf(BODY[id]),
+      spin: (id) => {
+        const b = BODY[id];
+        if (!b?.rotation || b.locked) return [0, 0, 0];
+        return scale(poleOf(b), (2 * Math.PI) / (b.rotation * 3600));
+      },
+    };
+  }
+
+  /** A body's velocity from the Sun (km/s), worked out once per moment it is asked for. */
+  private velocity(id: string): Vec3 {
+    const c = this.velCache.get(id);
+    if (c && c.jd === this.jd) return c.v;
+    const v = id === "sun" ? [0, 0, 0] as Vec3 : velocityOf(id, this.jd);
+    this.velCache.set(id, { jd: this.jd, v });
+    return v;
   }
 
   private refresh(): void {
@@ -123,6 +189,7 @@ export class SpaceSession {
 
   /** One frame: the clock, then the ship in steps small enough for its orders to stay smooth. */
   update(dt: number): void {
+    if (this.ship.physics === "newton") { this.updateNewton(dt); return; }
     this.clock += dt;
     this.jd += (dt * this.timeScale) / 86400;
     this.refresh();
@@ -137,12 +204,192 @@ export class SpaceSession {
     if (this.landing !== null) this.landing = Math.max(0, this.landing - dt);
   }
 
+  /**
+   * One frame under real physics. Warp runs on the frame's own time (it is
+   * the ship's drive, not the Solar System's clock). Otherwise the ship lives
+   * on the Solar System's time: coasting, in steps as long as keeps it from
+   * skipping over a sphere of influence it should have entered; burning or in
+   * the air, in quarter-second steps with the clock held to fifty times.
+   */
+  private updateNewton(dt: number): void {
+    this.clock += dt;
+    const s = this.ship;
+    if (s.landed) return;
+    if (s.warp) {
+      this.jd += (dt * this.timeScale) / 86400;
+      this.refresh();
+      this.report(newtonWarp(s, this.surroundings, dt));
+      this.shipHelio = shipPosition(s, this.surroundings);
+      this.shownScale = this.timeScale;
+      this.held = null;
+      return;
+    }
+    this.autopilotClock();
+    const wanted = this.autoScale ?? this.timeScale;
+    let w = this.surroundings;
+    const small = needsSmallSteps(s, w);
+    const scaleNow = small ? Math.min(wanted, PHYSICS_WARP) : wanted;
+    let sky = dt * scaleNow;
+    const maxStep = small ? 0.25 : this.coastStep();
+    let n = Math.max(1, Math.ceil(sky / maxStep));
+    if (n > MAX_STEPS) { n = MAX_STEPS; sky = maxStep * n; }
+    this.shownScale = sky / Math.max(dt, 1e-9);
+    this.held = scaleNow < wanted ? (airAround(s, w) ? "in the air" : "while the engine burns")
+      : this.shownScale < scaleNow * 0.95 ? `near ${BODY[this.nearestBoundary()]?.name ?? "a moon"}` : null;
+    for (let i = 0; i < n && !s.landed && !s.warp; i++) {
+      this.jd += sky / n / 86400;
+      this.refresh();
+      w = this.surroundings;
+      this.report(newtonStep(s, w, sky / n));
+    }
+    this.shipHelio = shipPosition(s, this.surroundings);
+  }
+
+  /** How long a coast can be stepped without skipping into a sphere of influence (or out of this one) unseen. */
+  private coastStep(): number {
+    const s = this.ship, w = this.surroundings;
+    const speed = len(s.vel) + 1e-6;
+    let step = Infinity;
+    const mine = this.places.find((p) => p.id === s.frame);
+    if (mine && s.frame !== "sun") step = Math.min(step, (0.4 * Math.max(0, mine.reach - len(s.pos))) / speed);
+    const here = this.shipHelio;
+    const mu = gmOf(BODY[s.frame]);
+    for (const p of this.places) {
+      if ((BODY[p.id]?.parent ?? "sun") !== s.frame) continue;
+      const q = this.positions.get(p.id);
+      if (!q) continue;
+      const gap = len(sub(here, q)) - p.reach;
+      // How fast they could be closing: the ship's speed and the body's own round the frame.
+      const theirs = mu > 0 ? Math.sqrt(mu / Math.max(1, len(sub(q, this.positions.get(s.frame) ?? [0, 0, 0])))) : 0;
+      step = Math.min(step, (0.4 * Math.max(0, gap)) / (speed + theirs));
+    }
+    return Math.max(1, step);
+  }
+
+  private nearestBoundary(): string {
+    let best = this.ship.frame, bestGap = Infinity;
+    for (const p of this.places) {
+      if ((BODY[p.id]?.parent ?? "sun") !== this.ship.frame) continue;
+      const q = this.positions.get(p.id);
+      if (!q) continue;
+      const gap = len(sub(this.shipHelio, q)) - p.reach;
+      if (gap < bestGap) { bestGap = gap; best = p.id; }
+    }
+    return best;
+  }
+
+  /**
+   * The long waits in a manoeuvre — half an orbit to the far side, the fall
+   * to the top of the air — the autopilot runs the clock through, so a landing
+   * from orbit takes a minute rather than an hour; the air and the burns set
+   * their own pace (held to fifty times).
+   */
+  private autopilotClock(): void {
+    const s = this.ship, o = s.order, w = this.surroundings;
+    const mu = gmOf(BODY[s.frame]);
+    // Fast enough to get there in `lead` seconds of play, but never slower than `floor`: aiming at a fixed time to
+    // go would slow the clock without end as the moment came nearer.
+    const pick = (seconds: number | null, lead: number, floor: number) => {
+      if (seconds === null || !(seconds > 0)) return floor;
+      const k = seconds / lead;
+      return Math.max(floor, Math.min(100_000, [...TIME_SCALES].reverse().find((t) => t <= k) ?? 1));
+    };
+    if (o.kind === "land" && o.phase === "entry") {
+      if (airAround(s, w)) { this.autoScale = s.chute > 0 ? PHYSICS_WARP : 20; return; }
+      const top = AIR[s.frame]?.top ?? 0;
+      this.autoScale = pick(timeToRadius(s.pos, s.vel, mu, w.radius(s.frame) + top), 10, PHYSICS_WARP);
+      return;
+    }
+    if (o.kind === "orbit" && o.phase === "coast" && mu > 0) {
+      const el = elementsOf(s.pos, s.vel, mu);
+      const R = w.radius(s.frame) + Math.max(o.range, safeAltitude(w, s.frame));
+      this.autoScale = pick(timeToAnomaly(el, mu, R > el.periapsis * 1.001 ? Math.PI : 0), 8, 10);
+      return;
+    }
+    this.autoScale = null;
+  }
+
+  /** Says what the physics did worth saying. */
+  private report(e: FlightEvent | null): void {
+    if (!e) return;
+    const s = this.ship, name = BODY[s.frame]?.name ?? "deep space";
+    switch (e) {
+      case "warp": this.say(`Warp drive active — ${BODY[s.warp?.target ?? ""]?.name ?? ""}`); break;
+      case "arrived": {
+        const o = orbitSummary(s, this.surroundings);
+        this.say(o && s.order.kind === "coast" ? `Arrived: in orbit round ${name}, ${Math.round(o.altitude).toLocaleString("en")} km up at ${o.speed.toFixed(2)} km/s` : `Arrived: ${name}`);
+        break;
+      }
+      case "orbit": {
+        const o = orbitSummary(s, this.surroundings);
+        if (o) this.say(`In orbit round ${name}: ${Math.round(o.periapsis).toLocaleString("en")} × ${Math.round(o.apoapsis).toLocaleString("en")} km, once every ${periodText(o.period)}`);
+        break;
+      }
+      case "entry":
+        this.say(`Entering ${name}'s atmosphere — the heat shield takes it from here`);
+        // Come in close for the fire.
+        if (this.camera.target === "ship") this.camera.dist = Math.min(this.camera.dist, 0.25);
+        break;
+      case "chute": this.say("Parachute out"); break;
+      case "landed": this.say("Touchdown"); break;
+      case "pullup": this.say(`Too low over ${name}: the flight computer pulled up and is setting up an orbit`); break;
+      case "soi": this.say(s.frame === "sun" ? "Out of the planets' pull: in orbit round the Sun" : `Into ${name}'s sphere of influence`); break;
+    }
+  }
+
+  /** The ship's speed through the air round it, if it is in some (the air turns with the planet), km/s. */
+  airSpeed(): number | null {
+    if (this.ship.physics !== "newton") return null;
+    const a = airAround(this.ship, this.surroundings);
+    return a ? len(a.vAir) : null;
+  }
+
+  /** The orbit the ship is on, for the panel. */
+  orbitInfo(): ReturnType<typeof orbitSummary> {
+    return this.ship.physics === "newton" && !this.ship.warp ? orbitSummary(this.ship, this.surroundings) : null;
+  }
+
+  /** The path ahead, for the overlay: points round the body the ship is near, where it is highest and lowest, and whether it comes down. */
+  pathAhead(): SpaceFrame["path"] {
+    const s = this.ship;
+    if (s.physics !== "newton" || s.warp || s.landed) return undefined;
+    const mu = gmOf(BODY[s.frame]);
+    if (!(mu > 0)) return undefined;
+    const reach = this.places.find((p) => p.id === s.frame)?.reach ?? 50 * AU;
+    const R = BODY[s.frame]?.radius ?? 0;
+    const floor = R + (AIR[s.frame]?.top ?? 0);
+    const p = pathAhead(s.pos, s.vel, mu, 160, reach, floor);
+    const el = elementsOf(s.pos, s.vel, mu);
+    const pe = el.periapsis > R ? pointAt(el, 0) : null;
+    const ap = el.e < 1 && el.apoapsis < reach ? pointAt(el, Math.PI) : null;
+    return { frame: s.frame, points: p.points, hits: p.hits, leaves: p.leaves, pe, ap, peAlt: el.periapsis - R, apAlt: el.apoapsis - R, air: !!AIR[s.frame] };
+  }
+
   frame(dt: number): SpaceFrame {
     const listed = new Set(this.rows().map((r) => r.id));
     return {
       jd: this.jd, dt, positions: this.positions, ship: this.ship, shipHelio: this.shipHelio, camera: this.camera,
-      selected: this.selected, hovered: this.hovered, orbits: this.orbits, listed,
+      selected: this.selected, hovered: this.hovered, orbits: this.orbits, listed, path: this.pathAhead(),
     };
+  }
+
+  /** Real physics or the arcade's, switched in flight: the ship keeps where it is; going to real, it keeps its speed too. */
+  setPhysics(p: Ship["physics"]): void {
+    const s = this.ship;
+    if (s.physics === p || s.warp) return;
+    s.physics = p;
+    if (p === "newton") {
+      // From the arcade's standstill, into an orbit where there is gravity to hold one.
+      const mu = gmOf(BODY[s.frame]);
+      if (mu > 0 && len(s.vel) < 0.5 && Math.sqrt(mu / len(s.pos)) > 0.5) s.vel = circularVelocity(s.pos, s.vel, mu, poleOf(BODY[s.frame]));
+      s.order = { kind: "coast" };
+      this.say("Real physics: gravity and a 5 g engine");
+    } else {
+      s.vel = [0, 0, 0];
+      s.order = { kind: "stop" };
+      this.autoScale = null;
+      this.say("Arcade flight: EVE's rules, no gravity");
+    }
   }
 
   say(text: string): void {
@@ -204,7 +451,8 @@ export class SpaceSession {
   }
 
   give(o: Order): boolean {
-    if (this.landing !== null) return false;
+    if (this.landing !== null || this.ship.landed) return false;
+    if (this.ship.physics === "newton" && o.kind === "land" && !AIR[this.ship.frame]?.lands) { this.say("Only the Earth has a world to land in: warp to it, then land."); return false; }
     if (this.ship.warp) { this.say("The ship is in warp: orders wait until it drops out."); return false; }
     if (o.kind === "warp") {
       const why = warpRefusal(this.ship, this.surroundings, o.target, o.range);
@@ -249,7 +497,8 @@ export class SpaceSession {
 
   /** The camera circles the ship, or looks at a body from a sensible distance. */
   lookAt(id: string | null): void {
-    if (!id || id === "ship") { this.camera = { ...this.camera, target: "ship", dist: Math.min(this.camera.dist, 5) }; return; }
+    // Back on the ship: close enough to see it (it is 42 metres long), however far out the camera had gone.
+    if (!id || id === "ship") { this.camera = { ...this.camera, target: "ship", dist: Math.min(this.camera.dist, 0.3) }; return; }
     const b = BODY[id];
     if (!b) return;
     const extent = b.rings ? b.rings.outer : b.radius;
@@ -268,18 +517,18 @@ export class SpaceSession {
 
   // ---- landing ---------------------------------------------------------------------------------------------------------
 
-  /** Where below the ship, if it is low enough over the Earth to come down. */
+  /** Where below the ship, if it is low enough over the Earth to come down (under real physics, anywhere near it: the landing flies itself down). */
   landingSite(): { lat: number; lon: number; altitude: number } | null {
     if (this.ship.frame !== "earth" || this.ship.warp) return null;
     const under = belowShip(this.ship.pos, gmst(this.jd), eclToEq);
-    return under.altitude < 2000 ? under : null;
+    return under.altitude < 2000 || (this.ship.physics === "newton" && !this.ship.landed) ? under : null;
   }
 
   /** Where in the world the landing site is. */
   landingBlock(): { x: number; z: number; lat: number; lon: number } | null {
     const s = this.landingSite();
     if (!s) return null;
-    return { ...latLonToBlock(this.seed, s.lat, s.lon), lat: s.lat, lon: s.lon };
+    return { ...latLonToBlock(this.seed, s.lat, s.lon, this.place), lat: s.lat, lon: s.lon };
   }
 
   /** Local solar time at a longitude, in hours: for setting the day to match where the ship came down. */
@@ -287,4 +536,13 @@ export class SpaceSession {
     const utc = ((this.jd + 0.5) % 1) * 24;
     return (((utc + lon / 15) % 24) + 24) % 24;
   }
+}
+
+/** "92 minutes", "27.3 days": how long an orbit takes. */
+export function periodText(seconds: number): string {
+  if (!Number.isFinite(seconds)) return "never (an escape)";
+  if (seconds < 5400) return `${Math.round(seconds / 60)} minutes`;
+  if (seconds < 172_800) return `${(seconds / 3600).toFixed(1)} hours`;
+  if (seconds < 3 * 365.25 * 86400) return `${(seconds / 86400).toFixed(1)} days`;
+  return `${(seconds / (365.25 * 86400)).toFixed(1)} years`;
 }

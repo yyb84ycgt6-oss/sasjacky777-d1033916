@@ -75,13 +75,16 @@ result — is unchanged.
 
 ### Sentinel — `/sentinel`, `/sentinel/board`
 
-`src/sentinel/lib/mockData.ts` is 624 lines of incidents, wallets, clusters and
-trace paths. `SentinelDashboard`, `SentinelBoard` and `RelationshipGraph` read
-it directly. There is no fetch of any kind in `src/sentinel/`.
-
-This one is further from real than the Vault, because there is no service layer
-underneath it at all — the mock data *is* the model. Making it real means
-deciding what it watches first.
+**Removed** (2026-09-27, `docs/MISSION_PLAN.md` mission 2.1). `src/sentinel/lib/mockData.ts`
+was 624 lines of incidents, wallets, clusters and trace paths, and
+`SentinelDashboard`, `SentinelBoard` and `RelationshipGraph` read it directly —
+there was no fetch of any kind in `src/sentinel/`, so the fixtures *were* the
+model. Nothing real had been chosen for it to watch, so the pages, the routes
+and the sidebar link went, rather than keep a screen of plausible rows that came
+from nowhere. The old URLs now land on the not-found page. It is all in git
+history (the commit that removed it) for when there is something real to watch:
+the audit log, the edge-function logs and the API-key usage table are the
+candidates that already produce data.
 
 ---
 

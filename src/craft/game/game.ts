@@ -45,7 +45,10 @@ import { isDino, pickCreatures } from "../engine/creatures";
 import { canLearn, engramFor, ENGRAMS, type Engram } from "../engine/engrams";
 import { CritterPlay, type CritterOp } from "./critterPlay";
 import type { LinkMsg } from "./critterLink";
-import { SpaceSession, blockToLatLon } from "../space/session";
+import { SpaceSession, blockToLatLon, placeFor } from "../space/session";
+import { clockFor, eclipseLight, epochForToday, skyAt, skyJd, type SkyObjects } from "../space/sky";
+import { jdFromMs } from "../space/kepler";
+import { localClock, placeText } from "../space/skyReport";
 import { SpaceView } from "../space/spaceView";
 import { BREAK_FALL, SICKNESS_TICKS, sicknessChance, statusLine, vitalsSecond, waterFrom, type VitalsRules } from "../engine/vitals";
 import { CREATURES, maxTorpor } from "../engine/creatures";
@@ -292,6 +295,14 @@ export class Game {
   private spaceView: SpaceView | null = null;
   /** Seconds left of a launch's countdown. */
   private launchCountdown: number | null = null;
+  /** How the starship flies: real physics (gravity, orbits) or the arcade's EVE rules. Kept between trips. */
+  spacePhysics: "newton" | "arcade" = "newton";
+  /** The real sky last worked out (space/sky.ts), and the latitude it was for. */
+  private skyCache: { sky: SkyObjects; lat: number } | null = null;
+  /** What the sky has done that has been told already (an eclipse, a shower's night), so it is told once. */
+  private skyTold = new Set<string>();
+  /** A slowed clock's fraction of a tick (advanceClock). */
+  private slowClock = 0;
   hurtTilt = 0;
   lastHurtAt = 0;
   private running = false;
@@ -353,6 +364,8 @@ export class Game {
     this.thunder = opts.meta.weather.thunder;
     this.playTimeBase = opts.meta.playTime;
     this.dimension = isDimension(opts.meta.dimension) ? opts.meta.dimension : "overworld";
+    // A world first played today starts its sky today; one from before the sky was real starts it now too.
+    if (!Number.isFinite(opts.meta.skyEpoch)) opts.meta.skyEpoch = epochForToday(this.time, jdFromMs(Date.now()));
     this.atlas = buildAtlas();
     this.ctx = this.makeContext();
     this.buildDimension();
@@ -1185,9 +1198,9 @@ export class Game {
 
   /** How bright the sun itself is (0 at night): daylight without the floor that keeps nights visible. */
   sunlight(): number {
-    const angle = ((this.time % DAY_TICKS) / DAY_TICKS) * Math.PI * 2;
-    const d = Math.max(0, Math.min(1, Math.sin(angle) * 2.2 + 0.2));
-    return d * (1 - this.rain * 0.25 - this.thunder * 0.25);
+    const sky = this.celestial();
+    const d = Math.max(0, Math.min(1, this.sunHeight(sky) * 2.2 + 0.2));
+    return d * (1 - this.rain * 0.25 - this.thunder * 0.25) * (sky ? eclipseLight(sky.eclipse) : 1);
   }
 
   private makeContext(): EntityContext {
@@ -1797,15 +1810,129 @@ export class Game {
   daylight(): number {
     // No sun where there is no sky: the Nether and the End sit in one unchanging dusk.
     if (!DIMENSION_INFO[this.dimension].hasSky) return 0.12;
-    const angle = ((this.time % DAY_TICKS) / DAY_TICKS) * Math.PI * 2;
-    let d = Math.max(0, Math.min(1, Math.sin(angle) * 2.2 + 0.45));
+    const sky = this.celestial();
+    let d = Math.max(0, Math.min(1, this.sunHeight(sky) * 2.2 + 0.45));
     d *= 1 - this.rain * 0.25 - this.thunder * 0.25;
+    // Totality is dusk at noon: the undead stop burning and the day's light goes out of the world with it.
+    if (sky) d *= eclipseLight(sky.eclipse);
     return Math.max(0.12, d);
   }
 
   isNight(): boolean {
+    // Under the real sky, night is when the Sun is down, however long the season makes it.
+    const sky = this.celestial();
+    if (sky) return sky.sun[1] < -0.035;
     const t = this.time % DAY_TICKS;
     return t > 12542 && t < 23460;
+  }
+
+  /** The sine of the Sun's altitude: the real one's, or the clock's. */
+  private sunHeight(sky: SkyObjects | null): number {
+    if (sky) return sky.sun[1];
+    return Math.sin(((this.time % DAY_TICKS) / DAY_TICKS) * Math.PI * 2);
+  }
+
+  /** Whether this world shows the real sky: the overworld, with the switch on (engine/mods.ts). */
+  realSky(): boolean {
+    return this.dimension === "overworld" && this.modOn("real_sky") && Number.isFinite(this.meta.skyEpoch);
+  }
+
+  /** Where the player stands on the Earth, as the sky and the space trip both see it. */
+  latLon(): { lat: number; lon: number } {
+    return blockToLatLon(this.meta.seed, this.player.body.x, this.player.body.z, this.meta.place);
+  }
+
+  /**
+   * Moves the sky to a moment (a Julian date) over a longitude, keeping the world's count of days: the clock goes to
+   * that local solar time, and the epoch shifts so today is that date.
+   */
+  setSkyDate(jd: number, lon = this.latLon().lon): void {
+    const c = clockFor(jd, lon, this.time);
+    this.time = c.time;
+    this.meta.skyEpoch = c.epoch;
+    this.skyCache = null;
+  }
+
+  /** Moves the world to another place on the Earth, so the block the player stands on is at that latitude and longitude. */
+  moveWorldTo(lat: number, lon: number): void {
+    this.meta.place = placeFor(this.player.body.x, this.player.body.z, lat, lon);
+    this.skyCache = null;
+  }
+
+  /**
+   * One tick of the clock — or a twelfth of one while the Moon all but covers the Sun: the sky runs seventy-two
+   * times faster than life, and the three minutes of a totality would otherwise be gone in three seconds.
+   */
+  private advanceClock(): void {
+    const sky = this.celestial();
+    if (sky && sky.eclipse > 0.97 && sky.sun[1] > -0.02) {
+      this.slowClock += 1 / 12;
+      if (this.slowClock < 1) return;
+      this.slowClock -= 1;
+    }
+    this.time++;
+  }
+
+  /** The sky's date and time over the player (a Julian date) at a moment of the world's clock. */
+  skyDate(time = this.time): number {
+    return skyJd(time, this.meta.skyEpoch ?? 0, this.latLon().lon);
+  }
+
+  /**
+   * The real sky over the player, or null where the world keeps the old one.
+   * A frame asks for its own exact moment; everything else (a mob asking
+   * whether the Sun is up) takes the last one worked out if it is within a
+   * few minutes of sky time, which a frame keeps it.
+   */
+  celestial(time = this.time, exact = false): SkyObjects | null {
+    if (!this.realSky()) return null;
+    const { lat, lon } = this.latLon();
+    const jd = skyJd(time, this.meta.skyEpoch!, lon);
+    const c = this.skyCache;
+    if (c && Math.abs(c.lat - lat) < 0.01 && Math.abs(c.sky.jd - jd) < (exact ? 1e-9 : 0.003)) return c.sky;
+    const sky = skyAt(jd, lat, lon);
+    this.skyCache = { sky, lat };
+    return sky;
+  }
+
+  /**
+   * The first moment from `time` the real Sun is up, within the morning:
+   * sleeping to the game's six o'clock would wake the player in the dark
+   * of a northern winter, with the night's monsters still about.
+   */
+  private sunriseFrom(time: number): number {
+    if (!this.realSky()) return time;
+    for (let t = time; t < time + 8000; t += 100) {
+      if (this.celestial(t, true)!.sun[1] > -0.0145) return t;
+    }
+    return time;
+  }
+
+  /** Tells the player what the sky is doing, once each: an eclipse, the Moon in the Earth's shadow, a shower's night. */
+  private skyNews(): void {
+    const sky = this.celestial();
+    if (!sky) return;
+    const day = Math.round(sky.jd);
+    if (sky.eclipse > 0.02 && sky.sun[1] > 0 && !this.skyTold.has(`e${day}`)) {
+      this.skyTold.add(`e${day}`);
+      this.message("The Moon is moving across the Sun: an eclipse has begun. Don't look at it without a filter.", "#ffd76a");
+    }
+    if (sky.eclipse > 0.995 && sky.sun[1] > 0 && !this.skyTold.has(`t${day}`)) {
+      this.skyTold.add(`t${day}`);
+      this.message("Totality. The corona is out, and the stars with it.", "#ffd76a");
+      this.advance({ kind: "totality" });
+    }
+    if (sky.umbra > 0.05 && sky.moon[1] > 0 && !this.skyTold.has(`l${day}`)) {
+      this.skyTold.add(`l${day}`);
+      this.message(sky.umbra > 0.99 ? "The Moon is wholly in the Earth's shadow, lit red by every sunset on the Earth at once: a total lunar eclipse." : "The Earth's shadow is taking a bite out of the Moon: a lunar eclipse.", "#ff9a6a");
+    }
+    const top = sky.showers[0];
+    if (top && top.zhr >= 10 && sky.sun[1] < -0.1 && !this.skyTold.has(`s${top.name}${day}`)) {
+      this.skyTold.add(`s${top.name}${day}`);
+      const [x, , z] = top.radiant;
+      const compass = ["north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west"][Math.round(((Math.atan2(x, -z) / Math.PI) * 180 + 360) % 360 / 45) % 8];
+      this.message(`The ${top.name} are falling tonight — up to ${Math.round(top.zhr)} an hour under a dark sky, out of the ${compass}${top.radiant[1] < 0 ? " once their radiant rises" : ""}: dust from ${top.parent}.`, "#9ff0ff");
+    }
   }
 
   setScreen(screen: Screen | null): void {
@@ -2112,6 +2239,7 @@ export class Game {
       dynamicLights: this.dynamicLights(ix, eye, iz),
       season: this.season() ? seasonTint(this.time, warmBiome(biome.id)) : undefined,
       bloodMoon: this.bloodMoon && this.dimension === "overworld",
+      celestial: this.celestial(this.time + alpha, true),
       border: this.dimension === "overworld" ? this.border : null,
       markers: this.dimension === "overworld" ? this.markers : [],
     });
@@ -2185,6 +2313,7 @@ export class Game {
     if (this.tickCount % 20 === 0) this.audio.tickMusic(1, !this.isNight());
     if (this.tickCount % 20 === 11) this.repaintMap();
     if (this.tickCount % 20 === 13 && this.modOn("ambient_sounds")) this.ambience();
+    if (this.tickCount % 40 === 7 && !this.space) this.skyNews();
     if (this.tickCount % 20 === 17) this.tickVitals();
     // Running is loud where the infected roam: they hear it from a few blocks off.
     if (this.tickCount % 20 === 3 && p.sprinting && !p.dead && modeDef(this.meta.mode?.id)?.fauna === "infected") this.makeNoise(b.x, b.y, b.z, 10, p.id);
@@ -2298,7 +2427,7 @@ export class Game {
   private simulate(): void {
     const world = this.world;
     world.tick++;
-    if (this.meta.rules.doDaylightCycle) this.time++;
+    if (this.meta.rules.doDaylightCycle) this.advanceClock();
     this.weatherTick();
 
     // Scheduled block updates, budgeted so a lava lake settling cannot stall a frame.
@@ -3057,11 +3186,12 @@ export class Game {
     if (before > 1 && t <= 1) this.sound("firework_launch", null, 0, 0, 1, 0.5);
     if (t <= 0) {
       this.launchCountdown = null;
-      const { lat, lon } = blockToLatLon(this.meta.seed, b.x, b.z);
+      const { lat, lon } = blockToLatLon(this.meta.seed, b.x, b.z, this.meta.place);
       this.spaceView ??= new SpaceView(this.renderer.renderer);
       const c = this.renderer.canvas;
       this.spaceView.resize(c.clientWidth || window.innerWidth, c.clientHeight || window.innerHeight);
-      this.space = new SpaceSession(this.meta.seed, { lat, lon });
+      // The trip starts on the world's own date, so the sky out there is the one the world was under.
+      this.space = new SpaceSession(this.meta.seed, { lat, lon }, this.realSky() ? this.skyDate() : jdFromMs(Date.now()), this.meta.place, this.spacePhysics);
       this.space.say(`In orbit, 400 km above ${latLonText(lat, lon)}`);
       this.setScreen({ kind: "space" });
       this.advance({ kind: "space" });
@@ -3075,7 +3205,8 @@ export class Game {
     const paused = this.screen?.kind === "pause" && !this.net;
     if (!paused) s.update(dt);
     this.spaceView!.render(s.frame(paused ? 0 : dt));
-    if (s.landing === 0) this.land();
+    // Down under a parachute (real physics) or through the arcade's re-entry: into the world where the ship came down.
+    if (s.landing === 0 || s.ship.landed) this.land();
   }
 
   /** The overlay the space view draws its orbits and brackets on. */
@@ -3104,7 +3235,10 @@ export class Game {
     const b = this.player.body;
     const x = site ? site.x + 0.5 : b.x, z = site ? site.z + 0.5 : b.z;
     const where = site ? latLonText(site.lat, site.lon) : "the launch site";
-    if (this.simulates && site) {
+    if (this.simulates && site && this.realSky()) {
+      // The world's sky picks up where the trip's left off, however long it ran and however fast.
+      this.setSkyDate(s.jd, site.lon);
+    } else if (this.simulates && site) {
       // Noon is 6000 ticks into the day; each hour of solar time is a thousand ticks.
       const hours = s.solarHours(site.lon);
       this.time = Math.floor(this.time / 24000) * 24000 + Math.round(((hours - 6 + 24) % 24) * 1000);
@@ -3210,7 +3344,7 @@ export class Game {
   }
 
   private guestTick(): void {
-    this.time++;
+    this.advanceClock();
     const own = this.ridden();
     if (own) {
       // The guest drives its own vehicle here, and tells the host.
@@ -3443,7 +3577,7 @@ export class Game {
     if (sleepers > 0 && sleepers === total) {
       this.sleepCounter++;
       if (this.sleepCounter >= 100) {
-        this.time = Math.ceil(this.time / DAY_TICKS) * DAY_TICKS;
+        this.time = this.sunriseFrom(Math.ceil(this.time / DAY_TICKS) * DAY_TICKS);
         this.meta.weather.rain = 0; this.meta.weather.thunder = 0;
         this.rain = 0; this.thunder = 0;
         if (this.player.sleeping) this.advance({ kind: "sleep" });
@@ -3621,7 +3755,7 @@ export class Game {
       `Block: ${x} ${y} ${z}   Chunk: ${x >> 4} ${z >> 4}`,
       `Facing: ${facing} (${(((p.yaw * 180) / Math.PI) % 360).toFixed(1)} / ${((p.pitch * 180) / Math.PI).toFixed(1)})`,
       `Biome: ${biome}`,
-      `Light: ${l < 0 ? "?" : `${l >> 4} sky, ${l & 15} block`}   Day ${Math.floor(this.time / DAY_TICKS)}, time ${this.time % DAY_TICKS}${this.season() ? `   ${seasonLabel(this.time)}` : ""}`,
+      `Light: ${l < 0 ? "?" : `${l >> 4} sky, ${l & 15} block`}   Day ${Math.floor(this.time / DAY_TICKS)}, time ${this.time % DAY_TICKS}${this.season() ? `   ${seasonLabel(this.time)}` : ""}${this.realSky() ? `   Sky ${localClock(this.skyDate(), this.latLon().lon)} at ${placeText(this.latLon().lat, this.latLon().lon)}` : ""}`,
       `Chunks: ${this.world.chunks.size} loaded, ${stats.chunks} drawn, ${this.streamer.busy} in flight (${this.pool.mode})`,
       `Draw: ${stats.calls} calls, ${(stats.triangles / 1000).toFixed(0)}k tris, ${(stats.quads / 1000).toFixed(0)}k quads`,
       `Entities: ${this.entities.size}   Players: ${1 + this.remote.size}`,

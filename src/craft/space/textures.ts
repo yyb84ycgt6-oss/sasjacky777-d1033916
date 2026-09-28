@@ -13,7 +13,8 @@
  */
 import { Simplex } from "../engine/noise";
 import { Rng } from "../engine/rng";
-import { EARTH_LAND } from "./skyData";
+import { EARTH_LAND, MILKY_WAY } from "./skyData";
+import { dot, raDecToEcl } from "./kepler";
 import type { Look } from "./bodies";
 
 type RGB = [number, number, number];
@@ -528,5 +529,62 @@ export function detailCanvas(): HTMLCanvasElement | null {
   }
   ctx.putImageData(img, 0, 0);
   cache.set("#detail", canvas);
+  return canvas;
+}
+
+/**
+ * The Milky Way as a map of right ascension (0h at the left) and declination
+ * (+90° at the top): its measured outline (skyData.ts), softened, given the
+ * grain of star clouds and the dark lanes of dust, and warm toward the
+ * galaxy's centre in Sagittarius. Shared by the space view and the sky seen
+ * from the ground.
+ */
+export function milkyWayCanvas(): HTMLCanvasElement | null {
+  const hit = cache.get("#milkyway");
+  if (hit || typeof document === "undefined") return hit ?? null;
+  const lv = decodeRuns(MILKY_WAY.width, MILKY_WAY.height, MILKY_WAY.runs);
+  const W = 1024, H = 512, n = new Simplex(99);
+  const canvas = document.createElement("canvas");
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext("2d")!;
+  const img = ctx.createImageData(W, H);
+  const gc = raDecToEcl(266.4, -28.94);
+  // Softened once at the map's own size, then read with bilinear filtering at the texture's.
+  const MW = MILKY_WAY.width, MH = MILKY_WAY.height;
+  const blur = new Float32Array(MW * MH);
+  for (let y = 0; y < MH; y++) for (let x = 0; x < MW; x++) {
+    let v = 0, wsum = 0;
+    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+      const w = Math.exp(-(dx * dx + dy * dy) / 3);
+      v += lv[Math.max(0, Math.min(MH - 1, y + dy)) * MW + (((x + dx) % MW) + MW) % MW] * w; wsum += w;
+    }
+    blur[y * MW + x] = v / (wsum * 5);
+  }
+  const sample = (fx: number, fy: number) => {
+    const x0 = Math.floor(fx), y0 = Math.max(0, Math.min(MH - 1, Math.floor(fy))), y1 = Math.min(MH - 1, y0 + 1), tx = fx - x0, ty = fy - Math.floor(fy);
+    const at = (x: number, y: number) => blur[y * MW + ((x % MW) + MW) % MW];
+    return (at(x0, y0) * (1 - tx) + at(x0 + 1, y0) * tx) * (1 - ty) + (at(x0, y1) * (1 - tx) + at(x0 + 1, y1) * tx) * ty;
+  };
+  for (let y = 0; y < H; y++) {
+    const dec = 90 - ((y + 0.5) / H) * 180;
+    for (let x = 0; x < W; x++) {
+      const ra = ((x + 0.5) / W) * 360;
+      const v = sample((x / W) * MW, (y / H) * MH);
+      const dir = raDecToEcl(ra, dec);
+      const nx = dir[0] * 6, ny = dir[1] * 6, nz = dir[2] * 6;
+      const dust = v > 0.02 ? Math.max(0, n.fbm3(nx * 2, ny * 2, nz * 2, 3)) : 0;
+      const grain = v > 0.02 ? 0.75 + n.noise3(nx * 5, ny * 5, nz * 5) * 0.3 : 1;
+      const core = Math.pow(Math.max(0, dot(dir, gc)), 6);
+      const b = Math.max(0, v * grain - dust * v * 0.9) * 0.55 + core * 0.08;
+      const warm = Math.min(1, core * 1.4 + v * 0.2);
+      const i = (y * W + x) * 4;
+      img.data[i] = Math.min(255, b * (190 + warm * 60) + 3);
+      img.data[i + 1] = Math.min(255, b * (190 + warm * 20) + 4);
+      img.data[i + 2] = Math.min(255, b * (220 - warm * 40) + 8);
+      img.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  cache.set("#milkyway", canvas);
   return canvas;
 }

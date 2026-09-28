@@ -8,7 +8,9 @@
  *
  * Keys (EVE's, with a target selected): Q approach, W orbit, E keep at range,
  * A align to, S warp to, D land (over the Earth), F look at, I show info,
- * Space stop, M microwarpdrive, comma and full stop slow and speed the clock.
+ * Space stop (under real physics: engine off), M microwarpdrive, comma and
+ * full stop slow and speed the clock. Under real physics the ship panel adds
+ * the orbit's numbers and the burns a pilot makes by hand.
  */
 import { Fragment, useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import type { Game } from "../game/game";
@@ -16,8 +18,8 @@ import { latLonText } from "../game/game";
 import { BODY, moonsOf, kindLabel } from "../space/bodies";
 import { dateString, len, sub } from "../space/kepler";
 import { distanceText, kindColor, speedText } from "../space/spaceView";
-import { aligned, topSpeed } from "../space/flight";
-import { TIME_SCALES, type OverviewTab } from "../space/session";
+import { aligned, topSpeed, type BurnDir } from "../space/flight";
+import { periodText, TIME_SCALES, type OverviewTab } from "../space/session";
 
 const u = (n: number) => `calc(var(--u) * ${n})`;
 
@@ -84,10 +86,14 @@ export function SpaceScreen({ game }: { game: Game }) {
         case "KeyE": if (target) s.give({ kind: "keep", target, range: orbitRange }); break;
         case "KeyA": if (target) s.give({ kind: "align", target }); break;
         case "KeyS": if (target) s.warpTo(target, warpRange); break;
-        case "KeyD": if (s.landingSite()) s.landing = 2.5; else s.say("Land from low over the Earth: warp to it, then press D."); break;
+        case "KeyD":
+          if (s.ship.physics === "newton") s.give({ kind: "land" });
+          else if (s.landingSite()) s.landing = 2.5;
+          else s.say("Land from low over the Earth: warp to it, then press D.");
+          break;
         case "KeyF": s.lookAt(s.camera.target === "ship" && target ? target : null); break;
         case "KeyI": setInfo(target ?? s.ship.frame); break;
-        case "Space": s.give({ kind: "stop" }); break;
+        case "Space": s.give(s.ship.physics === "newton" ? { kind: "coast" } : { kind: "stop" }); break;
         case "KeyM": s.ship.mwd = !s.ship.mwd; s.say(s.ship.mwd ? "Microwarpdrive on: five times the speed" : "Microwarpdrive off"); break;
         case "Comma": s.slower(); break;
         case "Period": s.faster(); break;
@@ -103,12 +109,17 @@ export function SpaceScreen({ game }: { game: Game }) {
   if (!s) return null;
   const ship = s.ship;
   const rows = s.rows();
-  const speed = ship.warp ? ship.warp.speed : len(ship.vel);
+  const airSpeed = s.airSpeed();
+  const speed = ship.warp ? ship.warp.speed : airSpeed ?? len(ship.vel);
   const frameName = BODY[ship.frame]?.name ?? "deep space";
   const note = s.noteText();
   const site = s.landingSite();
   const order = ship.order;
+  const real = ship.physics === "newton";
+  const orbit = s.orbitInfo();
   const status = ship.warp ? `Warping to ${BODY[ship.warp.target]?.name} — ${distanceText(ship.warp.left)} to go`
+    : ship.landed ? "Landed"
+    : real ? newtonStatus(ship, orbit, frameName)
     : order.kind === "warp" ? `Aligning to ${BODY[order.target]?.name}${aligned(ship, s.surroundings, order.target) ? "" : "…"}`
     : order.kind === "approach" ? `Approaching ${BODY[order.target]?.name}`
     : order.kind === "orbit" ? `Orbiting ${BODY[order.target]?.name} at ${order.range} km`
@@ -167,7 +178,14 @@ export function SpaceScreen({ game }: { game: Game }) {
   };
 
   const tabs: [OverviewTab, string][] = [["planets", "Planets"], ["moons", `Moons of ${BODY[s.homePlanet()]?.name}`], ["small", "Small bodies"], ["all", "All"]];
-  const speedFrac = ship.warp ? 1 : Math.min(1, len(ship.vel) / topSpeed(ship));
+  const speedFrac = ship.warp ? 1 : real ? ship.engine : Math.min(1, len(ship.vel) / topSpeed(ship));
+  const clockText = s.autoScale !== null && !ship.warp ? `×${Math.round(s.shownScale).toLocaleString("en")} autopilot`
+    : s.held ? `×${Math.round(s.shownScale).toLocaleString("en")} (held ${s.held})`
+    : s.timeScale === 1 ? "real time" : `×${s.timeScale.toLocaleString("en")}`;
+  const burn = (dir: BurnDir) => {
+    if (order.kind === "burn" && order.dir === dir) s.give({ kind: "coast" }); else s.give({ kind: "burn", dir });
+    refresh();
+  };
 
   return (
     <div className="absolute inset-0" data-testid="space-screen" style={{ pointerEvents: "none" }}>
@@ -181,7 +199,7 @@ export function SpaceScreen({ game }: { game: Game }) {
         <div>{dateString(s.jd)}</div>
         <div style={{ display: "flex", gap: u(1.5), alignItems: "center" }}>
           <Btn onClick={() => { s.slower(); refresh(); }} title="Slower (,)">◀</Btn>
-          <span style={{ minWidth: u(30), textAlign: "center" }} data-testid="space-timescale">{s.timeScale === 1 ? "real time" : `×${s.timeScale.toLocaleString("en")}`}</span>
+          <span style={{ minWidth: u(30), textAlign: "center" }} data-testid="space-timescale">{clockText}</span>
           <Btn onClick={() => { s.faster(); refresh(); }} title="Faster (.)" disabled={s.timeScale >= TIME_SCALES[TIME_SCALES.length - 1]}>▶</Btn>
           <Btn onClick={() => { s.now(); refresh(); }} title="Back to the real date">Now</Btn>
         </div>
@@ -262,17 +280,45 @@ export function SpaceScreen({ game }: { game: Game }) {
       {/* The ship. */}
       <div style={{ ...PANEL, position: "absolute", left: "50%", bottom: u(4), transform: "translateX(-50%)", padding: u(3), display: "flex", flexDirection: "column", alignItems: "center", gap: u(1.5), minWidth: u(130) }} data-testid="space-ship">
         <div style={{ fontSize: u(4.5), color: "#8fa6b8" }}>{ship.cls.name}</div>
-        <div style={{ width: "100%", height: u(2.2), background: "rgba(255,255,255,0.08)", border: "1px solid rgba(150,190,220,0.3)" }}>
-          <div style={{ width: `${speedFrac * 100}%`, height: "100%", background: ship.warp ? "linear-gradient(90deg,#4aa8ff,#bfe6ff)" : ship.mwd ? "#f0a040" : "#6fd0ff" }} />
+        {/* The bar: the throttle under real physics, the speed in the arcade; the heat of the air under it. */}
+        <div style={{ width: "100%", height: u(2.2), background: "rgba(255,255,255,0.08)", border: "1px solid rgba(150,190,220,0.3)" }} title={real ? "Throttle" : "Speed"}>
+          <div style={{ width: `${speedFrac * 100}%`, height: "100%", background: ship.warp ? "linear-gradient(90deg,#4aa8ff,#bfe6ff)" : real ? "linear-gradient(90deg,#ff9a3c,#ffe08a)" : ship.mwd ? "#f0a040" : "#6fd0ff" }} />
         </div>
-        <div style={{ fontSize: u(7), color: "#fff" }} data-testid="space-speed">{speedText(speed)}</div>
+        {ship.heat > 0.02 && (
+          <div style={{ width: "100%", height: u(1.2), background: "rgba(255,255,255,0.05)" }} title="Heat">
+            <div style={{ width: `${ship.heat * 100}%`, height: "100%", background: "linear-gradient(90deg,#ff5a1f,#ffd27a)" }} />
+          </div>
+        )}
+        <div style={{ fontSize: u(7), color: "#fff" }} data-testid="space-speed">{speedText(speed)}{real && !ship.warp ? <span style={{ fontSize: u(4.2), color: "#8fa6b8" }}> {airSpeed !== null ? "through the air" : `relative to ${frameName}`}</span> : null}</div>
         <div style={{ color: ship.warp ? "#9fd8ff" : "#cfe2f0" }} data-testid="space-status">{status}</div>
-        <div style={{ display: "flex", gap: u(1.5) }}>
-          <Btn onClick={() => s.give({ kind: "stop" })} title="Stop (Space)">Stop</Btn>
-          <Btn active={ship.mwd} onClick={() => { ship.mwd = !ship.mwd; refresh(); }} title="Microwarpdrive (M)">MWD</Btn>
+        {real && orbit && !ship.warp && (
+          <div style={{ color: "#a8d8f0", fontSize: u(4.4), textAlign: "center" }} data-testid="space-orbit">
+            {orbitLine(orbit)}{ship.dv > 0.0005 ? ` · Δv spent ${ship.dv.toFixed(2)} km/s` : ""}
+          </div>
+        )}
+        {real && !ship.warp && !ship.landed && (
+          <div style={{ display: "flex", gap: u(1), flexWrap: "wrap", justifyContent: "center" }}>
+            {([["prograde", "Prograde", "Burn along the orbit: higher on the far side"], ["retrograde", "Retrograde", "Burn against the orbit: lower on the far side"],
+              ["normal", "Normal", "Burn across the orbit: tilt it"], ["antinormal", "Anti-normal", "Burn across the orbit the other way"],
+              ["radial", "Radial out", "Burn away from the body"], ["antiradial", "Radial in", "Burn toward the body"]] as const).map(([d, label, title]) => (
+              <Btn key={d} testid={`burn-${d}`} active={order.kind === "burn" && order.dir === d} title={title} onClick={() => burn(d)}>{label}</Btn>
+            ))}
+            <Btn testid="burn-circularize" active={order.kind === "circularize"} title="Round the orbit off where the ship is now" onClick={() => { s.give({ kind: "circularize" }); refresh(); }}>Circularize</Btn>
+          </div>
+        )}
+        <div style={{ display: "flex", gap: u(1.5), flexWrap: "wrap", justifyContent: "center" }}>
+          {real
+            ? <Btn onClick={() => { s.give({ kind: "coast" }); refresh(); }} active={order.kind === "coast"} title="Engine off (Space)">Coast</Btn>
+            : <Btn onClick={() => s.give({ kind: "stop" })} title="Stop (Space)">Stop</Btn>}
+          {real && <Btn onClick={() => { s.give({ kind: "stop" }); refresh(); }} active={order.kind === "stop"} title="Hold position: the engine holds the ship up against gravity">Hold</Btn>}
+          <Btn active={ship.mwd} onClick={() => { ship.mwd = !ship.mwd; refresh(); }} title="Microwarpdrive (M): five times the speed, or the thrust">MWD</Btn>
           <Btn onClick={() => { s.lookAt(null); refresh(); }} active={s.camera.target === "ship"} title="Camera on the ship">Ship</Btn>
-          <Btn testid="space-land" disabled={!site} onClick={() => { s.landing = 2.5; }} title="Land (D): only from low over the Earth">Land</Btn>
+          <Btn testid="space-land" disabled={!site || ship.landed} active={order.kind === "land"}
+            onClick={() => { if (real) { s.give({ kind: "land" }); refresh(); } else s.landing = 2.5; }}
+            title={real ? "Land (D): a burn to bring the orbit into the air, then re-entry and a parachute — you come down where the physics takes you" : "Land (D): only from low over the Earth"}>Land</Btn>
           <Btn onClick={() => game.land(true)} title="Fly straight home to where you launched">Return home</Btn>
+          <Btn testid="space-physics" active={real} onClick={() => { const next = real ? "arcade" : "newton"; s.setPhysics(next); game.spacePhysics = next; refresh(); }}
+            title={real ? "Real physics: gravity, orbits and a 5 g engine. Click for arcade flight (EVE's rules, no gravity)." : "Arcade flight. Click for real physics."}>{real ? "Real physics" : "Arcade"}</Btn>
         </div>
       </div>
 
@@ -341,3 +387,38 @@ function lightTime(km: number): string {
   return `${(s / 3600).toFixed(1)} hours`;
 }
 
+
+/** What the ship is doing, under real physics. */
+function newtonStatus(ship: import("../space/flight").Ship, orbit: { periapsis: number; apoapsis: number; e: number; altitude: number } | null, frameName: string): string {
+  const o = ship.order;
+  switch (o.kind) {
+    case "coast":
+      if (!orbit) return "Coasting";
+      if (orbit.e >= 1) return `Coasting — on an escape path from ${frameName}`;
+      if (orbit.periapsis < 0) return `Coasting — falling toward ${frameName}`;
+      return `Coasting — in orbit round ${frameName}`;
+    case "burn": return `Burning ${o.dir === "antinormal" ? "anti-normal" : o.dir === "antiradial" ? "radial in" : o.dir === "radial" ? "radial out" : o.dir}`;
+    case "circularize": return "Circularizing";
+    case "stop": return ship.engine > 0.01 ? `Holding position — the engine holding the ship up against ${frameName}'s pull` : "Holding position";
+    case "land":
+      if (ship.chute > 0) return `Under the parachute — ${Math.max(0, Math.round((orbit?.altitude ?? 0) * 10) / 10)} km up`;
+      if (ship.heat > 0.02) return "Re-entry";
+      return o.phase === "entry" ? `Falling into the air — ${Math.round(orbit?.altitude ?? 0).toLocaleString("en")} km up` : "Deorbit burn";
+    case "orbit":
+      if (o.target !== ship.frame || !orbit) return `Orbiting ${frameName}`;
+      return o.phase === "burn" ? "Transfer burn" : o.phase === "coast" ? "Coasting to the new height" : "Rounding the orbit off";
+    case "warp": return ship.spool > 0 ? "Warp drive spooling up…" : "Turning to align…";
+    case "approach": return "Approaching";
+    case "keep": return "Keeping at range";
+    case "align": return "Aligning";
+    case "heading": return "Flying";
+  }
+}
+
+/** "Pe 398 km · Ap 402 km · 92 minutes · 51.6°": the orbit, the way a flight controller reads it. */
+function orbitLine(o: { periapsis: number; apoapsis: number; period: number; incl: number; e: number; altitude: number }): string {
+  const km = (n: number) => `${Math.round(n).toLocaleString("en")} km`;
+  if (o.e >= 1) return `Escape trajectory · closest ${km(o.periapsis)} · ${km(o.altitude)} up`;
+  if (o.periapsis < 0) return `Suborbital · top ${km(o.apoapsis)} · ${km(o.altitude)} up`;
+  return `Pe ${km(o.periapsis)} · Ap ${km(o.apoapsis)} · ${periodText(o.period)} · ${o.incl.toFixed(1)}°`;
+}

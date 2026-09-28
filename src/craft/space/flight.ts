@@ -18,6 +18,10 @@
  *   the ship keeps its speed relative to the new body: space is a set of places,
  *   as EVE's grids are, rather than one big inertial frame.
  *
+ * That is the arcade model, kept for anyone who wants EVE's grids. The real
+ * one — gravity, a thrust-limited engine, orbits that are orbits — is in
+ * newton.ts, and uses this file's orders, warp and frames.
+ *
  * Pure state and a step function, so the rules are tested without a screen.
  */
 import { add, AU, cross, dot, len, norm, scale, sub, type Vec3 } from "./kepler";
@@ -32,19 +36,30 @@ export interface ShipClass {
   warpSpeed: number;
   /** Length, km: how close things may come. */
   length: number;
+  /** The engine's acceleration, km/s², under real physics (newton.ts). */
+  thrust: number;
 }
 
 /** The ship a launch puts you in: a light scout, frigate-sized and quick in and out of warp. */
-export const SCOUT: ShipClass = { name: "Kestrel-class scout", maxSpeed: 0.42, tau: 2.4, warpSpeed: 5, length: 0.042 };
+export const SCOUT: ShipClass = { name: "Kestrel-class scout", maxSpeed: 0.42, tau: 2.4, warpSpeed: 5, length: 0.042, thrust: 0.05 };
+
+/** The burns a pilot makes by hand, named the way flight dynamics names them: along, against or across the orbit. */
+export type BurnDir = "prograde" | "retrograde" | "normal" | "antinormal" | "radial" | "antiradial";
 
 export type Order =
   | { kind: "stop" }
   | { kind: "heading"; dir: Vec3 }
   | { kind: "approach"; target: string }
-  | { kind: "orbit"; target: string; range: number }
+  | { kind: "orbit"; target: string; range: number; phase?: "circ1" | "burn" | "coast" | "circ2" }
   | { kind: "keep"; target: string; range: number }
   | { kind: "align"; target: string }
-  | { kind: "warp"; target: string; range: number };
+  | { kind: "warp"; target: string; range: number }
+  /** Real physics only: the engine off, falling round whatever the ship is near. */
+  | { kind: "coast" }
+  | { kind: "burn"; dir: BurnDir }
+  | { kind: "circularize" }
+  /** Down to the Earth: a burn to bring the orbit into the air, and then the air does the rest. */
+  | { kind: "land"; phase?: "deorbit" | "entry" };
 
 export interface Warp {
   target: string;
@@ -69,6 +84,19 @@ export interface Ship {
   warp: Warp | null;
   /** The microwarpdrive: five times the speed below warp, as EVE's MWD gives. */
   mwd: boolean;
+  /** Arcade (EVE's grids, no gravity) or newton (gravity, a thrust-limited engine: newton.ts). */
+  physics: "arcade" | "newton";
+  /** Δv the engine has spent, km/s. */
+  dv: number;
+  /** How hard the engine is burning now, 0..1. */
+  engine: number;
+  /** Heating in the air, 0..1, and how far open the parachute is, 0 (stowed) to 1. */
+  heat: number;
+  chute: number;
+  /** Seconds the warp drive has been spooling up, pointed at its target. */
+  spool: number;
+  /** On the ground. */
+  landed: boolean;
 }
 
 /** What the ship needs to know of the Solar System at this moment. */
@@ -78,6 +106,12 @@ export interface Surroundings {
   radius(id: string): number;
   /** The bodies whose neighbourhoods a ship can be in, with their reach (km): smallest reach first. */
   places: { id: string; reach: number }[];
+  /** For real physics: a body's GM (km³/s²), its velocity from the Sun (km/s), what it goes round, its north pole, and its spin (rad/s about the pole). */
+  gm?(id: string): number;
+  vel?(id: string): Vec3;
+  parent?(id: string): string | null;
+  pole?(id: string): Vec3;
+  spin?(id: string): Vec3;
 }
 
 /** How close an order to approach may bring the ship: above the surface (a little more for a big world). */
@@ -92,8 +126,11 @@ export function warpInDistance(radius: number, range: number): number {
 
 export const MIN_WARP = 150;
 
-export function newShip(cls: ShipClass, frame: string, pos: Vec3, heading: Vec3 = [1, 0, 0]): Ship {
-  return { cls, frame, pos, vel: [0, 0, 0], heading: norm(heading), order: { kind: "stop" }, warp: null, mwd: false };
+export function newShip(cls: ShipClass, frame: string, pos: Vec3, heading: Vec3 = [1, 0, 0], physics: Ship["physics"] = "arcade"): Ship {
+  return {
+    cls, frame, pos, vel: [0, 0, 0], heading: norm(heading), order: { kind: physics === "newton" ? "coast" : "stop" }, warp: null, mwd: false,
+    physics, dv: 0, engine: 0, heat: 0, chute: 0, spool: 0, landed: false,
+  };
 }
 
 /** The ship's position, km from the Sun. */
@@ -103,10 +140,10 @@ export function shipPosition(s: Ship, w: Surroundings): Vec3 {
 
 export const topSpeed = (s: Ship): number => s.cls.maxSpeed * (s.mwd ? 5 : 1);
 
-/** A body's position relative to the ship. */
-function toward(s: Ship, w: Surroundings, id: string): Vec3 | null {
+/** A body's position relative to the ship (or to a point, heliocentric). */
+function toward(s: Ship, w: Surroundings, id: string, from?: Vec3): Vec3 | null {
   const p = w.pos(id);
-  return p ? sub(p, shipPosition(s, w)) : null;
+  return p ? sub(p, from ?? shipPosition(s, w)) : null;
 }
 
 /** Whether the ship is pointed at the target and fast enough to go to warp. */
@@ -126,18 +163,23 @@ export function warpRefusal(s: Ship, w: Surroundings, target: string, range: num
   return null;
 }
 
-/** The velocity (km/s, relative to the frame) that the order wants now. */
-function wanted(s: Ship, w: Surroundings): Vec3 {
+/**
+ * The velocity (km/s, relative to the frame) that the order wants now — or,
+ * given a heliocentric point, would want there (newton.ts reads the field a
+ * moment ahead to know how it curves).
+ */
+export function wanted(s: Ship, w: Surroundings, at?: Vec3): Vec3 {
   const o = s.order, vmax = topSpeed(s);
+  const toward_ = (id: string) => toward(s, w, id, at);
   switch (o.kind) {
-    case "stop": return [0, 0, 0];
+    case "stop": case "coast": case "burn": case "circularize": case "land": return [0, 0, 0];
     case "heading": return scale(norm(o.dir), vmax);
     case "align": case "warp": {
-      const t = toward(s, w, o.target);
+      const t = toward_(o.target);
       return t ? scale(norm(t), vmax) : [0, 0, 0];
     }
     case "approach": case "keep": {
-      const t = toward(s, w, o.target);
+      const t = toward_(o.target);
       if (!t) return [0, 0, 0];
       const d = len(t);
       const stop = o.kind === "keep" ? w.radius(o.target) + o.range : standoff(w.radius(o.target), s.cls);
@@ -147,7 +189,7 @@ function wanted(s: Ship, w: Surroundings): Vec3 {
       return o.kind === "approach" && gap < 0 ? [0, 0, 0] : scale(norm(t), vmax * k);
     }
     case "orbit": {
-      const t = toward(s, w, o.target);
+      const t = toward_(o.target);
       if (!t) return [0, 0, 0];
       const d = len(t), R = w.radius(o.target) + o.range;
       const inward = norm(t);
@@ -200,6 +242,23 @@ export function reframe(s: Ship, w: Surroundings, frame: string): void {
   s.frame = frame;
 }
 
+/**
+ * Into warp: the ship now keeps its place relative to where it is going, so a
+ * moving target cannot slip away. False (and an approach instead) if it is
+ * already too close to need it.
+ */
+export function engageWarp(s: Ship, w: Surroundings, o: { target: string; range: number }): boolean {
+  reframe(s, w, o.target);
+  const d = len(s.pos);
+  const left = d - warpInDistance(w.radius(o.target), o.range);
+  if (left > MIN_WARP) {
+    s.warp = { target: o.target, range: o.range, covered: 0, left, speed: len(s.vel), dir: scale(norm(s.pos), -1) };
+    return true;
+  }
+  s.order = { kind: "approach", target: o.target };
+  return false;
+}
+
 /** Warp's shape: how fast speed builds with distance covered, and falls with distance left (per second). */
 const WARP_RATE = 3;
 /** The speed a warp ends at (km/s). */
@@ -221,21 +280,12 @@ export function step(s: Ship, w: Surroundings, dt: number): "warp" | "arrived" |
   s.heading = norm(add(s.heading, scale(sub(norm(aim), s.heading), Math.min(1, dt * 3))));
   let event: "warp" | null = null;
   const o = s.order;
-  if (o.kind === "warp" && aligned(s, w, o.target)) {
-    // Into warp: the ship now keeps its place relative to where it is going, so a moving target cannot slip away.
-    reframe(s, w, o.target);
-    const d = len(s.pos);
-    const left = d - warpInDistance(w.radius(o.target), o.range);
-    if (left > MIN_WARP) {
-      s.warp = { target: o.target, range: o.range, covered: 0, left, speed: len(s.vel), dir: scale(norm(s.pos), -1) };
-      event = "warp";
-    } else s.order = { kind: "approach", target: o.target };
-  }
+  if (o.kind === "warp" && aligned(s, w, o.target) && engageWarp(s, w, o)) event = "warp";
   if (!s.warp) reframe(s, w, placeOf(w, shipPosition(s, w), s.frame));
   return event;
 }
 
-function warpStep(s: Ship, w: Surroundings, dt: number): "arrived" | null {
+export function warpStep(s: Ship, w: Surroundings, dt: number): "arrived" | null {
   const wp = s.warp!;
   const vw = s.cls.warpSpeed * AU, v0 = s.cls.maxSpeed;
   // Each limit on the speed, integrated exactly over the step; the smallest advance is the one that binds.

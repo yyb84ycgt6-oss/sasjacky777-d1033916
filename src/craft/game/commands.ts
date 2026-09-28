@@ -23,6 +23,9 @@ import { PROFESSIONS, villageInRegion, VILLAGE_REGION, type Profession } from ".
 import type { GameMode } from "../engine/player";
 import { modeDef, MODES as GAME_MODES } from "../modes/modes";
 import type { Game } from "./game";
+import { jdFromMs } from "../space/kepler";
+import { nextPhase } from "../space/sky";
+import { describeSky, jdOfLocal, localClock, nextCentralEclipse, nextSeenEclipse, nextShowerPeak, placeText, SHOWER_NAMES } from "../space/skyReport";
 import { DEFAULT_RULES, type GameRules } from "./save";
 
 interface Line { text: string; color?: string }
@@ -48,6 +51,7 @@ const HELP = [
   "/critter give <species> [level] | wild <species> [level] | heal | coins <n> | list",
   "/battle <player>, /trade <player>, /accept, /decline   (critter link battles and trades)",
   "/space, /space land, /space home   (launch to orbit, and come back down)",
+  "/sky   (what is up tonight), /sky now | date <yyyy-mm-dd> [hh:mm] | moon new|full|first|last | eclipse [solar|lunar] | chase [annular] | shower <name> | place [home]",
   "/effect <speed|strength|fire_resistance|...> [seconds] [level] | /effect clear",
   "/enchant <enchantment> [level]   (the held item, e.g. /enchant sharpness 5)",
   "/xp add <amount>, /clear, /kill, /seed, /spawnpoint",
@@ -288,6 +292,7 @@ export function runCommand(game: Game, line: string): Line[] {
       game.launch();
       return [{ text: "Launch sequence started." }];
     }
+    case "sky": return skyCommand(game, args, needCheats, needHost);
     case "accept": return [{ text: game.critters.link.accept() }];
     case "decline": return [{ text: game.critters.link.decline() }];
     case "critter": {
@@ -468,4 +473,75 @@ function nearestInRegions(
     if (best && bestD < r * regionBlocks) break;
   }
   return best;
+}
+
+/**
+ * /sky: the real sky over the player (space/sky.ts) in words, and — with cheats, and only for the host, whose clock
+ * the world keeps — jumps through it: to a date, a phase of the Moon, the next eclipse seen from here, a shower's
+ * peak night, or the next total eclipse anywhere, taking the world to stand under its path.
+ */
+function skyCommand(game: Game, args: string[], needCheats: () => Line[] | null, needHost: () => Line[] | null): Line[] {
+  if (game.dimension !== "overworld") return [{ text: "There is no sky here.", color: ERR }];
+  if (!game.realSky()) return [{ text: "This world keeps the old sky: switch on The Real Sky in its Mods.", color: ERR }];
+  const sub = (args[0] ?? "").toLowerCase();
+  const { lat, lon } = game.latLon();
+  const jd = game.skyDate();
+  if (!sub) return describeSky(jd, lat, lon).map((text) => ({ text }));
+  if (sub === "place" && !args[1]) return [{ text: `This spot is ${placeText(lat, lon)}${game.meta.place ? " (the world has been moved; /sky place home puts it back)" : ""}.` }];
+  const denied = needCheats() ?? needHost();
+  if (denied) return denied;
+  const went = (what: string): Line[] => [{ text: `${what} — ${localClock(game.skyDate(), game.latLon().lon)} local solar time.` }];
+  switch (sub) {
+    case "now":
+      game.setSkyDate(jdFromMs(Date.now()));
+      return went("The sky is the real one, right now");
+    case "date": {
+      const [h, m] = (args[2] ?? "").split(":").map(Number);
+      const hours = args[2] ? (Number.isFinite(h) ? h : 0) + (Number.isFinite(m) ? m : 0) / 60 : ((game.time % 24000) / 1000 + 6) % 24;
+      const target = jdOfLocal(args[1] ?? "", hours, lon);
+      if (!args[1] || target === null) return [{ text: "Usage: /sky date <yyyy-mm-dd> [hh:mm]   (local solar time)", color: ERR }];
+      game.setSkyDate(target);
+      return went("The sky has moved");
+    }
+    case "moon": {
+      const phases: Record<string, number> = { new: 0, first: 90, full: 180, last: 270 };
+      const want = phases[(args[1] ?? "").toLowerCase()];
+      if (want === undefined) return [{ text: "Usage: /sky moon new|full|first|last", color: ERR }];
+      game.setSkyDate(nextPhase(jd, want));
+      return went(`The Moon is ${args[1]!.toLowerCase()}`);
+    }
+    case "eclipse": {
+      const which = args[1]?.toLowerCase() === "solar" ? "solar" : args[1]?.toLowerCase() === "lunar" ? "lunar" : null;
+      const seen = nextSeenEclipse(jd, lat, lon, which);
+      if (!seen) return [{ text: "No eclipse can be seen from here in the next twenty years or so. /sky chase goes to one.", color: ERR }];
+      // Start a while before the deepest moment, so it can be watched coming on.
+      game.setSkyDate(seen.at - (seen.eclipse.kind === "solar" ? 25 : 50) / 1440);
+      return went(`A ${seen.kind} eclipse is coming${seen.eclipse.kind === "solar" ? ` (${Math.round(seen.coverage * 100)}% of the Sun at its deepest)` : ""}`);
+    }
+    case "chase": {
+      const type = args[1]?.toLowerCase() === "annular" ? "annular" : "total";
+      const next = nextCentralEclipse(jd, type);
+      if (!next) return [{ text: `No ${type} eclipse found ahead.`, color: ERR }];
+      game.moveWorldTo(next.lat, next.lon);
+      game.setSkyDate(next.jd - 25 / 1440, next.lon);
+      return went(`The world has moved to ${placeText(next.lat, next.lon)}, under the path of the ${type} eclipse of ${localClock(next.jd, next.lon).slice(0, 10)}. /sky place home moves it back`);
+    }
+    case "shower": {
+      const peak = nextShowerPeak(jd, args.slice(1).join(" ") || "x");
+      if (!peak) return [{ text: `Usage: /sky shower <name>   (${SHOWER_NAMES.join(", ")})`, color: ERR }];
+      // Two in the morning nearest the peak: the radiant is high, and the side of the Earth we stand on faces
+      // forward along its orbit, into the stream.
+      const local = peak.jd + lon / 360;
+      const twoAm = Math.floor(local - 0.5) + 0.5 + 2 / 24;
+      const best = Math.abs(twoAm + 1 - local) < Math.abs(twoAm - local) ? twoAm + 1 : twoAm;
+      game.setSkyDate(best - lon / 360);
+      return went(`The ${peak.name} are at their peak tonight`);
+    }
+    case "place": {
+      if (args[1]?.toLowerCase() !== "home") return [{ text: "Usage: /sky place [home]", color: ERR }];
+      game.meta.place = undefined;
+      return [{ text: `The world is back where its seed put it: this spot is ${placeText(game.latLon().lat, game.latLon().lon)}.` }];
+    }
+  }
+  return [{ text: "Usage: /sky, /sky now | date <yyyy-mm-dd> [hh:mm] | moon new|full|first|last | eclipse [solar|lunar] | chase [annular] | shower <name> | place [home]", color: ERR }];
 }

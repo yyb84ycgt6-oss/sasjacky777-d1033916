@@ -89,6 +89,10 @@ export const MODS: readonly ModFeature[] = [
     id: "wildlife", name: "Wildlife", inspiredBy: "Alex's Mobs, Naturalist", url: "https://www.curseforge.com/minecraft/mc-mods/alexs-mobs",
     description: "Wolf packs to tame with bones — they sit, follow and fight for you — skittish deer to stalk, and bears best left alone.", toggle: true,
   },
+  {
+    id: "real_sky", name: "The Real Sky", inspiredBy: "Stellarium, Enhanced Celestials", url: "https://stellarium.org",
+    description: "The sky over the world is the real one over its place on Earth: the Sun keeps real hours for the season, the Moon runs through its phases, and the stars, planets, comets, meteor showers and eclipses come when they really do.", toggle: true,
+  },
 ];
 
 /** Whether a feature is on in a world: everything is, unless the world switched it off. */

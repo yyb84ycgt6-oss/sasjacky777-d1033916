@@ -140,7 +140,6 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Ops & Intel",
     items: [
       { label: "🛡️ VeilOps Threat Intel", href: "/veilops", title: "VeilOps — factual threat intelligence reference (MITRE ATT&CK, CISA KEV, APT profiles)" },
-      { label: "🛰️ Sentinel · Crypto Forensics", href: "/sentinel", title: "RugDNA Sentinel — synthetic crypto-forensics reference dashboard" },
       { label: "🏔 Apex Hub (placeholder)", href: "/apex", title: "Apex Intelligence Hub — reserved mount point" },
       { label: "🧊 eYe Pod Station", href: "/pods", title: "eYe Pod Station — 24 compression pods with SHA-256 integrity" },
     ],

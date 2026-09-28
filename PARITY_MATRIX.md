@@ -5,7 +5,7 @@ run `node scripts/gen-parity-matrix.mjs` to rebuild it from `src/lib/routeManife
 and `src/eru/routes.generated.ts`, so a renamed route changes this file in the same
 commit instead of quietly making it wrong.
 
-Last generated: 2026-09-27 · 50 native routes + 84 Eru modules.
+Last generated: 2026-09-27 · 48 native routes + 84 Eru modules.
 
 ## How to read the status column
 
@@ -74,8 +74,6 @@ this tracker, and pretending otherwise is what §6 was trying to avoid.
 | `/gunit/keys` | G-Unit API Keys | native | ? | ? |
 | `/sphere` | Sphere Command | native | ? | ? |
 | `/veilops` | VeilOps Threat Intel | native | ? | ? |
-| `/sentinel` | Crypto Sentinel | native | ? | ? |
-| `/sentinel/board` | Sentinel Board | native | ? | ? |
 | `/apex` | Apex Hub | native | ? | ? |
 | `/marvels` | Microscopic Marvels | native | ? | ? |
 | `/pods` | eYe Pod Station | native | ? | ? |
