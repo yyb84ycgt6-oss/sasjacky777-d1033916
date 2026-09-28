@@ -43,9 +43,17 @@ through — the same shape as the four `contextRouter.ts` ships hard-coded, but
 authored at runtime, testable on their own engine ladder, exportable as files
 and synced between your devices. See [INDEX_FORGE.md](INDEX_FORGE.md).
 
-The pill — mounted on every screen — is where they get used: commands resolve
-against the route manifest with no model involved, questions route to whichever
-index is expert in them. See [INDEX_PILL.md](INDEX_PILL.md).
+SANDi — on the nav bar, on every screen, Ctrl/⌘+K — is where they get used:
+commands resolve against the route manifest with no model involved, questions
+route to whichever index is expert in them, and anything no index claims goes to
+a built-in specialist on its weights ladder. See [NAV_BAR.md](NAV_BAR.md).
+
+## The nav bar
+
+One bar, customisable per person, in liquid glass — a port of Cybernetic's. It
+replaced four that stacked on top of each other, and can hold every page and
+every PC app, discovered from the manifest so new ones appear on their own. See
+[NAV_BAR.md](NAV_BAR.md).
 
 ## CollinSurvivalCraft
 

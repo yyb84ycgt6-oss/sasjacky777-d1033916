@@ -18,10 +18,8 @@ import NotFound from "./pages/NotFound";
 import Welcome from "./pages/Welcome";
 import { ERU_ALIASES } from "./lib/routeManifest";
 import RouteDebugOverlay from "./components/RouteDebugOverlay";
-import { UniversalFloatingNavBar } from "./components/UniversalFloatingNavBar";
-import { GlobalStickyNotes } from "./components/GlobalStickyNotes";
-import { GuideDock } from "./components/GuideDock";
-import { IndexPill } from "./components/IndexPill";
+import { GlobalStickyNotes, StickyNotesProvider } from "./components/GlobalStickyNotes";
+import { JackieNavBar } from "./components/nav/JackieNavBar";
 
 // Every page below is its own chunk, loaded when its route is first visited.
 // They were all imported eagerly, which put ~50 pages — 3D scenes, editors,
@@ -370,10 +368,13 @@ const App = () => (
               <RouteDebugOverlay />
 
               </SandboxCatcher>
-              <UniversalFloatingNavBar />
-              <GlobalStickyNotes />
-              <GuideDock />
-              <IndexPill />
+              {/* One bar. It replaced four that stacked on top of each other —
+                  the main nav, the Guide, the notes toolbar and the Index Pill —
+                  and carries what each of them did (src/components/nav/). */}
+              <StickyNotesProvider>
+                <GlobalStickyNotes />
+                <JackieNavBar />
+              </StickyNotesProvider>
             </BrowserRouter>
             </TooltipProvider>
           </I18nProvider>
