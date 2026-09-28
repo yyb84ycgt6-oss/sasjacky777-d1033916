@@ -2,6 +2,7 @@
  * Everything before a world is running: the title screen, the world list,
  * world creation and joining a friend.
  */
+import { ensureMainWorld, isMainWorld, MAIN_WORLD_NAME, resetMainWorld } from "../game/mainWorld";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MODS, modEnabled } from "../engine/mods";
 import { ModsList } from "./ModsScreen";
@@ -73,8 +74,8 @@ export function Logo() {
   );
 }
 
-export function TitleScreen({ onSingle, onMulti, onOptions, onExit, message, settings }: {
-  onSingle: () => void; onMulti: () => void; onOptions: () => void; onExit?: () => void; message?: string; settings: Settings;
+export function TitleScreen({ onMain, onSingle, onMulti, onOptions, onExit, message, settings }: {
+  onMain?: () => void; onSingle: () => void; onMulti: () => void; onOptions: () => void; onExit?: () => void; message?: string; settings: Settings;
 }) {
   const exitLabel = onExit ? edition().exitLabel : null;
   return (
@@ -86,6 +87,7 @@ export function TitleScreen({ onSingle, onMulti, onOptions, onExit, message, set
           <div style={{ maxWidth: "calc(var(--u) * 240)", marginBottom: "calc(var(--u) * 6)", textAlign: "center", color: "#ffcc55", fontSize: "calc(var(--u) * 6.5)", lineHeight: 1.5 }}>{message}</div>
         )}
         <div style={{ width: "min(100%, calc(var(--u) * 200))", display: "flex", flexDirection: "column", gap: "calc(var(--u) * 4)" }}>
+          {onMain && <Button wide onClick={onMain}>{`Main World: ${MAIN_WORLD_NAME}`}</Button>}
           <Button wide onClick={onSingle}>Singleplayer</Button>
           <Button wide onClick={onMulti}>Multiplayer</Button>
           <div style={{ display: "grid", gridTemplateColumns: exitLabel ? "1fr 1fr" : "1fr", gap: "calc(var(--u) * 4)" }}>
@@ -129,7 +131,9 @@ export function WorldSelect({ saves, ready, onPlay, onCreate, onBack }: {
     try {
       // A world that was just quit may still be writing its last save.
       await ready.catch(() => {});
-      const list = await saves.listWorlds();
+      // The main world is always there: made fresh if it is missing, and listed first.
+      await ensureMainWorld(saves);
+      const list = (await saves.listWorlds()).sort((a, b) => Number(isMainWorld(b)) - Number(isMainWorld(a)));
       setWorlds(list);
       setSelected((s) => (s && list.some((w) => w.id === s) ? s : list[0]?.id ?? null));
     } catch (err) {
@@ -179,8 +183,11 @@ export function WorldSelect({ saves, ready, onPlay, onCreate, onBack }: {
     await reload();
   });
 
-  const remove = (w: WorldMeta) => run("Delete failed", async () => {
-    await saves.deleteWorld(w.id);
+  const remove = (w: WorldMeta) => run(isMainWorld(w) ? "Reset failed" : "Delete failed", async () => {
+    if (isMainWorld(w)) {
+      await resetMainWorld(saves);
+      setNotice(`${MAIN_WORLD_NAME} is back as it was on the first morning.`);
+    } else await saves.deleteWorld(w.id);
     setConfirmDelete(false);
     await reload();
   });
@@ -199,6 +206,22 @@ export function WorldSelect({ saves, ready, onPlay, onCreate, onBack }: {
         onBack={() => { setCloud(false); void reload(); }}
         onDownloaded={(meta) => { setCloud(false); void reload().then(() => setSelected(meta.id)); setNotice(`Downloaded "${meta.name}".`); }}
       />
+    );
+  }
+
+  if (confirmDelete && sel && isMainWorld(sel)) {
+    return (
+      <>
+        <MenuBackground />
+        <MenuFrame title="Reset the main world?" dim={false}>
+          <div style={{ textAlign: "center", fontSize: "calc(var(--u) * 7)", lineHeight: 1.6 }}>
+            '{sel.name}' is the main world, and cannot be deleted. Resetting it puts it back exactly as it was on the first
+            morning — every house shut, every cupboard full — and everything you did there is gone. Export it first to keep a copy.
+          </div>
+          <Button wide danger disabled={busy} onClick={() => void remove(sel)}>Reset World</Button>
+          <Button wide onClick={() => setConfirmDelete(false)}>Cancel</Button>
+        </MenuFrame>
+      </>
     );
   }
 
@@ -257,7 +280,10 @@ export function WorldSelect({ saves, ready, onPlay, onCreate, onBack }: {
                       onBlur={(e) => void rename(w, e.target.value)}
                     />
                   ) : (
-                    <div style={{ fontSize: "calc(var(--u) * 7.5)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{w.name}</div>
+                    <div style={{ fontSize: "calc(var(--u) * 7.5)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {isMainWorld(w) && <span data-testid="main-world-badge" style={{ color: "#ffd24a", marginRight: "calc(var(--u) * 2)" }}>★ MAIN WORLD</span>}
+                      {w.name}
+                    </div>
                   )}
                   <div className="bc-sub">{when(w.lastPlayed)}</div>
                   <div className="bc-sub" style={{ color: w.hardcore ? "#ff5555" : undefined }}>
@@ -277,8 +303,8 @@ export function WorldSelect({ saves, ready, onPlay, onCreate, onBack }: {
         <div style={{ width: "min(100%, calc(var(--u) * 310))", margin: "calc(var(--u) * 4) auto 0", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(calc(var(--u) * 72), 1fr))", gap: "calc(var(--u) * 3)" }}>
           <Button disabled={!sel || busy} onClick={() => sel && onPlay(sel)}>Play Selected World</Button>
           <Button disabled={busy} onClick={onCreate}>Create New World</Button>
-          <Button disabled={!sel || busy} onClick={() => sel && setRenaming(sel.id)}>Rename</Button>
-          <Button disabled={!sel || busy} onClick={() => setConfirmDelete(true)}>Delete</Button>
+          <Button disabled={!sel || busy || isMainWorld(sel)} onClick={() => sel && setRenaming(sel.id)}>Rename</Button>
+          <Button disabled={!sel || busy} onClick={() => setConfirmDelete(true)}>{sel && isMainWorld(sel) ? "Reset…" : "Delete"}</Button>
           <Button disabled={!sel || busy} onClick={() => sel && void exportWorld(sel)}>Export…</Button>
           <Button disabled={busy} onClick={() => fileRef.current?.click()}>Import…</Button>
           {cloudAvailable() && <Button disabled={!sel || busy} onClick={() => sel && void upload(sel)}>☁ Upload to Cloud</Button>}

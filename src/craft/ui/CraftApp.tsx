@@ -3,6 +3,7 @@
  * multiplayer → a friend's world. Mounted full-screen over the app; leaving
  * saves whatever is running.
  */
+import { ensureMainWorld } from "../game/mainWorld";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { Role } from "../game/game";
 import { SaveStore, type WorldMeta } from "../game/save";
@@ -132,6 +133,7 @@ export function CraftApp({ onExit }: { onExit?: () => void }) {
         <TitleScreen
           settings={settings}
           message={view.message ?? saves.problem ?? undefined}
+          onMain={() => void lastSave.catch(() => {}).then(() => ensureMainWorld(saves)).then((m) => play(m, "local", null), (err: Error) => setView({ kind: "title", message: `The main world could not be opened: ${err.message}` }))}
           onSingle={() => setView({ kind: "worlds" })}
           onMulti={() => { setJoin({ busy: false, error: null }); setView({ kind: "multiplayer" }); }}
           onOptions={() => setView({ kind: "options" })}

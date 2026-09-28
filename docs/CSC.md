@@ -2,7 +2,9 @@
 
 `/craft` (also `/csc` and `/minecraft`, and **Games & Worlds → ⛏️
 CollinSurvivalCraft** in the sidebar) is a block-building survival game in the
-tradition of Minecraft:
+tradition of Minecraft, with a main world of its own — Ashgrove County, a
+sealed-off county of five towns to survive the outbreak in (see
+[Ashgrove County](#ashgrove-county-the-main-world)):
 survival, creative and hardcore; mining, crafting, smelting, farming; mobs,
 water and lava, TNT, beds, day and night, weather; saves on the device, in a
 file or in the cloud; the Nether and the End, with strongholds, End cities,
@@ -14,7 +16,7 @@ world — the Moon's phases, eclipses, meteor showers and comets on their real
 dates (see [The real sky](#the-real-sky)); 52 advancements to earn;
 eighteen features borrowed from the best-loved mods (minimap, waystones,
 seasons, gravestones, tameable wolves, catacombs and more — see [Mods](#mods));
-thirty-seven game modes on sixteen map packs, among them Primal (after ARK:
+thirty-eight game modes on seventeen map packs, among them Primal (after ARK:
 tame, saddle and ride dinosaurs), Dead Zone (after DayZ) with four more zombie
 modes, five critter modes (after Pokémon, Pixelmon and Cobblemon: catch,
 battle, evolve and trade original monsters, and battle your friends), and six city and casino modes (after
@@ -276,9 +278,72 @@ Online, the party travels to the End and home together as through the Nether;
 gateways and pearls move only the player who used them, and the dragon's
 death is everyone's advancement.
 
+## Ashgrove County (the main world)
+
+**Main World: Ashgrove County** on the title screen, and the first entry in
+the world list, is the game's own world rather than one the player makes: a
+small county sealed off at the start of an outbreak, played in the Ashgrove
+County mode (after the zombie survival sandboxes, Project Zomboid above all —
+its own county, towns, people and art; nothing of theirs).
+
+- **It cannot be deleted.** Its Delete button is **Reset…**: its saved
+  chunks and players are thrown away and it is made again exactly as it was
+  on the first morning — every house shut, every cupboard full
+  (`game/mainWorld.ts`). It cannot be renamed. It is the same county on
+  every device: one seed, one start date (a July morning in 1994, so the Moon
+  and stars are that summer's) and one place under the sky.
+- **The county** (`engine/county.ts`) is laid out by hand and filled from
+  the seed. Millbrook strung along Route 31, where you wake in your own
+  house; Westford's old grid of brick on the river, with its warehouses on
+  the waterfront; Cedar Bend's big houses upstream; Rosedale out east, with
+  its cemetery; Harlow Heights' subdivision and strip mall to the
+  south-west. Between them: Route 31, Route 60, River Road, South Road and
+  the county roads, some 50 farms (farmhouse, red barn, silo, fenced fields
+  of wheat, carrots or potatoes, and an irrigation ditch), Lake Ashgrove with
+  its cabins and campground, a trailer park, Camp Hadley (barracks, armoury,
+  mess hall, headquarters, motor pool, helipad, tents and watchtowers
+  inside the wire), and a checkpoint wherever a road meets the quarantine
+  fence round the county. Walk up to the fence and a loudspeaker warns you
+  off; go past it and the soldiers shoot.
+- **Every building is furnished** (`engine/countyBuild.ts`). A house has a
+  living room and kitchen at the front and bedrooms and a bathroom behind,
+  a garage on the wider lots, a porch, a path, a mailbox and a yard. It is
+  papered, panelled or tiled room by room inside, and brick or siding
+  outside. Kitchens have a fridge with a freezer over it, a sink, a stove,
+  cupboards, a microwave and a table and chairs. Some houses were broken
+  into before you got there, and a few were boarded up by a family that did
+  not last. The shops have their aisles and coolers, the police station its
+  cells and lockers, the school its desks, the church its pews, the gas
+  stations their pumps under a canopy, and the diner its counter and booths.
+  Storefronts carry their signs.
+- **What is in the cupboards** (`engine/countyLoot.ts`) is decided the first
+  time a container is opened, from what the container is and the building it
+  stands in: a shelf holds groceries in a grocery, pills in a pharmacy and
+  nails in a hardware store; a locker holds a nightstick at the police
+  station and a comic at the school. It is seeded by the container's place,
+  so everyone who opens it finds the same thing. Nothing is filled before
+  then, so a house nobody touched is never saved and the county can always
+  go back to how it began.
+- **Blocks and items** (`engine/countyBlocks.ts`, `engine/countyItems.ts`):
+  149 blocks (from id 4096; see below) and about 150 items. The blocks are
+  roads and their painted lines, siding in eight colours, brick, wallpaper,
+  flooring, shingle roofs and the furniture of every room. Windows open,
+  break, take curtains and take boards; doors can be boarded shut. The items
+  are tinned, dry and fresh food, drinks that leave their bottle or can,
+  first aid, tools, nineteen melee weapons (a fire axe, a crowbar, a nailed
+  bat), lumber and nails, skill books in three volumes, magazines, bags,
+  flashlights, radios and gas cans. Some can be crafted: planks into boards,
+  a nailed bat, sheets into rags and rags into bandages, and a barricade.
+
+Block ids are sixteen-bit. The first 256 were one byte, and every one was
+taken. Chunks keep Uint16Arrays, a save stores two bytes a block, and chunks
+saved before the change (one byte a block) are still read as they were
+written. The county's blocks start at 4096 so they never share an id with a
+plain item, which count up from 256.
+
 ## Game modes
 
-**Game Mode…** on the Create World screen picks one of thirty-seven modes. A
+**Game Mode…** on the Create World screen picks one of thirty-eight modes. A
 mode is a `ModeDef` in `modes/modes.ts`: the game mode, difficulty and rules
 to start with, an optional map pack, and switches for what the world holds
 (`fauna`, `vitals`, `engrams`, `lucky`). Modes with rounds, scores or
@@ -370,7 +435,8 @@ Wounds add to the vitals:
 - **Fever**, from raw meat, rotten flesh, pond water or an infected's bite, breaks with
   antibiotics.
 
-The five zombie modes:
+The six zombie modes (Ashgrove County, the main world's mode, is described
+[above](#ashgrove-county-the-main-world)):
 
 - **Dead Zone.** A fresh spawn with a bandage, a soda and beans. Looted
   towns and helicopter crashes. The scoreboard shows days alive and kills.

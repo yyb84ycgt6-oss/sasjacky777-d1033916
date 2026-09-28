@@ -16,7 +16,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const GAME_NAME = "CollinSurvivalCraft";
 export const GAME_SHORT = "CSC";
-export const GAME_VERSION = "2.0";
+export const GAME_VERSION = "2.1";
 
 /** Where a desktop copy can open a LAN relay. Supplied by the desktop shell's preload. */
 export interface LanHost {
