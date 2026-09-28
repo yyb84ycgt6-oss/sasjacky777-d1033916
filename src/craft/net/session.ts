@@ -140,7 +140,8 @@ export function sanitizeModeTell(v: unknown): ModeTell {
 // 8: the Starship item (a new item id) and the space trip it starts — a guest on 7 would hold an item it cannot draw.
 // 9: the real sky (the welcome's and the "env" op's skyEpoch and place) — a guest on 8 would see its own date's Moon and stars,
 //    and the Sun rise and set by the clock while the host's rose by the season.
-const PROTOCOL = 9;
+// 10: sixteen-bit block ids — a chunk now travels as two bytes a block, which a guest on 9 would read as garbage.
+const PROTOCOL = 10;
 const FLUSH_TICKS = 2;
 const ENTITY_TICKS = 4;
 const ENV_TICKS = 40;

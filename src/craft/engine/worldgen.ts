@@ -62,7 +62,7 @@ export interface Column {
 }
 
 export interface GeneratedChunk {
-  blocks: Uint8Array;
+  blocks: Uint16Array;
   meta: Uint8Array;
   /** Biome id per column, x fastest. */
   biomes: Uint8Array;
@@ -280,7 +280,7 @@ export class Generator implements ChunkGenerator {
   // ---- chunks ---------------------------------------------------------------------
 
   generate(cx: number, cz: number): GeneratedChunk {
-    const blocks = new Uint8Array(CHUNK_VOLUME);
+    const blocks = new Uint16Array(CHUNK_VOLUME);
     const meta = new Uint8Array(CHUNK_VOLUME);
     const biomes = new Uint8Array(CHUNK_SIZE * CHUNK_SIZE);
     const x0 = cx * CHUNK_SIZE, z0 = cz * CHUNK_SIZE;
@@ -318,7 +318,7 @@ export class Generator implements ChunkGenerator {
   }
 
   /** The villages overlapping this chunk, built after trees so their roads and houses win. */
-  private placeVillages(blocks: Uint8Array, meta: Uint8Array, cx: number, cz: number): void {
+  private placeVillages(blocks: Uint16Array, meta: Uint8Array, cx: number, cz: number): void {
     const x0 = cx * 16, z0 = cz * 16;
     for (const v of this.villagesAt(cx, cz)) {
       buildVillage(v, this, (x, y, z, id, m = 0) => {
@@ -350,7 +350,7 @@ export class Generator implements ChunkGenerator {
     return villagesTouching(this, this.seed, cx, cz);
   }
 
-  private fillColumn(blocks: Uint8Array, x: number, z: number, wx: number, wz: number, col: Column): void {
+  private fillColumn(blocks: Uint16Array, x: number, z: number, wx: number, wz: number, col: Column): void {
     const h = Math.floor(col.height);
     const b = biomeDef(col.biome);
     const underwater = h < SEA_LEVEL;
@@ -391,7 +391,7 @@ export class Generator implements ChunkGenerator {
     return b.underwater;
   }
 
-  private carveCaves(blocks: Uint8Array, heights: Int16Array, x0: number, z0: number): void {
+  private carveCaves(blocks: Uint16Array, heights: Int16Array, x0: number, z0: number): void {
     // Sample the three cave fields on a coarse 4-block lattice and interpolate
     // between — a twentieth of the noise evaluations of sampling every block,
     // and the tunnels come out smoother for it.
@@ -436,7 +436,7 @@ export class Generator implements ChunkGenerator {
     }
   }
 
-  private placeOres(blocks: Uint8Array, cx: number, cz: number, biomes: Uint8Array): void {
+  private placeOres(blocks: Uint16Array, cx: number, cz: number, biomes: Uint8Array): void {
     const rng = new Rng(hash4(this.seed, cx, cz, 0x0e5));
     const center = biomes[8 * 16 + 8];
     const mountainous = center === BiomeId.WindsweptHills || center === BiomeId.StonyPeaks || center === BiomeId.SnowyPeaks || center === BiomeId.Meadow;
@@ -476,7 +476,7 @@ export class Generator implements ChunkGenerator {
   }
 
   /** Single-block plants: only ever in this chunk, so no neighbour replay is needed. */
-  private decorate(blocks: Uint8Array, cx: number, cz: number, heights: Int16Array, biomes: Uint8Array): void {
+  private decorate(blocks: Uint16Array, cx: number, cz: number, heights: Int16Array, biomes: Uint8Array): void {
     const rng = new Rng(hash4(this.seed, cx, cz, 0xdec0));
     const x0 = cx * 16, z0 = cz * 16;
     for (let z = 0; z < 16; z++) {
@@ -555,7 +555,7 @@ export class Generator implements ChunkGenerator {
   }
 
   /** Trees, replayed from this chunk and its eight neighbours and clipped to this chunk. */
-  private placeFeatures(blocks: Uint8Array, meta: Uint8Array, cx: number, cz: number): void {
+  private placeFeatures(blocks: Uint16Array, meta: Uint8Array, cx: number, cz: number): void {
     const x0 = cx * 16, z0 = cz * 16;
     const place: Place = (x, y, z, id, m = 0, force = false) => {
       const lx = x - x0, lz = z - z0;
@@ -599,7 +599,7 @@ export class Generator implements ChunkGenerator {
   }
 
   /** Snow on the ground and ice on the water in cold biomes. */
-  private freeze(blocks: Uint8Array, biomes: Uint8Array): void {
+  private freeze(blocks: Uint16Array, biomes: Uint8Array): void {
     for (let z = 0; z < 16; z++) {
       for (let x = 0; x < 16; x++) {
         const b = biomeDef(biomes[z * 16 + x]);

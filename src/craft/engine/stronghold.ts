@@ -252,7 +252,7 @@ export const FRAME_RING: readonly [number, number, number][] = [
 ];
 
 /** Writes this chunk's share of a stronghold into its arrays. */
-export function stampStronghold(s: Stronghold, blocks: Uint8Array, meta: Uint8Array, cx: number, cz: number): void {
+export function stampStronghold(s: Stronghold, blocks: Uint16Array, meta: Uint8Array, cx: number, cz: number): void {
   const x0 = cx * 16, z0 = cz * 16;
   const Y = s.y;
   const wall = (x: number, y: number, z: number) => {

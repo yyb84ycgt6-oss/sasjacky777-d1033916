@@ -190,7 +190,7 @@ export class EndGenerator {
   }
 
   generate(cx: number, cz: number): GeneratedChunk {
-    const blocks = new Uint8Array(CHUNK_VOLUME);
+    const blocks = new Uint16Array(CHUNK_VOLUME);
     const meta = new Uint8Array(CHUNK_VOLUME);
     const biomes = new Uint8Array(256);
     const x0 = cx * 16, z0 = cz * 16;
@@ -261,7 +261,7 @@ export class EndGenerator {
   }
 
   /** Chorus plants on the highlands (and a few on the midlands), planned per chunk and clipped. */
-  private chorus(blocks: Uint8Array, meta: Uint8Array, cx: number, cz: number): void {
+  private chorus(blocks: Uint16Array, meta: Uint8Array, cx: number, cz: number): void {
     const x0 = cx * 16, z0 = cz * 16;
     const placed: number[] = [];
     for (let scz = cz - 1; scz <= cz + 1; scz++) for (let scx = cx - 1; scx <= cx + 1; scx++) {

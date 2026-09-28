@@ -15,7 +15,7 @@ export interface GenRequest {
   cx: number;
   cz: number;
   /** Saved contents; when present the chunk is loaded rather than generated. */
-  saved?: { blocks: Uint8Array; meta: Uint8Array };
+  saved?: { blocks: Uint16Array; meta: Uint8Array };
 }
 
 export interface GenResult {
@@ -23,7 +23,7 @@ export interface GenResult {
   job: number;
   cx: number;
   cz: number;
-  blocks: Uint8Array;
+  blocks: Uint16Array;
   meta: Uint8Array;
   light: Uint8Array;
   biomes: Uint8Array;
@@ -35,7 +35,7 @@ export interface MeshRequest {
   job: number;
   cx: number;
   cz: number;
-  blocks: Uint8Array;
+  blocks: Uint16Array;
   meta: Uint8Array;
   light: Uint8Array;
   tints: Uint8Array;
@@ -86,7 +86,7 @@ export class JobRunner {
     if (!this.generator || !this.mesher) throw new Error("job runner used before init");
     if (req.kind === "gen") {
       const { cx, cz } = req;
-      let blocks: Uint8Array, meta: Uint8Array, biomes: Uint8Array;
+      let blocks: Uint16Array, meta: Uint8Array, biomes: Uint8Array;
       if (req.saved && req.saved.blocks.length === CHUNK_VOLUME) {
         blocks = req.saved.blocks;
         meta = req.saved.meta.length === CHUNK_VOLUME ? req.saved.meta : new Uint8Array(CHUNK_VOLUME);

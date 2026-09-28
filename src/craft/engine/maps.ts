@@ -941,7 +941,7 @@ export class MapGenerator implements ChunkGenerator {
   generate(cx: number, cz: number): GeneratedChunk {
     let out: GeneratedChunk;
     if (this.layout.terrain) out = this.base.generate(cx, cz);
-    else out = { blocks: new Uint8Array(CHUNK_VOLUME), meta: new Uint8Array(CHUNK_VOLUME), biomes: new Uint8Array(256).fill(BiomeId.Plains) };
+    else out = { blocks: new Uint16Array(CHUNK_VOLUME), meta: new Uint8Array(CHUNK_VOLUME), biomes: new Uint8Array(256).fill(BiomeId.Plains) };
     this.layout.city?.fill(cx, cz, out);
     const list = this.layout.blocks.get(`${cx},${cz}`) ?? [];
     for (let i = 0; i < list.length; i += 5) {

@@ -21,7 +21,7 @@ const SEASON = SEASON_DAYS * DAY_TICKS;
 function flatWorld(fill: (x: number, y: number, z: number) => number): World {
   const world = new World();
   for (let cz = -1; cz <= 1; cz++) for (let cx = -1; cx <= 1; cx++) {
-    const blocks = new Uint8Array(CHUNK_VOLUME);
+    const blocks = new Uint16Array(CHUNK_VOLUME);
     for (let y = 0; y < WORLD_HEIGHT; y++) for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
       blocks[blockIndex(x, y, z)] = fill(cx * 16 + x, y, cz * 16 + z);
     }
@@ -109,7 +109,7 @@ describe("seasons", () => {
 
 describe("world map", () => {
   const chunk = (fill: (x: number, y: number, z: number) => number, cx = 0, cz = 0): PaintableChunk => {
-    const blocks = new Uint8Array(CHUNK_VOLUME);
+    const blocks = new Uint16Array(CHUNK_VOLUME);
     for (let y = 0; y < WORLD_HEIGHT; y++) for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) blocks[blockIndex(x, y, z)] = fill(x, y, z);
     const tints = new Uint8Array(256 * 9);
     for (let i = 0; i < 256; i++) tints.set([121, 192, 90, 89, 174, 48, 63, 118, 228], i * 9);

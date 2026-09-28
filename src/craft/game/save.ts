@@ -23,6 +23,7 @@ import type { MapId } from "../engine/maps";
 import type { ModeState } from "../modes/modes";
 import { GAME_NAME } from "../edition";
 import { MapStore } from "./mapStore";
+import { CHUNK_VOLUME } from "../engine/constants";
 
 export interface GameRules {
   keepInventory: boolean;
@@ -107,7 +108,7 @@ export interface WorldMeta {
 export interface ChunkData {
   cx: number;
   cz: number;
-  blocks: Uint8Array;
+  blocks: Uint16Array;
   meta: Uint8Array;
   entities: [number, BlockEntity][];
 }
@@ -149,17 +150,35 @@ async function gunzip(data: Uint8Array): Promise<Uint8Array> {
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
+/**
+ * A chunk as stored and sent: its block ids two bytes each (low byte first),
+ * then its meta a byte each, gzipped where the browser can.
+ *
+ * Chunks saved before block ids went past 255 hold one byte per block; they
+ * are told apart by length and read as they were written, so no save made
+ * before the change loses a block.
+ */
 export async function packChunk(c: ChunkData): Promise<{ data: Uint8Array; gz: boolean }> {
-  const raw = new Uint8Array(c.blocks.length + c.meta.length);
-  raw.set(c.blocks, 0);
-  raw.set(c.meta, c.blocks.length);
+  const n = c.blocks.length;
+  const raw = new Uint8Array(n * 2 + c.meta.length);
+  for (let i = 0; i < n; i++) {
+    const id = c.blocks[i];
+    raw[i * 2] = id & 0xff;
+    raw[i * 2 + 1] = id >> 8;
+  }
+  raw.set(c.meta, n * 2);
   return gzip(raw);
 }
 
-export async function unpackChunk(data: Uint8Array, gz: boolean): Promise<{ blocks: Uint8Array; meta: Uint8Array }> {
+export async function unpackChunk(data: Uint8Array, gz: boolean): Promise<{ blocks: Uint16Array; meta: Uint8Array }> {
   const raw = gz ? await gunzip(data) : data;
-  const half = raw.length / 2;
-  return { blocks: raw.slice(0, half), meta: raw.slice(half) };
+  if (raw.length === CHUNK_VOLUME * 2) return { blocks: Uint16Array.from(raw.subarray(0, CHUNK_VOLUME)), meta: raw.slice(CHUNK_VOLUME) };
+  if (raw.length !== CHUNK_VOLUME * 3) {
+    throw new Error(`A saved chunk is ${raw.length} bytes, which is neither the old layout (${CHUNK_VOLUME * 2}) nor the current one (${CHUNK_VOLUME * 3}); it cannot be read.`);
+  }
+  const blocks = new Uint16Array(CHUNK_VOLUME);
+  for (let i = 0; i < CHUNK_VOLUME; i++) blocks[i] = raw[i * 2] | (raw[i * 2 + 1] << 8);
+  return { blocks, meta: raw.slice(CHUNK_VOLUME * 2) };
 }
 
 function request<T>(r: IDBRequest<T>): Promise<T> {

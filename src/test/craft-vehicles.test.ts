@@ -14,7 +14,7 @@ import { World } from "@/craft/engine/world";
 function testWorld(): World {
   const world = new World();
   for (let cz = -1; cz <= 1; cz++) for (let cx = -1; cx <= 1; cx++) {
-    const blocks = new Uint8Array(CHUNK_VOLUME);
+    const blocks = new Uint16Array(CHUNK_VOLUME);
     for (let y = 0; y <= 10; y++) for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) blocks[blockIndex(x, y, z)] = B.STONE;
     if (cx === 1 && cz === 1) for (let y = 9; y <= 10; y++) for (let z = 0; z < 8; z++) for (let x = 0; x < 8; x++) blocks[blockIndex(x, y, z)] = B.WATER;
     world.addChunk(new Chunk(cx, cz, blocks, new Uint8Array(CHUNK_VOLUME), lightChunk(blocks, cx, cz), new Uint8Array(256), new Uint8Array(256 * 9)));

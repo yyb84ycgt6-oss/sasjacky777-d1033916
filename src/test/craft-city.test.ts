@@ -23,7 +23,7 @@ function cityWorld(): { world: World; load: (x0: number, z0: number, x1: number,
   const load = (x0: number, z0: number, x1: number, z1: number) => {
     for (let cx = x0 >> 4; cx <= x1 >> 4; cx++) for (let cz = z0 >> 4; cz <= z1 >> 4; cz++) {
       if (world.isLoaded(cx * 16, cz * 16)) continue;
-      const out = { blocks: new Uint8Array(CHUNK_VOLUME), meta: new Uint8Array(CHUNK_VOLUME), biomes: new Uint8Array(256) };
+      const out = { blocks: new Uint16Array(CHUNK_VOLUME), meta: new Uint8Array(CHUNK_VOLUME), biomes: new Uint8Array(256) };
       city.fill(cx, cz, out);
       world.addChunk(new Chunk(cx, cz, out.blocks, out.meta, lightChunk(out.blocks, cx, cz), out.biomes, new Uint8Array(256 * 9)));
     }
@@ -35,7 +35,7 @@ function cityWorld(): { world: World; load: (x0: number, z0: number, x1: number,
 function flatWorld(): World {
   const world = new World();
   for (let cz = -24; cz <= 3; cz++) for (let cx = -2; cx <= 2; cx++) {
-    const blocks = new Uint8Array(CHUNK_VOLUME);
+    const blocks = new Uint16Array(CHUNK_VOLUME);
     for (let y = 0; y <= GROUND; y++) for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) blocks[blockIndex(x, y, z)] = B.STONE;
     world.addChunk(new Chunk(cx, cz, blocks, new Uint8Array(CHUNK_VOLUME), lightChunk(blocks, cx, cz), new Uint8Array(256), new Uint8Array(256 * 9)));
   }
@@ -99,8 +99,8 @@ describe("Neon Bay's streets", () => {
   });
 
   it("builds the same chunk the same way every time, whoever builds it", () => {
-    const a = { blocks: new Uint8Array(CHUNK_VOLUME), meta: new Uint8Array(CHUNK_VOLUME), biomes: new Uint8Array(256) };
-    const b = { blocks: new Uint8Array(CHUNK_VOLUME), meta: new Uint8Array(CHUNK_VOLUME), biomes: new Uint8Array(256) };
+    const a = { blocks: new Uint16Array(CHUNK_VOLUME), meta: new Uint8Array(CHUNK_VOLUME), biomes: new Uint8Array(256) };
+    const b = { blocks: new Uint16Array(CHUNK_VOLUME), meta: new Uint8Array(CHUNK_VOLUME), biomes: new Uint8Array(256) };
     new City(NEON_BAY, SEED).fill(3, -4, a);
     new City(NEON_BAY, SEED).fill(3, -4, b);
     expect(a.blocks).toEqual(b.blocks);
@@ -422,7 +422,7 @@ describe("Golden Coast", () => {
   });
 
   it("paves its lanes clear from one end to the other, desert and all", () => {
-    const out = { blocks: new Uint8Array(CHUNK_VOLUME), meta: new Uint8Array(CHUNK_VOLUME), biomes: new Uint8Array(256) };
+    const out = { blocks: new Uint16Array(CHUNK_VOLUME), meta: new Uint8Array(CHUNK_VOLUME), biomes: new Uint8Array(256) };
     const x = gc.laneLine({ axis: "z", road: 11, dir: -1 });
     for (let z = gc.minZ + 2; z <= gc.maxZ - 2; z += 3) {
       gc.fill(x >> 4, z >> 4, out);

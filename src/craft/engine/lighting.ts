@@ -14,7 +14,7 @@
  * two-queue algorithm below; without it, lights that go out leave glowing
  * ghosts behind.
  */
-import { block } from "./blocks";
+import { block, BLOCK_ID_LIMIT } from "./blocks";
 import { blockIndex, CHUNK_SIZE, MAX_LIGHT, WORLD_HEIGHT } from "./constants";
 
 export interface LightVolume {
@@ -39,10 +39,10 @@ function withChannel(packed: number, ch: Channel, v: number): number {
 
 // Precomputed per-block light properties, indexed by id, so the flood fill
 // touches two typed arrays instead of a registry object per step.
-const OPAQUE = new Uint8Array(256);
-const FILTER = new Uint8Array(256);
-const EMISSION = new Uint8Array(256);
-for (let id = 0; id < 256; id++) {
+const OPAQUE = new Uint8Array(BLOCK_ID_LIMIT);
+const FILTER = new Uint8Array(BLOCK_ID_LIMIT);
+const EMISSION = new Uint8Array(BLOCK_ID_LIMIT);
+for (let id = 0; id < BLOCK_ID_LIMIT; id++) {
   const def = block(id);
   OPAQUE[id] = def.opaque ? 1 : 0;
   FILTER[id] = def.lightFilter;
@@ -190,7 +190,7 @@ export function relightBlock(vol: LightVolume, x: number, y: number, z: number, 
 /** A single chunk as a light volume; everything outside it reads as unloaded. */
 export class ChunkVolume implements LightVolume {
   constructor(
-    private blocks: Uint8Array,
+    private blocks: Uint16Array,
     private light: Uint8Array,
     private x0: number,
     private z0: number,
@@ -214,7 +214,7 @@ export class ChunkVolume implements LightVolume {
  * Lights a freshly generated or loaded chunk on its own. Light from
  * neighbouring chunks arrives later through `seamLight`, once both exist.
  */
-export function lightChunk(blocks: Uint8Array, cx: number, cz: number): Uint8Array {
+export function lightChunk(blocks: Uint16Array, cx: number, cz: number): Uint8Array {
   const light = new Uint8Array(blocks.length);
   const vol = new ChunkVolume(blocks, light, cx * CHUNK_SIZE, cz * CHUNK_SIZE);
   const x0 = cx * CHUNK_SIZE, z0 = cz * CHUNK_SIZE;

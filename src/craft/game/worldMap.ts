@@ -25,7 +25,7 @@ export const regionKey = (dim: Dimension, rx: number, rz: number) => `${dim}:${r
 export interface PaintableChunk {
   cx: number;
   cz: number;
-  blocks: Uint8Array;
+  blocks: Uint16Array;
   meta: Uint8Array;
   /** Nine bytes a column: grass, foliage and water tints (engine/worldgen.ts). */
   tints: Uint8Array;

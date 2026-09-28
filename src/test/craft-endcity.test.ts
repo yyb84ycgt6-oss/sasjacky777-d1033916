@@ -24,7 +24,7 @@ for (let rx = -6; rx <= 6; rx++) for (let rz = -6; rz <= 6; rz++) {
 }
 
 function blocksOf() {
-  const chunks = new Map<string, { blocks: Uint8Array; meta: Uint8Array }>();
+  const chunks = new Map<string, { blocks: Uint16Array; meta: Uint8Array }>();
   const chunk = (x: number, z: number) => {
     const key = `${x >> 4},${z >> 4}`;
     let c = chunks.get(key);
@@ -122,7 +122,7 @@ describe("End cities", () => {
 function flatWorld(r = 1): World {
   const world = new World();
   for (let cz = -r; cz <= r; cz++) for (let cx = -r; cx <= r; cx++) {
-    const blocks = new Uint8Array(CHUNK_VOLUME);
+    const blocks = new Uint16Array(CHUNK_VOLUME);
     for (let y = 0; y <= 10; y++) for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) blocks[blockIndex(x, y, z)] = B.END_STONE;
     world.addChunk(new Chunk(cx, cz, blocks, new Uint8Array(CHUNK_VOLUME), lightChunk(blocks, cx, cz), new Uint8Array(256), new Uint8Array(256 * 9)));
   }

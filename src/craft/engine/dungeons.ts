@@ -209,7 +209,7 @@ export function dungeonsTouching(seed: number, cx: number, cz: number): Dungeon[
  * from its first room to the surface of this very chunk — found here, where
  * the column is already built — and is ringed there with mossy brick.
  */
-export function stampDungeon(d: Dungeon, blocks: Uint8Array, meta: Uint8Array, cx: number, cz: number): void {
+export function stampDungeon(d: Dungeon, blocks: Uint16Array, meta: Uint8Array, cx: number, cz: number): void {
   const list = d.blocks.get(`${cx},${cz}`) ?? [];
   const x0 = cx * 16, z0 = cz * 16;
   for (let i = 0; i < list.length; i += 5) {

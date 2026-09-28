@@ -11,7 +11,7 @@ const city = new City(NEON_BAY, 2024);
 
 /** The block at a spot, built the way the world builds it. */
 function blockAt(x: number, y: number, z: number): number {
-  const out = { blocks: new Uint8Array(CHUNK_VOLUME), meta: new Uint8Array(CHUNK_VOLUME), biomes: new Uint8Array(256) };
+  const out = { blocks: new Uint16Array(CHUNK_VOLUME), meta: new Uint8Array(CHUNK_VOLUME), biomes: new Uint8Array(256) };
   city.fill(Math.floor(x) >> 4, Math.floor(z) >> 4, out);
   return out.blocks[blockIndex(Math.floor(x) & 15, y, Math.floor(z) & 15)];
 }

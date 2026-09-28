@@ -164,7 +164,7 @@ describe("fortresses", () => {
 function flatWorld(fill: (x: number, y: number, z: number) => number): World {
   const world = new World();
   for (let cz = -1; cz <= 1; cz++) for (let cx = -1; cx <= 1; cx++) {
-    const blocks = new Uint8Array(CHUNK_VOLUME);
+    const blocks = new Uint16Array(CHUNK_VOLUME);
     for (let y = 0; y < WORLD_HEIGHT; y++) for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) blocks[blockIndex(x, y, z)] = fill(cx * 16 + x, y, cz * 16 + z);
     world.addChunk(new Chunk(cx, cz, blocks, new Uint8Array(CHUNK_VOLUME), lightChunk(blocks, cx, cz), new Uint8Array(256), new Uint8Array(256 * 9)));
   }
@@ -525,7 +525,7 @@ describe("dimensions in the save", () => {
     const saves = new SaveStore();
     const meta = newWorldMeta({ name: "Two Worlds", seed: 5, seedText: "5", type: "default", gameMode: "survival", difficulty: 2, hardcore: false, cheats: false });
     await saves.putWorld(meta);
-    const chunk = (fill: number) => ({ cx: 1, cz: 2, blocks: new Uint8Array(CHUNK_VOLUME).fill(fill), meta: new Uint8Array(CHUNK_VOLUME), entities: [] });
+    const chunk = (fill: number) => ({ cx: 1, cz: 2, blocks: new Uint16Array(CHUNK_VOLUME).fill(fill), meta: new Uint8Array(CHUNK_VOLUME), entities: [] });
     await saves.putChunks(meta.id, [chunk(1)]);
     await saves.putChunks(meta.id, [chunk(198)], "nether");
     expect((await saves.getChunk(meta.id, 1, 2))?.blocks[0]).toBe(1);

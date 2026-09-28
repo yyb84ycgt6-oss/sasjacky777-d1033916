@@ -74,7 +74,7 @@ describe("dungeons", () => {
     const d = firstDungeon(3, "catacombs");
     const [sx, sz] = d.shaft!;
     const cx = sx >> 4, cz = sz >> 4;
-    const blocks = new Uint8Array(CHUNK_VOLUME), meta = new Uint8Array(CHUNK_VOLUME);
+    const blocks = new Uint16Array(CHUNK_VOLUME), meta = new Uint8Array(CHUNK_VOLUME);
     for (let x = 0; x < 16; x++) for (let z = 0; z < 16; z++) for (let y = 0; y <= 64; y++) blocks[blockIndex(x, y, z)] = B.STONE;
     for (const t of dungeonsTouching(3, cx, cz)) stampDungeon(t, blocks, meta, cx, cz);
     const lx = sx & 15, lz = sz & 15;
@@ -131,7 +131,7 @@ describe("wildlife", () => {
   function world(): World {
     const w = new World();
     for (let cz = -1; cz <= 1; cz++) for (let cx = -1; cx <= 1; cx++) {
-      const blocks = new Uint8Array(CHUNK_VOLUME);
+      const blocks = new Uint16Array(CHUNK_VOLUME);
       for (let x = 0; x < 16; x++) for (let z = 0; z < 16; z++) for (let y = 0; y <= 10; y++) blocks[blockIndex(x, y, z)] = B.STONE;
       w.addChunk(new Chunk(cx, cz, blocks, new Uint8Array(CHUNK_VOLUME), lightChunk(blocks, cx, cz), new Uint8Array(256), new Uint8Array(256 * 9)));
     }

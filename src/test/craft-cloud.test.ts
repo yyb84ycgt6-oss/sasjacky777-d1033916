@@ -46,7 +46,7 @@ describe("cloud worlds", () => {
     const here = new SaveStore();
     const meta = world();
     await here.putWorld(meta);
-    const blocks = new Uint8Array(CHUNK_VOLUME).fill(1);
+    const blocks = new Uint16Array(CHUNK_VOLUME).fill(1);
     await here.putChunks(meta.id, [{ cx: 3, cz: -2, blocks, meta: new Uint8Array(CHUNK_VOLUME), entities: [] }]);
 
     const up = await uploadWorld(here, meta);

@@ -1778,7 +1778,7 @@ export class Mob extends Entity {
     }
     if (this.kind === "iron_golem") this.attackCooldown = typeof d.ac === "number" ? d.ac : 0;
     if (this.kind === "enderman") {
-      this.carried = typeof d.cb === "number" && d.cb > 0 && d.cb < 256 ? d.cb : 0;
+      this.carried = typeof d.cb === "number" && d.cb > 0 && d.cb < 65536 ? d.cb : 0;
       this.scream = d.sc === 1 ? 20 : 0;
     }
     if (this.dragon && d.dg && typeof d.dg === "object") {

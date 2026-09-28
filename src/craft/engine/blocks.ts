@@ -1160,6 +1160,14 @@ add(255, "healing_station", "Healing Station", {
 });
 
 export const BLOCK_COUNT = BLOCKS.length;
+/**
+ * One past the highest block id: the size of a table indexed by id. Ids are
+ * sixteen-bit (chunks keep them in Uint16Arrays); the first 256 filled the
+ * one-byte ids the engine began with, and blocks since start at
+ * FIRST_WIDE_BLOCK so they never share an id with a plain item (those count
+ * up from 256, and a block's item has the block's own id).
+ */
+export const BLOCK_ID_LIMIT = BLOCKS.length;
 
 const AIR_DEF = BLOCKS[0];
 export function block(id: number): BlockDef {

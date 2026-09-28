@@ -14,7 +14,7 @@
  * plain floats would be four times that, across a few hundred chunks.
  */
 import {
-  block, faceTexture, isDoor, isLeaves, isRedstoneTorch, modelBoxes, B, Face, FACING_DIRS, type BlockDef, type Box,
+  block, BLOCK_ID_LIMIT, faceTexture, isDoor, isLeaves, isRedstoneTorch, modelBoxes, B, Face, FACING_DIRS, type BlockDef, type Box,
 } from "./blocks";
 import { dustColor, dustConnection } from "./redstone";
 import { railShape, isSlope } from "./rails";
@@ -30,7 +30,7 @@ export function padIndex(x: number, y: number, z: number): number {
 }
 
 export interface MeshInput {
-  blocks: Uint8Array;
+  blocks: Uint16Array;
   meta: Uint8Array;
   light: Uint8Array;
   /** 9 bytes per column: grass rgb, foliage rgb, water rgb. */
@@ -164,10 +164,10 @@ export type LayerLookup = (name: string) => number;
 export class Mesher {
   private cache = new Map<number, number>();
   private defs: BlockDef[] = [];
-  private opaque = new Uint8Array(256);
+  private opaque = new Uint8Array(BLOCK_ID_LIMIT);
 
   constructor(private lookup: LayerLookup) {
-    for (let id = 0; id < 256; id++) {
+    for (let id = 0; id < BLOCK_ID_LIMIT; id++) {
       this.defs[id] = block(id);
       this.opaque[id] = this.defs[id].opaque ? 1 : 0;
     }
@@ -588,11 +588,11 @@ export class Mesher {
 
 /** Copies a chunk and the border of its eight neighbours into padded arrays for the mesher. */
 export function buildPadded(
-  get: (cx: number, cz: number) => { blocks: Uint8Array; meta: Uint8Array; light: Uint8Array } | undefined,
+  get: (cx: number, cz: number) => { blocks: Uint16Array; meta: Uint8Array; light: Uint8Array } | undefined,
   cx: number,
   cz: number,
-): { blocks: Uint8Array; meta: Uint8Array; light: Uint8Array } {
-  const blocks = new Uint8Array(PADDED_VOLUME);
+): { blocks: Uint16Array; meta: Uint8Array; light: Uint8Array } {
+  const blocks = new Uint16Array(PADDED_VOLUME);
   const meta = new Uint8Array(PADDED_VOLUME);
   const light = new Uint8Array(PADDED_VOLUME);
   // Below the world reads as solid (no faces rendered downward into the void);

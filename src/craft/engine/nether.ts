@@ -115,7 +115,7 @@ export class NetherGenerator {
   }
 
   generate(cx: number, cz: number): GeneratedChunk {
-    const blocks = new Uint8Array(CHUNK_VOLUME);
+    const blocks = new Uint16Array(CHUNK_VOLUME);
     const meta = new Uint8Array(CHUNK_VOLUME);
     const biomes = new Uint8Array(256);
     const x0 = cx * 16, z0 = cz * 16;
@@ -159,7 +159,7 @@ export class NetherGenerator {
   }
 
   /** Floors take their biome's ground: nylium, soul sand and soil, basalt; the wastes get gravel and soul sand by the lava. */
-  private surface(blocks: Uint8Array, biomes: Uint8Array, x0: number, z0: number): void {
+  private surface(blocks: Uint16Array, biomes: Uint8Array, x0: number, z0: number): void {
     for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
       const biome = biomes[z * 16 + x];
       const wx = x0 + x, wz = z0 + z;
@@ -193,7 +193,7 @@ export class NetherGenerator {
     }
   }
 
-  private ores(blocks: Uint8Array, rng: Rng): void {
+  private ores(blocks: Uint16Array, rng: Rng): void {
     const vein = (id: number, count: number, size: number, yMin: number, yMax: number, hidden = false) => {
       for (let v = 0; v < count; v++) {
         let x = rng.int(16), y = yMin + rng.int(yMax - yMin + 1), z = rng.int(16);
@@ -223,7 +223,7 @@ export class NetherGenerator {
     }
   }
 
-  private features(blocks: Uint8Array, meta: Uint8Array, biomes: Uint8Array, cx: number, cz: number): void {
+  private features(blocks: Uint16Array, meta: Uint8Array, biomes: Uint8Array, cx: number, cz: number): void {
     const x0 = cx * 16, z0 = cz * 16;
     // Only into air (or over plants): features never cut into the terrain they grow on.
     const place: Place = (x, y, z, id, m = 0) => {
@@ -411,7 +411,7 @@ export class NetherGenerator {
   }
 }
 
-function buried(blocks: Uint8Array, x: number, y: number, z: number): boolean {
+function buried(blocks: Uint16Array, x: number, y: number, z: number): boolean {
   for (const [dx, dy, dz] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) {
     const nx = x + dx, ny = y + dy, nz = z + dz;
     if (nx < 0 || nx > 15 || nz < 0 || nz > 15) continue;
@@ -421,7 +421,7 @@ function buried(blocks: Uint8Array, x: number, y: number, z: number): boolean {
   return true;
 }
 
-function exposed(blocks: Uint8Array, x: number, y: number, z: number): boolean {
+function exposed(blocks: Uint16Array, x: number, y: number, z: number): boolean {
   return !buried(blocks, x, y, z);
 }
 
@@ -566,7 +566,7 @@ export function inFortress(seed: number, x: number, y: number, z: number): boole
 }
 
 /** Writes this chunk's share of a fortress into its arrays. */
-export function stampFortress(f: Fortress, blocks: Uint8Array, meta: Uint8Array, cx: number, cz: number): void {
+export function stampFortress(f: Fortress, blocks: Uint16Array, meta: Uint8Array, cx: number, cz: number): void {
   const x0 = cx * 16, z0 = cz * 16;
   const Y = f.y;
   const inside = (x: number, z: number) => x >= x0 && x < x0 + 16 && z >= z0 && z < z0 + 16;

@@ -18,7 +18,7 @@ import { sanitizeModeTell } from "@/craft/net/session";
 function flatWorld(): World {
   const world = new World();
   for (let cz = -2; cz <= 2; cz++) for (let cx = -2; cx <= 2; cx++) {
-    const blocks = new Uint8Array(CHUNK_VOLUME);
+    const blocks = new Uint16Array(CHUNK_VOLUME);
     for (let y = 0; y <= GROUND; y++) for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) blocks[blockIndex(x, y, z)] = B.STONE;
     world.addChunk(new Chunk(cx, cz, blocks, new Uint8Array(CHUNK_VOLUME), lightChunk(blocks, cx, cz), new Uint8Array(256), new Uint8Array(256 * 9)));
   }
@@ -167,7 +167,7 @@ describe("the shops", () => {
     expect([...kinds].sort()).toEqual(["cars", "guns"]);
     const c = layout.city!;
     for (const s of layout.shops!) {
-      const out = { blocks: new Uint8Array(CHUNK_VOLUME), meta: new Uint8Array(CHUNK_VOLUME), biomes: new Uint8Array(256) };
+      const out = { blocks: new Uint16Array(CHUNK_VOLUME), meta: new Uint8Array(CHUNK_VOLUME), biomes: new Uint8Array(256) };
       c.fill(s.x >> 4, s.z >> 4, out);
       expect(out.blocks[blockIndex(s.x & 15, s.y, s.z & 15)], `${s.shop} at ${s.x},${s.y},${s.z}`).not.toBe(B.AIR);
     }

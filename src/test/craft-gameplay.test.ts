@@ -73,7 +73,7 @@ describe("advancements", () => {
 function flatWorld(fill: (x: number, y: number, z: number) => number, radius = 1): World {
   const world = new World();
   for (let cz = -radius; cz <= radius; cz++) for (let cx = -radius; cx <= radius; cx++) {
-    const blocks = new Uint8Array(CHUNK_VOLUME);
+    const blocks = new Uint16Array(CHUNK_VOLUME);
     for (let y = 0; y < WORLD_HEIGHT; y++) for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
       blocks[blockIndex(x, y, z)] = fill(cx * 16 + x, y, cz * 16 + z);
     }

@@ -29,7 +29,7 @@ import { chunkStoreKey } from "@/craft/game/save";
 function flatWorld(fill: (x: number, y: number, z: number) => number, r = 1): World {
   const world = new World();
   for (let cz = -r; cz <= r; cz++) for (let cx = -r; cx <= r; cx++) {
-    const blocks = new Uint8Array(CHUNK_VOLUME);
+    const blocks = new Uint16Array(CHUNK_VOLUME);
     for (let y = 0; y < WORLD_HEIGHT; y++) for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) blocks[blockIndex(x, y, z)] = fill(cx * 16 + x, y, cz * 16 + z);
     world.addChunk(new Chunk(cx, cz, blocks, new Uint8Array(CHUNK_VOLUME), lightChunk(blocks, cx, cz), new Uint8Array(256), new Uint8Array(256 * 9)));
   }
@@ -47,8 +47,8 @@ const run = (world: World, rules: BlockRules, n: number) => {
 };
 
 /** Blocks of a generated world, chunk by chunk as asked for. */
-function blocksOf(gen: { generate(cx: number, cz: number): { blocks: Uint8Array; meta: Uint8Array } }) {
-  const chunks = new Map<string, { blocks: Uint8Array; meta: Uint8Array }>();
+function blocksOf(gen: { generate(cx: number, cz: number): { blocks: Uint16Array; meta: Uint8Array } }) {
+  const chunks = new Map<string, { blocks: Uint16Array; meta: Uint8Array }>();
   const chunk = (x: number, z: number) => {
     const key = `${x >> 4},${z >> 4}`;
     let c = chunks.get(key);

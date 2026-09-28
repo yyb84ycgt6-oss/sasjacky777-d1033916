@@ -12,7 +12,7 @@ import { seedFromString } from "@/craft/engine/rng";
 import { BIOMES } from "@/craft/engine/biomes";
 
 function emptyChunk(cx: number, cz: number, fill?: (x: number, y: number, z: number) => number): Chunk {
-  const blocks = new Uint8Array(CHUNK_VOLUME);
+  const blocks = new Uint16Array(CHUNK_VOLUME);
   if (fill) for (let y = 0; y < WORLD_HEIGHT; y++) for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) blocks[blockIndex(x, y, z)] = fill(x, y, z);
   const light = lightChunk(blocks, cx, cz);
   return new Chunk(cx, cz, blocks, new Uint8Array(CHUNK_VOLUME), light, new Uint8Array(256), new Uint8Array(256 * 9).fill(200));

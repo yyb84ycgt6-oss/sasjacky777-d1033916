@@ -77,7 +77,7 @@ export class Chunk {
   constructor(
     readonly cx: number,
     readonly cz: number,
-    public blocks: Uint8Array,
+    public blocks: Uint16Array,
     public meta: Uint8Array,
     public light: Uint8Array,
     public biomes: Uint8Array,
@@ -85,6 +85,10 @@ export class Chunk {
   ) {
     this.id = chunkId(cx, cz);
     if (blocks.length !== CHUNK_VOLUME) throw new Error(`chunk ${cx},${cz} has ${blocks.length} blocks, expected ${CHUNK_VOLUME}`);
+    // Block ids are sixteen-bit. A byte array here would hold every id below 256
+    // and quietly turn every block past it into something else — typed arrays
+    // look alike to the type checker, so it is caught here instead.
+    if (!(blocks instanceof Uint16Array)) throw new Error(`chunk ${cx},${cz} keeps its blocks in a ${(blocks as object).constructor.name}, not a Uint16Array`);
   }
 
   get(x: number, y: number, z: number): number {

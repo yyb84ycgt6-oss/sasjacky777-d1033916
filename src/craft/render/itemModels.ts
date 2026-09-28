@@ -59,7 +59,7 @@ export function blockGeometry(id: number, meta = 0): THREE.BufferGeometry {
   const hit = blockCache.get(key);
   if (hit) return hit;
   mesher ??= new Mesher(layerOf);
-  const blocks = new Uint8Array(PADDED_VOLUME);
+  const blocks = new Uint16Array(PADDED_VOLUME);
   const metas = new Uint8Array(PADDED_VOLUME);
   const light = new Uint8Array(PADDED_VOLUME).fill(0xf0);
   blocks[padIndex(0, 0, 0)] = id;
