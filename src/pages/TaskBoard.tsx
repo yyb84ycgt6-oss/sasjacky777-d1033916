@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { DragDropContext, Draggable, Droppable, type DropResult } from "@hello-pangea/dnd";
 import { Plus } from "lucide-react";
 import { TaskCard } from "@/components/tasks/TaskCard";
@@ -33,6 +34,17 @@ const COLUMN_EDGE: Record<TaskStatus, string> = {
 const TaskBoard = () => {
   const { tasks, loaded, loading, loadError, busy, today, reload, move, save, remove } = useTasks();
   const [dialog, setDialog] = useState<{ task: BoardTask | null; status: TaskStatus } | null>(null);
+  const [params, setParams] = useSearchParams();
+
+  // The nav bar's Create → Task lands here as /tasks?new=1. The flag is taken
+  // off the URL once used, so a reload does not open a second blank task.
+  useEffect(() => {
+    if (!loaded || params.get("new") !== "1") return;
+    setDialog({ task: null, status: "todo" });
+    const next = new URLSearchParams(params);
+    next.delete("new");
+    setParams(next, { replace: true });
+  }, [loaded, params, setParams]);
 
   const board = useMemo(() => arrangeBoard(tasks), [tasks]);
 

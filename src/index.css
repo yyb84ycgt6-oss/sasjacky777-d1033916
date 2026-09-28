@@ -126,6 +126,75 @@
 
 /* Jackie-specific utilities */
 @layer components {
+  /*
+   * Liquid glass — the nav bar and the panels it opens, after Cybernetic's.
+   * Built from the theme tokens rather than Cybernetic's magenta, so it takes
+   * whichever primary the active theme has and works in light mode too: a
+   * tinted, heavily blurred pane, a hairline of light along the top edge, and a
+   * soft glow of the primary around the rim. Opaque enough to read over a
+   * busy page — a screenshot of the first version, at 55%, had the headline
+   * behind the SANDi panel legible through its answer text.
+   */
+  .liquid-glass {
+    background:
+      linear-gradient(160deg, hsl(var(--foreground) / 0.07), hsl(var(--foreground) / 0.015) 45%, transparent),
+      hsl(var(--card) / 0.8);
+    -webkit-backdrop-filter: blur(22px) saturate(180%);
+    backdrop-filter: blur(22px) saturate(180%);
+    border: 1px solid hsl(var(--primary) / 0.35);
+    /* Cybernetic's dual ring: the primary rim, plus a faint cyan "hologram
+       trim" one pixel outside it (eru-neon-card in Eru's index.css). */
+    box-shadow:
+      inset 0 1px 0 hsl(var(--foreground) / 0.14),
+      inset 0 -1px 0 hsl(var(--background) / 0.35),
+      0 0 0 1px hsl(192 100% 60% / 0.08),
+      0 0 22px hsl(var(--primary) / 0.18),
+      0 18px 48px -12px hsl(0 0% 0% / 0.55);
+  }
+
+  /* Cybernetic's nav-item rhythm: a one-pixel lift on hover, a half-pixel
+     press, on a spring curve. */
+  .nav-item {
+    transition:
+      background-color 160ms ease,
+      color 160ms ease,
+      transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .nav-item:hover { transform: translateY(-1px); }
+  .nav-item:active { transform: translateY(0.5px); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .nav-item { transition: none; transform: none !important; }
+    .liquid-glass {
+      -webkit-backdrop-filter: blur(6px);
+      backdrop-filter: blur(6px);
+    }
+  }
+
+  /* Without backdrop-filter the pane would be see-through over busy pages. */
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .liquid-glass {
+      background: hsl(var(--card) / 0.96);
+    }
+  }
+
+  @media (prefers-reduced-transparency: reduce) {
+    .liquid-glass {
+      background: hsl(var(--card) / 0.97);
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+  }
+
+  .liquid-glass-held {
+    border-color: hsl(var(--primary) / 0.8);
+    box-shadow:
+      inset 0 1px 0 hsl(var(--foreground) / 0.14),
+      0 0 0 2px hsl(var(--primary) / 0.45),
+      0 0 32px hsl(var(--primary) / 0.35),
+      0 18px 48px -12px hsl(0 0% 0% / 0.55);
+  }
+
   .jackie-badge {
     @apply inline-flex items-center px-2 py-0.5 text-xs border rounded-sm;
     font-family: var(--font-mono);
