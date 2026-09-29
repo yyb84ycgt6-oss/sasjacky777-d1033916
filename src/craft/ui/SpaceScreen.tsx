@@ -15,11 +15,12 @@
 import { Fragment, useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import type { Game } from "../game/game";
 import { latLonText } from "../game/game";
-import { BODY, moonsOf, kindLabel } from "../space/bodies";
-import { dateString, len, sub } from "../space/kepler";
+import { AU, dateString, len, sub } from "../space/kepler";
+import { SOL } from "../space/galaxy";
+import { WORLD_LABEL } from "../space/worlds";
 import { distanceText, kindColor, speedText } from "../space/spaceView";
 import { aligned, topSpeed, type BurnDir } from "../space/flight";
-import { periodText, TIME_SCALES, type OverviewTab } from "../space/session";
+import { JUMP_SPOOL, jumpTunnel, periodText, TIME_SCALES, type OverviewTab } from "../space/session";
 import { GalaxyScreen } from "./GalaxyScreen";
 
 const u = (n: number) => `calc(var(--u) * ${n})`;
@@ -73,7 +74,7 @@ export function SpaceScreen({ game }: { game: Game }) {
     return () => { ro.disconnect(); game.setSpaceOverlay(null); };
   }, [game, galaxyOpen]);
 
-  const sel = s?.selected ? BODY[s.selected] : null;
+  const sel = s?.selected ? s.body(s.selected) ?? null : null;
 
   // EVE's keys.
   useEffect(() => {
@@ -118,20 +119,21 @@ export function SpaceScreen({ game }: { game: Game }) {
   const rows = s.rows();
   const airSpeed = s.airSpeed();
   const speed = ship.warp ? ship.warp.speed : airSpeed ?? len(ship.vel);
-  const frameName = BODY[ship.frame]?.name ?? "deep space";
+  const frameName = s.body(ship.frame)?.name ?? "deep space";
   const note = s.noteText();
   const site = s.landingSite();
   const order = ship.order;
   const real = ship.physics === "newton";
   const orbit = s.orbitInfo();
-  const status = ship.warp ? `Warping to ${BODY[ship.warp.target]?.name} — ${distanceText(ship.warp.left)} to go`
+  const status = s.jump ? (s.jump.phase === "spool" ? `Jump drive spooling — ${Math.max(0, Math.ceil(JUMP_SPOOL - s.jump.t))} s` : `In hyperspace — ${Math.max(0, Math.ceil(jumpTunnel(s.jump.ly) - s.jump.t))} s to ${s.jump.target.name}`)
+    : ship.warp ? `Warping to ${s.body(ship.warp.target)?.name} — ${distanceText(ship.warp.left)} to go`
     : ship.landed ? "Landed"
     : real ? newtonStatus(ship, orbit, frameName)
-    : order.kind === "warp" ? `Aligning to ${BODY[order.target]?.name}${aligned(ship, s.surroundings, order.target) ? "" : "…"}`
-    : order.kind === "approach" ? `Approaching ${BODY[order.target]?.name}`
-    : order.kind === "orbit" ? `Orbiting ${BODY[order.target]?.name} at ${order.range} km`
-    : order.kind === "keep" ? `Keeping ${order.range} km from ${BODY[order.target]?.name}`
-    : order.kind === "align" ? `Aligned to ${BODY[order.target]?.name}`
+    : order.kind === "warp" ? `Aligning to ${s.body(order.target)?.name}${aligned(ship, s.surroundings, order.target) ? "" : "…"}`
+    : order.kind === "approach" ? `Approaching ${s.body(order.target)?.name}`
+    : order.kind === "orbit" ? `Orbiting ${s.body(order.target)?.name} at ${order.range} km`
+    : order.kind === "keep" ? `Keeping ${order.range} km from ${s.body(order.target)?.name}`
+    : order.kind === "align" ? `Aligned to ${s.body(order.target)?.name}`
     : order.kind === "heading" ? "Flying" : len(ship.vel) > 0.001 ? "Stopping" : "Stopped";
 
   // ---- the mouse on the space ----
@@ -184,7 +186,10 @@ export function SpaceScreen({ game }: { game: Game }) {
     if (dir) s.give({ kind: "heading", dir });
   };
 
-  const tabs: [OverviewTab, string][] = [["planets", "Planets"], ["moons", `Moons of ${BODY[s.homePlanet()]?.name}`], ["small", "Small bodies"], ["all", "All"]];
+  // Round another star the planets are "TRAPPIST-1 e" and the like: the tab says "Moons of e", as the full name wrapped to three lines.
+  const home = s.body(s.homePlanet())?.name ?? "…";
+  const homeShort = !s.system.solar && home.startsWith(`${s.system.star.name} `) ? home.slice(s.system.star.name.length + 1) : home;
+  const tabs: [OverviewTab, string][] = [["planets", "Planets"], ["moons", `Moons of ${homeShort}`], ["small", "Small bodies"], ["all", "All"]];
   const speedFrac = ship.warp ? 1 : real ? ship.engine : Math.min(1, len(ship.vel) / topSpeed(ship));
   const clockText = s.autoScale !== null && !ship.warp ? `×${Math.round(s.shownScale).toLocaleString("en")} autopilot`
     : s.held ? `×${Math.round(s.shownScale).toLocaleString("en")} (held ${s.held})`
@@ -202,7 +207,8 @@ export function SpaceScreen({ game }: { game: Game }) {
 
       {/* The clock and where the ship is. */}
       <div style={{ ...PANEL, position: "absolute", left: u(4), top: u(4), padding: u(3), display: "flex", flexDirection: "column", gap: u(1.5), minWidth: u(95) }} data-testid="space-clock">
-        <div style={{ fontSize: u(6), color: "#ffffff" }}>{frameName === "Sun" ? "Interplanetary space" : `Near ${frameName}`}</div>
+        <div style={{ fontSize: u(4.4), color: "#9fc4dc" }} data-testid="space-system">{s.system.solar ? "The Solar System" : `The ${s.system.star.name} system · ${s.system.star.spectral}`}</div>
+        <div style={{ fontSize: u(6), color: "#ffffff" }}>{ship.frame === "sun" ? (s.system.solar ? "Interplanetary space" : `Round ${s.system.star.name}`) : `Near ${frameName}`}</div>
         <div>{dateString(s.jd)}</div>
         <div style={{ display: "flex", gap: u(1.5), alignItems: "center" }}>
           <Btn onClick={() => { s.slower(); refresh(); }} title="Slower (,)">◀</Btn>
@@ -224,7 +230,8 @@ export function SpaceScreen({ game }: { game: Game }) {
       </div>
 
       {note && (
-        <div style={{ ...PANEL, position: "absolute", left: "50%", top: u(6), transform: "translateX(-50%)", padding: `${u(2)} ${u(5)}`, fontSize: u(5.5), color: "#fff" }} data-testid="space-note">
+        // Kept clear of the panels either side: a jump's notices are long enough to run under the selection panel.
+        <div style={{ ...PANEL, position: "absolute", left: "50%", top: u(6), transform: "translateX(-50%)", maxWidth: `max(calc(100% - var(--u) * 256), ${u(100)})`, padding: `${u(2)} ${u(5)}`, fontSize: u(5.5), color: "#fff", textAlign: "center" }} data-testid="space-note">
           {note}
         </div>
       )}
@@ -238,7 +245,7 @@ export function SpaceScreen({ game }: { game: Game }) {
               <span style={{ fontSize: u(6.5), color: kindColor(sel.kind) }}>{sel.name}</span>
               <span>{distanceText(s.distanceTo(sel.id))}</span>
             </div>
-            <div style={{ color: "#8fa6b8" }}>{kindLabel(sel)}</div>
+            <div style={{ color: "#8fa6b8" }}>{s.system.kindLabel(sel)}</div>
             <div style={{ display: "flex", gap: u(1), flexWrap: "wrap" }}>
               <Btn testid="order-approach" title="Approach (Q)" onClick={() => s.give({ kind: "approach", target: sel.id })}>Approach</Btn>
               <Btn testid="order-orbit" title="Orbit (W)" onClick={() => s.give({ kind: "orbit", target: sel.id, range: orbitRange })}>Orbit</Btn>
@@ -276,7 +283,7 @@ export function SpaceScreen({ game }: { game: Game }) {
               onMouseEnter={() => { s.hovered = r.id; }} onMouseLeave={() => { if (s.hovered === r.id) s.hovered = null; }}
               style={{ display: "flex", gap: u(2), padding: `${u(0.8)} ${u(2)}`, cursor: "pointer", background: s.selected === r.id ? "rgba(90,150,200,0.3)" : "transparent", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
               <span style={{ color: kindColor(r.kind), width: u(4) }}>{r.kind === "asteroid" ? "◇" : r.kind === "comet" || r.kind === "interstellar" ? "△" : r.kind === "probe" ? "□" : r.kind === "star" ? "✹" : "○"}</span>
-              <span style={{ width: u(34), textAlign: "right", color: "#a8c4d8" }}>{distanceText(r.distance)}</span>
+              <span style={{ width: u(34), textAlign: "right", color: "#a8c4d8", whiteSpace: "nowrap" }}>{distanceText(r.distance, true)}</span>
               <span style={{ flex: 1, color: "#eaf4fb", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</span>
               <span style={{ color: "#7890a2", overflow: "hidden", whiteSpace: "nowrap", maxWidth: u(34), textOverflow: "ellipsis" }}>{r.type}</span>
             </div>
@@ -324,7 +331,9 @@ export function SpaceScreen({ game }: { game: Game }) {
           <Btn testid="space-land" disabled={!site || ship.landed} active={order.kind === "land"}
             onClick={() => { if (real) { s.give({ kind: "land" }); refresh(); } else s.landing = 2.5; }}
             title={real ? "Land (D): a burn to bring the orbit into the air, then re-entry and a parachute — you come down where the physics takes you" : "Land (D): only from low over the Earth"}>Land</Btn>
-          <Btn onClick={() => game.land(true)} title="Fly straight home to where you launched">Return home</Btn>
+          {s.home
+            ? <Btn onClick={() => game.land(true)} title="Fly straight home to where you launched">Return home</Btn>
+            : <Btn testid="space-jump-home" disabled={!!s.jump} onClick={() => { s.startJump(SOL); refresh(); }} title="Jump back to the Solar System">Jump home</Btn>}
           <Btn testid="space-physics" active={real} onClick={() => { const next = real ? "arcade" : "newton"; s.setPhysics(next); game.spacePhysics = next; refresh(); }}
             title={real ? "Real physics: gravity, orbits and a 5 g engine. Click for arcade flight (EVE's rules, no gravity)." : "Arcade flight. Click for real physics."}>{real ? "Real physics" : "Arcade"}</Btn>
         </div>
@@ -336,20 +345,21 @@ export function SpaceScreen({ game }: { game: Game }) {
         </div>
       )}
 
-      {info && BODY[info] && <InfoWindow id={info} game={game} onClose={() => setInfo(null)} />}
+      {info && s.body(info) && <InfoWindow id={info} game={game} onClose={() => setInfo(null)} />}
     </div>
   );
 }
 
 /** EVE's "show info": what a body is, and its numbers. */
 function InfoWindow({ id, game, onClose }: { id: string; game: Game; onClose: () => void }) {
-  const b = BODY[id];
   const s = game.space!;
+  const sys = s.system;
+  const b = sys.body(id)!;
   const p = s.positions.get(id);
   const fromSun = p ? len(p) : 0;
   const G = 6.6743e-20;
   const rows: [string, string][] = [];
-  rows.push(["Type", kindLabel(b)]);
+  rows.push(["Type", sys.kindLabel(b)]);
   rows.push(["Radius", `${b.radius < 10 ? b.radius.toFixed(2) : Math.round(b.radius).toLocaleString("en")} km${b.flattening ? ` (flattened ${(b.flattening * 100).toFixed(1)}%)` : ""}`]);
   if (b.gm) {
     rows.push(["Mass", `${(b.gm / G).toExponential(3).replace("e+", " × 10^")} kg`]);
@@ -357,8 +367,12 @@ function InfoWindow({ id, game, onClose }: { id: string; game: Game; onClose: ()
     rows.push(["Escape velocity", `${Math.sqrt((2 * b.gm) / b.radius).toFixed(2)} km/s`]);
   }
   if (b.rotation) rows.push(["Day (sidereal)", `${Math.abs(b.rotation) < 48 ? `${Math.abs(b.rotation).toFixed(2)} hours` : `${(Math.abs(b.rotation) / 24).toFixed(1)} days`}${b.rotation < 0 ? ", turning backwards" : ""}`]);
-  if (b.locked) rows.push(["Day", "Tidally locked: one face always toward " + (BODY[b.parent!]?.name ?? "its planet")]);
-  if (b.kind !== "star" && p) rows.push(["From the Sun now", distanceText(fromSun)]);
+  if (b.locked) rows.push(["Day", "Tidally locked: one face always toward " + (sys.body(b.parent!)?.name ?? "its planet")]);
+  if (b.kind !== "star" && p) rows.push([sys.solar ? "From the Sun now" : `From ${sys.star.name} now`, distanceText(fromSun)]);
+  if (b.orbit.kind === "kepler") {
+    const o = b.orbit;
+    rows.push(["Orbit", `${b.kind === "moon" ? `${Math.round(o.a).toLocaleString("en")} km` : `${(o.a / AU).toFixed(o.a / AU < 0.1 ? 4 : 3)} AU`}, eccentricity ${o.e.toFixed(3)}, every ${periodText(o.period * 86400)}`]);
+  }
   if (b.orbit.kind === "equatorial") rows.push(["Orbit", `${Math.round(b.orbit.a).toLocaleString("en")} km, every ${b.orbit.period < 2 ? `${(b.orbit.period * 24).toFixed(1)} hours` : `${b.orbit.period.toFixed(2)} days`}${b.orbit.i > 90 ? ", backwards" : ""}`]);
   if (b.orbit.kind === "conic") {
     const c = b.orbit.conic;
@@ -368,9 +382,19 @@ function InfoWindow({ id, game, onClose }: { id: string; game: Game; onClose: ()
       if (c.n) rows.push(["Year", `${(360 / c.n / 365.25).toFixed(1)} years`]);
     } else rows.push(["Orbit", `Open (eccentricity ${c.e.toFixed(3)}): passing through, never to return`]);
   }
-  const moons = moonsOf(id);
+  const moons = sys.moonsOf(id);
   if (moons.length) rows.push(["Moons shown", moons.map((m) => m.name).join(", ")]);
-  if (p && b.kind !== "star") rows.push(["Light from here to Earth", lightTime(len(sub(p, s.positions.get("earth") ?? [0, 0, 0])))]);
+  const w = sys.world(id) ?? b.world;
+  if (w) {
+    rows.push(["World", WORLD_LABEL[w.type]]);
+    rows.push(["Temperature", `${Math.round(w.temp - 273.15)} °C${w.surface ? " at the surface" : " at the cloud tops"}`]);
+    rows.push(["Air", !w.air ? "None: vacuum" : `${w.air.pressure < 0.01 ? w.air.pressure.toFixed(4) : w.air.pressure.toFixed(2)} bar${w.air.breathable ? " — breathable" : ""}`]);
+    if (w.liquid) rows.push(["Lakes and seas", w.liquid === "water" ? "Water" : w.liquid === "lava" ? "Lava" : "Liquid methane"]);
+    if (w.surface) rows.push(["Life", w.life === "none" ? "None known" : w.life === "microbial" ? "Microbial" : w.life === "plants" ? "Plants" : "Plants and animals"]);
+    rows.push(["Ground", w.surface ? "Solid: somewhere to stand" : "None: no surface to stand on"]);
+    rows.push(["Source", w.status === "solar" ? "Probes and telescopes" : w.status === "known" ? "A catalogued planet; its surface is the game's imagining" : w.status === "approx" ? "A real planet, details estimated" : w.status === "hypothetical" ? "The game's invention: none is known here" : "Charted by the game's survey of this star"]);
+  }
+  if (sys.solar && p && b.kind !== "star") rows.push(["Light from here to Earth", lightTime(len(sub(p, s.positions.get("earth") ?? [0, 0, 0])))]);
   return (
     <div style={{ ...PANEL, position: "absolute", left: "50%", top: "50%", transform: "translate(-50%, -50%)", width: `min(92vw, ${u(190)})`, maxHeight: "80vh", overflowY: "auto", padding: u(5), display: "flex", flexDirection: "column", gap: u(2.5) }} data-testid="space-info">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -382,7 +406,9 @@ function InfoWindow({ id, game, onClose }: { id: string; game: Game; onClose: ()
         {rows.map(([k, v]) => (<Fragment key={k}><span style={{ color: "#8fa6b8" }}>{k}</span><span>{v}</span></Fragment>))}
       </div>
       <div style={{ color: "#6f8494", fontSize: u(4) }}>
-        Positions from JPL's planetary elements and a lunar theory after Meeus; small bodies from the Minor Planet Center and JPL. Stars: XHIP via d3-celestial (BSD licence). Earth's coastlines: Natural Earth.
+        {sys.solar
+          ? "Positions from JPL's planetary elements and a lunar theory after Meeus; small bodies from the Minor Planet Center and JPL. Stars: XHIP via d3-celestial (BSD licence). Earth's coastlines: Natural Earth."
+          : "Catalogued planets: published periods, masses and radii (NASA Exoplanet Archive and the discovery papers), rounded. Everything else in this system the game works out from its star, the same way every time."}
       </div>
     </div>
   );

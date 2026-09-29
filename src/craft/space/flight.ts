@@ -112,6 +112,13 @@ export interface Surroundings {
   parent?(id: string): string | null;
   pole?(id: string): Vec3;
   spin?(id: string): Vec3;
+  /**
+   * The air round a body (newton.ts), and whether the ship can come down on it:
+   * the current star system's answer (starSystem.ts). Absent, the Solar
+   * System's own table is used, with only the Earth to land on.
+   */
+  air?(id: string): { H: number; rho0: number; top: number } | null;
+  lands?(id: string): boolean;
 }
 
 /** How close an order to approach may bring the ship: above the surface (a little more for a big world). */

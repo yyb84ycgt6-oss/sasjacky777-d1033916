@@ -270,6 +270,8 @@ export class GalaxyView {
     const sel = map.selected;
     const selAt = sel ? this.project(sel.pos, f) : null;
     if (sel && selAt) placed.push([selAt[0] + 14, selAt[1] - 20, ctx.measureText(sel.name).width + 4, 16], [selAt[0] - 12, selAt[1] - 12, 24, 24]);
+    // Where the ship is, when it is not at home.
+    if (map.here !== SOL) label(map.here.pos, "You are here", "#7dff9a", "ring", 9);
     // Sol, always: the way home.
     label(SUN_POS, d > 400 ? "Sol" : "", "#ffe27a", "ring", d > 400 ? 6 : 8);
     // The black hole, always: the other way to find your bearings.
@@ -316,8 +318,9 @@ export class GalaxyView {
         ctx.stroke();
         ctx.fillStyle = "#7dff9a";
         ctx.fillText(sel.name, s[0] + 16, s[1] - 12);
-        const sun = this.project(SUN_POS, f);
-        if (sun && sel !== SOL) {
+        // A dashed line from where the ship is: the jump it would make.
+        const sun = this.project(map.here.pos, f);
+        if (sun && sel !== map.here) {
           ctx.globalAlpha = 0.5; ctx.setLineDash([4, 4]);
           ctx.beginPath(); ctx.moveTo(sun[0], sun[1]); ctx.lineTo(s[0], s[1]); ctx.stroke();
           ctx.setLineDash([]); ctx.globalAlpha = 1;

@@ -63,6 +63,15 @@ export function toGalactic(ra: number, dec: number): { l: number; b: number; dir
   return { l, b: Math.asin(Math.max(-1, Math.min(1, g[2]))) / DEG, dir: g };
 }
 
+/** A direction in galactic coordinates as one in J2000 equatorial ones: the rotation above, run backwards (its transpose). */
+export function galacticToEquatorial(g: Vec3): Vec3 {
+  return [
+    EQ_TO_GAL[0][0] * g[0] + EQ_TO_GAL[1][0] * g[1] + EQ_TO_GAL[2][0] * g[2],
+    EQ_TO_GAL[0][1] * g[0] + EQ_TO_GAL[1][1] * g[1] + EQ_TO_GAL[2][1] * g[2],
+    EQ_TO_GAL[0][2] * g[0] + EQ_TO_GAL[1][2] * g[1] + EQ_TO_GAL[2][2] * g[2],
+  ];
+}
+
 /** Where in the galaxy (galactocentric parsecs) a star is, from where it is in our sky and how far. */
 export function galacticPosition(ra: number, dec: number, lightYears: number): Vec3 {
   const { dir } = toGalactic(ra, dec);
@@ -631,6 +640,16 @@ export function tempColor(t: number): [number, number, number] {
     if (t <= b) { const f = (t - a) / (b - a); return [ca[0] + (cb[0] - ca[0]) * f, ca[1] + (cb[1] - ca[1]) * f, ca[2] + (cb[2] - ca[2]) * f]; }
   }
   return stops[stops.length - 1][1];
+}
+
+/**
+ * How bright a star looks from a distance (parsecs), as an apparent
+ * magnitude: its absolute magnitude (the Sun's is 4.83, and each factor of
+ * 2.5 in luminosity is one step brighter) dimmed by five magnitudes for every
+ * tenfold step of distance past ten parsecs.
+ */
+export function apparentMagnitude(lum: number, pc: number): number {
+  return 4.83 - 2.5 * Math.log10(Math.max(1e-12, lum)) + 5 * Math.log10(Math.max(1e-6, pc) / 10);
 }
 
 /** What a star's planets are likely to be, before anyone has been there: how many, and where water could be liquid (AU). */

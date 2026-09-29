@@ -65,6 +65,11 @@ export const thrustOf = (s: Ship): number => s.cls.thrust * (s.mwd ? 5 : 1);
 
 const gmOf = (w: Surroundings, id: string): number => w.gm?.(id) ?? 0;
 
+/** The air round a body: the system's, or the Solar System's own table. */
+export const airOf = (w: Surroundings, id: string): { H: number; rho0: number; top: number } | null => (w.air ? w.air(id) : AIR[id] ?? null);
+/** Whether the ship can come down on a body. */
+export const landsOn = (w: Surroundings, id: string): boolean => (w.lands ? w.lands(id) : !!AIR[id]?.lands);
+
 function gravity(mu: number, r: Vec3): Vec3 {
   const d = len(r);
   return d > 0 ? scale(r, -mu / (d * d * d)) : [0, 0, 0];
@@ -74,20 +79,21 @@ const clampLen = (v: Vec3, max: number): Vec3 => { const l = len(v); return l > 
 
 /** The lowest the flight computer lets the ship go over a body it cannot land on, km above the surface. */
 export function floorOf(w: Surroundings, id: string): number {
-  const air = AIR[id];
-  if (air) return air.lands ? -Infinity : air.top * 0.2;
+  if (landsOn(w, id)) return -Infinity;
+  const air = airOf(w, id);
+  if (air) return air.top * 0.2;
   return Math.max(1, w.radius(id) * 0.0005);
 }
 
 /** The lowest safe circular orbit: above the air, or a little above the ground. */
 export function safeAltitude(w: Surroundings, id: string): number {
-  const air = AIR[id];
+  const air = airOf(w, id);
   return air ? air.top + 20 : Math.max(5, w.radius(id) * 0.02);
 }
 
 /** The air round the ship, if it is in some: its density, and the ship's velocity through it (the air turns with the planet). */
 export function airAround(s: Ship, w: Surroundings, r: Vec3 = s.pos, v: Vec3 = s.vel): { rho: number; vAir: Vec3; alt: number } | null {
-  const air = AIR[s.frame];
+  const air = airOf(w, s.frame);
   if (!air) return null;
   const alt = len(r) - w.radius(s.frame);
   if (alt > air.top) return null;
@@ -313,7 +319,7 @@ export function newtonStep(s: Ship, w: Surroundings, dt: number): FlightEvent | 
   if (!burning && !wasInAir) {
     // The exact coast — unless it would carry the ship into the air or under the floor before the step is out,
     // in which case it coasts to there, and the rest of the step is flown in small steps.
-    const R = w.radius(s.frame), air = AIR[s.frame];
+    const R = w.radius(s.frame), air = airOf(w, s.frame);
     const edge = R + (air ? air.top : floorOf(w, s.frame)) - 1e-3;
     const tEdge = mu > 0 ? timeToRadius(s.pos, s.vel, mu, edge) : null;
     const t = tEdge !== null && tEdge < dt ? tEdge : dt;
@@ -334,12 +340,12 @@ export function newtonStep(s: Ship, w: Surroundings, dt: number): FlightEvent | 
     const u = len(air.vAir);
     s.heat = Math.min(1, 0.2 * Math.sqrt(air.rho) * u * u * u);
     if (!wasInAir && u > 1) event ??= "entry";
-    if (s.chute === 0 && AIR[s.frame]?.lands && air.alt < 10 && u < 0.3) { s.chute = 1e-3; event ??= "chute"; }
+    if (s.chute === 0 && landsOn(w, s.frame) && air.alt < 10 && u < 0.3) { s.chute = 1e-3; event ??= "chute"; }
     if (s.chute > 0) s.chute = Math.min(1, s.chute + dt / CHUTE_OPENING);
   } else s.heat = 0;
   const alt = len(s.pos) - w.radius(s.frame);
   const falling = dot(s.pos, s.vel) < 0;
-  if (AIR[s.frame]?.lands && alt <= 0.2) {
+  if (landsOn(w, s.frame) && alt <= 0.2) {
     s.landed = true;
     s.vel = [0, 0, 0];
     s.engine = 0;

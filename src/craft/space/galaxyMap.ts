@@ -27,6 +27,8 @@ export interface MapHit { kind: "star"; star: Star }
 export class GalaxyMap {
   camera: GalaxyCamera = { focus: [...SUN_POS] as Vec3, yaw: Math.PI * 0.8, pitch: 0.55, dist: 40 };
   selected: Star | null = SOL;
+  /** The star whose system the ship is in: "You are here". */
+  here: Star = SOL;
   /** The stars round `fieldCenter`, and a count that goes up whenever they change. */
   stars: Star[] = [];
   fieldCenter: Vec3 = [...SUN_POS] as Vec3;

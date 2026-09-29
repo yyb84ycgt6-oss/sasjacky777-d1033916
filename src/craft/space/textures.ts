@@ -15,7 +15,7 @@ import { Simplex } from "../engine/noise";
 import { Rng } from "../engine/rng";
 import { EARTH_LAND, MILKY_WAY } from "./skyData";
 import { dot, raDecToEcl } from "./kepler";
-import type { Look } from "./bodies";
+import type { BodyDef, Look } from "./bodies";
 
 type RGB = [number, number, number];
 
@@ -356,6 +356,154 @@ function plain(color: string, ice: boolean): Painter {
 }
 
 /**
+ * Another star's world, painted from what the generator says it is
+ * (systems.ts): continents, seas, clouds and ice caps on an Earth-like one,
+ * islands on an ocean world, dunes on a desert, cracks across ice, glowing
+ * seams on a lava world, storm bands on a giant. The colours are its own
+ * palette's, so no two look alike; the seed is its own, so each looks the same
+ * every time.
+ */
+function generated(def: BodyDef): Painter {
+  const w = def.world;
+  const small = def.radius < 1500;
+  const size: [number, number] = small ? [256, 128] : [512, 256];
+  if (def.kind === "star" || !w) {
+    const c = hex(def.color);
+    return {
+      size: [256, 128],
+      pixel(lat, lon, x, y, z, n) {
+        const g = n.noise3(x * 40, y * 40, z * 40) * 0.5 + n.fbm3(x * 10, y * 10, z * 10, 3) * 0.5;
+        const k = 0.8 + g * 0.3;
+        return [Math.min(255, c[0] * k + 30), Math.min(255, c[1] * k + 20), Math.min(255, c[2] * k + 10)];
+      },
+    };
+  }
+  const P = w.palette;
+  const ground = hex(P.ground), rock = hex(P.rock), accent = hex(P.accent);
+  const flora = P.flora ? hex(P.flora) : ground, sea = P.sea ? hex(P.sea) : [30, 70, 140] as RGB;
+  const deep: RGB = [sea[0] * 0.55, sea[1] * 0.55, sea[2] * 0.7];
+  const cloudy = (c: RGB, x: number, y: number, z: number, n: Simplex, amount: number): RGB => {
+    const cl = n.fbm3(x * 5 + 11, y * 5, z * 5, 5);
+    return mix(c, [245, 247, 250], smooth(0.12, 0.5, cl) * amount);
+  };
+  switch (w.type) {
+    case "gasgiant": case "hotjupiter": case "icegiant": case "minineptune": {
+      const banded = w.type === "gasgiant" || w.type === "hotjupiter" ? 1 : 0.35;
+      return {
+        size,
+        pixel(lat, lon, x, y, z, n) {
+          const warp = n.fbm3(x * 3, y * 3, z * 3, 4) * 0.35;
+          const band = Math.sin((lat / 90) * (banded > 0.5 ? 14 : 7) + warp * 4);
+          let c = mix(ground, band > 0 ? accent : rock, Math.abs(band) * 0.55 * banded + 0.1);
+          c = mix(c, rock, Math.max(0, n.noise3(x * 12, y * 30, z * 12)) * 0.12 * banded);
+          // A great storm, somewhere in the southern bands.
+          const storm = arc(lat, lon, -22 + (w.seed % 9), ((w.seed >> 4) % 360) - 180);
+          if (banded > 0.5 && storm < 9) c = mix(c, [Math.min(255, rock[0] * 1.3 + 40), rock[1] * 0.8, rock[2] * 0.7], 1 - storm / 9);
+          // Polar hazes darker.
+          return mix(c, rock, smooth(60, 88, Math.abs(lat)) * 0.4);
+        },
+      };
+    }
+    case "terran": case "ocean": case "tundra": {
+      const level = w.type === "ocean" ? 0.28 : w.type === "tundra" ? 0.02 : 0.08;
+      return {
+        size,
+        pixel(lat, lon, x, y, z, n) {
+          const h = n.fbm3(x * 2.2, y * 2.2, z * 2.2, 6) + (n.noise3(x * 0.8 + 3, y * 0.8, z * 0.8) * 0.25);
+          const cold = Math.abs(lat) > (w.type === "tundra" ? 45 : 68) + n.noise3(x * 4, y * 4, z * 4) * 8;
+          let c: RGB;
+          if (h < level) c = mix(sea, deep, smooth(level, level - 0.35, h));
+          else {
+            const up = h - level;
+            // Green (in its star's green) where it is wet and warm, sand in the dry belts, rock high up.
+            const dry = smooth(0.15, 0.5, n.noise3(x * 3 + 5, y * 3, z * 3) + (Math.abs(Math.abs(lat) - 25) < 12 ? 0.35 : 0));
+            c = w.life === "plants" || w.life === "animals" ? mix(flora, ground, dry) : mix(ground, rock, 0.3);
+            c = mix(c, rock, smooth(0.25, 0.5, up));
+          }
+          if (cold) c = mix(c, accent, 0.85);
+          return cloudy(c, x, y, z, n, 0.75);
+        },
+      };
+    }
+    case "desert": {
+      return {
+        size,
+        pixel(lat, lon, x, y, z, n) {
+          const dunes = Math.sin((lon + n.noise3(x * 3, y * 3, z * 3) * 40) * 0.35) * 0.5 + 0.5;
+          let c = mix(ground, accent, dunes * 0.3 + n.fbm3(x * 5, y * 5, z * 5, 4) * 0.3);
+          c = mix(c, rock, smooth(0.25, 0.6, n.fbm3(x * 2.5 + 7, y * 2.5, z * 2.5, 5)));
+          if (w.life === "plants") c = mix(c, flora, smooth(0.35, 0.6, n.noise3(x * 6 + 2, y * 6, z * 6)) * 0.5);
+          return w.air ? cloudy(c, x, y, z, n, 0.25) : c;
+        },
+      };
+    }
+    case "hothouse": case "haze": {
+      return {
+        size,
+        pixel(lat, lon, x, y, z, n) {
+          const streak = n.fbm3(x * 2 + lat * 0.02, y * 6, z * 2, 5);
+          return mix(mix(accent, ground, 0.35 + streak * 0.6), rock, smooth(55, 90, Math.abs(lat)) * 0.35);
+        },
+      };
+    }
+    case "lava": {
+      return {
+        size, craters: { count: 60, depth: 0.2, seed: w.seed & 0xffff },
+        pixel(lat, lon, x, y, z, n) {
+          const crust = mix(ground, rock, n.fbm3(x * 5, y * 5, z * 5, 4) * 0.5 + 0.3);
+          const seam = 1 - Math.abs(n.noise3(x * 7, y * 7, z * 7));
+          const hot = smooth(0.9, 0.99, seam) + smooth(0.45, 0.7, n.noise3(x * 1.5 + 9, y * 1.5, z * 1.5)) * 0.6;
+          return mix(crust, accent, Math.min(1, hot));
+        },
+      };
+    }
+    case "volcanic": {
+      return {
+        size,
+        pixel(lat, lon, x, y, z, n) {
+          let c = mix(ground, accent, smooth(0.2, 0.6, n.fbm3(x * 4, y * 4, z * 4, 4)) * 0.5);
+          const spot = n.noise3(x * 9 + 1, y * 9, z * 9);
+          if (spot > 0.55) c = mix(c, rock, (spot - 0.55) * 3);
+          if (spot > 0.72) c = mix(c, [255, 90, 30], (spot - 0.72) * 3);
+          return c;
+        },
+      };
+    }
+    case "icy": case "nitrogen": {
+      return {
+        size, craters: { count: 120, depth: 0.12, seed: w.seed & 0xffff },
+        pixel(lat, lon, x, y, z, n) {
+          let c = mix(ground, rock, smooth(0.25, 0.6, n.fbm3(x * 2.5, y * 2.5, z * 2.5, 5)) * 0.6);
+          const crack = 1 - Math.abs(n.noise3(x * 6 + 4, y * 6, z * 6));
+          c = mix(c, accent, smooth(0.93, 0.99, crack) * 0.8);
+          return w.type === "nitrogen" ? mix(c, accent, smooth(0.3, 0.6, n.noise3(x * 1.5, y * 1.5, z * 1.5)) * 0.4) : c;
+        },
+      };
+    }
+    case "martian": {
+      return {
+        size, craters: { count: 250, depth: 0.2, seed: w.seed & 0xffff },
+        pixel(lat, lon, x, y, z, n) {
+          let c = mix(ground, rock, smooth(0.15, 0.5, n.fbm3(x * 3, y * 3, z * 3, 5)) * 0.7);
+          c = mix(c, accent, smooth(72, 82, Math.abs(lat) + n.noise3(x * 5, y * 5, z * 5) * 5));
+          return c;
+        },
+      };
+    }
+    default: {
+      // Barren and iron worlds: the Moon's look — dark lowland seas, bright highlands, craters everywhere.
+      return {
+        size, craters: { count: small ? 220 : 380, depth: 0.3, seed: w.seed & 0xffff },
+        pixel(lat, lon, x, y, z, n) {
+          const sea = smooth(0.1, 0.35, n.fbm3(x * 1.6 + 2, y * 1.6, z * 1.6, 4));
+          return mix(mix(ground, accent, n.fbm3(x * 8, y * 8, z * 8, 3) * 0.3 + 0.15), rock, sea * 0.75);
+        },
+      };
+    }
+  }
+}
+
+/**
  * Stamps craters into a finished map: dark floors, bright rims, and a
  * power-law of sizes — many small, few large — as impacts make them.
  */
@@ -384,13 +532,13 @@ function craters(px: Float32Array, w: number, h: number, spec: NonNullable<Paint
 const cache = new Map<string, HTMLCanvasElement>();
 
 /** A body's surface map, painted once and kept. Null outside a browser. */
-export function surfaceCanvas(id: string, look: Look, color: string): HTMLCanvasElement | null {
+export function surfaceCanvas(id: string, look: Look, color: string, def?: BodyDef): HTMLCanvasElement | null {
   const hit = cache.get(id);
   if (hit) return hit;
   if (typeof document === "undefined") return null;
-  const p = PAINTERS[look] ?? plain(color, look === "ice");
+  const p = look === "gen" && def ? generated(def) : PAINTERS[look] ?? plain(color, look === "ice");
   const [w, h] = p.size;
-  const noise = new Simplex(id.length * 131 + id.charCodeAt(0));
+  const noise = new Simplex(def?.world ? def.world.seed & 0x7fffffff : id.length * 131 + id.charCodeAt(0));
   const px = new Float32Array(w * h * 3);
   for (let y = 0; y < h; y++) {
     const lat = 90 - ((y + 0.5) / h) * 180, cl = Math.cos((lat * Math.PI) / 180), sl = Math.sin((lat * Math.PI) / 180);

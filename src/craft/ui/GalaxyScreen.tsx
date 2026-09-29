@@ -8,6 +8,8 @@
 import { Fragment, useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import type { Game } from "../game/game";
 import { CLASS, distance, LY_PER_PC, regionAt, seenFromSun, SGR_A, SOL, SUN_POS, systemOutlook, tempColor, totalStars, type Star } from "../space/galaxy";
+import { systemOf, systemSummary } from "../space/systems";
+import { WORLD_LABEL } from "../space/worlds";
 
 const u = (n: number) => `calc(var(--u) * ${n})`;
 
@@ -127,6 +129,7 @@ export function GalaxyScreen({ game }: { game: Game }) {
         </div>
         <div style={{ display: "flex", gap: u(1), flexWrap: "wrap" }}>
           <Btn testid="galaxy-sol" title="Home (H)" onClick={() => { map.goTo(SUN_POS, 40); map.select(SOL); refresh(); }}>Sol</Btn>
+          {map.here !== SOL && <Btn testid="galaxy-here" title="Where the ship is" onClick={() => { map.goTo(map.here.pos, 40); map.select(map.here); refresh(); }}>Here</Btn>}
           <Btn testid="galaxy-core" title="The black hole at the centre" onClick={() => { map.goTo(SGR_A.pos, 1500); refresh(); }}>Galactic centre</Btn>
           <Btn testid="galaxy-whole" title="Pull back to see the whole galaxy" onClick={() => { map.goTo([0, 0, 0], 42000); map.camera.pitch = 1.05; refresh(); }}>Whole galaxy</Btn>
           {sel && <Btn testid="galaxy-centre-on" title="Centre on the selection (F)" onClick={() => { map.goTo(sel.pos); refresh(); }}>Centre on selected</Btn>}
@@ -146,7 +149,7 @@ export function GalaxyScreen({ game }: { game: Game }) {
         )}
       </div>
 
-      {sel && <StarCard star={sel} />}
+      {sel && <StarCard star={sel} game={game} onJump={refresh} />}
 
       <div style={{ ...PANEL, position: "absolute", right: u(4), bottom: u(4), padding: u(2.5), display: "flex", gap: u(3), flexWrap: "wrap", fontSize: u(4.2), maxWidth: u(150) }}>
         {([[40000, "O/B"], [9000, "A"], [6500, "F"], [5700, "G"], [4600, "K"], [3200, "M"], [3500, "giants"]] as const).map(([t, name]) => (
@@ -159,8 +162,13 @@ export function GalaxyScreen({ game }: { game: Game }) {
   );
 }
 
-function StarCard({ star }: { star: Star }) {
+function StarCard({ star, game, onJump }: { star: Star; game: Game; onJump: () => void }) {
+  const s = game.space!;
   const fromSun = distance(star.pos, SUN_POS) * LY_PER_PC;
+  const fromHere = distance(star.pos, s.system.star.pos) * LY_PER_PC;
+  const here = s.system.star.id === star.id;
+  const sys = star.id === SOL.id ? null : systemOf(star);
+  const sum = sys ? systemSummary(sys) : null;
   const sky = seenFromSun(star.pos);
   const outlook = systemOutlook(star);
   const num = (n: number) => (n >= 1000 ? Math.round(n).toLocaleString("en") : n >= 10 ? n.toFixed(0) : n >= 1 ? n.toFixed(2) : n.toPrecision(2));
@@ -174,17 +182,39 @@ function StarCard({ star }: { star: Star }) {
     ["In our sky", star === SOL ? "—" : `galactic longitude ${sky.l.toFixed(1)}°, latitude ${sky.b.toFixed(1)}°`],
     ["Where", regionAt(star.pos)],
     // A real star with no planets on record says so, rather than passing a guess off as the catalogue.
-    ["Planets", star.real ? (star.planets !== undefined ? `${star.planets} known` : "none confirmed") : `${outlook.planets} expected`],
+    ["Planets", star.id === SOL.id ? "8, and the dwarfs, moons and comets" : star.real ? (star.planets !== undefined ? `${star.planets} known` : `none confirmed${sum?.planets ? ` (the game imagines ${sum.planets})` : ""}`) : `${outlook.planets} charted`],
   ];
+  if (!here && s.system.star.id !== SOL.id) rows.splice(6, 0, ["From here", `${fromHere < 100 ? fromHere.toFixed(2) : Math.round(fromHere).toLocaleString("en")} light-years`]);
+  if (sum && sum.moons) rows.push(["Moons", String(sum.moons)]);
   if (outlook.habitable) rows.push(["Habitable zone", `${outlook.habitable[0].toFixed(2)}–${outlook.habitable[1].toFixed(2)} AU`]);
   return (
-    <div style={{ ...PANEL, position: "absolute", right: u(4), top: u(4), width: u(118), padding: u(3), display: "flex", flexDirection: "column", gap: u(1.8) }} data-testid="galaxy-star">
+    <div style={{ ...PANEL, position: "absolute", right: u(4), top: u(4), width: u(118), maxHeight: `calc(100% - ${u(30)})`, overflowY: "auto", padding: u(3), display: "flex", flexDirection: "column", gap: u(1.8) }} data-testid="galaxy-star">
       <div style={{ fontSize: u(6.5), color: css(tempColor(star.temp)) }}>{star.name}</div>
       <div style={{ color: "#7890a2" }}>{star.real ? "A real star" : "Charted by the survey: not yet visited"}</div>
+      {here
+        ? <div style={{ color: "#7dff9a" }} data-testid="galaxy-here-note">You are here.</div>
+        : <button type="button" data-testid="galaxy-jump" disabled={!!s.jump} onClick={() => { if (s.startJump(star)) onJump(); }}
+            style={{ background: "rgba(60, 120, 90, 0.6)", border: "1px solid rgba(140, 230, 170, 0.6)", color: "#eafff0", padding: u(1.8), fontFamily: "inherit", fontSize: u(5), cursor: "pointer" }}>
+            Jump to {star.name} — {fromHere < 100 ? fromHere.toFixed(1) : Math.round(fromHere).toLocaleString("en")} ly
+          </button>}
+
       <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: `${u(0.8)} ${u(3)}` }}>
         {rows.map(([k, v]) => (<Fragment key={k}><span style={{ color: "#8fa6b8" }}>{k}</span><span>{v}</span></Fragment>))}
       </div>
       {star.note && <div style={{ lineHeight: 1.5, color: "#dbe9f4" }}>{star.note}</div>}
+      {sys && sys.bodies.some((b) => b.kind === "planet") && (
+        <div style={{ display: "flex", flexDirection: "column", gap: u(0.6), maxHeight: u(60), overflowY: "auto" }} data-testid="galaxy-planets">
+          {sys.bodies.filter((b) => b.kind === "planet").map((b) => (
+            <div key={b.id} style={{ display: "flex", gap: u(2), fontSize: u(4.2) }}>
+              <span style={{ width: u(5), color: b.color }}>●</span>
+              <span style={{ flex: 1 }}>{b.name.slice(star.name.length + 1)} · {WORLD_LABEL[b.world!.type]}</span>
+              {b.world!.habitable && <span style={{ color: "#7ac8ff" }}>seas</span>}
+              {(b.world!.life === "plants" || b.world!.life === "animals") && <span style={{ color: "#8fe08f" }}>life</span>}
+              {b.world!.status === "known" && <span style={{ color: "#ffd98a" }}>known</span>}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

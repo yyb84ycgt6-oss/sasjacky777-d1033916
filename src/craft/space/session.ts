@@ -16,14 +16,16 @@
  * comes down wherever on Earth the ship is — which is somewhere in this world,
  * however far from home.
  */
-import { BODIES, BODY, kindLabel, type BodyDef } from "./bodies";
-import { ephemeris, planetConic, velocityOf } from "./ephemeris";
+import type { BodyDef } from "./bodies";
+import { planetConic } from "./ephemeris";
 import { AU, eclToEq, eqToEcl, gmst, jdFromMs, len, norm, raDecToEcl, scale, sub, type Vec3 } from "./kepler";
+import { SOLAR_SYSTEM, systemFor, type StarSystem } from "./starSystem";
+import { distance, LY_PER_PC, type Star } from "./galaxy";
 import {
   aboveEarth, belowShip, MIN_WARP, newShip, order, SCOUT, shipPosition, step, warpInDistance, warpRefusal, warpTime, type Order, type Ship, type Surroundings,
 } from "./flight";
 import {
-  AIR, airAround, circularVelocity, needsSmallSteps, newtonStep, newtonWarp, orbitSummary, safeAltitude, type FlightEvent,
+  airAround, airOf, circularVelocity, needsSmallSteps, newtonStep, newtonWarp, orbitSummary, safeAltitude, type FlightEvent,
 } from "./newton";
 import { elementsOf, pathAhead, pointAt, timeToAnomaly, timeToRadius } from "./orbit";
 import type { SpaceCameraState, SpaceFrame } from "./spaceView";
@@ -104,16 +106,16 @@ export function placeFor(x: number, z: number, lat: number, lon: number): Place 
 }
 
 /** How far each body's neighbourhood reaches (km): its sphere of influence, or a patch of space around a small one. */
-function reaches(): { id: string; reach: number }[] {
+function reachesOf(sys: StarSystem): { id: string; reach: number }[] {
   const out: { id: string; reach: number }[] = [];
-  for (const b of BODIES) {
+  for (const b of sys.bodies) {
     if (b.kind === "star") continue;
-    const parent = b.parent ? BODY[b.parent] : null;
+    const parent = b.parent ? sys.body(b.parent) : null;
     let reach: number;
     if (b.gm && parent?.gm) {
       const o = b.orbit;
       const a = o.kind === "planet" ? planetConic(o.index, 2451545).q / (1 - planetConic(o.index, 2451545).e) * AU
-        : o.kind === "equatorial" ? o.a : o.kind === "moon" ? 384_400 : o.kind === "conic" ? (o.conic.q / (1 - Math.min(0.99, o.conic.e))) * AU : b.radius * 100;
+        : o.kind === "equatorial" || o.kind === "kepler" ? o.a : o.kind === "moon" ? 384_400 : o.kind === "conic" ? (o.conic.q / (1 - Math.min(0.99, o.conic.e))) * AU : b.radius * 100;
       reach = a * Math.pow(b.gm / parent.gm, 0.4);
     } else if (b.kind === "comet" || b.kind === "interstellar") reach = 200_000;
     else reach = Math.max(b.radius * 100, 3000);
@@ -122,8 +124,27 @@ function reaches(): { id: string; reach: number }[] {
   return out.sort((a, b) => a.reach - b.reach);
 }
 
+/** Seconds the jump drive spools before it can open a way through. */
+export const JUMP_SPOOL = 5;
+/** Seconds in hyperspace: a few, a little more the farther the jump. */
+export const jumpTunnel = (ly: number): number => 3 + Math.log10(1 + ly) * 1.2;
+
+export interface Jump {
+  target: Star;
+  system: StarSystem;
+  /** Light-years it spans. */
+  ly: number;
+  phase: "spool" | "tunnel";
+  /** Seconds into the phase. */
+  t: number;
+}
+
 export class SpaceSession {
   jd: number;
+  /** The star system the ship is in: the Solar System until it jumps. */
+  system: StarSystem = SOLAR_SYSTEM;
+  /** A jump under way, if one is. */
+  jump: Jump | null = null;
   timeScale = 1;
   ship: Ship;
   camera: SpaceCameraState;
@@ -145,7 +166,7 @@ export class SpaceSession {
   /** The clock speed actually used last frame, and why it was held back if it was. */
   shownScale = 1;
   held: string | null = null;
-  private readonly places = reaches();
+  private places = reachesOf(SOLAR_SYSTEM);
   private clock = 0;
   private velCache = new Map<string, { jd: number; v: Vec3 }>();
 
@@ -154,7 +175,7 @@ export class SpaceSession {
     const up = aboveEarth(launch.lat, launch.lon, 400, gmst(jd), eqToEcl);
     this.ship = newShip(SCOUT, "earth", up.pos, up.heading, physics);
     // Under real physics a launch ends in a real orbit: 7.7 km/s eastward, the way rockets fly to use the Earth's spin.
-    if (physics === "newton") this.ship.vel = scale(norm(up.heading), Math.sqrt((BODY.earth.gm ?? 398600.435) / len(up.pos)));
+    if (physics === "newton") this.ship.vel = scale(norm(up.heading), Math.sqrt((this.body("earth")?.gm ?? 398600.435) / len(up.pos)));
     // Behind and a little above the ship, looking along its path with the Earth's curve below.
     const back = sub([0, 0, 0], up.heading), radial = norm(up.pos);
     const off = norm([back[0] + radial[0] * 0.35, back[1] + radial[1] * 0.35, back[2] + radial[2] * 0.35]);
@@ -162,18 +183,27 @@ export class SpaceSession {
     this.refresh();
   }
 
+  /** A body of the system the ship is in. */
+  body(id: string): BodyDef | undefined {
+    return this.system.body(id);
+  }
+
   get surroundings(): Surroundings {
+    const sys = this.system;
     return {
-      pos: (id) => this.positions.get(id) ?? null, radius: (id) => BODY[id]?.radius ?? 1, places: this.places,
-      gm: (id) => gmOf(BODY[id]),
+      pos: (id) => this.positions.get(id) ?? null, radius: (id) => sys.body(id)?.radius ?? 1, places: this.places,
+      gm: (id) => gmOf(sys.body(id)),
       vel: (id) => this.velocity(id),
-      parent: (id) => BODY[id]?.parent ?? null,
-      pole: (id) => poleOf(BODY[id]),
+      parent: (id) => sys.body(id)?.parent ?? null,
+      pole: (id) => poleOf(sys.body(id)),
       spin: (id) => {
-        const b = BODY[id];
+        const b = sys.body(id);
         if (!b?.rotation || b.locked) return [0, 0, 0];
         return scale(poleOf(b), (2 * Math.PI) / (b.rotation * 3600));
       },
+      air: (id) => sys.air(id),
+      // Only the Earth has a world to come down into, so far.
+      lands: (id) => sys.solar && id === "earth",
     };
   }
 
@@ -181,18 +211,19 @@ export class SpaceSession {
   private velocity(id: string): Vec3 {
     const c = this.velCache.get(id);
     if (c && c.jd === this.jd) return c.v;
-    const v = id === "sun" ? [0, 0, 0] as Vec3 : velocityOf(id, this.jd);
+    const v = this.system.velocity(id, this.jd);
     this.velCache.set(id, { jd: this.jd, v });
     return v;
   }
 
   private refresh(): void {
-    this.positions = ephemeris(this.jd);
+    this.positions = this.system.positions(this.jd);
     this.shipHelio = shipPosition(this.ship, this.surroundings);
   }
 
   /** One frame: the clock, then the ship in steps small enough for its orders to stay smooth. */
   update(dt: number): void {
+    if (this.jump) { this.updateJump(dt); return; }
     if (this.ship.physics === "newton") { this.updateNewton(dt); return; }
     this.clock += dt;
     this.jd += (dt * this.timeScale) / 86400;
@@ -201,8 +232,8 @@ export class SpaceSession {
     const n = Math.max(1, Math.ceil(dt / (1 / 30)));
     for (let i = 0; i < n; i++) {
       const e = step(this.ship, w, dt / n);
-      if (e === "warp") this.say(`Warp drive active — ${BODY[this.ship.warp!.target]?.name}`);
-      if (e === "arrived") this.say(`Arrived: ${BODY[this.ship.frame]?.name ?? "deep space"}`);
+      if (e === "warp") this.say(`Warp drive active — ${this.body(this.ship.warp!.target)?.name}`);
+      if (e === "arrived") this.say(`Arrived: ${this.body(this.ship.frame)?.name ?? "deep space"}`);
     }
     this.shipHelio = shipPosition(this.ship, w);
     if (this.landing !== null) this.landing = Math.max(0, this.landing - dt);
@@ -239,7 +270,7 @@ export class SpaceSession {
     if (n > MAX_STEPS) { n = MAX_STEPS; sky = maxStep * n; }
     this.shownScale = sky / Math.max(dt, 1e-9);
     this.held = scaleNow < wanted ? (airAround(s, w) ? "in the air" : "while the engine burns")
-      : this.shownScale < scaleNow * 0.95 ? `near ${BODY[this.nearestBoundary()]?.name ?? "a moon"}` : null;
+      : this.shownScale < scaleNow * 0.95 ? `near ${this.body(this.nearestBoundary())?.name ?? "a moon"}` : null;
     for (let i = 0; i < n && !s.landed && !s.warp; i++) {
       this.jd += sky / n / 86400;
       this.refresh();
@@ -257,9 +288,9 @@ export class SpaceSession {
     const mine = this.places.find((p) => p.id === s.frame);
     if (mine && s.frame !== "sun") step = Math.min(step, (0.4 * Math.max(0, mine.reach - len(s.pos))) / speed);
     const here = this.shipHelio;
-    const mu = gmOf(BODY[s.frame]);
+    const mu = gmOf(this.body(s.frame));
     for (const p of this.places) {
-      if ((BODY[p.id]?.parent ?? "sun") !== s.frame) continue;
+      if ((this.body(p.id)?.parent ?? "sun") !== s.frame) continue;
       const q = this.positions.get(p.id);
       if (!q) continue;
       const gap = len(sub(here, q)) - p.reach;
@@ -273,7 +304,7 @@ export class SpaceSession {
   private nearestBoundary(): string {
     let best = this.ship.frame, bestGap = Infinity;
     for (const p of this.places) {
-      if ((BODY[p.id]?.parent ?? "sun") !== this.ship.frame) continue;
+      if ((this.body(p.id)?.parent ?? "sun") !== this.ship.frame) continue;
       const q = this.positions.get(p.id);
       if (!q) continue;
       const gap = len(sub(this.shipHelio, q)) - p.reach;
@@ -290,7 +321,7 @@ export class SpaceSession {
    */
   private autopilotClock(): void {
     const s = this.ship, o = s.order, w = this.surroundings;
-    const mu = gmOf(BODY[s.frame]);
+    const mu = gmOf(this.body(s.frame));
     // Fast enough to get there in `lead` seconds of play, but never slower than `floor`: aiming at a fixed time to
     // go would slow the clock without end as the moment came nearer.
     const pick = (seconds: number | null, lead: number, floor: number) => {
@@ -300,7 +331,7 @@ export class SpaceSession {
     };
     if (o.kind === "land" && o.phase === "entry") {
       if (airAround(s, w)) { this.autoScale = s.chute > 0 ? PHYSICS_WARP : 20; return; }
-      const top = AIR[s.frame]?.top ?? 0;
+      const top = airOf(w, s.frame)?.top ?? 0;
       this.autoScale = pick(timeToRadius(s.pos, s.vel, mu, w.radius(s.frame) + top), 10, PHYSICS_WARP);
       return;
     }
@@ -316,9 +347,9 @@ export class SpaceSession {
   /** Says what the physics did worth saying. */
   private report(e: FlightEvent | null): void {
     if (!e) return;
-    const s = this.ship, name = BODY[s.frame]?.name ?? "deep space";
+    const s = this.ship, name = this.body(s.frame)?.name ?? "deep space";
     switch (e) {
-      case "warp": this.say(`Warp drive active — ${BODY[s.warp?.target ?? ""]?.name ?? ""}`); break;
+      case "warp": this.say(`Warp drive active — ${this.body(s.warp?.target ?? "")?.name ?? ""}`); break;
       case "arrived": {
         const o = orbitSummary(s, this.surroundings);
         this.say(o && s.order.kind === "coast" ? `Arrived: in orbit round ${name}, ${Math.round(o.altitude).toLocaleString("en")} km up at ${o.speed.toFixed(2)} km/s` : `Arrived: ${name}`);
@@ -337,7 +368,7 @@ export class SpaceSession {
       case "chute": this.say("Parachute out"); break;
       case "landed": this.say("Touchdown"); break;
       case "pullup": this.say(`Too low over ${name}: the flight computer pulled up and is setting up an orbit`); break;
-      case "soi": this.say(s.frame === "sun" ? "Out of the planets' pull: in orbit round the Sun" : `Into ${name}'s sphere of influence`); break;
+      case "soi": this.say(s.frame === "sun" ? `Out of the planets' pull: in orbit round ${this.system.solar ? "the Sun" : this.system.star.name}` : `Into ${name}'s sphere of influence`); break;
     }
   }
 
@@ -357,23 +388,25 @@ export class SpaceSession {
   pathAhead(): SpaceFrame["path"] {
     const s = this.ship;
     if (s.physics !== "newton" || s.warp || s.landed) return undefined;
-    const mu = gmOf(BODY[s.frame]);
+    const mu = gmOf(this.body(s.frame));
     if (!(mu > 0)) return undefined;
     const reach = this.places.find((p) => p.id === s.frame)?.reach ?? 50 * AU;
-    const R = BODY[s.frame]?.radius ?? 0;
-    const floor = R + (AIR[s.frame]?.top ?? 0);
+    const R = this.body(s.frame)?.radius ?? 0;
+    const air = this.system.air(s.frame);
+    const floor = R + (air?.top ?? 0);
     const p = pathAhead(s.pos, s.vel, mu, 160, reach, floor);
     const el = elementsOf(s.pos, s.vel, mu);
     const pe = el.periapsis > R ? pointAt(el, 0) : null;
     const ap = el.e < 1 && el.apoapsis < reach ? pointAt(el, Math.PI) : null;
-    return { frame: s.frame, points: p.points, hits: p.hits, leaves: p.leaves, pe, ap, peAlt: el.periapsis - R, apAlt: el.apoapsis - R, air: !!AIR[s.frame] };
+    return { frame: s.frame, points: p.points, hits: p.hits, leaves: p.leaves, pe, ap, peAlt: el.periapsis - R, apAlt: el.apoapsis - R, air: !!air };
   }
 
   frame(dt: number): SpaceFrame {
     const listed = new Set(this.rows().map((r) => r.id));
     return {
       jd: this.jd, dt, positions: this.positions, ship: this.ship, shipHelio: this.shipHelio, camera: this.camera,
-      selected: this.selected, hovered: this.hovered, orbits: this.orbits, listed, path: this.pathAhead(),
+      selected: this.selected, hovered: this.hovered, orbits: this.orbits, listed, path: this.pathAhead(), system: this.system,
+      jump: this.jump ? { phase: this.jump.phase, t: this.jump.t, total: this.jump.phase === "spool" ? JUMP_SPOOL : jumpTunnel(this.jump.ly), target: this.jump.target.name } : undefined,
     };
   }
 
@@ -381,6 +414,12 @@ export class SpaceSession {
   toggleGalaxy(): void {
     if (this.galaxy) { this.galaxy = null; return; }
     this.chart ??= new GalaxyMap();
+    // Opened somewhere new, the map starts where the ship is.
+    if (this.chart.here.id !== this.system.star.id) {
+      this.chart.here = this.system.star;
+      this.chart.goTo(this.system.star.pos, 40);
+      this.chart.select(this.system.star);
+    }
     this.galaxy = this.chart;
   }
 
@@ -391,8 +430,8 @@ export class SpaceSession {
     s.physics = p;
     if (p === "newton") {
       // From the arcade's standstill, into an orbit where there is gravity to hold one.
-      const mu = gmOf(BODY[s.frame]);
-      if (mu > 0 && len(s.vel) < 0.5 && Math.sqrt(mu / len(s.pos)) > 0.5) s.vel = circularVelocity(s.pos, s.vel, mu, poleOf(BODY[s.frame]));
+      const mu = gmOf(this.body(s.frame));
+      if (mu > 0 && len(s.vel) < 0.5 && Math.sqrt(mu / len(s.pos)) > 0.5) s.vel = circularVelocity(s.pos, s.vel, mu, poleOf(this.body(s.frame)));
       s.order = { kind: "coast" };
       this.say("Real physics: gravity and a 5 g engine");
     } else {
@@ -429,10 +468,11 @@ export class SpaceSession {
   /** The planet (or dwarf planet) the ship is at or nearest to. */
   homePlanet(): string {
     let id = this.ship.frame;
-    while (id && BODY[id] && BODY[id].kind === "moon") id = BODY[id].parent!;
-    if (BODY[id] && (BODY[id].kind === "planet" || BODY[id].kind === "dwarf")) return id;
-    let best = "earth", bestD = Infinity;
-    for (const b of BODIES) {
+    while (id && this.body(id)?.kind === "moon") id = this.body(id)!.parent!;
+    const here = this.body(id);
+    if (here && (here.kind === "planet" || here.kind === "dwarf")) return id;
+    let best = this.system.solar ? "earth" : "", bestD = Infinity;
+    for (const b of this.system.bodies) {
       if (b.kind !== "planet") continue;
       const p = this.positions.get(b.id);
       if (p) { const d = len(sub(p, this.shipHelio)); if (d < bestD) { bestD = d; best = b.id; } }
@@ -442,34 +482,35 @@ export class SpaceSession {
 
   rows(): OverviewRow[] {
     const out: OverviewRow[] = [];
-    for (const b of BODIES) {
+    for (const b of this.system.bodies) {
       const p = this.positions.get(b.id);
       if (!p || !this.inTab(b)) continue;
-      out.push({ id: b.id, name: b.name, kind: b.kind, type: kindLabel(b), distance: Math.max(0, len(sub(p, this.shipHelio)) - b.radius) });
+      out.push({ id: b.id, name: b.name, kind: b.kind, type: this.system.kindLabel(b), distance: Math.max(0, len(sub(p, this.shipHelio)) - b.radius) });
     }
     return out.sort((a, b) => a.distance - b.distance);
   }
 
   distanceTo(id: string): number {
     const p = this.positions.get(id);
-    return p ? Math.max(0, len(sub(p, this.shipHelio)) - (BODY[id]?.radius ?? 0)) : Infinity;
+    return p ? Math.max(0, len(sub(p, this.shipHelio)) - (this.body(id)?.radius ?? 0)) : Infinity;
   }
 
   // ---- orders ----------------------------------------------------------------------------------------------------------
 
   select(id: string | null): void {
-    this.selected = id && BODY[id] ? id : null;
+    this.selected = id && this.body(id) ? id : null;
   }
 
   give(o: Order): boolean {
     if (this.landing !== null || this.ship.landed) return false;
-    if (this.ship.physics === "newton" && o.kind === "land" && !AIR[this.ship.frame]?.lands) { this.say("Only the Earth has a world to land in: warp to it, then land."); return false; }
+    if (this.jump) { this.say("The jump drive has the ship: orders wait until it arrives."); return false; }
+    if (this.ship.physics === "newton" && o.kind === "land" && !this.surroundings.lands!(this.ship.frame)) { this.say(this.system.solar ? "Only the Earth has a world to land in: warp to it, then land." : "Jump home to the Solar System to land: only the Earth has a world to land in yet."); return false; }
     if (this.ship.warp) { this.say("The ship is in warp: orders wait until it drops out."); return false; }
     if (o.kind === "warp") {
       const why = warpRefusal(this.ship, this.surroundings, o.target, o.range);
       if (why) { this.say(why); return false; }
       const d = this.distanceTo(o.target);
-      this.say(`Aligning to ${BODY[o.target].name} — warp in about ${Math.round(warpTime(this.ship.cls, d) + this.ship.cls.tau * 1.4)} s`);
+      this.say(`Aligning to ${this.body(o.target)?.name} — warp in about ${Math.round(warpTime(this.ship.cls, d) + this.ship.cls.tau * 1.4)} s`);
     }
     order(this.ship, o);
     return true;
@@ -483,7 +524,7 @@ export class SpaceSession {
   canWarp(id: string): boolean {
     const p = this.positions.get(id);
     if (!p) return false;
-    return len(sub(p, this.shipHelio)) - warpInDistance(BODY[id].radius, 0) > MIN_WARP;
+    return len(sub(p, this.shipHelio)) - warpInDistance(this.body(id)?.radius ?? 0, 0) > MIN_WARP;
   }
 
   setTimeScale(k: number): void {
@@ -510,14 +551,14 @@ export class SpaceSession {
   lookAt(id: string | null): void {
     // Back on the ship: close enough to see it (it is 42 metres long), however far out the camera had gone.
     if (!id || id === "ship") { this.camera = { ...this.camera, target: "ship", dist: Math.min(this.camera.dist, 0.3) }; return; }
-    const b = BODY[id];
+    const b = this.body(id);
     if (!b) return;
     const extent = b.rings ? b.rings.outer : b.radius;
     this.camera = { ...this.camera, target: id, dist: Math.max(extent * 3.2, 1) };
   }
 
   zoom(factor: number): void {
-    const min = this.camera.target === "ship" ? 0.06 : (BODY[this.camera.target]?.radius ?? 1) * 1.05;
+    const min = this.camera.target === "ship" ? 0.06 : (this.body(this.camera.target)?.radius ?? 1) * 1.05;
     this.camera.dist = Math.max(min, Math.min(80 * AU, this.camera.dist * factor));
   }
 
@@ -526,11 +567,94 @@ export class SpaceSession {
     this.camera.pitch = Math.max(-1.52, Math.min(1.52, this.camera.pitch + dpitch));
   }
 
+  // ---- the jump drive ---------------------------------------------------------------------------------------------------
+
+  /**
+   * Starts a jump to another star (the galaxy map's "Jump"): the drive spools
+   * up, opens a way through hyperspace, and the ship comes out in orbit round
+   * the new star, outside its outermost planet — or, coming home, a short warp
+   * from the Earth.
+   */
+  startJump(star: Star): boolean {
+    const s = this.ship;
+    if (this.jump) { this.say("The jump drive is already running."); return false; }
+    if (s.landed || this.landing !== null) return false;
+    if (s.warp) { this.say("Drop out of warp first: the jump drive and the warp drive cannot run together."); return false; }
+    if (s.physics === "newton" && airAround(s, this.surroundings)) { this.say("Climb out of the air first: the jump drive needs open space."); return false; }
+    if (star.id === this.system.id) { this.say(`The ship is already at ${star.name}.`); return false; }
+    const ly = distance(this.system.star.pos, star.pos) * LY_PER_PC;
+    this.jump = { target: star, system: systemFor(star), ly, phase: "spool", t: 0 };
+    this.galaxy = null;
+    s.order = s.physics === "newton" ? { kind: "coast" } : { kind: "stop" };
+    this.autoScale = null;
+    this.say(`Jump drive spooling up — ${star.name}, ${ly < 100 ? ly.toFixed(1) : Math.round(ly).toLocaleString("en")} light-years away`);
+    return true;
+  }
+
+  /** The jump under way: the spool, then hyperspace, then out at the other end. The Solar System's clock runs on regardless. */
+  private updateJump(dt: number): void {
+    const j = this.jump!;
+    this.clock += dt;
+    this.jd += dt / 86400;
+    j.t += dt;
+    if (j.phase === "spool") {
+      if (j.t >= JUMP_SPOOL) { j.phase = "tunnel"; j.t = 0; this.say(`In hyperspace — ${j.target.name}`); }
+      this.refresh();
+      return;
+    }
+    if (j.t < jumpTunnel(j.ly)) return;
+    this.arrive(j.system);
+  }
+
+  /** Out of hyperspace into a system: somewhere sensible to start from, in a real orbit round its star. */
+  private arrive(sys: StarSystem): void {
+    const s = this.ship;
+    this.jump = null;
+    this.system = sys;
+    this.places = reachesOf(sys);
+    this.velCache.clear();
+    this.selected = null;
+    this.hovered = null;
+    this.refresh();
+    const star = sys.body("sun")!;
+    let pos: Vec3;
+    if (sys.solar) {
+      // Home: a short warp sunward of the Earth, where the trip began.
+      const e = this.positions.get("earth") ?? [AU, 0, 0];
+      pos = scale(e, 1 - 0.02);
+    } else {
+      // Outside the outermost planet, a little above the plane of their orbits: the whole system in view.
+      let out = 0;
+      for (const b of sys.bodies) if (b.kind === "planet" && b.orbit.kind === "kepler") out = Math.max(out, b.orbit.a * (1 + b.orbit.e));
+      const r = Math.max(out * 1.25, star.radius * 20, 0.05 * AU, Math.sqrt(Math.max(0, sys.star.lum)) * 0.5 * AU);
+      const a = (sys.id.length * 2.399963) % (2 * Math.PI);
+      pos = [r * Math.cos(a), r * Math.sin(a), r * 0.06];
+    }
+    s.frame = "sun";
+    s.pos = pos;
+    s.warp = null;
+    s.spool = 0;
+    s.heat = 0;
+    s.chute = 0;
+    const mu = gmOf(star);
+    s.vel = s.physics === "newton" && mu > 0 ? circularVelocity(pos, [0, 0, 0], mu, [0, 0, 1]) : [0, 0, 0];
+    s.order = s.physics === "newton" ? { kind: "coast" } : { kind: "stop" };
+    this.shipHelio = shipPosition(s, this.surroundings);
+    this.camera = { ...this.camera, target: "ship", dist: Math.min(this.camera.dist, 0.3) };
+    const planets = sys.bodies.filter((b) => b.kind === "planet").length;
+    this.say(sys.solar ? "Home: the Solar System. The Earth is a short warp away." : `Arrived at ${sys.star.name}: ${planets ? `${planets} planet${planets === 1 ? "" : "s"}` : "no planets"} — pick one in the overview and warp to it`);
+  }
+
+  /** Whether the ship is at home, in the Solar System. */
+  get home(): boolean {
+    return this.system.solar;
+  }
+
   // ---- landing ---------------------------------------------------------------------------------------------------------
 
   /** Where below the ship, if it is low enough over the Earth to come down (under real physics, anywhere near it: the landing flies itself down). */
   landingSite(): { lat: number; lon: number; altitude: number } | null {
-    if (this.ship.frame !== "earth" || this.ship.warp) return null;
+    if (!this.system.solar || this.ship.frame !== "earth" || this.ship.warp) return null;
     const under = belowShip(this.ship.pos, gmst(this.jd), eclToEq);
     return under.altitude < 2000 || (this.ship.physics === "newton" && !this.ship.landed) ? under : null;
   }

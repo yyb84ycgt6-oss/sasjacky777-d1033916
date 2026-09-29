@@ -76,6 +76,20 @@ export const BELTS: Belt[] = [
 ];
 
 /**
+ * A belt of another star's (systems.ts): `count` bodies spread between two
+ * distances (AU) on low, nearly round orbits round a star of `mass` Suns.
+ */
+export function makeBelt(name: string, count: number, color: [number, number, number], inner: number, outer: number, mass: number, seed: number): Belt {
+  const r = new Rng(seed);
+  const el = new Float64Array(count * 7);
+  for (let k = 0; k < count; k++) {
+    const a = inner + (outer - inner) * r.next();
+    el.set([a, Math.abs(gauss(r)) * 0.06, Math.abs(gauss(r)) * 5 * DEG, r.next() * 2 * Math.PI, r.next() * 2 * Math.PI, r.next() * 2 * Math.PI, (GAUSS_K * Math.sqrt(mass)) / Math.pow(a, 1.5)], k * 7);
+  }
+  return { name, elements: el, count, color };
+}
+
+/**
  * A belt's positions at a date (km from the Sun) into `out`, three numbers
  * a body. Thousands of Kepler solutions a frame: the solver converges in a
  * few steps for these nearly round orbits.
