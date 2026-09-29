@@ -28,6 +28,7 @@ import { WaystoneScreen } from "./WaystoneScreen";
 import { EngramScreen } from "./EngramScreen";
 import { ModsScreen } from "./ModsScreen";
 import { BattleScreen, CenterScreen, CritterTradeScreen, LinkScreen, PartyScreen, PartyStrip, StarterScreen } from "./CritterScreens";
+import { SurvivorScreen } from "./SurvivorScreen";
 import { CasinoScreen } from "./CasinoScreens";
 import { ShopScreen } from "./CityScreens";
 import { SpaceScreen } from "./SpaceScreen";
@@ -254,6 +255,7 @@ function Overlay({ game, input, settings, onSettings, onQuit, onExitApp }: GameV
       {screen?.kind === "shop" && <ShopScreen key={screen.shop} game={game} which={screen.shop} />}
       {screen?.kind === "party" && <PartyScreen key={`${screen.give ?? ""}${screen.tab ?? ""}`} game={game} give={screen.give} tab={screen.tab} />}
       {screen?.kind === "starter" && <StarterScreen game={game} rentals={screen.rentals} />}
+      {screen?.kind === "survivor" && <SurvivorScreen game={game} />}
       {screen?.kind === "center" && <CenterScreen game={game} x={screen.x} y={screen.y} z={screen.z} />}
       {/* In space the ship's screen stays up under the pause menu and the chat, which open over it. */}
       {hud.space && (screen?.kind === "space" || screen?.kind === "pause" || screen?.kind === "chat" || screen?.kind === "options") && <SpaceScreen game={game} />}

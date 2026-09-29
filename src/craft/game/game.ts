@@ -27,6 +27,7 @@ import { blastImpact, explosionBlocks, exposure } from "../engine/explosion";
 import { itemByName, itemDef, itemId, itemLight, maxStack, resolveDrops, type ItemStack, type StatusEffect } from "../engine/items";
 import { COUNTY_BLOCKS as C, LIGHT_OFF, LIGHT_ON } from "../engine/countyBlocks";
 import { BOOK_SKILLS } from "../engine/countyItems";
+import { invalid, occupation, type Survivor } from "../engine/survivors";
 import {
   countyDay, GENERATOR_CAN, GENERATOR_REACH, GENERATOR_TANK, hasPower, hasWater, READ_IDLE, READ_TEACHES, SKILL_LESSON, spoiled, utilities,
 } from "../engine/countyLife";
@@ -1713,6 +1714,33 @@ export class Game {
     }
   }
 
+  /**
+   * Becoming someone: the occupation and traits chosen on the survivor
+   * screen. Returns why not, or null — and on success the job's kit goes into
+   * the pockets and what it taught is known from the first moment.
+   */
+  chooseSurvivor(s: Survivor): string | null {
+    const why = invalid(s);
+    if (why) return why;
+    const p = this.player;
+    p.setSurvivor({ occupation: s.occupation, traits: [...s.traits] });
+    for (const [name, count] of p.perks.kit) {
+      const id = itemByName(name)?.id;
+      if (id === undefined) continue;
+      const left = p.inventory.add({ id, count });
+      if (left > 0) this.dropItem(p.body.x, p.body.y + 1, p.body.z, { id, count: left });
+    }
+    this.bumpInv();
+    this.setScreen(null);
+    const job = occupation(s.occupation)!;
+    // What the picker hid: the day, and how the county works, said again now that someone is here to hear it.
+    const day = Math.floor(countyDay(this.time)) + 1;
+    this.showTitle("Ashgrove County", day === 1 ? "Day one. The county has been sealed." : `Day ${day}. Somebody new wakes up.`);
+    this.message(job.id === "unemployed" ? "You wake with nothing but yourself. That will have to do." : `You were a ${job.name.toLowerCase()}. Whatever you are now, that still counts for something.`, "#aaffaa");
+    this.message("Search the houses: kitchens, bathrooms and garages hold what you need. Close doors behind you. The infected hear everything.", "#aaffaa");
+    return null;
+  }
+
   /** What this player has read, of the books and magazines that teach something (engine/countyItems.ts). */
   private readLocal = new Set<string>();
   private readList(): Set<string> {
@@ -1727,6 +1755,8 @@ export class Game {
    * counts), or a magazine's one lesson by its item name.
    */
   hasRead(what: string): boolean {
+    // What the player knew before, from their job or their traits (engine/survivors.ts), counts as read.
+    if (this.player.perks.knows.includes(what)) return true;
     const read = this.readList();
     return read.has(what) || [...read].some((r) => r.startsWith(`${what}_book_`));
   }
@@ -2166,6 +2196,8 @@ export class Game {
 
   respawn(): void {
     const p = this.player;
+    // In the county, whoever died is gone: the next to wake in the house is somebody new, with a past of their own.
+    if (this.vitalsRules()?.knox) p.setSurvivor(null);
     // Beds are in the overworld: death anywhere else sends the player home (online, a guest respawns by the host).
     if (this.dimension !== "overworld") {
       const host = this.role === "guest" && this.net?.hostConnection ? this.remote.get(this.net.hostConnection) : undefined;
@@ -2514,7 +2546,7 @@ export class Game {
     if (this.tickCount % 20 === 17) this.tickVitals();
     if (this.tickCount % 20 === 9) this.tickCounty();
     // Running is loud where the infected roam: they hear it from a few blocks off.
-    if (this.tickCount % 20 === 3 && p.sprinting && !p.dead && modeDef(this.meta.mode?.id)?.fauna === "infected") this.makeNoise(b.x, b.y, b.z, 10, p.id);
+    if (this.tickCount % 20 === 3 && p.sprinting && !p.dead && modeDef(this.meta.mode?.id)?.fauna === "infected") this.makeNoise(b.x, b.y, b.z, 10 * p.perks.noise, p.id);
     this.borderTick();
     this.critters.tick();
     if (p.health > this.maxHealth) p.health = this.maxHealth;
@@ -3166,6 +3198,8 @@ export class Game {
     const rules = this.vitalsRules();
     const p = this.player;
     if (!rules || p.dead || !p.survivalLike) return;
+    // Ashgrove County asks who you were before you take a step: the choice shapes everything after.
+    if (rules.knox && !p.survivor && !this.screen && this.spawnReady) { this.setScreen({ kind: "survivor" }); return; }
     const b = p.body, fx = Math.floor(b.x), fy = Math.floor(b.y), fz = Math.floor(b.z);
     const biome = biomeDef(this.world.chunkAt(fx, fz)?.biomes[((fz & 15) << 4) | (fx & 15)] ?? 7);
     // Warmth nearby: the strongest source within four blocks, fading with distance.
@@ -3174,7 +3208,7 @@ export class Game {
       const s = HEAT[this.world.blockAt(fx + dx, fy + dy, fz + dz)];
       if (s) heat = Math.max(heat, s * (1 - Math.hypot(dx, dy, dz) / 4.5));
     }
-    const insulation = Math.min(1, p.inventory.armor.reduce((t, a) => t + (!a ? 0 : itemDef(a.id)?.armor?.material === "leather" ? 0.25 : 0.12), 0));
+    const insulation = Math.min(1, p.perks.warmth + p.inventory.armor.reduce((t, a) => t + (!a ? 0 : itemDef(a.id)?.armor?.material === "leather" ? 0.25 : 0.12), 0));
     const second = ++this.vitalSecond;
     const events = vitalsSecond(p.vitals, rules, {
       biome: biome.name, dimension: this.dimension, night: this.isNight(), raining: this.rain > 0.5 && this.world.seesSky(fx, fy + 2, fz),
@@ -3218,7 +3252,7 @@ export class Game {
     if (!rules) return;
     const v = this.player.vitals;
     if (rules.thirst) v.water = Math.min(20, v.water + water);
-    if (rules.wounds && Math.random() < sicknessChance(item) && !v.sick) { v.sick = SICKNESS_TICKS; this.message("That water was bad. You feel sick.", "#ffaa55"); }
+    if (rules.wounds && Math.random() < sicknessChance(item) * this.player.perks.sickness && !v.sick) { v.sick = SICKNESS_TICKS; this.message("That water was bad. You feel sick.", "#ffaa55"); }
   }
 
   /** Something was eaten: juicy food quenches a little; raw or rotten may make you ill. */
@@ -3227,7 +3261,7 @@ export class Game {
     if (!rules) return;
     const v = this.player.vitals;
     if (rules.thirst) v.water = Math.min(20, v.water + waterFrom(item));
-    if (rules.wounds && Math.random() < sicknessChance(item) && !v.sick) { v.sick = SICKNESS_TICKS; this.message("Your stomach turns. You feel sick — antibiotics would help.", "#ffaa55"); }
+    if (rules.wounds && Math.random() < sicknessChance(item) * this.player.perks.sickness && !v.sick) { v.sick = SICKNESS_TICKS; this.message("Your stomach turns. You feel sick — antibiotics would help.", "#ffaa55"); }
   }
 
   /** A bandage, a splint or antibiotics used on yourself. Returns whether it did anything (and so is used up). */
@@ -3293,7 +3327,7 @@ export class Game {
       const infected = mob instanceof Mob && isInfected(mob.kind);
       if (rules.knox && infected && source === "mob") {
         // The county's rule: every blow from the dead is a scratch, a tear or a bite, and any of them may carry it.
-        const w = knoxWound(Math.random);
+        const w = knoxWound(Math.random, p.perks.infection);
         if (w.bleeds && v.bleeding < 3) v.bleeding++;
         if (w.infects && !v.infection) v.infection = 1;
         this.message(w.wound === "bite"

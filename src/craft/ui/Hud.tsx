@@ -88,7 +88,8 @@ export function Hud({ hud, mobile, crosshair }: { hud: HudState; mobile: boolean
         </div>
       )}
 
-      {hud.title && (
+      {/* The survivor picker is the whole screen: the day's title waits until someone has been chosen to read it. */}
+      {hud.title && hud.screen?.kind !== "survivor" && (
         <div className="absolute left-0 right-0 text-center" style={{ top: "30%", animation: "bc-fadeout 4s forwards" }}>
           <div style={{ fontSize: "calc(var(--u) * 20)" }}>{hud.title.text}</div>
           {hud.title.sub && <div style={{ fontSize: "calc(var(--u) * 9)", color: "#ddd" }}>{hud.title.sub}</div>}
@@ -236,7 +237,7 @@ export function Hud({ hud, mobile, crosshair }: { hud: HudState; mobile: boolean
       {/* Chat. */}
       <div className="absolute left-0" style={{ bottom: mobile ? "calc(var(--u) * 70)" : "calc(var(--u) * 48)", maxWidth: "min(90vw, calc(var(--u) * 240))", padding: "0 calc(var(--u) * 2)" }}>
         {/* A battle has its own line of text: the chat keeps out of its way. */}
-        {hud.screen?.kind !== "battle" && hud.chat.filter((l) => hud.screen?.kind === "chat" || now - l.at < 10000).slice(-10).map((l) => (
+        {hud.screen?.kind !== "battle" && hud.screen?.kind !== "survivor" && hud.chat.filter((l) => hud.screen?.kind === "chat" || now - l.at < 10000).slice(-10).map((l) => (
           <div key={l.id} style={{ fontSize: "calc(var(--u) * 6.5)", color: l.color ?? "#fff", background: "rgba(0,0,0,0.4)", padding: "calc(var(--u) * 0.5) calc(var(--u) * 2)", opacity: hud.screen?.kind === "chat" ? 1 : Math.min(1, (10000 - (now - l.at)) / 1500) }}>
             {l.text}
           </div>

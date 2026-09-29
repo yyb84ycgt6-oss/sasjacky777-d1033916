@@ -80,6 +80,8 @@ export type Screen =
   | { kind: "battle" }
   | { kind: "party"; give?: string; tab?: "party" | "dex" }
   | { kind: "starter"; rentals?: boolean }
+  /** Ashgrove County: who this survivor was before (engine/survivors.ts), chosen before the first step and after every death. */
+  | { kind: "survivor" }
   | { kind: "center"; x: number; y: number; z: number }
   /** In space (space/): the ship's view and its overview. */
   | { kind: "space" }

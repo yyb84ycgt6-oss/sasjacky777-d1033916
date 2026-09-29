@@ -398,6 +398,34 @@ The county runs on the reference game's rules, written here from scratch
 
   Newspapers, comics, novels and cards pass the time, and are used up.
 
+### Who you were
+
+Before the first step into the county, and again after every death (whoever
+wakes next is somebody new), a **Who were you?** screen asks for an
+occupation and traits (`engine/survivors.ts`, `ui/SurvivorScreen.tsx`), after
+the reference game's character creation:
+
+- **An occupation** brings a starting kit and what you already know:
+  - Carpenter: one nail a plank, with a hammer, planks and nails.
+  - Nurse: dressings that heal, with sterile bandages and painkillers.
+  - Electrician: can run a generator without the Guide.
+  - Police officer: a nightstick and the service pistol.
+  - Firefighter: a fire axe.
+  - Chef, farmer, mechanic, burglar and lumberjack each bring their own.
+  - Unemployed brings nothing, but leaves the most points.
+- **Traits** cost points or pay them back, and opposites exclude each other:
+  - Strong or weak, and athletic or unfit: harder or softer hits, faster or slower on your feet.
+  - Fast or slow healer.
+  - Thick or thin skinned: changes the odds that a scratch or tear carries the infection. A bite always does.
+  - Iron gut or weak stomach.
+  - Light eater or hearty appetite.
+  - Graceful or clumsy: how far your running is heard.
+  - Outdoorsman: the cold takes longer to reach you.
+  - Handy and First Aider: carpentry and first aid known from the start.
+- A choice that overspends cannot be confirmed. All of it folds into one
+  set of multipliers (`perksOf`), so an unchosen player is exactly the
+  ordinary one. The choice is saved with the player.
+
 Block ids are sixteen-bit. The first 256 were one byte, and every one was
 taken. Chunks keep Uint16Arrays, a save stores two bytes a block, and chunks
 saved before the change (one byte a block) are still read as they were

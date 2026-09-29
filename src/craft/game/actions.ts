@@ -175,6 +175,8 @@ export class Actions {
       // Escape backs out of whatever is open; the death screen stays until a choice is made, a battle until it is
       // run from or won, and a new trainer's first critter until it is chosen.
       if (g.screen?.kind === "battle" || (g.screen?.kind === "starter" && !p.card.party.length)) return;
+      // Nobody walks out into the county without having been someone first.
+      if (g.screen?.kind === "survivor" && !p.survivor) return;
       // In space, Escape opens the pause menu over the ship's view rather than closing it.
       if (g.screen?.kind === "space") { g.setScreen({ kind: "pause" }); return; }
       // Walking away from a trade calls it off, so the other player is not left waiting on an empty table.
@@ -573,6 +575,8 @@ export class Actions {
     const torpor = mount ? 0 : (held?.name === "wooden_club" ? TORPOR.club : held ? 0 : TORPOR.fist) * (0.2 + strength * strength * 0.8);
     const crit = strength > 0.9 && p.body.fallDistance > 0 && !p.body.onGround && !p.body.inWater && !p.body.onLadder;
     if (crit) damage *= 1.5;
+    // Ashgrove County: a strong survivor, a weak one, a police officer's training (engine/survivors.ts).
+    damage *= p.perks.melee;
     const knockback = levelOf(stack, "knockback") * 0.5;
     const fire = levelOf(stack, "fire_aspect") * 80;
     const looting = levelOf(stack, "looting");

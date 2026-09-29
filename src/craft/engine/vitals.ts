@@ -56,10 +56,11 @@ export type KnoxWound = "scratch" | "laceration" | "bite";
  * the infection is the reference game's: a scratch seldom, a laceration now
  * and then, a bite always.
  */
-export function knoxWound(random: () => number): { wound: KnoxWound; infects: boolean; bleeds: boolean } {
+export function knoxWound(random: () => number, skin = 1): { wound: KnoxWound; infects: boolean; bleeds: boolean } {
   const r = random();
   const wound: KnoxWound = r < 0.15 ? "bite" : r < 0.45 ? "laceration" : "scratch";
-  const chance = wound === "bite" ? 1 : wound === "laceration" ? 0.25 : 0.07;
+  // Thick or thin skin (engine/survivors.ts) moves the odds for a scratch or a tear — never for a bite.
+  const chance = wound === "bite" ? 1 : Math.min(1, (wound === "laceration" ? 0.25 : 0.07) * skin);
   return { wound, infects: random() < chance, bleeds: wound !== "scratch" || random() < 0.3 };
 }
 

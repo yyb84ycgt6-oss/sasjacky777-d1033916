@@ -15,6 +15,7 @@ import { glide, newBody, senseEnvironment, travel, type Body, type BlockReader }
 import type { DamageSource } from "./entities";
 import { sanitizeWaypoints, type Waypoint } from "./waypoints";
 import { freshVitals, sanitizeVitals, type Vitals } from "./vitals";
+import { perksOf, sanitizeSurvivor, type Perks, type Survivor } from "./survivors";
 import { freshCard, sanitizeCard, type TrainerCard } from "./critters";
 
 export type GameMode = "survival" | "creative" | "adventure" | "spectator";
@@ -118,6 +119,15 @@ export class Player {
   card: TrainerCard = freshCard();
   /** Dollars: the city's money and the casino's (play money, earned and lost in game). */
   cash = 0;
+  /** Ashgrove County: who this player was before (engine/survivors.ts), or null until they have chosen. */
+  survivor: Survivor | null = null;
+  /** What that past does to them; the ordinary player's when there is none. */
+  perks: Perks = perksOf(null);
+
+  setSurvivor(s: Survivor | null): void {
+    this.survivor = s;
+    this.perks = perksOf(s);
+  }
   /** The city modes: wanted stars, as the host last told this player (not saved: the heat dies with the session). */
   wanted = 0;
   /** Chance source for Unbreaking and Respiration; tests pin it. */
@@ -211,7 +221,7 @@ export class Player {
   }
 
   addExhaustion(n: number): void {
-    if (this.survivalLike) this.exhaustion = Math.min(40, this.exhaustion + n);
+    if (this.survivalLike) this.exhaustion = Math.min(40, this.exhaustion + n * this.perks.hunger);
   }
 
   heal(n: number): void {
@@ -424,7 +434,7 @@ export class Player {
     } else {
       res = travel(world, b, {
         forward: input.forward, strafe: input.strafe, yaw: this.yaw, jump: input.jump, sneak: input.sneak,
-        sprint: this.sprinting, flying: this.flying, speed: 0.1 * speedBoost,
+        sprint: this.sprinting, flying: this.flying, speed: 0.1 * speedBoost * this.perks.speed,
         levitation: this.flying ? 0 : this.effectLevel("levitation") + 1,
       });
     }
@@ -525,14 +535,14 @@ export class Player {
     }
     const regen = rules.naturalRegeneration;
     if (regen && this.saturation > 0 && this.health < 20 && this.food >= 20) {
-      if (++this.foodTimer >= 10) {
+      if (++this.foodTimer >= 10 / this.perks.heal) {
         const s = Math.min(this.saturation, 6);
         this.heal(s / 6);
         this.addExhaustion(s);
         this.foodTimer = 0;
       }
     } else if (regen && this.food >= 18 && this.health < 20) {
-      if (++this.foodTimer >= 80) {
+      if (++this.foodTimer >= 80 / this.perks.heal) {
         this.heal(1);
         this.addExhaustion(6);
         this.foodTimer = 0;
@@ -572,6 +582,7 @@ export class Player {
       // Only once they have a critter: a world that never had any keeps its saves as they were.
       card: this.card.party.length || this.card.box.length || this.card.starter ? this.card : undefined,
       cash: this.cash || undefined,
+      survivor: this.survivor ?? undefined,
     };
   }
 
@@ -598,6 +609,7 @@ export class Player {
     this.vitals = sanitizeVitals(s.vitals);
     this.engrams = new Set(Array.isArray(s.engrams) ? s.engrams.filter((e): e is string => typeof e === "string").slice(0, 128) : []);
     this.card = sanitizeCard(s.card);
+    this.setSurvivor(sanitizeSurvivor(s.survivor));
     this.cash = typeof s.cash === "number" && Number.isFinite(s.cash) ? Math.max(0, Math.min(999_999_999, Math.floor(s.cash))) : 0;
     if (s.dead || this.health <= 0) { this.dead = true; this.health = 0; }
   }
@@ -623,4 +635,5 @@ export interface PlayerSave {
   engrams?: string[];
   card?: TrainerCard;
   cash?: number;
+  survivor?: Survivor;
 }
