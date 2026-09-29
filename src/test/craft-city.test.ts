@@ -337,7 +337,9 @@ describe("the traffic", () => {
     // Whatever it chose, it is squarely on a lane now.
     const now = laneNear(city, car.x, car.z, car.yaw);
     expect(Math.abs(city.laneLine(now) - (now.axis === "z" ? car.x : car.z))).toBeLessThan(1.2);
-  });
+  // It builds 220 blocks square of city before the car turns a wheel: about three and a half seconds on a fast machine,
+  // which a busy CI runner stretched past the default five. The work is the test, so it gets the time.
+  }, 20_000);
 
   it("stops for somebody standing in its lane, and sounds the horn if they stay", () => {
     // A long straight avenue down x = 0, northbound.
