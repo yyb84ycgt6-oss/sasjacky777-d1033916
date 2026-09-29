@@ -79,6 +79,13 @@ const EXTERNAL_DESTINATIONS: Destination[] = [
     keywords: ["commander", "fleet", "vault"],
   },
   {
+    path: "/strongbox.html",
+    label: "Strongbox",
+    kind: "external",
+    group: "Core",
+    keywords: ["strongbox", "vault", "encrypted", "offline", "private", "notes", "backup"],
+  },
+  {
     path: "/pc-os/verify-provenance.html",
     label: "PC provenance verifier",
     kind: "external",

@@ -149,6 +149,26 @@ state viewer (`Jackie/core/engine/requirements.txt`). The registry, the pod
 manager, the execution graph and tracing need none of them, which is why
 `tests/test_jackie_os_runtime.py` can cover them without a network.
 
+## Strongbox
+
+`public/strongbox.html` is an encrypted vault for notes and files that lives on
+the device: PBKDF2 (600,000 rounds) into AES-GCM, IndexedDB at rest, no account,
+and no request after it loads — its Checks tab counts them rather than claiming
+it. It is a single self-contained page, like `app-commander.html`, reachable at
+`/strongbox.html`, from the chat sidebar and by name from `/path`, and it
+installs to an iPhone Home Screen. `public/strongbox-sw.js` keeps one copy of the
+page so it opens offline; a Home Screen app never loads the rest of the site, so
+it would never get the site's own worker.
+
+It came in as a single file. Driving it in a browser before it landed turned
+up ten problems, and reading it three more: two ways to lose the whole vault
+through a backup, one way for a backup to run code, three places that reported
+success while failing, three that failed without a word, and four that weakened
+what it protects. The worst was a damaged backup wiping the vault it was being
+restored into. `e2e/strongbox.spec.ts` drives each of
+them in a real browser, and `src/test/strongbox.test.ts` fails in seconds if the
+page ever gains a `<script src>` or a `fetch()`.
+
 ## The archive
 
 `archive/branches/` holds every file version that existed only on a branch
