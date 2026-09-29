@@ -251,7 +251,9 @@ def test_no_module_uses_syntax_newer_than_the_declared_python_floor():
     root = Path(__file__).resolve().parents[1]
     offenders = []
     for path in root.rglob("*.py"):
-        if "node_modules" in path.parts or "__pycache__" in path.parts:
+        # `archive/` is deleted branches kept to be read, never imported — it
+        # holds the pre-recovery runtime, `X | None` and all, on purpose.
+        if {"node_modules", "__pycache__", "archive"} & set(path.relative_to(root).parts):
             continue
         for node in ast.walk(ast.parse(path.read_text())):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -267,3 +269,18 @@ def test_no_module_uses_syntax_newer_than_the_declared_python_floor():
         "PEP 604 unions (`X | None`) are a TypeError on Python 3.9, which this "
         "project supports. Use Optional[X]:\n  " + "\n  ".join(offenders)
     )
+
+
+def test_a_router_refusal_reaches_the_orchestrator_as_the_router_s_reason():
+    import io
+    import urllib.error
+
+    from Jackie.core.engine.fs.jackie_router_client import _describe_failure
+
+    body = io.BytesIO(b'{"error": "no provider could serve the request", "trace": []}')
+    refusal = urllib.error.HTTPError("http://127.0.0.1:4000/chat/completions", 503, "Service Unavailable", {}, body)
+    assert _describe_failure(refusal) == "router 503: no provider could serve the request"
+
+    unreadable = urllib.error.HTTPError("u", 502, "Bad Gateway", {}, io.BytesIO(b"<html>"))
+    assert "502" in _describe_failure(unreadable)
+    assert _describe_failure(ConnectionRefusedError("refused")) == "refused"

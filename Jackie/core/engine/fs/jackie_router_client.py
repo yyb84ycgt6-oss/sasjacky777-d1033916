@@ -38,6 +38,28 @@ def _get_json(url: str, timeout: int) -> Dict[str, Any]:
         return json.loads(response.read().decode("utf-8"))
 
 
+def _describe_failure(error: Exception) -> str:
+    """
+    The router's own reason, when it gave one.
+
+    The router answers an unservable request with a 503 whose body names the
+    cause ("pinned provider is not configured", every rung rate-limited). urllib
+    raises on the status and `str()` of that is "HTTP Error 503: Service
+    Unavailable" — the one sentence that tells the orchestrator nothing about
+    what to fix.
+    """
+    if isinstance(error, urllib.error.HTTPError):
+        try:
+            body = json.loads(error.read().decode("utf-8"))
+        except Exception:
+            body = None
+        if isinstance(body, dict) and body.get("error"):
+            return f"router {error.code}: {body['error']}"
+        if isinstance(body, dict) and body.get("detail"):
+            return f"router {error.code}: {body['detail']}"
+    return str(error)
+
+
 class JackieRouterClient:
     """
     Jackie → Router → Ollama
@@ -115,7 +137,7 @@ class JackieRouterClient:
 
         except Exception as e:
             return {
-                "error": str(e),
+                "error": _describe_failure(e),
                 "router_url": self.router_url,
                 "payload": payload,
             }
@@ -134,7 +156,7 @@ class JackieRouterClient:
             )
 
         except Exception as e:
-            return {"error": str(e), "prompt": prompt}
+            return {"error": _describe_failure(e), "prompt": prompt}
 
     # ────────────────────────────────────────
     # Health checks

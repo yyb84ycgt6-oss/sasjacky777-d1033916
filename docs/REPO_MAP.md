@@ -128,7 +128,7 @@ JACKIEROUTER_CONFIG=router.config.json python router_final.py
 | `fs/pod_backpack_manager.py` | Pods (execution partitions with hardware hints) and backpacks (memory partitions). |
 | `fs/jackie_orchestrator.py` | Dispatch: task → agent → router call → result, with fallback agents on error. |
 | `fs/execution_graph.py` | A DAG of tasks with dependency resolution. |
-| `fs/jackie_router_client.py` | HTTP client for the gateway at `router_final.py`. |
+| `fs/jackie_router_client.py` | HTTP client for the gateway at `router_final.py` — `/chat/completions` and `/complete/auto`, which `tests/test_gateway.py` holds the gateway to serving. |
 | `fs/tracing.py`, `fs/state_viewer.py` | Structured tracing and an HTTP view of live state. |
 | `jackie_os.py` | The bootstrap that wires all of the above together. |
 
@@ -148,3 +148,13 @@ python -m Jackie.core.engine.jackie_os --viewer
 state viewer (`Jackie/core/engine/requirements.txt`). The registry, the pod
 manager, the execution graph and tracing need none of them, which is why
 `tests/test_jackie_os_runtime.py` can cover them without a network.
+
+## The archive
+
+`archive/branches/` holds every file version that existed only on a branch
+sharing no history with SAS-JACKY (`main`, `master`, `bionic/router-stack-v1`,
+`bionic/command-station-integration-v2`…`v4`), plus their commit messages, so
+those branches can be deleted without losing anything. Nothing there is
+imported, built, linted or tested; its README says what each part is and what
+replaced it.
+
