@@ -135,9 +135,11 @@ let players: PlayerRef[];
 let hurt: { id: string; amount: number }[];
 let effects: { id: string; effect: StatusEffect; seconds: number }[];
 let dropped: ItemStack[];
+/** Where the mobs' chances come from: Math.random, unless a test pins it to a seed. */
+let random: () => number = Math.random;
 
 const ctx = (): EntityContext => ({
-  world, tick: 0, daylight: 1, difficulty: 2, random: Math.random, players: () => players,
+  world, tick: 0, daylight: 1, difficulty: 2, random: () => random(), players: () => players,
   hurtPlayer: (id, amount) => { hurt.push({ id, amount }); }, givePlayer: () => 0, giveXp: () => {},
   spawn: (e) => { spawned.push(e); }, dropItem: (_x, _y, _z, s) => { dropped.push(s); }, explode: () => {}, sound: () => {}, particles: () => {},
   entitiesNear: (x, y, z, r) => spawned.filter((m) => !m.removed && Math.abs(m.x - x) <= r && Math.abs(m.y - y) <= r && Math.abs(m.z - z) <= r),
@@ -154,6 +156,7 @@ function tickAll(n: number): void {
 }
 
 beforeEach(() => {
+  random = Math.random;
   world = flatWorld(2);
   spawned = [];
   players = [];
@@ -197,6 +200,9 @@ describe("shulkers", () => {
   });
 
   it("drops a shell about half the time", () => {
+    // Seeded, so the count is the same on every machine: unseeded, a run out in the tail once failed the suite.
+    let seed = 20260929;
+    random = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
     let shells = 0;
     for (let i = 0; i < 200; i++) {
       const s = new Mob("shulker", 0.5, 11, 0.5);
@@ -207,6 +213,7 @@ describe("shulkers", () => {
       tickAll(25);
       if (dropped.some((d) => d.id === itemId("shulker_shell"))) shells++;
     }
+    random = Math.random;
     expect(shells).toBeGreaterThan(70);
     expect(shells).toBeLessThan(130);
   });
