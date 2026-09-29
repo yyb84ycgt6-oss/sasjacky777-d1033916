@@ -335,6 +335,69 @@ its own county, towns, people and art; nothing of theirs).
   flashlights, radios and gas cans. Some can be crafted: planks into boards,
   a nailed bat, sheets into rags and rags into bandages, and a barricade.
 
+### Surviving it
+
+The county runs on the reference game's rules, written here from scratch
+(`engine/countyLife.ts`, `engine/infectedAi.ts`, `game/countyUse.ts`):
+
+- **The dead are slow, and there are a lot of them.** Almost all are
+  shamblers, which never run; some are crawlers, which drag themselves along
+  at knee height; very rarely one still runs. They are thick in the towns and
+  thin in the fields, more come out at night, and they come up at street
+  level and on the ground floors of houses, never on the roofs. They cannot
+  dig through a wall. What they do is beat on the weak places: glass goes in
+  seconds, a board in about fifteen seconds, and a door in half a minute. A
+  crowd at one door is each of them beating on it, which is how a house
+  falls. Noise brings them: gunshots, hammering, a garage door, a running
+  generator.
+- **The infection has no cure.** Every blow from the dead is a scratch, a
+  laceration or a bite. A bite always carries the infection, a laceration
+  one time in four, a scratch one time in fourteen, and you find out only
+  when the symptoms come. It is half a day before you feel queasy, then you
+  are nauseous, then feverish, then failing. At two and a half days you
+  die, and one more shambler gets up where you fell. Antibiotics do nothing
+  for it. The other wounds are the ordinary ones: bleeding, which bandages
+  and sutures stop; a broken leg, which a splint or a first-aid kit sets;
+  and a dirty wound, which disinfectant cleans.
+- **The HUD speaks in moodles.** Beside the temperature it shows words for
+  what is wrong: Queasy, Nauseous, Feverish or Failing; Thirsty, Very
+  thirsty or Parched; Bleeding; a broken leg.
+- **Windows and barricades.** Right-click a window to slide it up (an open
+  or smashed window is a way in, over the sill) and sneak-click with an empty
+  hand to draw the curtains. With a hammer in hand, a plank and two nails
+  board up a window or a door; four boards is the most either takes. A door
+  with boards across it will not open. A crowbar, or a sneaking hammer, pries
+  a board off and gives the plank back. The garage doors roll up and down as
+  a whole.
+- **The water goes, then the power.** Each world has its own days for these,
+  a week or two in, with the water first. Until then the taps run and fill
+  bottles; after, only a toilet tank still gives a drink, and not a clean
+  one. When the power fails, every light in the county goes dark, including
+  the houses you reach later. Stoves and microwaves stop cooking, and the gas
+  pumps stop pumping. A generator brings the power back for twelve blocks
+  around it. It runs on a full gas can for about twenty minutes, and is loud
+  enough to draw the dead from forty blocks away. You cannot hook one up
+  until you have read the Generator Guide.
+- **Food spoils.** Fresh food found in a cupboard has gone off after a few
+  days. In a fridge it keeps three times as long, but only while the power
+  is on; after that it is spoiled food, which will likely make you sick.
+  Tins and dry goods keep.
+- **The television and the radio** carry this game's own emergency
+  broadcasts, day by day. The official line comes first, then the official
+  line fraying, then a test card. The television dies with the power. A
+  radio hears a farmer called Walt for a while after that, and then only
+  static.
+- **The helicopter.** Once, in the first week, on a day and hour of the
+  world's own, a helicopter comes low over the county and circles you for a
+  minute and a half. Everything dead for miles follows the noise.
+- **Reading.** A skill book (any volume) or a special-interest magazine
+  teaches something, and you keep it:
+  - Carpentry, or Weekend Builder: one nail a plank instead of two.
+  - First Aid: your dressings heal as well as stop the bleeding.
+  - The Generator Guide: you can run a generator.
+
+  Newspapers, comics, novels and cards pass the time, and are used up.
+
 Block ids are sixteen-bit. The first 256 were one byte, and every one was
 taken. Chunks keep Uint16Arrays, a save stores two bytes a block, and chunks
 saved before the change (one byte a block) are still read as they were

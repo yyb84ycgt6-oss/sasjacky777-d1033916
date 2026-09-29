@@ -19,12 +19,49 @@ export interface Vitals {
   sick: number;
   /** A broken leg: slow, until splinted. */
   broken: boolean;
+  /**
+   * Seconds since the county's infection got in (0: it has not). Unlike a
+   * fever it has no cure: it runs its course and the body gets up again.
+   */
+  infection: number;
 }
 
-export const freshVitals = (): Vitals => ({ water: 20, temp: 37, bleeding: 0, sick: 0, broken: false });
+export const freshVitals = (): Vitals => ({ water: 20, temp: 37, bleeding: 0, sick: 0, broken: false, infection: 0 });
 
-/** Which of the vitals a mode keeps. */
-export interface VitalsRules { thirst?: boolean; temperature?: boolean; wounds?: boolean }
+/**
+ * Which of the vitals a mode keeps. `knox` is Ashgrove County's rule, after
+ * Project Zomboid's: a wound from the dead may carry an infection nothing
+ * cures — a bite always does — and you learn it only when the symptoms come.
+ */
+export interface VitalsRules { thirst?: boolean; temperature?: boolean; wounds?: boolean; knox?: boolean }
+
+/**
+ * The infection's course, in seconds of play (a county day is twenty
+ * minutes): nothing for half a day, then queasy, then sick to the stomach,
+ * then a fever that eats at you, and at two and a half days the end.
+ */
+export const KNOX = { queasy: 600, nauseous: 1200, fever: 1800, failing: 2400, turn: 3000 } as const;
+
+/** 0 clean or not showing yet, 1 queasy, 2 nauseous, 3 feverish, 4 failing. */
+export function knoxStage(v: Pick<Vitals, "infection">): 0 | 1 | 2 | 3 | 4 {
+  const t = v.infection;
+  return t <= 0 || t < KNOX.queasy ? 0 : t < KNOX.nauseous ? 1 : t < KNOX.fever ? 2 : t < KNOX.failing ? 3 : 4;
+}
+
+export type KnoxWound = "scratch" | "laceration" | "bite";
+
+/**
+ * What a blow from one of the county's dead did: mostly a scratch through
+ * the clothes, sometimes a tear, and sometimes teeth. The chance each carries
+ * the infection is the reference game's: a scratch seldom, a laceration now
+ * and then, a bite always.
+ */
+export function knoxWound(random: () => number): { wound: KnoxWound; infects: boolean; bleeds: boolean } {
+  const r = random();
+  const wound: KnoxWound = r < 0.15 ? "bite" : r < 0.45 ? "laceration" : "scratch";
+  const chance = wound === "bite" ? 1 : wound === "laceration" ? 0.25 : 0.07;
+  return { wound, infects: random() < chance, bleeds: wound !== "scratch" || random() < 0.3 };
+}
 
 /** What a player's surroundings are doing to them this second. */
 export interface Surroundings {
@@ -74,7 +111,9 @@ export function bodyTarget(air: number, insulation: number): number {
 }
 
 export type VitalsEvent =
-  | { kind: "hurt"; amount: number; cause: "thirst" | "cold" | "heat" | "bleeding" | "sickness" }
+  | { kind: "hurt"; amount: number; cause: "thirst" | "cold" | "heat" | "bleeding" | "sickness" | "infection" }
+  /** The infection has run its course: the player dies, and gets up again as one of them. */
+  | { kind: "turn" }
   | { kind: "hunger"; amount: number }
   | { kind: "message"; text: string }
   | { kind: "cough" };
@@ -111,8 +150,24 @@ export function vitalsSecond(v: Vitals, rules: VitalsRules, s: Surroundings, sec
       if (v.sick === 0) out.push({ kind: "message", text: "You feel better." });
     }
   }
+  if (rules.knox && v.infection > 0) {
+    const was = knoxStage(v);
+    v.infection++;
+    const now = knoxStage(v);
+    if (now !== was) out.push({ kind: "message", text: KNOX_WORDS[now] });
+    if (now >= 2 && second % 30 === 0) out.push({ kind: "hunger", amount: 1 });
+    if (now >= 3) v.temp = Math.max(v.temp, 38.6 + (now - 3) * 1.2);
+    if (now === 4 && second % 12 === 0) out.push({ kind: "hurt", amount: 1, cause: "infection" });
+    if (v.infection >= KNOX.turn) out.push({ kind: "turn" });
+  }
   return out;
 }
+
+/** What each stage feels like, as it arrives. */
+const KNOX_WORDS = [
+  "", "You feel queasy. Something you ate, maybe.", "Your stomach turns over and over. This is not food poisoning.",
+  "You are burning up. The wound has gone black at the edges.", "You can barely stand. You know what is coming.",
+] as const;
 
 /** Water from what was just eaten or drunk. */
 export function waterFrom(item: string): number {
@@ -133,6 +188,7 @@ export function waterFrom(item: string): number {
 export function sicknessChance(item: string): number {
   switch (item) {
     case "rotten_flesh": return 0.6;
+    case "spoiled_food": return 0.7;
     case "raw_meat": case "beef": case "porkchop": case "mutton": case "venison": return 0.25;
     case "chicken": return 0.4;
     case "pond_water": return 0.2;
@@ -154,6 +210,12 @@ export function statusLine(v: Vitals, rules: VitalsRules): string[] {
     if (v.sick) out.push("Sick");
     if (v.broken) out.push("Broken leg");
   }
+  if (rules.knox) {
+    // The reference game's moodles, as words: what the body is telling you, worst first.
+    const stage = knoxStage(v);
+    if (stage) out.unshift(["", "Queasy", "Nauseous", "Feverish", "Failing"][stage]);
+    if (rules.thirst && v.water < 10) out.push(v.water < 3 ? "Parched" : v.water < 6 ? "Very thirsty" : "Thirsty");
+  }
   return out;
 }
 
@@ -165,5 +227,6 @@ export function sanitizeVitals(v: unknown): Vitals {
   return {
     water: num(o.water, 0, 20, f.water), temp: num(o.temp, 20, 45, f.temp), bleeding: Math.floor(num(o.bleeding, 0, 3, 0)),
     sick: Math.floor(num(o.sick, 0, SICKNESS_TICKS, 0)), broken: o.broken === true,
+    infection: Math.floor(num(o.infection, 0, KNOX.turn, 0)),
   };
 }

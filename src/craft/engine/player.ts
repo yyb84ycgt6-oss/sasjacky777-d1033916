@@ -66,7 +66,7 @@ const DEATH_MESSAGES: Record<DamageSource, string> = {
   lava: "tried to swim in lava", drown: "drowned", starve: "starved to death", void: "fell out of the world",
   cactus: "was pricked to death", player: "was slain", magic: "died", suffocation: "suffocated in a wall",
   wither: "withered away", fireball: "was fireballed", fly_into_wall: "experienced kinetic energy", vehicle: "was run over",
-  thirst: "died of thirst", cold: "froze to death", heat: "succumbed to the heat", bleeding: "bled out", sickness: "died of a fever",
+  thirst: "died of thirst", cold: "froze to death", heat: "succumbed to the heat", bleeding: "bled out", sickness: "died of a fever", infection: "succumbed to the infection",
 };
 
 /** Elytra: flight wears it a point a second, and at one point from breaking it will no longer open. */
@@ -272,7 +272,7 @@ export class Player {
       dealt = amount - this.lastDamage;
     }
     const armored = source !== "fall" && source !== "drown" && source !== "starve" && source !== "void" && source !== "fire" && source !== "magic" && source !== "suffocation" && source !== "wither"
-      && source !== "thirst" && source !== "cold" && source !== "heat" && source !== "bleeding" && source !== "sickness";
+      && source !== "thirst" && source !== "cold" && source !== "heat" && source !== "bleeding" && source !== "sickness" && source !== "infection";
     if (armored) {
       const armor = this.inventory.armorPoints();
       const tough = this.inventory.armorToughness();

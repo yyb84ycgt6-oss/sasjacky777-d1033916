@@ -41,8 +41,8 @@ export type MobKind =
   | "tribute"
   // Primal's creatures (engine/creatures.ts, engine/dinoAi.ts).
   | "dodo" | "dilo" | "parasaur" | "raptor" | "trike" | "stego" | "rex" | "bronto" | "ptero" | "gigantoraptor"
-  // Dead Zone's infected (engine/infected.ts, engine/infectedAi.ts).
-  | "infected" | "runner" | "brute" | "spitter" | "screamer" | "bloater"
+  // Dead Zone's infected (engine/infected.ts, engine/infectedAi.ts), and Ashgrove County's shamblers and crawlers.
+  | "infected" | "runner" | "brute" | "spitter" | "screamer" | "bloater" | "shambler" | "crawler"
   // The monster-collecting modes: every species is one kind, told apart by `species` (engine/critters.ts); and their trainers.
   | "critter" | "trainer"
   // The city modes' people (engine/citizens.ts), and their police (engine/police.ts).
@@ -121,6 +121,10 @@ export const MOB_SPECS: Record<MobKind, MobSpec> = {
   spitter: { health: 18, width: 0.6, height: 1.95, speed: 0.05, hostile: true, attack: 2, tempt: [], burnsInDay: false, followRange: 24, xp: [8, 8] },
   screamer: { health: 16, width: 0.6, height: 1.95, speed: 0.055, hostile: true, attack: 2, tempt: [], burnsInDay: false, followRange: 32, xp: [8, 8] },
   bloater: { health: 26, width: 0.8, height: 2.2, speed: 0.04, hostile: true, attack: 3, tempt: [], burnsInDay: false, followRange: 20, xp: [8, 8] },
+  // Ashgrove County's dead: they never run. What makes them deadly is how many there are, and that they do not stop.
+  shambler: { health: 22, width: 0.6, height: 1.95, speed: 0.042, hostile: true, attack: 3, tempt: [], burnsInDay: false, followRange: 22, xp: [4, 4] },
+  // Legs gone, it drags itself along the floor: slow, low, and easy to miss until it has your ankle.
+  crawler: { health: 12, width: 0.7, height: 0.6, speed: 0.022, hostile: true, attack: 2, tempt: [], burnsInDay: false, followRange: 14, xp: [3, 3] },
   // Critters. The box, speed and flight here are a stand-in: each takes its species' own (Mob.setSpecies).
   critter: { health: 20, width: 0.6, height: 0.6, speed: 0.07, hostile: false, attack: 0, tempt: [], burnsInDay: false, followRange: 16, xp: [0, 0] },
   trainer: { health: 20, width: 0.6, height: 1.8, speed: 0.07, hostile: false, attack: 0, tempt: [], burnsInDay: false, followRange: 16, xp: [0, 0] },
@@ -1691,7 +1695,7 @@ export class Mob extends Entity {
       case "bear": return [...it("leather", r(1, 3)), ...it("bone", r(0, 2))];
       case "tribute": return [...it("bread", r(0, 2)), ...it("arrow", r(0, 4)), ...(ctx.random() < 0.3 ? it("stone_sword", 1) : [])];
       // The infected were people once: now and then something from their pockets.
-      case "infected": case "runner": case "screamer": case "spitter":
+      case "infected": case "runner": case "screamer": case "spitter": case "shambler": case "crawler":
         return [...it("rotten_flesh", r(0, 1)), ...(ctx.random() < 0.08 ? it(["bandage", "pistol_ammo", "canned_beans", "soda_can"][Math.floor(ctx.random() * 4)], 1) : [])];
       case "brute": return [...it("rotten_flesh", r(1, 3)), ...it("iron_nugget", r(0, 3)), ...(ctx.random() < 0.2 ? it("rifle_ammo", r(2, 5)) : [])];
       case "bloater": return it("gunpowder", r(0, 2));

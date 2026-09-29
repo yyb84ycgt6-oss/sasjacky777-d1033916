@@ -10,7 +10,8 @@
  * two blocks of room, a slab on a slab makes a double slab.
  */
 import { Car } from "../engine/cars";
-import { boardsOf } from "../engine/countyBlocks";
+import { boardsOf, FIRST_WIDE_BLOCK } from "../engine/countyBlocks";
+import { clickCountyBlock, type UseHelpers } from "./countyUse";
 import * as THREE from "three";
 import {
   B, block, CLOCKWISE_FACING, collisionBoxes, CROP_MAX_AGE, Face, FACE_DIRS, FACE_OF_FACING, FACING_DIRS, isBed, isBerryBush, isButton, isCrop, isDoor, isFluid, isLeaves, isPillar,
@@ -141,6 +142,13 @@ export class Actions {
   private dir = new THREE.Vector3();
 
   constructor(private game: Game) {}
+
+  /** The parts of this class the county's fittings borrow (game/countyUse.ts). */
+  private countyHelpers: UseHelpers = {
+    swing: () => this.swing(),
+    consumeHeld: (n) => this.consumeHeld(n),
+    replaceHeld: (stack) => this.replaceHeld(stack),
+  };
 
   // ---- per frame -----------------------------------------------------------------------
 
@@ -737,6 +745,11 @@ export class Actions {
       if (p.canEat(def.food)) this.eating = { ticks: 0, slot: p.inventory.selected, id: def.id };
       return;
     }
+    if (def.use === "read") {
+      if (g.read(def.name) && p.survivalLike) this.consumeHeld();
+      this.swing();
+      return;
+    }
     if (def.use === "treat") {
       if (g.treat(def.name) && p.survivalLike) this.consumeHeld();
       this.swing();
@@ -1132,6 +1145,8 @@ export class Actions {
     const bdef = block(id);
     const meta = w.getMeta(x, y, z);
 
+    // The county's fittings first: a hammer or crowbar at a window or door, and the sneaking uses the vanilla path skips.
+    if (fresh && id >= FIRST_WIDE_BLOCK && p.gameMode !== "spectator" && clickCountyBlock(g, this.countyHelpers, x, y, z, id, meta)) return true;
     if ((!p.sneaking || !def) && fresh && bdef.interact) {
       if (this.interactBlock(x, y, z, id, meta, def)) return true;
     }

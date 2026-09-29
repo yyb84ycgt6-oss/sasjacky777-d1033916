@@ -7,7 +7,7 @@ import { World } from "@/craft/engine/world";
 import type { Entity, EntityContext, PlayerRef } from "@/craft/engine/entities";
 import { itemByName } from "@/craft/engine/items";
 import { Mob, MOB_SPECS } from "@/craft/engine/mobs";
-import { INFECTED_KINDS, isInfected, isInfectedMob, pickInfected } from "@/craft/engine/infected";
+import { INFECTED_KINDS, INFECTED_SPAWNS, isInfected, isInfectedMob, pickInfected } from "@/craft/engine/infected";
 import { GUNS, stray, tracePellet } from "@/craft/engine/guns";
 import type { BlockReader } from "@/craft/engine/physics";
 import { Generator } from "@/craft/engine/worldgen";
@@ -59,7 +59,9 @@ describe("the infected", () => {
     const rng = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
     const counts: Record<string, number> = {};
     for (let i = 0; i < 5000; i++) { const k = pickInfected(rng); counts[k] = (counts[k] ?? 0) + 1; }
-    for (const k of INFECTED_KINDS) expect(counts[k], k).toBeGreaterThan(0);
+    // Dead Zone's own mix: Ashgrove County's shamblers and crawlers are infected too, but never spawn here.
+    for (const [k] of INFECTED_SPAWNS) expect(counts[k], k).toBeGreaterThan(0);
+    expect(counts.shambler ?? 0).toBe(0);
     expect(counts.infected).toBeGreaterThan(counts.brute * 5);
   });
 

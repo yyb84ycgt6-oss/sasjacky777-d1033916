@@ -27,7 +27,7 @@ export type EntityKind =
   | "shulker" | "shulker_bullet" | "item_frame" | "firework_rocket"
   | "wolf" | "deer" | "bear" | "tribute"
   | "dodo" | "dilo" | "parasaur" | "raptor" | "trike" | "stego" | "rex" | "bronto" | "ptero" | "gigantoraptor"
-  | "infected" | "runner" | "brute" | "spitter" | "screamer" | "bloater"
+  | "infected" | "runner" | "brute" | "spitter" | "screamer" | "bloater" | "shambler" | "crawler"
   | "critter" | "trainer" | "citizen" | "cop";
 
 export interface PlayerRef {
@@ -61,7 +61,7 @@ export type DamageSource = "mob" | "arrow" | "explosion" | "fall" | "fire" | "la
   /** Run over, or rammed. */
   | "vehicle"
   /** The vitals some modes keep (engine/vitals.ts). */
-  | "thirst" | "cold" | "heat" | "bleeding" | "sickness";
+  | "thirst" | "cold" | "heat" | "bleeding" | "sickness" | "infection";
 
 export interface EntityContext {
   world: World;

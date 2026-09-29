@@ -141,7 +141,9 @@ export function sanitizeModeTell(v: unknown): ModeTell {
 // 9: the real sky (the welcome's and the "env" op's skyEpoch and place) — a guest on 8 would see its own date's Moon and stars,
 //    and the Sun rise and set by the clock while the host's rose by the season.
 // 10: sixteen-bit block ids — a chunk now travels as two bytes a block, which a guest on 9 would read as garbage.
-const PROTOCOL = 10;
+// 11: Ashgrove County's shamblers and crawlers (mob kinds) and spoiled food (a new item id) — a guest on 10 would
+//     be shown mobs and an item it has never heard of.
+const PROTOCOL = 11;
 const FLUSH_TICKS = 2;
 const ENTITY_TICKS = 4;
 const ENV_TICKS = 40;

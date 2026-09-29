@@ -702,7 +702,7 @@ export function skin(kind: string, variant = 0): HTMLCanvasElement {
     case "trike": case "stego": case "bronto": case "ptero":
       paintDino(p, kind, variant);
       break;
-    case "infected": case "runner": case "brute": case "spitter": case "screamer": case "bloater": {
+    case "infected": case "runner": case "brute": case "spitter": case "screamer": case "bloater": case "shambler": case "crawler": {
       paintInfected(p, kind, variant);
       break;
     }

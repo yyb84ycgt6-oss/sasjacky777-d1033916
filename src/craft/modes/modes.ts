@@ -54,7 +54,7 @@ export interface ModeDef {
   /** Primal's rules: Evolved's, or Ascended's gentler taming and wider roster. */
   primal?: "evolved" | "ascended";
   /** Survival beyond hunger: thirst, body temperature, and wounds (bleeding, sickness, broken bones). */
-  vitals?: { thirst?: boolean; temperature?: boolean; wounds?: boolean };
+  vitals?: { thirst?: boolean; temperature?: boolean; wounds?: boolean; knox?: boolean };
   /** Recipes past the stone age are learned, a level at a time (engine/engrams.ts). */
   engrams?: boolean;
 }
@@ -154,7 +154,7 @@ export const MODES: readonly ModeDef[] = [
     description: "Survivors against the infected in the colosseum: whoever falls rises infected. Alone, hold out against the stream through the gates.",
     goal: "Be a survivor when the five minutes are up." },
   { id: "ashgrove", name: "Ashgrove County", category: "zombie", icon: "spiked_bat", gameMode: "survival", map: "county", difficulty: 2,
-    fauna: "infected", vitals: { thirst: true, temperature: true, wounds: true }, multiplayer: true,
+    fauna: "infected", vitals: { thirst: true, temperature: true, wounds: true, knox: true }, multiplayer: true,
     inspiredBy: "The zombie survival sandboxes, Project Zomboid above all (The Indie Stone, 2013 on)",
     description: "You wake in your own house in Millbrook, the morning after the county was sealed. Five towns of houses and shops to search, farms, a lake, an army camp gone quiet, and the fence the soldiers will not let anyone cross. The power and the water will not last.",
     goal: "Survive. Count the days." },

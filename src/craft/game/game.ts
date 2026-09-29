@@ -25,6 +25,11 @@ import {
 } from "../engine/entities";
 import { blastImpact, explosionBlocks, exposure } from "../engine/explosion";
 import { itemByName, itemDef, itemId, itemLight, maxStack, resolveDrops, type ItemStack, type StatusEffect } from "../engine/items";
+import { COUNTY_BLOCKS as C, LIGHT_OFF, LIGHT_ON } from "../engine/countyBlocks";
+import { BOOK_SKILLS } from "../engine/countyItems";
+import {
+  countyDay, GENERATOR_CAN, GENERATOR_REACH, GENERATOR_TANK, hasPower, hasWater, READ_IDLE, READ_TEACHES, SKILL_LESSON, spoiled, utilities,
+} from "../engine/countyLife";
 import { modEnabled } from "../engine/mods";
 import { WorldMap } from "./worldMap";
 import { withDeathPoint } from "../engine/waypoints";
@@ -34,7 +39,7 @@ import { POT_SLOTS } from "../engine/cooking";
 import { pickWildlife } from "../engine/wildlife";
 import { dungeonLoot } from "../engine/dungeons";
 import { fillLoot, MapGenerator, mapLayout, mapLoot } from "../engine/maps";
-import type { County } from "../engine/county";
+import { GROUND, type County } from "../engine/county";
 import { COUNTY_LOOT, countyLootTable } from "../engine/countyLoot";
 import type { CasinoGame } from "../engine/casino";
 import { luckyOutcome } from "../engine/lucky";
@@ -54,10 +59,10 @@ import { localClock, placeText } from "../space/skyReport";
 import { SpaceView } from "../space/spaceView";
 import { GalaxyView } from "../space/galaxyView";
 import type { Star } from "../space/galaxy";
-import { BREAK_FALL, SICKNESS_TICKS, sicknessChance, statusLine, vitalsSecond, waterFrom, type VitalsRules } from "../engine/vitals";
+import { BREAK_FALL, knoxStage, knoxWound, SICKNESS_TICKS, sicknessChance, statusLine, vitalsSecond, waterFrom, type VitalsRules } from "../engine/vitals";
 import { CREATURES, maxTorpor } from "../engine/creatures";
 import { favouriteFoods } from "../engine/dinoAi";
-import { isInfected, pickInfected } from "../engine/infected";
+import { countyGroup, countyInfectedCap, isInfected, pickCountyInfected, pickInfected } from "../engine/infected";
 import { groundBlock } from "../engine/physics";
 import { Player, type PlayerEvent } from "../engine/player";
 import { Generator, type ChunkGenerator } from "../engine/worldgen";
@@ -448,6 +453,8 @@ export class Game {
         if (this.modOn("minimap")) this.worldMap.paintChunk(dim, chunk);
         if (this.simulates) this.redstone.onChunkLoaded(chunk);
         if (this.simulates && !fromSave) this.settleStructures(chunk.cx, chunk.cz);
+        // A house the player first reaches after the power failed is dark: it was built with its lights on.
+        if (this.county() && !this.powered()) this.darkenChunk(chunk);
       },
     );
     streamer.fancyLeaves = this.settings.graphics === "fancy";
@@ -1585,7 +1592,163 @@ export class Game {
     const e = this.containerAt(x, y, z, "chest");
     if (e.kind !== "chest" || !table) return;
     fillLoot(e.items, new Rng(hash4(this.meta.seed ^ 0xc0117, x, y, z)), table, false);
+    // What has been sitting in a cupboard, or a fridge since the power went, has gone off.
+    const fridge = loot === "fridge" || loot === "freezer" || loot === "cooler";
+    const day = countyDay(this.time), off = utilities(this.meta.seed).powerOffDay;
+    for (let i = 0; i < e.items.length; i++) {
+      const s = e.items[i];
+      const name = s ? itemDef(s.id)?.name : undefined;
+      if (s && name && spoiled(name, day, fridge, off)) e.items[i] = { id: itemId("spoiled_food"), count: s.count };
+    }
     this.containerChanged(x, y, z);
+  }
+
+  // ---- the county's utilities (engine/countyLife.ts) ----------------------------------------------
+
+  /** The county's grid is still up: lights, stoves, pumps and televisions work anywhere. Outside the county the grid never fails. */
+  powered(): boolean {
+    return !this.county() || hasPower(this.meta.seed, this.time);
+  }
+
+  /** The county's taps still run (and anywhere else's always do). */
+  watered(): boolean {
+    return !this.county() || hasWater(this.meta.seed, this.time);
+  }
+
+  /** Power here: the grid, or a running generator within reach of its cable. */
+  poweredAt(x: number, y: number, z: number): boolean {
+    if (this.powered()) return true;
+    return this.generators().some((gen) => gen.fuel > 0 && Math.hypot(gen.x - x, gen.y - y, gen.z - z) <= GENERATOR_REACH);
+  }
+
+  /** The generators someone has fuelled and started, kept with the mode's own state so they survive a save. */
+  private generators(): { x: number; y: number; z: number; fuel: number }[] {
+    const data = this.meta.mode?.data;
+    if (!data) return [];
+    return ((data.generators as { x: number; y: number; z: number; fuel: number }[] | undefined) ??= []);
+  }
+
+  /**
+   * Fuelling, starting and stopping a generator. As in the reference game,
+   * it takes knowing how: someone who has not read the Generator Guide cannot
+   * connect one without risking the house. It is loud, and the dead come.
+   */
+  workGenerator(x: number, y: number, z: number, h: { swing(): void; replaceHeld(stack: ItemStack): void }): boolean {
+    if (!this.simulates) { this.showActionbar("Only the world's host can run a generator."); return true; }
+    if (!this.hasRead("generator_guide")) { this.showActionbar("You don't know how to hook it up safely. A Generator Guide would show you."); return true; }
+    const gens = this.generators();
+    let gen = gens.find((g) => g.x === x && g.y === y && g.z === z);
+    const held = itemDef(this.player.inventory.held?.id ?? 0)?.name;
+    if (held === "full_gas_can") {
+      if (!gen) gens.push((gen = { x, y, z, fuel: 0 }));
+      gen.fuel = Math.min(GENERATOR_TANK, gen.fuel + GENERATOR_CAN);
+      h.replaceHeld({ id: itemId("gas_can"), count: 1 });
+      this.message(`The generator coughs into life. Fuel for about ${Math.round(gen.fuel / 60)} minutes.`, "#aaffaa");
+      this.relight(x, y, z, true);
+    } else if (gen && gen.fuel > 0) {
+      gens.splice(gens.indexOf(gen), 1);
+      this.message("You shut the generator off.", "#cccccc");
+      this.relight(x, y, z, false);
+    } else {
+      this.showActionbar("It needs fuel: a full gas can.");
+      return true;
+    }
+    this.sound("fuse", x + 0.5, y + 0.5, z + 0.5, 0.8, 0.5);
+    h.swing();
+    return true;
+  }
+
+  /** Every light in a generator's reach on (it is running) or off (it is not, and nor is the grid). */
+  private relight(x: number, y: number, z: number, on: boolean): void {
+    if (!on && this.poweredAt(x, y, z)) return;
+    const table = on ? LIGHT_ON : LIGHT_OFF;
+    const r = GENERATOR_REACH;
+    for (let dy = -4; dy <= 6; dy++) for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
+      const id = this.world.blockAt(x + dx, y + dy, z + dz);
+      const to = table[id];
+      if (to !== undefined) this.world.setBlock(x + dx, y + dy, z + dz, to, this.world.getMeta(x + dx, y + dy, z + dz), "world");
+    }
+  }
+
+  /** Every mains light in a chunk goes dark: done as a chunk arrives after the power has failed. */
+  private darkenChunk(chunk: Chunk): void {
+    const bx = chunk.cx << 4, bz = chunk.cz << 4;
+    for (let i = 0; i < chunk.blocks.length; i++) {
+      const off = LIGHT_OFF[chunk.blocks[i]];
+      if (off === undefined) continue;
+      this.world.setBlock(bx + (i & 15), i >> 8, bz + ((i >> 4) & 15), off, chunk.meta[i], "world");
+    }
+  }
+
+  /** Whether the power was up at the last county second, to catch the moment it fails. */
+  private gridWas: boolean | null = null;
+
+  /** Once a second in the county: the grid failing, generators burning fuel and making noise. */
+  private tickCounty(): void {
+    if (!this.county()) return;
+    const up = this.powered();
+    if (this.gridWas === true && !up) {
+      this.message("The lights flicker and go out. The fridge falls silent. The power is gone.", "#ffcc55");
+      for (const c of [...this.world.loadedChunks()]) this.darkenChunk(c);
+      for (const gen of this.generators()) if (gen.fuel > 0) this.relight(gen.x, gen.y, gen.z, true);
+    }
+    if (this.gridWas === true && hasWater(this.meta.seed, this.time - 20) && !this.watered()) {
+      this.message("Somewhere in the house a pipe knocks, and the taps run dry. The water is off.", "#ffcc55");
+    }
+    this.gridWas = up;
+    if (!this.simulates) return;
+    const gens = this.generators();
+    for (let i = gens.length - 1; i >= 0; i--) {
+      const gen = gens[i];
+      if (this.world.blockAt(gen.x, gen.y, gen.z) !== C.GENERATOR) { gens.splice(i, 1); this.relight(gen.x, gen.y, gen.z, false); continue; }
+      if (!this.world.chunkAt(gen.x, gen.z)) continue;
+      gen.fuel--;
+      // Its racket carries: every few seconds, everything dead in forty blocks turns toward it.
+      if (gen.fuel % 5 === 0) this.makeNoise(gen.x + 0.5, gen.y + 0.5, gen.z + 0.5, 40, null);
+      if (gen.fuel <= 0) {
+        gens.splice(i, 1);
+        this.message("The generator sputters and dies. It's out of fuel.", "#ffcc55");
+        this.relight(gen.x, gen.y, gen.z, false);
+      }
+    }
+  }
+
+  /** What this player has read, of the books and magazines that teach something (engine/countyItems.ts). */
+  private readLocal = new Set<string>();
+  private readList(): Set<string> {
+    const data = this.meta.mode?.data;
+    if (!data || !this.simulates) return this.readLocal;
+    const all = ((data.read as Record<string, string[]> | undefined) ??= {});
+    return new Set(all[this.player.name] ?? []);
+  }
+
+  /**
+   * Whether this player has learnt a thing: a skill (any volume of its book
+   * counts), or a magazine's one lesson by its item name.
+   */
+  hasRead(what: string): boolean {
+    const read = this.readList();
+    return read.has(what) || [...read].some((r) => r.startsWith(`${what}_book_`));
+  }
+
+  /** Reading something: a skill book or a magazine teaches, and is kept; the paper and the comics pass the time and are used up. */
+  read(item: string): boolean {
+    const skill = BOOK_SKILLS.find(([k]) => item.startsWith(`${k}_book_`));
+    const teaches = !!skill || READ_TEACHES[item] !== undefined;
+    if (!teaches) {
+      this.message(READ_IDLE[item] ?? "You read it cover to cover. It takes your mind off things, for a while.", "#cccccc");
+      this.player.applyEffect("regeneration", 6, 0);
+      return true;
+    }
+    if (this.hasRead(item) || (skill && this.hasRead(skill[0]))) { this.showActionbar("You have read this already."); return false; }
+    const data = this.meta.mode?.data;
+    if (data && this.simulates) {
+      const all = ((data.read as Record<string, string[]> | undefined) ??= {});
+      (all[this.player.name] ??= []).push(item);
+    } else this.readLocal.add(item);
+    this.message(skill ? `You study ${itemDef(itemId(item))?.displayName ?? "the book"}. ${SKILL_LESSON[skill[0]] ?? ""}` : READ_TEACHES[item], "#aaffaa");
+    this.sound("click", null, 0, 0, 0.4, 1.6);
+    return false;
   }
 
   /** A mode's chest at x, y, z — placed if missing, emptied if not — filled by `fill`, and sent to everyone. */
@@ -2349,6 +2512,7 @@ export class Game {
     if (this.tickCount % 20 === 13 && this.modOn("ambient_sounds")) this.ambience();
     if (this.tickCount % 40 === 7 && !this.space) this.skyNews();
     if (this.tickCount % 20 === 17) this.tickVitals();
+    if (this.tickCount % 20 === 9) this.tickCounty();
     // Running is loud where the infected roam: they hear it from a few blocks off.
     if (this.tickCount % 20 === 3 && p.sprinting && !p.dead && modeDef(this.meta.mode?.id)?.fauna === "infected") this.makeNoise(b.x, b.y, b.z, 10, p.id);
     this.borderTick();
@@ -3021,6 +3185,7 @@ export class Game {
       else if (e.kind === "hunger") p.addExhaustion(4 * e.amount);
       else if (e.kind === "message") this.message(e.text, "#aaffaa");
       else if (e.kind === "cough") { this.sound("hurt", null, 0, 0, 0.5, 0.6); this.showActionbar("You cough. You feel feverish."); }
+      else if (e.kind === "turn") { this.turn(); return; }
     }
     if (rules.wounds && p.vitals.broken) p.applyEffect("slowness", 3, 1);
     if (rules.temperature && second % 30 === 0) {
@@ -3030,6 +3195,22 @@ export class Game {
     if (rules.thirst && p.vitals.water < 4 && second % 30 === 15) this.showActionbar("You are parched — drink from water, or fill a bottle.");
   }
   private vitalSecond = 0;
+
+  /**
+   * The infection has run its course. The player dies of it — and where they
+   * fell, one more of the dead gets up, in their clothes, carrying nothing
+   * (what they carried falls, or goes to their grave, as any death's does).
+   */
+  private turn(): void {
+    const p = this.player;
+    const { x, y, z } = p.body;
+    p.vitals.infection = 0;
+    this.message("The infection has taken you.", "#ff5555");
+    this.hurtLocal(1000, "infection");
+    if (!p.dead) return;
+    // Only the world's host makes mobs; a guest who turns leaves their things, and the host's county is one short.
+    if (this.simulates) this.spawn(new Mob("shambler", x, y, z));
+  }
 
   /** Something was drunk: water back, and with wounds kept, a chance a pond made you ill. */
   drank(item: string, water = waterFrom(item)): void {
@@ -3052,10 +3233,48 @@ export class Game {
   /** A bandage, a splint or antibiotics used on yourself. Returns whether it did anything (and so is used up). */
   treat(item: string): boolean {
     const v = this.player.vitals;
-    const done = (text: string) => { this.message(text, "#aaffaa"); this.sound("item_frame_add", null, 0, 0, 0.6, 1.2); return true; };
+    const done = (text: string) => {
+      this.message(text, "#aaffaa");
+      this.sound("item_frame_add", null, 0, 0, 0.6, 1.2);
+      // Someone who has read up on first aid dresses a wound so it heals, not just so it stops.
+      if (this.hasRead("first_aid")) this.player.applyEffect("regeneration", 5, 0);
+      return true;
+    };
     if (item === "bandage") return v.bleeding ? ((v.bleeding = 0), done("The bleeding stops.")) : (this.showActionbar("You are not bleeding."), false);
     if (item === "splint") return v.broken ? ((v.broken = false), (this.player.effects = this.player.effects.filter((e) => e.kind !== "slowness")), done("Your leg is set.")) : (this.showActionbar("Nothing is broken."), false);
-    if (item === "antibiotics") return v.sick ? ((v.sick = 0), done("The fever breaks.")) : (this.showActionbar("You are not sick."), false);
+    if (item === "antibiotics") return v.sick ? ((v.sick = 0), done("The fever breaks.")) : (this.showActionbar(v.infection ? "Antibiotics will not touch what you have." : "You are not sick."), false);
+    // Ashgrove County's medicine cabinet. None of it touches the infection; the reference game's cruelty is that nothing does.
+    const p = this.player;
+    switch (item) {
+      case "sterile_bandage": case "suture_needle":
+        return v.bleeding ? ((v.bleeding = 0), done(item === "suture_needle" ? "You stitch the wound shut." : "The clean bandage stops the bleeding.")) : (this.showActionbar("You are not bleeding."), false);
+      case "disinfectant": case "alcohol_wipes":
+        // Cleaning a wound keeps it from going bad: an ordinary infection, not the county's.
+        return v.bleeding || v.sick ? ((v.sick = 0), done("It stings. The wound is clean.")) : (this.showActionbar("You have no wound to clean."), false);
+      case "tweezers":
+        return v.bleeding ? ((v.bleeding = Math.max(0, v.bleeding - 1)), done("You pick the glass out of the cut.")) : (this.showActionbar("There is nothing to pick out."), false);
+      case "painkillers":
+        p.applyEffect("regeneration", 12, 0);
+        return done(v.infection && knoxStage(v) >= 3 ? "It dulls the fever. It does not stop it." : "The ache fades.");
+      case "vitamins":
+        p.applyEffect("absorption", 60, 0);
+        return done("You feel a little stronger.");
+      case "beta_blockers": case "antidepressants":
+        // Steadier hands and a clearer head: a little more force behind every swing.
+        p.applyEffect("strength", 30, 0);
+        return done(item === "beta_blockers" ? "Your heart stops hammering." : "The dread lifts a little.");
+      case "sleeping_pills":
+        p.applyEffect("slowness", 20, 1);
+        return done("You feel heavy and slow. Find a bed.");
+      case "first_aid_kit": {
+        if (!v.bleeding && !v.broken && p.health >= 20) { this.showActionbar("Nothing needs seeing to."); return false; }
+        v.bleeding = 0;
+        v.broken = false;
+        p.effects = p.effects.filter((e) => e.kind !== "slowness");
+        p.applyEffect("regeneration", 8, 1);
+        return done("You clean up, bandage and splint what needs it.");
+      }
+    }
     return false;
   }
 
@@ -3072,6 +3291,16 @@ export class Game {
     if (source === "mob" || source === "arrow" || source === "player") {
       const mob = attacker !== undefined ? this.entities.get(attacker) : undefined;
       const infected = mob instanceof Mob && isInfected(mob.kind);
+      if (rules.knox && infected && source === "mob") {
+        // The county's rule: every blow from the dead is a scratch, a tear or a bite, and any of them may carry it.
+        const w = knoxWound(Math.random);
+        if (w.bleeds && v.bleeding < 3) v.bleeding++;
+        if (w.infects && !v.infection) v.infection = 1;
+        this.message(w.wound === "bite"
+          ? "You've been bitten. You know what that means."
+          : w.wound === "laceration" ? "It tore your arm open. Bandage it — and hope." : "It scratched you. Clean it, and hope.", w.wound === "bite" ? "#ff5555" : "#ff8888");
+        return;
+      }
       if (Math.random() < (infected ? 0.35 : 0.18) && v.bleeding < 3) {
         v.bleeding++;
         this.message("You're bleeding! A bandage will stop it.", "#ff5555");
@@ -3140,6 +3369,31 @@ export class Game {
     if (!this.isNight() && Math.random() < 0.4) return;
     const n = 1 + Math.floor(Math.random() * 3);
     for (let i = 0; i < n; i++) this.spawn(new Mob(pickInfected(Math.random), x + 0.5 + (Math.random() - 0.5) * 3, top + 1, z + 0.5 + (Math.random() - 0.5) * 3));
+  }
+
+  /**
+   * Ashgrove County: the dead where people were. They come up at street level
+   * and on the ground floor of houses — never on a roof, which is where
+   * topSolid would put them in a town — thick in town and thin outside it.
+   */
+  private trySpawnCountyDead(origin: PlayerRef, county: County): void {
+    const a = Math.random() * Math.PI * 2, r = 22 + Math.random() * 30;
+    const x = Math.floor(origin.x + Math.cos(a) * r), z = Math.floor(origin.z + Math.sin(a) * r);
+    if (!this.world.chunkAt(x, z)) return;
+    const inTown = !!county.townAt(x, z);
+    if (!inTown && Math.random() < 0.5) return;
+    if (!this.isNight() && Math.random() < 0.3) return;
+    const clear = (y: number) => !block(this.world.blockAt(x, y, z)).solid && !isFluid(this.world.blockAt(x, y, z));
+    let y = -1;
+    for (let yy = GROUND + 1; yy <= GROUND + 3 && y < 0; yy++) if (block(this.world.blockAt(x, yy - 1, z)).solid && clear(yy) && clear(yy + 1)) y = yy;
+    if (y < 0) return;
+    const n = countyGroup(inTown, Math.random);
+    for (let i = 0; i < n; i++) {
+      const sx = x + 0.5 + (Math.random() - 0.5) * 2, sz = z + 0.5 + (Math.random() - 0.5) * 2;
+      // Each of a group stands somewhere it fits, or does not come at all: no one wedged into a wall.
+      if (block(this.world.blockAt(Math.floor(sx), y, Math.floor(sz))).solid || block(this.world.blockAt(Math.floor(sx), y + 1, Math.floor(sz))).solid) continue;
+      this.spawn(new Mob(pickCountyInfected(Math.random), sx, y, sz));
+    }
   }
 
   /** Whether this world asks for engrams (Primal). */
@@ -3476,7 +3730,13 @@ export class Game {
     const origin = refs[Math.floor(Math.random() * refs.length)];
     // A Dead Zone world's monsters are the infected, by day as by night; its animals are the usual.
     if (modeDef(this.meta.mode?.id)?.fauna === "infected" && this.dimension === "overworld") {
-      if (this.meta.difficulty > 0 && hostile < MAX_INFECTED * refs.length) for (let attempt = 0; attempt < 3; attempt++) this.trySpawnInfected(origin);
+      const county = this.county();
+      if (county) {
+        const cap = countyInfectedCap(!!county.townAt(Math.floor(origin.x), Math.floor(origin.z)), this.isNight()) * refs.length;
+        if (this.meta.difficulty > 0 && hostile < cap) for (let attempt = 0; attempt < 3; attempt++) this.trySpawnCountyDead(origin, county);
+      } else if (this.meta.difficulty > 0 && hostile < MAX_INFECTED * refs.length) for (let attempt = 0; attempt < 3; attempt++) this.trySpawnInfected(origin);
+      // The county's livestock are on its farms and in its fields, not wandering the streets of a town.
+      if (county?.townAt(Math.floor(origin.x), Math.floor(origin.z))) return;
       if (passive < MAX_PASSIVE * refs.length && (this.tickCount % 400 === 0 || this.tickCount < 200)) for (let attempt = 0; attempt < 4; attempt++) this.trySpawn(origin, false);
       return;
     }

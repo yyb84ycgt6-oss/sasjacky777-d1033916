@@ -15,7 +15,8 @@
  */
 import type { EntityContext, PlayerRef } from "./entities";
 import type { Mob } from "./mobs";
-import { B, block } from "./blocks";
+import { B, block, isDoor, isTrapdoor } from "./blocks";
+import { boardsOf, COUNTY_BLOCKS as C, WINDOW_BROKEN, WINDOW_OPEN, withBoards } from "./countyBlocks";
 
 type Move = { forward: number; jump: boolean; yaw: number; speedMul: number };
 
@@ -51,9 +52,79 @@ export function infectedAi(m: Mob, ctx: EntityContext, move: Move): boolean {
 /** After the chase has steered: how fast each kind runs, and (a brute, or anyone under a blood moon) digging through what is in the way. */
 export function infectedAfter(m: Mob, ctx: EntityContext, move: Move): void {
   const chasing = !!m.targetId;
+  // Ashgrove's dead never run: a shambler hurries a little once it has you, a crawler cannot.
+  if (m.kind === "shambler" || m.kind === "crawler") {
+    move.speedMul *= chasing ? (m.kind === "shambler" ? 1.25 : 1) : 0.6;
+    if (chasing && ctx.mobGriefing !== false) thump(m, ctx, move);
+    return;
+  }
   if (chasing) move.speedMul *= m.kind === "runner" ? 2.1 : m.kind === "brute" ? 1.25 : m.kind === "bloater" ? 1 : 1.7;
   else move.speedMul *= 0.7;
   if (chasing && (m.kind === "brute" || ctx.bloodMoon) && ctx.mobGriefing !== false) dig(m, ctx, move);
+}
+
+/**
+ * How long, in ticks, one of the county's dead takes to get through what is
+ * in its way. They cannot dig through a wall, as a brute can — what they do
+ * is beat on the weak places, the doors, the windows and the boards across
+ * them, until those give. A pane goes in seconds, a board in a quarter of a
+ * minute, a front door in half a minute; a crowd at the same door is each
+ * beating on it, so a crowd is how a house falls.
+ */
+export function thumpTicks(id: number, meta: number): number {
+  if (id === C.HOUSE_WINDOW) return boardsOf(meta) > 0 ? 300 : meta & (WINDOW_BROKEN | WINDOW_OPEN) ? 0 : 60;
+  if (isDoor(id)) return boardsOf(meta) > 0 ? 300 : Math.round(block(id).hardness * 150 + 100);
+  if (id === C.BARRICADE) return 300;
+  if (id === C.GARAGE_DOOR) return 1000;
+  // Glass anywhere else — a shop front — goes as a window's does.
+  if (id === B.GLASS || id === B.GLASS_PANE) return 80;
+  return 0;
+}
+
+/** Batters at the door, window or boards in front of it until they give — never at a plain wall. */
+function thump(m: Mob, ctx: EntityContext, move: Move): void {
+  const b = m.body;
+  if (!b.collidedH || move.forward <= 0) { m.dig = null; return; }
+  const ax = Math.floor(b.x - Math.sin(move.yaw) * (b.width / 2 + 0.5)), az = Math.floor(b.z - Math.cos(move.yaw) * (b.width / 2 + 0.5));
+  const fy = Math.floor(b.y + 0.01);
+  // A window's sill is a wall block, so its pane is one up: the head's height, and a crawler's reach stops at the floor.
+  for (const y of m.kind === "crawler" ? [fy] : [fy, fy + 1]) {
+    const id = ctx.world.blockAt(ax, y, az);
+    if (isTrapdoor(id)) continue;
+    const meta = ctx.world.getMeta(ax, y, az);
+    const ticks = thumpTicks(id, meta);
+    if (ticks <= 0) continue;
+    if (!m.dig || m.dig.x !== ax || m.dig.y !== y || m.dig.z !== az) m.dig = { x: ax, y, z: az, progress: 0 };
+    m.dig.progress += 1 / ticks;
+    if (m.age % 15 === 0) ctx.sound("zombie_break", ax + 0.5, y + 0.5, az + 0.5, 0.9, 0.7 + ctx.random() * 0.2);
+    if (m.dig.progress >= 1) { give(ctx, ax, y, az, id, meta); m.dig = null; }
+    return;
+  }
+}
+
+/** What happens when a door, window or board gives: a board comes off, glass smashes, a door splinters. */
+export function give(ctx: Pick<EntityContext, "world" | "particles" | "sound">, x: number, y: number, z: number, id: number, meta: number): void {
+  const w = ctx.world;
+  // Both halves of a two-high door or window go together.
+  const pair = isDoor(id) ? (meta & 8 ? y - 1 : y + 1) : id === C.HOUSE_WINDOW ? (w.blockAt(x, y + 1, z) === id ? y + 1 : w.blockAt(x, y - 1, z) === id ? y - 1 : null) : null;
+  const both = (f: (m: number) => number | null) => {
+    for (const yy of pair === null ? [y] : [y, pair]) {
+      if (w.blockAt(x, yy, z) !== id) continue;
+      const next = f(w.getMeta(x, yy, z));
+      w.setBlock(x, yy, z, next === null ? B.AIR : id, next ?? 0, "world");
+    }
+  };
+  ctx.particles("block", x + 0.5, y + 0.5, z + 0.5, 12, boardsOf(meta) > 0 || id === C.BARRICADE ? C.BARRICADE : id);
+  if ((isDoor(id) || id === C.HOUSE_WINDOW) && boardsOf(meta) > 0) {
+    both((m) => withBoards(m, boardsOf(m) - 1));
+    ctx.sound("zombie_break", x + 0.5, y + 0.5, z + 0.5, 1.2, 0.6);
+  } else if (id === C.HOUSE_WINDOW) {
+    both((m) => m | WINDOW_BROKEN);
+    ctx.sound("glass_break", x + 0.5, y + 0.5, z + 0.5, 1, 1);
+  } else {
+    both(() => null);
+    ctx.sound(block(id).material === "glass" ? "glass_break" : "zombie_break", x + 0.5, y + 0.5, z + 0.5, 1.2, 0.5);
+  }
 }
 
 /** Batters at the block in front of it — the one at its feet, then its head — until it gives. */

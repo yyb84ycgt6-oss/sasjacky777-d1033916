@@ -7,6 +7,7 @@
  * to leave, first with a warning and then with rifles.
  */
 import { CORDON } from "../engine/county";
+import { countyDay, countyHour, helicopter } from "../engine/countyLife";
 import type { Objective } from "../game/types";
 import { ModeRuntime, registerRuntime } from "./runtime";
 
@@ -44,8 +45,34 @@ class AshgroveRuntime extends ModeRuntime {
     this.begin(this.game.player.name);
   }
 
+  /**
+   * The helicopter: once, on a day and hour of the world's own, it comes low
+   * over the county and circles whoever it finds, for a minute and a half —
+   * and every one of the dead in earshot follows the noise to them.
+   */
+  private helicopter(): void {
+    const { day, hour } = helicopter(this.game.meta.seed);
+    const now = countyDay(this.game.time), h = countyHour(this.game.time);
+    const left = (this.data.heli as number | undefined) ?? -1;
+    if (left === -1 && now === day && h >= hour) {
+      this.data.heli = 90;
+      this.tell(null, "A helicopter, low over the rooftops — circling. It isn't landing. And everything dead for miles can hear it.", "#ffcc55");
+      return;
+    }
+    if (left > 0) {
+      this.data.heli = left - 1;
+      for (const p of this.players()) {
+        if (p.dead || p.spectating) continue;
+        if (left % 4 === 0) this.game.sound("helicopter", p.x, p.y + 30, p.z, 1.5, 1);
+        if (left % 6 === 0) this.game.makeNoise(p.x, p.y, p.z, 90, p.id);
+      }
+      if (left === 1) { this.data.heli = 0; this.tell(null, "The helicopter's noise fades away to the east.", "#cccccc"); }
+    }
+  }
+
   second(): void {
     if (!this.home) return;
+    this.helicopter();
     for (const p of this.players()) {
       if (this.born[p.name] === undefined) this.begin(p.name);
       if (p.dead || p.spectating) continue;

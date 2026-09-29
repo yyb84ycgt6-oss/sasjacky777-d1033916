@@ -228,6 +228,11 @@ export class GameAudio {
       case "brew":
         for (let i = 0; i < 5; i++) this.tone(out, t + i * 0.07, "sine", 300 + Math.random() * 400, 200 + Math.random() * 200, 0.06, 0.12);
         break;
+      case "helicopter":
+        // Rotor blades far overhead: a low thud-thud-thud under a turbine's whine, fading in and out.
+        for (let i = 0; i < 12; i++) this.noiseBurst(out, t + i * 0.09, 0.07, "lowpass", 220, 1, 0.5 * Math.sin((i / 12) * Math.PI) + 0.1);
+        this.tone(out, t, "sawtooth", 880, 900, 1.1, 0.03, 0.3);
+        break;
       case "glass_break":
         this.noiseBurst(out, t, 0.25, "highpass", 3500, 0.7, 0.5);
         for (let i = 0; i < 4; i++) this.tone(out, t + i * 0.03, "triangle", 2400 + i * 500, 1800 + i * 400, 0.08, 0.1);
@@ -425,6 +430,9 @@ export class GameAudio {
       case "gigantoraptor": this.tone(out, t, "sawtooth", 320 * p * low, 200 * p * low, 0.7, 0.22, 0.1); this.noiseBurst(out, t, 0.4, "bandpass", 900, 1.5, 0.2); break;
       // The infected: groans and gurgles; a runner's rasp; a brute's roar; a screamer's shriek; a bloater's wet pop.
       case "infected": this.tone(out, t, "sawtooth", 130 * p * low, 90 * p * low, 0.8, 0.28, 0.2); this.noiseBurst(out, t, 0.7, "lowpass", 600, 1, 0.22); break;
+      // Ashgrove's dead: a slower, lower moan, and from the floor a wet, breathy rattle.
+      case "shambler": this.tone(out, t, "sawtooth", 105 * p * low, 75 * p * low, 1.1, 0.26, 0.3); this.noiseBurst(out, t, 0.9, "lowpass", 500, 1, 0.2, 0.2); break;
+      case "crawler": this.tone(out, t, "sawtooth", 150 * p * low, 110 * p * low, 0.6, 0.18, 0.1); this.noiseBurst(out, t, 0.6, "bandpass", 700, 2.5, 0.28); break;
       case "runner": this.tone(out, t, "sawtooth", 260 * p * low, 180 * p * low, 0.4, 0.22, 0.05); this.noiseBurst(out, t, 0.35, "bandpass", 1600, 1.2, 0.3); break;
       case "brute": this.tone(out, t, "sawtooth", 80 * p * low, 55 * p * low, 1.1, 0.45, 0.2); this.noiseBurst(out, t, 1, "lowpass", 400, 0.8, 0.4); break;
       case "spitter":

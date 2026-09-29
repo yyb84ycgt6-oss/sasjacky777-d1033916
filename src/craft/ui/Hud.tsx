@@ -186,7 +186,7 @@ export function Hud({ hud, mobile, crosshair }: { hud: HudState; mobile: boolean
           // Body temperature and anything wrong, in words: the vitals a mode keeps (engine/vitals.ts).
           <div data-testid="vitals" style={{ display: "flex", gap: "calc(var(--u) * 3)", marginBottom: "calc(var(--u) * 2)", fontSize: "calc(var(--u) * 5.5)" }}>
             {hud.vitals.map((v) => (
-              <span key={v} style={{ background: "rgba(0,0,0,0.45)", padding: "0 calc(var(--u) * 2)", color: /Bleeding|Sick|Broken|Freezing|Overheating/.test(v) ? "#ff7070" : /Cold/.test(v) ? "#8fd0ff" : /Hot/.test(v) ? "#ffc070" : "#e0e0e0" }}>{v}</span>
+              <span key={v} style={{ background: "rgba(0,0,0,0.45)", padding: "0 calc(var(--u) * 2)", color: /Bleeding|Sick|Broken|Freezing|Overheating|Nauseous|Feverish|Failing|Parched/.test(v) ? "#ff7070" : /Queasy|thirsty|Thirsty/.test(v) ? "#ffd070" : /Cold/.test(v) ? "#8fd0ff" : /Hot/.test(v) ? "#ffc070" : "#e0e0e0" }}>{v}</span>
             ))}
           </div>
         )}

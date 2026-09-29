@@ -161,6 +161,9 @@ export function defineCountyItems(item: ItemFn): void {
   item("school_bag", "School Backpack", { category: "tools", use: "backpack", maxStack: 1 });
   item("hiking_bag", "Hiking Backpack", { category: "tools", use: "backpack", maxStack: 1 });
   item("duffel_bag", "Duffel Bag", { category: "tools", use: "backpack", maxStack: 1 });
+
+  // ---- what a fridge holds once the power has been off a while (engine/countyLife.ts) ----
+  food("spoiled_food", "Spoiled Food", 2, 0.2, {}, { maxStack: 16 });
 }
 
 /** Item sprites for the county: templates first, then each item's picture in its colours. */
@@ -465,6 +468,7 @@ export const COUNTY_ART: Record<string, [string, Record<string, string>]> = {};
   art("butter", "matchbox", { a: "#8a7a30", b: "#f0e080", w: "#ffffff" });
   art("deli_ham", "cloth", { a: "#8a3a3a", b: "#e89a9a", c: "#d87a7a" });
   art("banana", "banana", { a: "#8a6a10", b: "#f0d040" });
+  art("spoiled_food", "sandwich", { a: "#3a3a1a", b: "#6a7a3a", c: "#8a8a4a", g: "#4a5a2a", f: "#7a6a3a" });
   art("sandwich", "sandwich", { a: "#6a4a26", b: "#d8a860", c: "#e8c890", g: "#5aa83a", f: "#e89a9a" });
   art("tv_dinner", "tray", { a: "#6a6a6e", b: "#c8ccd0", f: "#8a4a2a", g: "#5a8a3a", w: "#e8d070" });
   const FRUIT = (b: string, g = "#4c9a2a") => ({ a: "#3a2a1a", b, c: "#ffffff", d: "#2a1a0a", h: "#6a4a26", g });

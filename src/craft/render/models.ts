@@ -262,6 +262,7 @@ const MODELS: Record<string, PartSpec[]> = {
   tribute: HUMANOID(false),
   // Dead Zone's infected: people, still, in shape.
   infected: HUMANOID(false), runner: HUMANOID(false), brute: HUMANOID(false), spitter: HUMANOID(false), screamer: HUMANOID(false), bloater: HUMANOID(false),
+  shambler: HUMANOID(false), crawler: HUMANOID(false),
   skeleton: HUMANOID(true),
   pig: [
     { name: "body", size: [10, 8, 16], uv: [0, 16], pivot: [0, 10, 0] },
@@ -441,6 +442,8 @@ export function pose(m: ModelInstance, kind: string, p: PoseInput): void {
   // A glider lies face down along its flight, tipped up as it climbs; the dragon noses into a dive.
   if (p.gliding) { r.rotation.x = -Math.PI / 2 + p.pitch * 0.8; r.position.y += 0.3; }
   if (kind === "ender_dragon") r.rotation.x = p.bank ?? 0;
+  // A crawler lies face down along the way it is going, a little off the floor so its chest is not in it.
+  if (kind === "crawler" && !(p.death > 0)) { r.rotation.x = -Math.PI / 2; r.position.y += 0.25; }
 
   const l = Math.max(0.12, p.light);
   const hurtTint = p.hurt || p.death > 0;
@@ -511,10 +514,18 @@ export function pose(m: ModelInstance, kind: string, p: PoseInput): void {
       break;
     }
     case "player": case "zombie": case "skeleton": case "piglin": case "zombified_piglin": case "wither_skeleton": case "tribute": case "trainer": case "citizen": case "cop":
-    case "infected": case "runner": case "brute": case "spitter": case "screamer": case "bloater": {
+    case "infected": case "runner": case "brute": case "spitter": case "screamer": case "bloater": case "shambler": case "crawler": {
       const sneak = p.sneaking ? 0.5 : 0;
       const body = m.parts.get("body");
       if (body) body.rotation.x = sneak;
+      if (kind === "crawler") {
+        // Hauling itself along by its hands, over its head as it lies; the legs trail behind.
+        const claw = Math.sin(p.walk * 4) * 0.5;
+        set("rightArm", Math.PI - 0.2 + claw, 0, 0.1); set("leftArm", Math.PI - 0.2 - claw, 0, -0.1);
+        set("rightLeg", 0.05, 0, 0.05); set("leftLeg", 0.05, 0, -0.05);
+        if (head) head.rotation.set(Math.PI / 2 * 0.8 + p.pitch, 0, 0);
+        break;
+      }
       if (p.armsForward) {
         set("rightArm", -Math.PI / 2 + Math.sin(p.time * 3) * 0.05, 0, 0);
         set("leftArm", -Math.PI / 2 - Math.sin(p.time * 3) * 0.05, 0, 0);

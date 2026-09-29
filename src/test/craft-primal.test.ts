@@ -268,7 +268,7 @@ describe("vitals", () => {
   it("quenches with water, juicy food and drink, and restores a sane state from a save", () => {
     expect(waterFrom("water_bottle")).toBeGreaterThan(waterFrom("melon_slice"));
     expect(waterFrom("bread")).toBe(0);
-    expect(sanitizeVitals({ water: 99, temp: -40, bleeding: 9, sick: -3, broken: "yes" })).toEqual({ water: 20, temp: 20, bleeding: 3, sick: 0, broken: false });
+    expect(sanitizeVitals({ water: 99, temp: -40, bleeding: 9, sick: -3, broken: "yes" })).toEqual({ water: 20, temp: 20, bleeding: 3, sick: 0, broken: false, infection: 0 });
   });
 });
 

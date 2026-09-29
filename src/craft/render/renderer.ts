@@ -504,7 +504,8 @@ export class WorldRenderer {
           woolColor: e.woolColor, sheared: e.sheared, onGround: e.body.onGround,
           // A piglin holds out the gold it is admiring.
           armsForward: e.kind === "zombie" || (e.kind === "skeleton" && e.targetId !== null) || (e.kind === "piglin" && e.admiring > 0)
-            || ((e.kind === "infected" || e.kind === "brute" || e.kind === "bloater") && e.targetId !== null),
+            || ((e.kind === "infected" || e.kind === "brute" || e.kind === "bloater" || e.kind === "shambler") && e.targetId !== null)
+            || e.kind === "crawler",
           size: modelScale(e), squish: e.squish,
           swing: e.kind === "iron_golem" ? Math.max(0, e.attackCooldown - 12) / 8 : 0,
           screaming: e.kind === "enderman" && e.scream > 0, carrying: e.kind === "enderman" && e.carried > 0,
