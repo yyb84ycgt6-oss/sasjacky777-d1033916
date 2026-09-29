@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { PROVIDERS, OLLAMA_AGENTS, providersByTier, type ProviderId, type ProviderTier } from "@/lib/jackie-providers";
 import { streamProviderChat } from "@/lib/jackie-provider-stream";
+import { VAULTS, keySlots, vaultChain, SLOTS_PER_VAULT, type VaultId } from "@/lib/providerVaults";
 import { guardSwitch } from "@/lib/repair/contextGuard";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -11,7 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   ArrowLeft, Zap, Cpu, Cloud, HardDrive, ExternalLink, KeyRound, Play, Loader2,
-  CheckCircle2, Star, Sparkles, Building2, Flame, Boxes, Brain, Globe,
+  CheckCircle2, Star, Sparkles, Building2, Flame, Boxes, Brain, Globe, Copy, Vault,
 } from "lucide-react";
 
 const ICONS: Record<ProviderId, typeof Zap> = {
@@ -58,6 +59,10 @@ export default function AIProviders() {
   const [fallback, setFallback] = useState(true);
   const [servedBy, setServedBy] = useState<string | null>(null);
   const [fallbackNote, setFallbackNote] = useState<string | null>(null);
+  // Null means the hub's own order; a vault swaps in its five and their models.
+  const [vaultId, setVaultId] = useState<VaultId | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
+  const vault = VAULTS.find((v) => v.id === vaultId) ?? null;
 
   const tiers = providersByTier();
 
@@ -69,6 +74,7 @@ export default function AIProviders() {
       messages: [{ role: "user", content: prompt }],
       system: "You are Jackie. Respond concisely.",
       fallback,
+      chain: vault ? vaultChain(vault) : undefined,
       onDelta: (t) => setOutput((o) => o + t),
       onDone: (meta) => { if (meta) setServedBy(`${meta.servedBy} · ${meta.model}`); setRunning(false); },
       onError: (e) => { setError(e); setRunning(false); },
@@ -101,6 +107,28 @@ export default function AIProviders() {
     setOutput(""); setError(null); setServedBy(null); setFallbackNote(null);
   };
 
+
+  const openVault = (id: VaultId) => {
+    const v = VAULTS.find((x) => x.id === id)!;
+    const first = v.slots[0];
+    snapshot(`${v.name} · ${first.provider}`, "provider-switch");
+    setVaultId(id);
+    setProviderId(first.provider);
+    setModelId(first.model ?? PROVIDERS.find((x) => x.id === first.provider)!.models[0].id);
+    setOutput(""); setError(null); setServedBy(null); setFallbackNote(null);
+  };
+
+  const copySecret = async (secret: string) => {
+    try {
+      await navigator.clipboard.writeText(secret);
+      setCopied(secret);
+      setTimeout(() => setCopied((c) => (c === secret ? null : c)), 1500);
+    } catch {
+      // Clipboard access is refused outside a secure context; say so rather
+      // than flashing "copied" over a clipboard that still holds the old text.
+      setError(`Could not copy — type ${secret} into Cloud → Secrets by hand.`);
+    }
+  };
 
   const renderCard = (p: (typeof PROVIDERS)[number]) => {
     const Icon = ICONS[p.id];
@@ -143,6 +171,77 @@ export default function AIProviders() {
           </div>
         </div>
 
+        {/* Vaults */}
+        <section className="space-y-3">
+          <div className="flex items-baseline justify-between">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+              <Vault className="w-4 h-4" /> Key vaults
+            </h2>
+            <span className="text-[11px] text-muted-foreground">
+              {VAULTS.length} vaults × {SLOTS_PER_VAULT} keys = {VAULTS.length * SLOTS_PER_VAULT} key slots
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {VAULTS.map((v) => (
+              <Button
+                key={v.id}
+                size="sm"
+                variant={v.id === vaultId ? "default" : "outline"}
+                onClick={() => openVault(v.id)}
+              >
+                {v.name}
+              </Button>
+            ))}
+            {vault && (
+              <Button size="sm" variant="ghost" onClick={() => setVaultId(null)}>
+                Hub order
+              </Button>
+            )}
+          </div>
+          {vault ? (
+            <Card className="p-4 space-y-3">
+              <p className="text-xs text-muted-foreground">{vault.purpose}</p>
+              <div className="grid md:grid-cols-2 lg:grid-cols-5 gap-2">
+                {keySlots(vault).map((k, i) => (
+                  <div key={k.provider} className="rounded-lg border border-border p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-muted-foreground">#{i + 1}</span>
+                      <Badge variant="secondary" className="text-[9px]">{k.kind === "url" ? "URL" : "KEY"}</Badge>
+                    </div>
+                    <div className="text-sm font-semibold leading-tight">{k.label}</div>
+                    <div className="text-[10px] font-mono text-muted-foreground truncate" title={k.model}>{k.model}</div>
+                    <a href={k.url} target="_blank" rel="noreferrer" className="block">
+                      <Button size="sm" className="w-full gap-1.5 h-7 text-xs">
+                        <ExternalLink className="w-3 h-3" />
+                        {k.kind === "url" ? "Set up" : "Get key"}
+                      </Button>
+                    </a>
+                    <button
+                      onClick={() => copySecret(k.secret)}
+                      className="w-full flex items-center justify-center gap-1 text-[10px] font-mono text-primary hover:underline"
+                    >
+                      <Copy className="w-3 h-3" />
+                      {copied === k.secret ? "copied" : k.secret}
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <div className="text-[11px] text-muted-foreground">
+                <span className="font-semibold text-foreground">Fallback order: </span>
+                <span className="font-mono">{vaultChain(vault).map((l) => l.provider).join(" → ")}</span>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Get key opens the page the key is made on. Paste it into Cloud → Secrets under the name
+                shown (click it to copy). Any slot left empty is skipped, and the chain moves to the next one.
+              </p>
+            </Card>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Pick a vault to get its five keys and use its fallback order in the test below.
+            </p>
+          )}
+        </section>
+
         {/* Tier sections */}
         {(["default", "free", "freemium", "paid"] as ProviderTier[]).map((tier) => (
           <section key={tier} className="space-y-2">
@@ -162,7 +261,10 @@ export default function AIProviders() {
         <Card className="p-4 md:p-6 space-y-4">
           <div className="flex flex-wrap items-center gap-3 justify-between">
             <div>
-              <h2 className="font-semibold">Test: {provider.label}</h2>
+              <h2 className="font-semibold">
+                Test: {provider.label}
+                {vault && <span className="text-xs font-normal text-muted-foreground"> · {vault.name} order</span>}
+              </h2>
               <p className="text-xs text-muted-foreground">{provider.description}</p>
             </div>
             <div className="flex items-center gap-4">

@@ -53,6 +53,12 @@ type StreamArgs = {
   fallback?: boolean;
   /** Callback fired when we switch to a fallback provider. */
   onFallback?: (from: ProviderId, to: ProviderId, reason: string) => void;
+  /**
+   * Order to fall back through instead of FALLBACK_ORDER, each link with the
+   * model it should be asked for. A vault passes its own five here, so a code
+   * vault falls back to Codestral rather than to whatever Mistral defaults to.
+   */
+  chain?: readonly { provider: ProviderId; model?: string }[];
 };
 
 type SingleResult =
@@ -179,13 +185,16 @@ export async function streamProviderChat(args: StreamArgs) {
     return;
   }
 
-  // Cascade through remaining providers using each provider's default (first) model.
-  const chain = FALLBACK_ORDER.filter((p) => p !== primary);
+  // Cascade through the remaining providers, each on the model its link names
+  // or, failing that, the provider's default (first) model.
+  const links: readonly { provider: ProviderId; model?: string }[] =
+    args.chain ?? FALLBACK_ORDER.map((provider) => ({ provider }));
+  const chain = links.filter((link) => link.provider !== primary);
   let lastReason = first.reason;
-  for (const next of chain) {
+  for (const { provider: next, model } of chain) {
     const def = findProvider(next);
     if (!def) continue;
-    const fallbackModel = def.models[0]?.id;
+    const fallbackModel = model ?? def.models[0]?.id;
     if (!fallbackModel) continue;
     // Auto-save the context before handing the session to another provider.
     guard(args, primary, next, lastReason, sink.text);
