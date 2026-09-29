@@ -15,6 +15,7 @@
  * them approximate, except our own Moon, which has a lunar theory of its own.
  */
 import type { Conic } from "./kepler";
+import type { WorldInfo } from "./worlds";
 
 export type BodyKind = "star" | "planet" | "dwarf" | "moon" | "asteroid" | "comet" | "interstellar" | "probe";
 
@@ -37,13 +38,22 @@ export type Orbit =
   /** A craft on a straight line out of the Solar System: direction (RA, Dec), distance in AU at a date and AU a year, from a date on. */
   | { kind: "escape"; ra: number; dec: number; r0: number; t0: number; rate: number; from: number }
   /** A telescope parked a distance (km) behind the Earth from the Sun: the second Lagrange point. */
-  | { kind: "l2"; distance: number };
+  | { kind: "l2"; distance: number }
+  /**
+   * A world of another star (systems.ts), round its parent in the system's
+   * own reference plane: semi-major axis (km), eccentricity, inclination,
+   * node and argument of periapsis, mean anomaly at J2000 (degrees), and the
+   * period (days) — which Kepler's third law ties to the axis and the masses.
+   */
+  | { kind: "kepler"; a: number; e: number; i: number; node: number; peri: number; M0: number; period: number };
 
 /** Which painter makes its surface (textures.ts), and its colours. */
 export type Look =
   | "sun" | "mercury" | "venus" | "earth" | "moon" | "mars" | "jupiter" | "saturn" | "uranus" | "neptune"
   | "io" | "europa" | "ganymede" | "callisto" | "titan" | "enceladus" | "iapetus" | "mimas" | "triton" | "pluto" | "charon"
-  | "rock" | "ice" | "ceres" | "vesta" | "comet" | "probe";
+  | "rock" | "ice" | "ceres" | "vesta" | "comet" | "probe"
+  /** Another star's world, painted from its WorldInfo (textures.ts). */
+  | "gen";
 
 export interface BodyDef {
   id: string;
@@ -69,6 +79,8 @@ export interface BodyDef {
   /** A comet's activity: how bright its coma and how long its tails, at one AU. */
   activity?: number;
   facts: string;
+  /** What it is like to stand on (worlds.ts): every world with ground, and every world of another star. */
+  world?: WorldInfo;
 }
 
 const AUd = 149_597_870.7;
