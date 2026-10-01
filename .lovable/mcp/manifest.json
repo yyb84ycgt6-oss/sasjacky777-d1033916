@@ -12,10 +12,59 @@
   "mcp": {
     "server": {
       "name": "sas-jacky",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "title": "SAS-JACKY"
     },
     "tools": [
+      {
+        "name": "ask_jackie",
+        "title": "Ask Jackie",
+        "description": "Send a message to Jackie and get her answer. She sees the user's memory and active tasks. The exchange is saved to a conversation in the app (a new one unless conversation_id is given).",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "openWorldHint": true
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 20000,
+              "description": "What to say to Jackie."
+            },
+            "conversation_id": {
+              "type": "string",
+              "description": "Continue this conversation (its recent history is sent)."
+            },
+            "title": {
+              "type": "string",
+              "description": "Title for a new conversation."
+            },
+            "engine": {
+              "type": "string",
+              "enum": [
+                "cloud",
+                "deepseek",
+                "bionic",
+                "ollama"
+              ],
+              "description": "Which engine answers (default cloud). bionic and ollama answer the owner only."
+            },
+            "model": {
+              "type": "string",
+              "description": "Model id for that engine; omit for its default."
+            }
+          },
+          "required": [
+            "message"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
       {
         "name": "list_tasks",
         "title": "List tasks",
@@ -30,7 +79,13 @@
           "properties": {
             "status": {
               "type": "string",
-              "description": "Filter by task status, e.g. pending, in_progress, done."
+              "enum": [
+                "todo",
+                "in_progress",
+                "done",
+                "blocked"
+              ],
+              "description": "Filter by task status."
             },
             "limit": {
               "type": "integer",
@@ -47,7 +102,7 @@
       {
         "name": "create_task",
         "title": "Create task",
-        "description": "Create a new Jackie task for the signed-in user.",
+        "description": "Create a new Jackie task for the signed-in user. It appears on the app's task board.",
         "annotations": {
           "readOnlyHint": false,
           "destructiveHint": false,
@@ -65,9 +120,25 @@
               "type": "string",
               "description": "Optional longer detail."
             },
+            "status": {
+              "type": "string",
+              "enum": [
+                "todo",
+                "in_progress",
+                "done",
+                "blocked"
+              ],
+              "description": "Column to start in (default todo)."
+            },
             "priority": {
               "type": "string",
-              "description": "Priority, e.g. low, medium, high."
+              "enum": [
+                "low",
+                "medium",
+                "high",
+                "critical"
+              ],
+              "description": "Priority (default medium)."
             },
             "category": {
               "type": "string",
@@ -80,6 +151,61 @@
           },
           "required": [
             "title"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "update_task",
+        "title": "Update task",
+        "description": "Change any of a task's status, priority, title, description or due date. Give only the fields to change.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Task id (uuid)."
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "todo",
+                "in_progress",
+                "done",
+                "blocked"
+              ]
+            },
+            "priority": {
+              "type": "string",
+              "enum": [
+                "low",
+                "medium",
+                "high",
+                "critical"
+              ]
+            },
+            "title": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "due_date": {
+              "type": "string",
+              "description": "ISO 8601 date, or empty string to clear it."
+            }
+          },
+          "required": [
+            "id"
           ],
           "additionalProperties": false,
           "$schema": "http://json-schema.org/draft-07/schema#"
@@ -106,8 +232,13 @@
             },
             "status": {
               "type": "string",
-              "minLength": 1,
-              "description": "New status, e.g. pending, in_progress, done."
+              "enum": [
+                "todo",
+                "in_progress",
+                "done",
+                "blocked"
+              ],
+              "description": "New status."
             }
           },
           "required": [
@@ -120,9 +251,36 @@
         "outputSchema": null
       },
       {
+        "name": "delete_task",
+        "title": "Delete task",
+        "description": "Permanently delete one of the signed-in user's tasks. Prefer update_task with status done to finish a task.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Task id (uuid)."
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
         "name": "search_memory",
         "title": "Search Jackie memory",
-        "description": "Search the signed-in user's Jackie long-term memory entries by key or value text.",
+        "description": "Search the signed-in user's Jackie long-term memory by key or value text. Omit query to list recent entries.",
         "annotations": {
           "readOnlyHint": true,
           "idempotentHint": true,
@@ -133,10 +291,18 @@
           "properties": {
             "query": {
               "type": "string",
-              "description": "Text to match against memory key or value. Omit to list recent entries."
+              "description": "Text to match against memory key or value."
             },
             "category": {
               "type": "string",
+              "enum": [
+                "preference",
+                "decision",
+                "context",
+                "pattern",
+                "architecture",
+                "style"
+              ],
               "description": "Optional category filter."
             },
             "limit": {
@@ -154,7 +320,7 @@
       {
         "name": "remember_fact",
         "title": "Remember a fact",
-        "description": "Store or overwrite a fact in the signed-in user's Jackie long-term memory.",
+        "description": "Store or overwrite a fact in the signed-in user's Jackie long-term memory. Jackie sees it in every chat.",
         "annotations": {
           "readOnlyHint": false,
           "destructiveHint": false,
@@ -176,13 +342,48 @@
             },
             "category": {
               "type": "string",
-              "description": "Optional category, e.g. preference, project, constraint."
+              "enum": [
+                "preference",
+                "decision",
+                "context",
+                "pattern",
+                "architecture",
+                "style"
+              ],
+              "description": "Category (default context)."
             }
           },
           "required": [
             "key",
             "value"
           ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "forget_fact",
+        "title": "Forget a fact",
+        "description": "Delete one of Jackie's memory entries, by id or by key.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Memory entry id (uuid)."
+            },
+            "key": {
+              "type": "string",
+              "description": "Memory key, when the id is not known."
+            }
+          },
           "additionalProperties": false,
           "$schema": "http://json-schema.org/draft-07/schema#"
         },
@@ -205,6 +406,60 @@
               "minimum": 1,
               "maximum": 100,
               "description": "Max rows to return (default 20)."
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "read_conversation",
+        "title": "Read conversation",
+        "description": "Read the most recent messages of one conversation, oldest first.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Conversation id (uuid), from list_conversations."
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "description": "How many recent messages (default 40)."
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "create_conversation",
+        "title": "Create conversation",
+        "description": "Start a new conversation in the app's chat sidebar. Use its id with ask_jackie.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string",
+              "description": "Conversation title (default 'Agent session')."
             }
           },
           "additionalProperties": false,
