@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { defineConfig, devices } from "@playwright/test";
 
 /**
@@ -25,6 +26,10 @@ export default defineConfig({
     baseURL: process.env.E2E_BASE_URL ?? "http://localhost:4173",
     trace: "on-first-retry",
     screenshot: "only-on-failure",
+    // Playwright's pinned Chromium is not always the build a machine has. The
+    // cloud dev containers ship theirs here; CI installs the pinned one and
+    // never takes this branch. scripts/smoke-routes.mjs does the same.
+    launchOptions: existsSync("/opt/pw-browsers/chromium") ? { executablePath: "/opt/pw-browsers/chromium" } : {},
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   // Reuse whatever is already serving locally; in CI always build and serve.

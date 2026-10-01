@@ -48,6 +48,7 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "🔌 Local Bridge · terminal + models", href: "/bridge", title: "Run commands on your own machine over loopback and convert LM Studio / Ollama / BionicGPT models — works offline" },
       { label: "🗂️ PC App Library · all 90", href: "/pc-apps", title: "Every app in the PC, searchable — the groups below are a shortcut to the ones used most" },
       { label: "👁️ eYe App Commander", href: "/app-commander.html", title: "Fleet command center — live GPU/thermal, routing tier, AES-GCM vault, collapse pipeline", external: true },
+      { label: "🔐 Strongbox · offline vault", href: "/strongbox.html", title: "Notes and files encrypted on this device with your password — opens offline, installs to the Home Screen", external: true },
       { label: "📡 Jacky Live · Real Engine", href: "/jacky-live", title: "Live RTX-3090 telemetry, situation-aware routing and squad dispatch from the real jacky engine" },
       { label: "🧭 JACKY v3 (in PC)", href: "/pc?app=jacky", title: "Open the PC with JACKY v3 running" },
       { label: "⌨️ ai-term Console", href: "/pc?app=aiterm", title: "Open the PC with the ai-term console running" },
