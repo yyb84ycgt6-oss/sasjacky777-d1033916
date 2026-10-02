@@ -226,7 +226,7 @@ export async function runConversion(
       );
     }
     return {
-      blob: new Blob([data], { type: plan.outputMime }),
+      blob: new Blob([data as Uint8Array<ArrayBuffer>], { type: plan.outputMime }),
       filename: plan.outputName,
       mimeType: plan.outputMime,
     };

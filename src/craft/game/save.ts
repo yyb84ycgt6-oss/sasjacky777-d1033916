@@ -137,7 +137,7 @@ const dimOfKey = (part: string): Dimension => (part.startsWith("n:") ? "nether" 
 async function gzip(data: Uint8Array): Promise<{ data: Uint8Array; gz: boolean }> {
   if (typeof CompressionStream === "undefined") return { data, gz: false };
   try {
-    const stream = new Blob([data]).stream().pipeThrough(new CompressionStream("gzip"));
+    const stream = new Blob([data as Uint8Array<ArrayBuffer>]).stream().pipeThrough(new CompressionStream("gzip"));
     return { data: new Uint8Array(await new Response(stream).arrayBuffer()), gz: true };
   } catch {
     return { data, gz: false };
@@ -146,7 +146,7 @@ async function gzip(data: Uint8Array): Promise<{ data: Uint8Array; gz: boolean }
 
 async function gunzip(data: Uint8Array): Promise<Uint8Array> {
   if (typeof DecompressionStream === "undefined") throw new Error("This browser cannot read compressed saves (no DecompressionStream).");
-  const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream("gzip"));
+  const stream = new Blob([data as Uint8Array<ArrayBuffer>]).stream().pipeThrough(new DecompressionStream("gzip"));
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 

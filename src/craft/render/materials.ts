@@ -34,7 +34,7 @@ let atlasTexture: THREE.DataArrayTexture | null = null;
 export function getAtlasTexture(): THREE.DataArrayTexture {
   if (atlasTexture) return atlasTexture;
   const atlas = buildAtlas();
-  const tex = new THREE.DataArrayTexture(atlas.pixels, TEX, TEX, atlas.count);
+  const tex = new THREE.DataArrayTexture(atlas.pixels as Uint8Array<ArrayBuffer>, TEX, TEX, atlas.count);
   tex.format = THREE.RGBAFormat;
   tex.type = THREE.UnsignedByteType;
   tex.magFilter = THREE.NearestFilter;
