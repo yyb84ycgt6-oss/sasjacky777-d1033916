@@ -70,6 +70,7 @@ const LocalAITest = lazy(() => import("./pages/LocalAITest"));
 const MicroAI = lazy(() => import("./pages/MicroAI"));
 const IndexForge = lazy(() => import("./pages/IndexForge"));
 const MicroBoard = lazy(() => import("./pages/MicroBoard"));
+const BuildTriage = lazy(() => import("./pages/BuildTriage"));
 const NervousSystem = lazy(() => import("./pages/NervousSystem"));
 
 const EruRouter = lazy(() => import("./eru/EruRouter"));
@@ -333,6 +334,7 @@ const App = () => (
                   <Route path="/forge" element={<ProtectedRoute><IndexForge /></ProtectedRoute>} />
                   <Route path="/micro" element={<ProtectedRoute><MicroAI /></ProtectedRoute>} />
                   <Route path="/micro/board" element={<ProtectedRoute><MicroBoard /></ProtectedRoute>} />
+                  <Route path="/triage" element={<ProtectedRoute><BuildTriage /></ProtectedRoute>} />
                   <Route
 
                     path="/eru/visualizers"
