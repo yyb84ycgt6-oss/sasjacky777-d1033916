@@ -42,12 +42,14 @@ import {
   loadDraft, saveDraft, clearDraft, registerContextSource, guardSwitch,
 } from "@/lib/repair/contextGuard";
 import { orchestrate } from "@/lib/jackie-orchestrator";
+import { BackendPicker } from "@/components/microai/BackendPicker";
+import { findBackend, sendChat } from "@/lib/microai/chatBackends";
 import {
   askGemini, GeminiNotConnectedError, GeminiSkippedError,
   type GeminiCitation,
 } from "@/lib/geminiEngine";
 import {
-  CONSULT_ENGINES, findConsultEngine, readConsultEngine, writeConsultEngine,
+  readConsultEngine, writeConsultEngine,
   type ConsultEngineId,
 } from "@/lib/repair/consultEngine";
 import { readSettings as readMicroSettings } from "@/lib/microai/settings";
@@ -209,6 +211,15 @@ export default function RepairBay() {
   // own engine did not do that in order to be put back on the gateway by a
   // page reload.
   const [engineId, setEngineId] = useState<ConsultEngineId>(() => readConsultEngine());
+  // The full picker: Gemini models, Bonsai on device, Ollama, the grounded
+  // engine. Remembered, like the engine choice it extends.
+  const [pick, setPick] = useState<{ b: string; m: string }>(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem("jacky.repair.consultPick.v1") || "null");
+      if (raw?.b) return raw;
+    } catch { /* fall through */ }
+    return engineId === "gemini" ? { b: "gemini-enterprise", m: "default_assistant" } : { b: "lovable", m: "google/gemini-3-flash-preview" };
+  });
   const [citations, setCitations] = useState<GeminiCitation[]>([]);
   const [geminiSession, setGeminiSession] = useState<string | null>(null);
   const [engineNote, setEngineNote] = useState<string | null>(null);
@@ -394,6 +405,14 @@ Tell me: (1) is this update worth taking for MY use case, or is it risk with no 
     citations: GeminiCitation[];
     session: string | null;
   }> => {
+    if (findBackend(pick.b).kind !== "gemini" && pick.b !== "lovable-orchestrate") {
+      const r = await sendChat({
+        backendId: pick.b, modelId: pick.m, system: consultSystem(evidence),
+        prompt: context ? `${q}\n\n---\nRecent session context I saved:\n${context}` : q,
+      });
+      if (!r.ok) throw new Error(`${r.servedBy}: ${r.error ?? "no answer"}`);
+      return { text: r.text, answeredBy: r.servedBy, citations: [], session: null };
+    }
     if (engineId === "gemini") {
       const brief = consultSystem(evidence);
       const answer = await askGemini(
@@ -1592,30 +1611,20 @@ Tell me: (1) is this update worth taking for MY use case, or is it risk with no 
                 </Button>
               </div>
               <div className="space-y-2 border-t border-border/50 pt-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs text-muted-foreground">Answered by</span>
-                  {CONSULT_ENGINES.map((e) => (
-                    <Button
-                      key={e.id}
-                      size="sm"
-                      variant={engineId === e.id ? "default" : "outline"}
-                      className="min-h-9"
-                      onClick={() => {
-                        setEngineId(e.id);
-                        writeConsultEngine(e.id);
-                        setEngineNote(null);
-                        // A new engine has not answered this question yet, and
-                        // leaving the last one's citations under it would
-                        // attribute sources to an engine that never cited them.
-                        setCitations([]);
-                      }}
-                      aria-pressed={engineId === e.id}
-                    >
-                      {e.short}
-                    </Button>
-                  ))}
-                </div>
-                <p className="text-xs text-muted-foreground">{findConsultEngine(engineId).description}</p>
+                <BackendPicker
+                  backendId={pick.b}
+                  modelId={pick.m}
+                  onChange={(b, m) => {
+                    const next = { b, m };
+                    setPick(next);
+                    try { localStorage.setItem("jacky.repair.consultPick.v1", JSON.stringify(next)); } catch { /* session only */ }
+                    const eid: ConsultEngineId = findBackend(b).kind === "gemini" ? "gemini" : "gateway";
+                    setEngineId(eid);
+                    writeConsultEngine(eid);
+                    setEngineNote(null);
+                    setCitations([]);
+                  }}
+                />
               </div>
 
               {modelUsed && (

@@ -28,7 +28,7 @@ function texCanvas(name: string, tint: readonly [number, number, number] | null,
   }
   const c = document.createElement("canvas");
   c.width = 16; c.height = 16;
-  c.getContext("2d")!.putImageData(new ImageData(px, 16, 16), 0, 0);
+  c.getContext("2d")!.putImageData(new ImageData(px as Uint8ClampedArray<ArrayBuffer>, 16, 16), 0, 0);
   return c;
 }
 
