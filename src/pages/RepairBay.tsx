@@ -49,7 +49,7 @@ import {
   type GeminiCitation,
 } from "@/lib/geminiEngine";
 import {
-  CONSULT_ENGINES, findConsultEngine, readConsultEngine, writeConsultEngine,
+  readConsultEngine, writeConsultEngine,
   type ConsultEngineId,
 } from "@/lib/repair/consultEngine";
 import { readSettings as readMicroSettings } from "@/lib/microai/settings";
