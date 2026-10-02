@@ -49,6 +49,11 @@ export const CHAT_MODELS: readonly ChatModel[] = [
   { id: "google/gemini-2.5-pro", label: "Gemini Pro", description: "Top-tier reasoning, slower", cost: 3, speed: 1 },
   { id: "google/gemini-2.5-flash-lite", label: "Gemini Lite", description: "Cheapest and quickest", cost: 1, speed: 3 },
   { id: "google/gemini-3-flash-preview", label: "Gemini 3 Flash", description: "Next-gen, balanced", cost: 2, speed: 2 },
+  { id: "google/gemini-3.8-flash", label: "Gemini 3.8 Flash", description: "Newest Flash — fast coding and reasoning", cost: 2, speed: 3 },
+  { id: "google/gemini-3.7-flash", label: "Gemini 3.7 Flash", description: "Fast coding and reasoning", cost: 2, speed: 3 },
+  { id: "google/gemini-3.6-flash", label: "Gemini 3.6 Flash", description: "Fast coding and reasoning", cost: 2, speed: 3 },
+  { id: "google/gemini-3.1-pro-preview", label: "Gemini 3.1 Pro", description: "Deepest Gemini reasoning, slower", cost: 3, speed: 1 },
+  { id: "google/gemini-3.1-flash-lite", label: "Gemini 3.1 Flash Lite", description: "Cheapest Gemini for quick answers", cost: 1, speed: 3 },
   { id: "openai/gpt-5", label: "GPT-5", description: "Powerful all-rounder", cost: 3, speed: 1 },
   { id: "openai/gpt-5-mini", label: "GPT-5 Mini", description: "Strong and efficient", cost: 2, speed: 2 },
 ] as const;
