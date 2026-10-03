@@ -17,6 +17,7 @@ export type Database = {
       api_keys: {
         Row: {
           created_at: string
+          expires_at: string | null
           id: string
           is_active: boolean
           key_hash: string
@@ -24,11 +25,15 @@ export type Database = {
           name: string
           prefix: string
           rate_limit: number
+          rotated_at: string | null
+          rotated_from: string | null
           scopes: Json
+          superseded_by: string | null
           user_id: string
         }
         Insert: {
           created_at?: string
+          expires_at?: string | null
           id?: string
           is_active?: boolean
           key_hash: string
@@ -36,11 +41,15 @@ export type Database = {
           name: string
           prefix: string
           rate_limit?: number
+          rotated_at?: string | null
+          rotated_from?: string | null
           scopes?: Json
+          superseded_by?: string | null
           user_id: string
         }
         Update: {
           created_at?: string
+          expires_at?: string | null
           id?: string
           is_active?: boolean
           key_hash?: string
@@ -48,10 +57,28 @@ export type Database = {
           name?: string
           prefix?: string
           rate_limit?: number
+          rotated_at?: string | null
+          rotated_from?: string | null
           scopes?: Json
+          superseded_by?: string | null
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "api_keys_rotated_from_fkey"
+            columns: ["rotated_from"]
+            isOneToOne: false
+            referencedRelation: "api_keys"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "api_keys_superseded_by_fkey"
+            columns: ["superseded_by"]
+            isOneToOne: false
+            referencedRelation: "api_keys"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       api_usage_logs: {
         Row: {
