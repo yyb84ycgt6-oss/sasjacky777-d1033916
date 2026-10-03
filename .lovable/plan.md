@@ -1,95 +1,26 @@
-# Seed Pods + Micro-Routers — Bridge Layer
+# Open straight into the app: silent guest sign-in
 
-> **Shipped — all five parts (verified 12 Sep 2026).** Kept as the design record.
->
-> | Part | Where it landed |
-> |---|---|
-> | 1 · Seed identity (colors + QR) | `src/components/pods/SeedCard.tsx` |
-> | 2 · Pod-bound routers | `supabase/functions/router-register`, `router-poll` |
-> | 3 · Lazy / streaming decompression | `src/lib/pods/podSlice.ts` — `openSlice()` |
-> | 4 · Y-axis fold | `supabase/functions/pod-fold`, `pod-search`, `pod-fetch` |
-> | 5 · Merge surface | `src/pages/FoldSurface.tsx` at `/pods/surface` |
+## What you'll see
+- No login screen. Opening any page goes straight into Jackie.
+- Behind the scenes, each browser quietly gets its own private guest account. Chat, memory, tasks and saving keep working.
+- Your data and other visitors' data stay walled off from each other. Nothing is deleted. You said "eliminate data user" was meant as a safety precaution, so keeping these walls is how that's covered.
+- Your owner-only tools (your own rig engine, GitHub sync, core docs) stay locked to your real account. A guest visitor can't reach your hardware or private files.
+- AI answers start working again. Right now every AI request is refused because a usage-limit setup step was never applied to the database.
 
+## Steps
+1. **Turn on guest accounts** in the sign-in settings. The app already has a "demo" button that uses them, but the setting is off.
+2. **Sign in silently.** When someone opens a page with no account, the app creates a guest account in the background and continues. If that fails, it shows a plain message saying why instead of a blank screen.
+3. **Leave the sign-in page reachable but unlinked.** You can still go to it directly to use your owner account.
+4. **Apply the missing usage-limit setup.** This uses the two files already in your project, unchanged. Guests get the same fair usage cap that is already defined there, so a stranger can't run up your AI bill.
+5. **Test before handing back.** Open the home chat, the Repair Consultant, `/micro` and `/triage` in a fresh browser. Confirm each loads without a login screen and that one real AI answer comes back. Report anything that still fails, by name.
 
-Connect the three pieces that already exist (`/eyepod`, `/mesh`, `/providers`) into the vision: **color-coded QR seeds, pod-bound routers, lazy decompression, and Y-axis folding**.
+## Technical details
+- Change the `ProtectedRoute` in `App.tsx`: when `!user && !loading`, call `supabase.auth.signInAnonymously()` once (guarded by a ref) and render a loading state, not `<Auth />`. On error, render the reason.
+- Enable anonymous sign-ins with `configure_auth`. Leave email auto-confirm alone.
+- Run `20260914120000_authz_hardening.sql` then `20260922120000_provider_quota_lock.sql` through the migration tool, byte-for-byte. First check which of the other migrations are also unapplied, and apply only what `consume_provider_quota` depends on.
+- Leave RLS on every table as it is. Owner-only functions still check the `owner` role.
+- Verify with Playwright on a fresh context: `/`, `/repair`, `/micro`, `/triage`. Send one prompt through `jackie-chat` and one through `build-triage`.
 
-Nothing gets rebuilt. Only bridges are added.
-
-## What gets added
-
-### 1. Seed identity (colors + QR)
-Every eYe pod gets:
-- `color` (from a fixed 24-color palette, one per pod slot)
-- `glyph` (single emoji/symbol)
-- `capability` string (e.g. `seed:security`, `seed:code`, `seed:memory`)
-- `version` + `content_hash` (SHA-256 of the compressed blob)
-
-A **Seed Card** UI on `/eyepod` shows each pod as a colored tile with its glyph and a **QR button**. The QR encodes:
-```json
-{ "pod_id": "...", "version": 3, "capability": "seed:security",
-  "hash": "sha256:...", "url": "<supabase-url>/functions/v1/pod-fetch" }
-```
-Scanning it on another device (or from a router node) is enough to pull + verify that exact seed. No secrets in the QR — read-only pod fetch is gated by the scanner's own auth.
-
-### 2. Pod-bound routers
-`mesh_routers` gets a nullable `pod_id` column. A router registered with a `pod_id`:
-- Only receives jobs whose `capability_required` matches that pod's capability.
-- Reports pod version on every poll; if the server has a newer version, the poll response includes `{seed_update: {url, hash}}` so the router can pull the new seed before continuing.
-
-This is your "router knows the application" — the pod IS the application slice it knows.
-
-### 3. Lazy / streaming decompression
-`src/lib/eye-pods.ts` gains `openSlice(podId, path)` — decompress only a JSON path (e.g. `openSlice("security", "rules.mitre.T1078")`), leaving the rest sealed. Uses the existing LZ blob but decompresses in a chunked worker so a big pod doesn't freeze the tab. Speed is capped by a `bytesPerTick` knob (adjustable — your "slow speed as to not fault hardware").
-
-### 4. Y-axis fold (surface → circle with infinite points)
-New edge function `pod-fold`:
-- Input: a slice of pod content (text)
-- Output: `{ vector: number[768], hash, glyph, color }`
-- Uses Lovable AI embeddings (`google/gemini-embedding-001`, truncated to 768 dims via OpenAI's `text-embedding-3-small` when the caller wants the smaller footprint — chosen by pod, not hardcoded).
-- Storage: new `pod_folds` table with `pgvector` column so a router can drop its folded slice into a shared searchable surface.
-- What this means concretely: a router reads 20 KB of pod text, folds it to a 3 KB vector + hash, ships THAT back to Lovable. The full text never leaves the pod. Anyone querying similarity gets a hit + the hash + which pod/router owns it — decrypt is a separate step gated by the pod's own auth.
-
-### 5. Merge surface (`/eyepod/surface`)
-A visual page: every folded vector plotted as a point on a unit circle (2D projection via t-SNE-lite in browser), colored by source pod. Clicking a point shows `{pod, capability, hash, router_that_folded_it, timestamp}`. This is the "circle with infinite points" you described — the merged surface of all folded knowledge.
-
-## Data model additions
-
-```text
-mesh_routers    + pod_id (uuid, nullable, references eye_pods.id)
-eye_pods        + color, glyph, capability, version, content_hash
-                (or if eye_pods lives only in IndexedDB today,
-                 add a lightweight `eye_pod_registry` mirror table
-                 for QR / router lookup — decision noted below)
-pod_folds       (new): id, user_id, pod_id, router_id, capability,
-                vector(768), hash, source_ref, created_at
-                + pgvector hnsw index
-```
-
-## New edge functions
-- `pod-fetch` — auth'd, returns a pod blob by id + verifies hash
-- `pod-fold` — embeds a slice, inserts into `pod_folds`
-- `pod-search` — cosine search over `pod_folds`, returns hits + hashes
-
-## UI changes
-- `/eyepod`: swap tile grid for **Seed Cards** with color, glyph, QR button, capability tag, size, version.
-- `/mesh`: registration modal gains a "Bind to seed pod" dropdown; router cards show their pod chip.
-- `/eyepod/surface`: new page with the merged fold circle.
-
-## Open decision (need your call before building)
-**Where does the pod registry live?** Right now pods are IndexedDB-only (per-device). QR + pod-bound routers need a small server-side registry so a scanned QR resolves on any device.
-
-Two options:
-- **A. Add `eye_pod_registry` server table** — metadata only (id, color, glyph, capability, version, hash, size). Blob still lives in IndexedDB + optional Supabase storage bucket for cross-device sync. Cleanest, unlocks the full vision.
-- **B. Keep pods device-local** — QR encodes the blob itself (limits pod size to ~2KB; kills the vision for anything real).
-
-Recommendation: **A**.
-
-## Explicitly out of scope
-- No changes to `/providers`, `/control`, Jackie chat, or the existing router mesh contract (3 endpoints stay identical — pod-binding is additive).
-- No new AI provider. Folding uses the Lovable AI embeddings you already have.
-- No proprietary encryption scheme invented. Cipher = AES-GCM with per-pod key derived from user session; hash = SHA-256. Standard, auditable.
-
-## Deliverable when built
-Colored seed tiles with QR export → scan on another device or feed to a router → that router only wakes for its pod's capability → folds slices to vectors → the merged surface page shows the whole knowledge circle growing in real time.
-
-**Confirm option A vs B, and I'll build it.**
+## Risk
+- An anonymous guest loses their history if they clear browser data. That's fine for a demo.
+- If the database setup step fails, I'll report the exact error and won't hide it.
