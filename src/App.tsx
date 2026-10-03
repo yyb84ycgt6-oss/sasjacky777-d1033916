@@ -7,7 +7,10 @@ import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import { ThemeProvider } from "@/hooks/useTheme";
 import { I18nProvider } from "@/game/i18n";
 import { LocalAIProvider } from "@/providers/LocalAIProvider";
-import { useEffect, lazy, Suspense } from "react";
+import React, { useEffect, lazy, Suspense } from "react";
+import { supabase } from "@/integrations/supabase/client";
+// One silent guest sign-in per page load, however many routes mount.
+const guestStarted = { current: false };
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import Sandbox from "./pages/Sandbox";
