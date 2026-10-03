@@ -7,7 +7,10 @@ import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import { ThemeProvider } from "@/hooks/useTheme";
 import { I18nProvider } from "@/game/i18n";
 import { LocalAIProvider } from "@/providers/LocalAIProvider";
-import { useEffect, lazy, Suspense } from "react";
+import React, { useEffect, lazy, Suspense } from "react";
+import { supabase } from "@/integrations/supabase/client";
+// One silent guest sign-in per page load, however many routes mount.
+const guestStarted = { current: false };
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import Sandbox from "./pages/Sandbox";
@@ -118,8 +121,30 @@ const ProtectedRoute = ({
   fallback?: React.ReactNode;
 }) => {
   const { user, loading } = useAuth();
+  const [guestError, setGuestError] = React.useState<string | null>(null);
+  void fallback;
 
-  if (loading) {
+  // No login wall: a visitor without an account gets a private guest account
+  // silently, so RLS still walls each browser's data off from everyone else's.
+  // /auth stays reachable directly for the owner's real account.
+  React.useEffect(() => {
+    if (loading || user || guestStarted.current) return;
+    guestStarted.current = true;
+    void supabase.auth.signInAnonymously().then(({ error }) => {
+      if (error) setGuestError(error.message);
+    });
+  }, [loading, user]);
+
+  if (guestError) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center gap-3 p-6 text-center">
+        <p className="text-sm text-destructive">Could not open a guest session: {guestError}</p>
+        <a href="/auth" className="text-sm underline">Sign in instead</a>
+      </div>
+    );
+  }
+
+  if (loading || !user) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <span className="font-mono text-4xl font-bold text-primary animate-pulse">J</span>
@@ -127,7 +152,6 @@ const ProtectedRoute = ({
     );
   }
 
-  if (!user) return <>{fallback ?? <Auth />}</>;
   return <>{children}</>;
 };
 

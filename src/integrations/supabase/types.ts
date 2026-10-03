@@ -14,9 +14,42 @@ export type Database = {
   }
   public: {
     Tables: {
+      api_key_rate_events: {
+        Row: {
+          api_key_id: string
+          created_at: string
+          endpoint: string
+          id: number
+          user_id: string
+        }
+        Insert: {
+          api_key_id: string
+          created_at?: string
+          endpoint?: string
+          id?: never
+          user_id: string
+        }
+        Update: {
+          api_key_id?: string
+          created_at?: string
+          endpoint?: string
+          id?: never
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "api_key_rate_events_key_owner_fkey"
+            columns: ["api_key_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "api_keys"
+            referencedColumns: ["id", "user_id"]
+          },
+        ]
+      }
       api_keys: {
         Row: {
           created_at: string
+          expires_at: string | null
           id: string
           is_active: boolean
           key_hash: string
@@ -24,11 +57,15 @@ export type Database = {
           name: string
           prefix: string
           rate_limit: number
+          rotated_at: string | null
+          rotated_from: string | null
           scopes: Json
+          superseded_by: string | null
           user_id: string
         }
         Insert: {
           created_at?: string
+          expires_at?: string | null
           id?: string
           is_active?: boolean
           key_hash: string
@@ -36,11 +73,15 @@ export type Database = {
           name: string
           prefix: string
           rate_limit?: number
+          rotated_at?: string | null
+          rotated_from?: string | null
           scopes?: Json
+          superseded_by?: string | null
           user_id: string
         }
         Update: {
           created_at?: string
+          expires_at?: string | null
           id?: string
           is_active?: boolean
           key_hash?: string
@@ -48,10 +89,28 @@ export type Database = {
           name?: string
           prefix?: string
           rate_limit?: number
+          rotated_at?: string | null
+          rotated_from?: string | null
           scopes?: Json
+          superseded_by?: string | null
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "api_keys_rotated_from_fkey"
+            columns: ["rotated_from"]
+            isOneToOne: false
+            referencedRelation: "api_keys"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "api_keys_superseded_by_fkey"
+            columns: ["superseded_by"]
+            isOneToOne: false
+            referencedRelation: "api_keys"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       api_usage_logs: {
         Row: {
@@ -81,7 +140,15 @@ export type Database = {
           status_code?: number
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "api_usage_logs_key_owner_fkey"
+            columns: ["api_key_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "api_keys"
+            referencedColumns: ["id", "user_id"]
+          },
+        ]
       }
       bot_api_keys: {
         Row: {
@@ -105,7 +172,22 @@ export type Database = {
           id?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "bot_api_keys_bot_owner_fkey"
+            columns: ["bot_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "user_bots"
+            referencedColumns: ["id", "user_id"]
+          },
+          {
+            foreignKeyName: "bot_api_keys_key_owner_fkey"
+            columns: ["api_key_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "api_keys"
+            referencedColumns: ["id", "user_id"]
+          },
+        ]
       }
       chat_attachments: {
         Row: {
@@ -1012,6 +1094,57 @@ export type Database = {
           },
         ]
       }
+      provider_quota_policy: {
+        Row: {
+          enabled: boolean
+          note: string | null
+          per_day: number
+          per_minute: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          enabled?: boolean
+          note?: string | null
+          per_day?: number
+          per_minute?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          enabled?: boolean
+          note?: string | null
+          per_day?: number
+          per_minute?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      provider_usage_events: {
+        Row: {
+          created_at: string
+          function_name: string
+          id: number
+          model: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          function_name: string
+          id?: never
+          model?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          function_name?: string
+          id?: never
+          model?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_bots: {
         Row: {
           behavior_style: string
@@ -1081,11 +1214,43 @@ export type Database = {
         }
         Relationships: []
       }
+      xai_generation_requests: {
+        Row: {
+          created_at: string
+          id: string
+          model: string
+          provider_request_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          model: string
+          provider_request_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          model?: string
+          provider_request_id?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
+      consume_api_key: {
+        Args: { p_endpoint?: string; p_key_hash: string }
+        Returns: Json
+      }
+      consume_provider_quota: {
+        Args: { p_function: string; p_model?: string; p_user_id: string }
+        Returns: Json
+      }
       match_pod_folds: {
         Args: {
           match_count?: number
@@ -1104,6 +1269,18 @@ export type Database = {
           source_hash: string
           source_ref: string
         }[]
+      }
+      rotate_api_key_atomic: {
+        Args: {
+          p_expires_at: string
+          p_immediate: boolean
+          p_key_hash: string
+          p_key_id: string
+          p_prefix: string
+          p_rotated_at: string
+          p_user_id: string
+        }
+        Returns: Json
       }
     }
     Enums: {
