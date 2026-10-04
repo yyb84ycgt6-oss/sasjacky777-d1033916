@@ -89,14 +89,16 @@ serve(async (req) => {
     if (!baseUrl) {
       // `needs_secret` is what tells the router this engine is not configured
       // rather than broken, so it moves on without making noise about it.
+      // 200 + ok:false, not 503 — see restoreUnconfigured in src/lib/edgeFunction.ts.
       return json(
         {
+          ok: false,
           error:
             "Bionic is not connected. Set BIONIC_BASE_URL to your OpenAI-compatible endpoint (BionicGPT, LM Studio, llama.cpp, vLLM).",
           code: "PROVIDER_UNCONFIGURED",
           needs_secret: "BIONIC_BASE_URL",
         },
-        503,
+        200,
       );
     }
 

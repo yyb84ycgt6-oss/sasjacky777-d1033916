@@ -75,12 +75,34 @@ export async function callEdgeFunction(
   body: unknown,
   options: EdgeHeaderOptions = {},
 ): Promise<Response> {
-  return fetch(edgeUrl(name), {
+  const resp = await fetch(edgeUrl(name), {
     method: "POST",
     headers: await edgeHeaders(options),
     body: JSON.stringify(body),
     signal: options.signal,
   });
+  return restoreUnconfigured(resp);
+}
+
+/**
+ * An engine with no secret set answers 200 `{ ok: false, code:
+ * "PROVIDER_UNCONFIGURED" }` rather than 503: the chat probes every engine in
+ * its chain on each send, and the preview reported each 503 as a crash that
+ * blanked the screen. Callers were written against a non-ok status, so the
+ * refusal is turned back into one here — locally, with no 5xx on the wire.
+ */
+export async function restoreUnconfigured(resp: Response): Promise<Response> {
+  if (!resp.ok || !(resp.headers.get("Content-Type") ?? "").includes("application/json")) return resp;
+  const text = await resp.clone().text();
+  try {
+    const parsed = JSON.parse(text) as { code?: string; ok?: boolean };
+    if (parsed?.code === "PROVIDER_UNCONFIGURED" && parsed.ok === false) {
+      return new Response(text, { status: 503, headers: { "Content-Type": "application/json" } });
+    }
+  } catch {
+    /* not JSON after all — hand it back untouched */
+  }
+  return resp;
 }
 
 /**

@@ -535,7 +535,8 @@ var ask_jackie_default = defineTool12({
     } catch (e) {
       return fail2(`Could not reach ${fn}: ${e instanceof Error ? e.message : String(e)}`);
     }
-    if (!resp.ok) {
+    const unconfigured = resp.ok && (resp.headers.get("Content-Type") ?? "").includes("application/json");
+    if (!resp.ok || unconfigured) {
       const body = await resp.json().catch(() => null);
       const why = [body?.error, body?.detail].filter(Boolean).join(" ") || `HTTP ${resp.status}`;
       return fail2(`${fn} refused: ${why}`);

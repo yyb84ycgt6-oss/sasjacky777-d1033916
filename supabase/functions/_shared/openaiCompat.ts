@@ -66,13 +66,15 @@ export function openAiCompatHandler(cfg: OpenAiCompatConfig): (req: Request) => 
       // cascade to move on quietly.
       const key = Deno.env.get(cfg.secret);
       if (!key) {
+        // 200 + ok:false, not 503 — see restoreUnconfigured in src/lib/edgeFunction.ts.
         return json(
           {
+            ok: false,
             error: `${cfg.secret} not configured. ${cfg.keyHelp}`,
             code: "PROVIDER_UNCONFIGURED",
             needs_secret: cfg.secret,
           },
-          503,
+          200,
         );
       }
 

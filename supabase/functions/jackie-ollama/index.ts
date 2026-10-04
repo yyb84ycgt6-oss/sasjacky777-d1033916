@@ -128,9 +128,10 @@ serve(async (req) => {
   const base = Deno.env.get("OLLAMA_BASE_URL");
   if (!base) {
     console.error(`${FUNCTION_NAME}: OLLAMA_BASE_URL not configured`);
+    // 200 + ok:false, not 503 — see restoreUnconfigured in src/lib/edgeFunction.ts.
     return json(
-      { error: "Provider unavailable", code: "PROVIDER_UNCONFIGURED", needs_secret: "OLLAMA_BASE_URL" },
-      503,
+      { ok: false, error: "Provider unavailable", code: "PROVIDER_UNCONFIGURED", needs_secret: "OLLAMA_BASE_URL" },
+      200,
     );
   }
 

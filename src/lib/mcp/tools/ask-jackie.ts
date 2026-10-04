@@ -84,7 +84,11 @@ export default defineTool({
       return fail(`Could not reach ${fn}: ${e instanceof Error ? e.message : String(e)}`);
     }
 
-    if (!resp.ok) {
+    // An unconfigured engine answers 200 with `ok: false` (see edgeFunction.ts
+    // restoreUnconfigured); read that as the refusal it is, not as a stream.
+    const unconfigured =
+      resp.ok && (resp.headers.get("Content-Type") ?? "").includes("application/json");
+    if (!resp.ok || unconfigured) {
       const body = (await resp.json().catch(() => null)) as { error?: string; detail?: string } | null;
       const why = [body?.error, body?.detail].filter(Boolean).join(" ") || `HTTP ${resp.status}`;
       return fail(`${fn} refused: ${why}`);
