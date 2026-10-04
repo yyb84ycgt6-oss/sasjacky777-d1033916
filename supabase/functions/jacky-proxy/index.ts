@@ -41,14 +41,19 @@ serve(async (req) => {
   const base = (Deno.env.get("JACKY_API_BASE") || "").replace(/\/+$/, "");
   const token = Deno.env.get("JACKY_API_TOKEN") || "";
   if (!base) {
+    // 200 with an error envelope, not 503: an unconfigured link is a normal
+    // state the Workstation probes on every load. A 503 was reported by the
+    // preview as a crash that blanked the screen. Both clients (jackyClient,
+    // jackie-router) already read `error` from the envelope and say why.
     return json(
       {
+        ok: false,
         error: "jacky link not configured",
         detail: "Set the JACKY_API_BASE secret to your jacky host root.",
         code: "PROVIDER_UNCONFIGURED",
         needs_secret: "JACKY_API_BASE",
       },
-      503,
+      200,
     );
   }
 
