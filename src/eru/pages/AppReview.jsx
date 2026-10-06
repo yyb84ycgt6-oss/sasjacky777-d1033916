@@ -90,7 +90,7 @@ export default function AppReview() {
               <Upload className="w-6 h-6 text-muted-foreground" />
               <p className="text-sm text-muted-foreground">{file ? file.name : 'Tap to upload file'}</p>
               <p className="text-xs text-muted-foreground/50">.js .py .ts .sol .json .txt</p>
-              <input type="file" className="hidden" onChange={e => setFile(e.target.files[0])} accept=".js,.py,.ts,.sol,.json,.txt" />
+              <input type="file" className="hidden" onChange={e => setFile(e.target.files[0])} accept=".js,.py,.ts,.sol,.json,.txt,.md,.markdown" />
             </label>
 
             <button onClick={startReview} disabled={!file && !pasteCode.trim()}
