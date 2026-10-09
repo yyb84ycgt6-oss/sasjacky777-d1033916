@@ -535,9 +535,12 @@ var ask_jackie_default = defineTool12({
     } catch (e) {
       return fail2(`Could not reach ${fn}: ${e instanceof Error ? e.message : String(e)}`);
     }
-    const unconfigured = resp.ok && (resp.headers.get("Content-Type") ?? "").includes("application/json");
-    if (!resp.ok || unconfigured) {
+    const isJson = (resp.headers.get("Content-Type") ?? "").includes("application/json");
+    if (!resp.ok || isJson) {
       const body = await resp.json().catch(() => null);
+      if (resp.ok && body?.code !== "PROVIDER_UNCONFIGURED" && !body?.error) {
+        return fail2(`${fn} answered with JSON instead of a stream: ${JSON.stringify(body).slice(0, 200)}`);
+      }
       const why = [body?.error, body?.detail].filter(Boolean).join(" ") || `HTTP ${resp.status}`;
       return fail2(`${fn} refused: ${why}`);
     }

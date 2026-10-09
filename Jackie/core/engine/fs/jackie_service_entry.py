@@ -12,19 +12,21 @@ It wires together:
 """
 
 import threading
-import uvicorn
-import os
-# `router_final` is the gateway shell at the repository root — the thin FastAPI
-# wrapper over `jackierouter/`. This branch carried its own copy of it next to
-# this file; that copy is not recovered, because two routers drifting apart is
-# how you end up debugging the wrong one.
-from router_final import app as router_app
 from ..jackie_os import JackieOS
 from .tracing import trace
 
 
 def start_router():
     """Starts the Router Gateway."""
+    # Imported here, not at module level: `router_final` builds the FastAPI app
+    # as it loads, which needs the gateway extra. At module level that made
+    # merely importing this file fail with a RuntimeError on any install
+    # without fastapi. `router_final` is the gateway shell at the repository
+    # root; this branch's own copy is not recovered, because two routers
+    # drifting apart is how you end up debugging the wrong one.
+    import uvicorn
+    from router_final import app as router_app
+
     trace("service_start_router")
     uvicorn.run(router_app, host="127.0.0.1", port=4000, log_level="info")
 
@@ -33,11 +35,11 @@ def start_jackie_os():
     """Initializes and keeps the Jackie OS runtime alive."""
     trace("service_start_jackie_os")
     # Initialize the entire OS runtime with all its components
-    os = JackieOS(router_url="http://127.0.0.1:4000")
-    
-    # Keep the main thread alive indefinitely, allowing the FastAPI app to run in the background
-    while True:
-        pass  
+    runtime = JackieOS(router_url="http://127.0.0.1:4000")  # noqa: F841 - held for its lifetime
+
+    # Block without spinning: `while True: pass` pinned a CPU core for as long
+    # as the service ran.
+    threading.Event().wait()
 
 
 if __name__ == "__main__":

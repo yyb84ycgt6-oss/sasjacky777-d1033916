@@ -71,7 +71,7 @@ describe("Jackie/CORE_IDENTITY.md - Resonance orientation section", () => {
   it("lists all three gates with their definitions", () => {
     expect(content).toContain("**Coherence** — no unresolved contradictions");
     expect(content).toContain(
-      "**Gravity** — claims fall toward verifiable truth; facts, inferences, and unknowns are labeled"
+      "**Gravity** — claims fall toward verifiable truth; facts, inferences, opinions, and unknowns are labeled"
     );
     expect(content).toContain(
       "**Humility** — what is not known is said plainly; no fake certainty"
@@ -309,7 +309,7 @@ describe("Jackie/prompts/system_prompt.md - resonance additions", () => {
       "Coherence: no unresolved contradictions between perspectives"
     );
     const gravityIdx = content.indexOf(
-      "Gravity: claims fall toward verifiable truth — label facts, inferences, and unknowns"
+      "Gravity: claims fall toward verifiable truth — label facts, inferences, opinions, and unknowns"
     );
     const humilityIdx = content.indexOf(
       "Humility: state plainly what you do not know; never fake certainty"
