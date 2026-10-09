@@ -85,11 +85,19 @@ export default defineTool({
     }
 
     // An unconfigured engine answers 200 with `ok: false` (see edgeFunction.ts
-    // restoreUnconfigured); read that as the refusal it is, not as a stream.
-    const unconfigured =
-      resp.ok && (resp.headers.get("Content-Type") ?? "").includes("application/json");
-    if (!resp.ok || unconfigured) {
-      const body = (await resp.json().catch(() => null)) as { error?: string; detail?: string } | null;
+    // restoreUnconfigured, which this bundle cannot import — it pulls in the
+    // browser client). Like that function, judge it by the body's code, not the
+    // Content-Type alone, so a JSON answer that is not a refusal is never
+    // reported as one. Any other JSON is still not a stream, so it is read and
+    // named rather than handed to the SSE reader to come back empty.
+    const isJson = (resp.headers.get("Content-Type") ?? "").includes("application/json");
+    if (!resp.ok || isJson) {
+      const body = (await resp.json().catch(() => null)) as
+        | { ok?: boolean; code?: string; error?: string; detail?: string }
+        | null;
+      if (resp.ok && body?.code !== "PROVIDER_UNCONFIGURED" && !body?.error) {
+        return fail(`${fn} answered with JSON instead of a stream: ${JSON.stringify(body).slice(0, 200)}`);
+      }
       const why = [body?.error, body?.detail].filter(Boolean).join(" ") || `HTTP ${resp.status}`;
       return fail(`${fn} refused: ${why}`);
     }
