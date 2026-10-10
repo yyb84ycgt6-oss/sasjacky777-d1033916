@@ -20,7 +20,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { callEdgeFunction, describeEdgeFailure } from "@/lib/edgeFunction";
 import {
-  buildMoralsBlock, MORAL_CATEGORIES, MORAL_LIMITS, PERSONA_ENGINES,
+  buildMoralsBlock, MORAL_CATEGORIES, MORAL_LIMITS, moralsFingerprint, MORALS_UNAVAILABLE, PERSONA_ENGINES,
   type Moral, type MoralCategory,
 } from "../../supabase/functions/_shared/morals";
 
@@ -48,7 +48,7 @@ export interface LedgerRow {
 
 export interface AttestationRow {
   engine: string;
-  mode: "persona" | "persona-without-morals" | "override";
+  mode: "persona" | "persona-without-morals" | "override" | "rig";
   persona_fp: string;
   morals_fp: string;
   detail: string | null;
@@ -109,8 +109,21 @@ async function select<T>(table: string, query: (q: any) => any): Promise<Result<
 
 export const loadMorals = () =>
   select<MoralRow>("jackie_morals", (q) => q.select("*").order("sort_order").order("created_at"));
-export const loadLedger = () =>
-  select<LedgerRow>("jackie_morals_ledger", (q) => q.select("*").order("seq"));
+// PostgREST caps a response at 1,000 rows. A ledger read in one request would
+// stop at #1000 for good: every later seal and change invisible, and the
+// witness — which by then points past the end — reporting a rewrite that never
+// happened. So it is read a page at a time until a page comes back short.
+const LEDGER_PAGE = 1000;
+export async function loadLedger(): Promise<Result<LedgerRow[]>> {
+  const all: LedgerRow[] = [];
+  for (let from = 0; ; from += LEDGER_PAGE) {
+    const page = await select<LedgerRow>("jackie_morals_ledger", (q) =>
+      q.select("*").order("seq").range(from, from + LEDGER_PAGE - 1));
+    if (!page.ok) return page;
+    all.push(...page.data);
+    if (page.data.length < LEDGER_PAGE) return { ok: true, data: all };
+  }
+}
 export const loadAttestations = () =>
   select<AttestationRow>("jackie_persona_attestations", (q) => q.select("*").order("last_seen", { ascending: false }));
 
@@ -128,8 +141,13 @@ async function callMoralsFunction<T>(body: Record<string, unknown>): Promise<Res
 }
 
 export const fetchStatus = () => callMoralsFunction<PersonaStatus>({ action: "status" });
-export const sealNow = (note: string) =>
-  callMoralsFunction<{ sealed: boolean; seq: number | null; hash: string | null }>({ action: "seal", note });
+/**
+ * Seals exactly what the owner was shown. The function refuses if the persona
+ * or morals moved in between — otherwise a deploy or an edit landing while the
+ * dialog was open would be approved without ever having been seen.
+ */
+export const sealNow = (note: string, expected: { persona_fp: string; morals_fp: string }) =>
+  callMoralsFunction<{ sealed: boolean; seq: number | null; hash: string | null }>({ action: "seal", note, expected });
 
 // --- writing -------------------------------------------------------------------
 
@@ -193,14 +211,25 @@ export const setMoralEnabled = (id: string, enabled: boolean) =>
 
 export const deleteMoral = (id: string) => write(() => db.from("jackie_morals").delete().eq("id", id));
 
-/** Swaps two neighbours' places. Two ledger entries, which is honest: two rows changed. */
-export async function swapOrder(a: MoralRow, b: MoralRow): Promise<Result<null>> {
-  // Equal sort_orders (rows added in one batch) would swap to the same values;
-  // spread them first so the move is visible.
-  const [ao, bo] = a.sort_order === b.sort_order ? [a.sort_order + 1, a.sort_order] : [b.sort_order, a.sort_order];
-  const first = await write(() => db.from("jackie_morals").update({ sort_order: ao }).eq("id", a.id));
-  if (!first.ok) return first;
-  return write(() => db.from("jackie_morals").update({ sort_order: bo }).eq("id", b.id));
+/**
+ * Moves one moral up or down by renumbering the whole list 1..n and writing
+ * only the rows whose number changed. Swapping two numbers did nothing when the
+ * two were equal — which is how a batch of suggestions arrives — and a swap
+ * that failed half way left exactly such a tie behind. Each row written is one
+ * ledger entry, which is honest: that many rows changed.
+ */
+export async function moveMoral(list: readonly MoralRow[], index: number, delta: -1 | 1): Promise<Result<null>> {
+  const target = index + delta;
+  if (target < 0 || target >= list.length) return { ok: true, data: null };
+  const order = list.slice();
+  [order[index], order[target]] = [order[target], order[index]];
+  for (let i = 0; i < order.length; i++) {
+    if (order[i].sort_order === i + 1) continue;
+    const id = order[i].id;
+    const res = await write(() => db.from("jackie_morals").update({ sort_order: i + 1 }).eq("id", id));
+    if (!res.ok) return res;
+  }
+  return { ok: true, data: null };
 }
 
 /**
@@ -235,6 +264,11 @@ export async function addSuggested(existing: readonly MoralRow[]): Promise<Resul
 export const GENESIS = "genesis";
 
 async function sha256Hex(text: string): Promise<string> {
+  // crypto.subtle exists only in secure contexts. Over plain http on the LAN it
+  // is missing, and without this the page sat on "Checking…" for ever.
+  if (!globalThis.crypto?.subtle) {
+    throw new Error("This page needs a secure connection (https or localhost) to verify the history — the browser withholds its hashing on plain http.");
+  }
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
   return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
 }
@@ -247,20 +281,101 @@ export function ledgerHash(prevHash: string, seq: number, action: string, payloa
   return sha256Hex(`${prevHash}\n${seq}\n${action}\n${payload}`);
 }
 
+export function parsePayload(row: Pick<LedgerRow, "payload">): Record<string, unknown> {
+  try {
+    const v = JSON.parse(row.payload);
+    return v && typeof v === "object" ? (v as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Who made an entry and when, from the hashed record rather than the unhashed columns. */
+export function signedOf(row: Pick<LedgerRow, "payload" | "actor" | "at">): { actor: string | null; at: string } {
+  const p = parsePayload(row);
+  return {
+    actor: typeof p.actor === "string" ? p.actor : null,
+    at: typeof p.at === "string" ? p.at : row.at,
+  };
+}
+
+// --- what this browser remembers -------------------------------------------------------
+
+/**
+ * The witness is the last head this browser verified; a history that no longer
+ * contains it was rewritten. The anchor is where the owner, after looking into
+ * a break or a rewrite, chose to start trusting again: verification restarts
+ * from it, and seals and morals from before it are not relied on. Without an
+ * anchor, one broken entry would keep the page red for the life of the table.
+ *
+ * Both live in this browser only. Storage can be missing or throw (private
+ * windows, blocked site data); the page then checks everything else and simply
+ * cannot remember.
+ */
+export interface Witness { seq: number; hash: string; at: string }
+export interface Anchor extends Witness {
+  /** The morals as they stood when the owner re-anchored: the replay starts here. */
+  morals: Moral[];
+}
+const WITNESS_KEY = "jackie-morals-witness:v1";
+const ANCHOR_KEY = "jackie-morals-anchor:v1";
+
+function readStored<T>(key: string, valid: (v: any) => boolean): T | null {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const v = JSON.parse(raw);
+    return valid(v) ? (v as T) : null;
+  } catch {
+    return null;
+  }
+}
+function writeStored(key: string, value: unknown | null): boolean {
+  try {
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const isWitness = (w: any) => typeof w?.seq === "number" && typeof w?.hash === "string";
+export const readWitness = () => readStored<Witness>(WITNESS_KEY, isWitness);
+export const writeWitness = (w: Witness | null) => writeStored(WITNESS_KEY, w);
+export const readAnchor = () => readStored<Anchor>(ANCHOR_KEY, (a) => isWitness(a) && Array.isArray(a.morals));
+export const writeAnchor = (a: Anchor | null) => writeStored(ANCHOR_KEY, a);
+
 export type ChainVerdict =
-  | { ok: true; count: number; head: { seq: number; hash: string } | null }
+  | { ok: true; count: number; head: { seq: number; hash: string } | null; anchoredAt: number | null }
   | { ok: false; count: number; brokenAt: number; reason: string };
+
+type VerifiableRow = Pick<LedgerRow, "seq" | "action" | "payload" | "prev_hash" | "hash"> & Partial<Pick<LedgerRow, "actor" | "at">>;
 
 /**
  * Recomputes every link. Catches an entry edited in place (its hash no longer
  * matches), one removed or reordered (the next entry's prev_hash points at
- * something else, or the numbering skips), and a new first entry slipped in
- * front (it would have to start from genesis).
+ * something else, or the numbering skips), a new first entry slipped in front
+ * (it would have to start from genesis), and an edited `actor` or `at` column
+ * (those sit outside the hash; their hashed copies are in the payload).
+ *
+ * With an anchor, entries up to it are taken as the owner accepted them and
+ * checking starts from the anchor's own hash — which must still be there.
  */
-export async function verifyLedger(rows: readonly Pick<LedgerRow, "seq" | "action" | "payload" | "prev_hash" | "hash">[]): Promise<ChainVerdict> {
+export async function verifyLedger(rows: readonly VerifiableRow[], anchor: Pick<Anchor, "seq" | "hash"> | null = null): Promise<ChainVerdict> {
   let prev = GENESIS;
   let expectSeq = 1;
-  for (const row of rows) {
+  let start = 0;
+  if (anchor) {
+    const at = rows.findIndex((r) => r.seq === anchor.seq);
+    if (at < 0 || rows[at].hash !== anchor.hash) {
+      return { ok: false, count: rows.length, brokenAt: anchor.seq, reason: `entry #${anchor.seq}, where you chose to trust the history from, is gone or changed` };
+    }
+    prev = anchor.hash;
+    expectSeq = anchor.seq + 1;
+    start = at + 1;
+  }
+  for (const row of rows.slice(start)) {
     if (row.seq !== expectSeq) {
       return { ok: false, count: rows.length, brokenAt: row.seq, reason: `entry #${expectSeq} is missing — the numbering jumps to #${row.seq}` };
     }
@@ -271,31 +386,28 @@ export async function verifyLedger(rows: readonly Pick<LedgerRow, "seq" | "actio
     if (actual !== row.hash) {
       return { ok: false, count: rows.length, brokenAt: row.seq, reason: `entry #${row.seq} was changed after it was written` };
     }
+    const signed = signedOf({ payload: row.payload, actor: row.actor ?? null, at: row.at ?? "" });
+    if (row.actor !== undefined && row.actor !== signed.actor) {
+      return { ok: false, count: rows.length, brokenAt: row.seq, reason: `entry #${row.seq}'s account was changed after it was written` };
+    }
+    if (row.at !== undefined && Date.parse(row.at) !== Date.parse(signed.at)) {
+      return { ok: false, count: rows.length, brokenAt: row.seq, reason: `entry #${row.seq}'s time was changed after it was written` };
+    }
     prev = row.hash;
     expectSeq += 1;
   }
   const last = rows[rows.length - 1];
-  return { ok: true, count: rows.length, head: last ? { seq: last.seq, hash: last.hash } : null };
+  return { ok: true, count: rows.length, head: last ? { seq: last.seq, hash: last.hash } : null, anchoredAt: anchor?.seq ?? null };
 }
 
-export function parsePayload(row: Pick<LedgerRow, "payload">): Record<string, unknown> {
-  try {
-    const v = JSON.parse(row.payload);
-    return v && typeof v === "object" ? (v as Record<string, unknown>) : {};
-  } catch {
-    return {};
-  }
-}
-
-export function latestSeal(rows: readonly LedgerRow[]): SealRecord | null {
-  for (let i = rows.length - 1; i >= 0; i--) {
+export function latestSeal(rows: readonly LedgerRow[], afterSeq = 0): SealRecord | null {
+  for (let i = rows.length - 1; i >= 0 && rows[i].seq > afterSeq; i--) {
     if (rows[i].action !== "seal") continue;
     const p = parsePayload(rows[i]);
     if (typeof p.persona_fp !== "string" || typeof p.morals_fp !== "string") continue;
     return {
       seq: rows[i].seq,
-      at: rows[i].at,
-      actor: rows[i].actor,
+      ...signedOf(rows[i]),
       persona_fp: p.persona_fp,
       persona_text: typeof p.persona_text === "string" ? p.persona_text : "",
       morals_fp: p.morals_fp,
@@ -304,33 +416,6 @@ export function latestSeal(rows: readonly LedgerRow[]): SealRecord | null {
     };
   }
   return null;
-}
-
-// --- the browser's witness ---------------------------------------------------------
-
-export interface Witness { seq: number; hash: string; at: string }
-const WITNESS_KEY = "jackie-morals-witness:v1";
-
-// Storage can be missing or throw (private windows, blocked site data). Without
-// it the page still checks everything else; it just cannot remember a head.
-export function readWitness(): Witness | null {
-  try {
-    const raw = localStorage.getItem(WITNESS_KEY);
-    if (!raw) return null;
-    const w = JSON.parse(raw) as Witness;
-    return typeof w?.seq === "number" && typeof w?.hash === "string" ? w : null;
-  } catch {
-    return null;
-  }
-}
-
-export function writeWitness(w: Witness): boolean {
-  try {
-    localStorage.setItem(WITNESS_KEY, JSON.stringify(w));
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 export type WitnessVerdict =
@@ -348,11 +433,79 @@ export function checkWitness(witness: Witness | null, rows: readonly Pick<Ledger
   return { state: "ok" };
 }
 
+// --- replaying the morals from their history -----------------------------------------
+
+export interface MoralsReplay {
+  /** The morals block the history says is in force now. */
+  fingerprint: string;
+  block: string;
+  /** Each morals fingerprint and when it took effect, oldest first. */
+  timeline: { fp: string; from: number }[];
+}
+
+const asMoral = (v: unknown): (Moral & { id: string }) | null => {
+  const m = v as Record<string, unknown> | null;
+  if (!m || typeof m.id !== "string" || typeof m.title !== "string" || typeof m.rule !== "string") return null;
+  return {
+    id: m.id, title: m.title, rule: m.rule, category: m.category as MoralCategory,
+    enabled: m.enabled === true, sort_order: Number(m.sort_order) || 0,
+  };
+};
+
+/**
+ * Rebuilds the morals from the ledger alone, entry by entry. Two uses:
+ *  - its end state must match the morals table. Every write fires the trigger,
+ *    so a table that differs from its own history was changed with the
+ *    triggers off — the one tamper the chain itself cannot show.
+ *  - its timeline says which morals were in force at any moment, so an engine
+ *    that answered with yesterday's morals yesterday is told apart from one that
+ *    used morals nobody ever set.
+ */
+export async function replayMorals(rows: readonly LedgerRow[], anchor: Anchor | null = null): Promise<MoralsReplay> {
+  const state = new Map<string, Moral>();
+  for (const m of anchor?.morals ?? []) {
+    const parsed = asMoral(m);
+    if (parsed) state.set(parsed.id, parsed);
+  }
+  const blockNow = () => buildMoralsBlock([...state.values()]);
+  let block = blockNow();
+  let fp = await moralsFingerprint(block);
+  const timeline = [{ fp, from: Number.NEGATIVE_INFINITY }];
+  for (const row of rows) {
+    if (anchor && row.seq <= anchor.seq) continue;
+    if (row.action === "seal") continue;
+    const p = parsePayload(row);
+    const after = asMoral(p.after);
+    const before = asMoral(p.before);
+    if (row.action === "delete") {
+      if (before) state.delete(before.id);
+    } else if (after) {
+      state.set(after.id, after);
+    }
+    const nextBlock = blockNow();
+    if (nextBlock === block) continue;
+    block = nextBlock;
+    fp = await moralsFingerprint(block);
+    timeline.push({ fp, from: Date.parse(signedOf(row).at) });
+  }
+  return { fingerprint: fp, block, timeline };
+}
+
+/** Whether `fp` was the morals in force at some moment in (`at` − window, `at`]. */
+export function wasInForce(timeline: MoralsReplay["timeline"], fp: string, at: number, windowMs: number): boolean {
+  for (let i = 0; i < timeline.length; i++) {
+    const from = timeline[i].from;
+    const until = i + 1 < timeline.length ? timeline[i + 1].from : Number.POSITIVE_INFINITY;
+    if (timeline[i].fp === fp && from <= at && until + windowMs >= at) return true;
+  }
+  return false;
+}
+
 // --- diffs ---------------------------------------------------------------------
 
 export type DiffLine = { kind: "same" | "added" | "removed"; text: string };
 
-/** Line diff by longest common subsequence. The persona is ~100 lines; quadratic is fine. */
+/** Line diff by longest common subsequence. The persona is ~150 lines; quadratic is fine. */
 export function lineDiff(before: string, after: string): DiffLine[] {
   const a = before.split("\n");
   const b = after.split("\n");
@@ -422,34 +575,45 @@ export interface AssessmentInput {
   attestations: Result<AttestationRow[]>;
   chain: ChainVerdict | null;
   witness: WitnessVerdict;
-  /** Engines report within this long after a change still counts as the change propagating. */
+  /** The morals rebuilt from the ledger; null when the ledger could not be read or verified. */
+  replay?: MoralsReplay | null;
+  /** True when this browser has verified a ledger here before (it holds a witness or an anchor). */
+  seenBefore?: boolean;
+  /** How long after a change an engine may still use the old morals (its cache, plus slack). */
   propagationMs?: number;
 }
 
 const RANK: Record<CheckState, number> = { ok: 0, info: 0, warn: 1, fail: 2 };
 const worst = (states: CheckState[]): CheckState =>
   states.reduce<CheckState>((w, s) => (RANK[s] > RANK[w] ? s : w), "ok");
-const short = (fp: string) => fp.slice(0, 12);
-const when = (iso: string) => new Date(iso).toLocaleString();
+const short = (fp: string) => (fp.length < 32 ? fp : fp.slice(0, 12));
+const when = (iso: string | number) => new Date(iso).toLocaleString();
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 export function assessIntegrity(input: AssessmentInput): Assessment {
   const propagationMs = input.propagationMs ?? 30_000;
   const checks: Check[] = [];
-  const missing = [input.ledger, input.attestations]
-    .map(errorOf)
-    .some((e) => e !== null && isMissingTable(e));
+  const missing = [input.ledger, input.attestations].map(errorOf).some((e) => e !== null && isMissingTable(e))
+    || (input.status.ok && !!input.status.data.morals.error && isMissingTable(input.status.data.morals.error));
 
-  if (missing || (input.status.ok && input.status.data.morals.error && isMissingTable(input.status.data.morals.error))) {
+  if (missing) {
+    // Tables that this browser has already verified do not un-exist on their
+    // own. "Not set up" would be a comfortable lie about a dropped ledger.
+    const gone = !!input.seenBefore;
     return {
-      verdict: "setup",
-      headline: "The guard rail is built but not switched on yet.",
-      checks: [{
-        id: "setup",
-        state: "warn",
-        title: "Database not set up",
-        summary:
-          "The morals tables do not exist in the database yet. Run `supabase db push`, then deploy the functions, and reload this page. Until then every engine answers on the base persona and says so.",
-      }],
+      verdict: gone ? "fail" : "setup",
+      headline: gone
+        ? "The guard rail's own tables are gone."
+        : "The guard rail is built but not switched on yet.",
+      checks: [gone
+        ? {
+            id: "setup", state: "fail", title: "Guard rail tables missing",
+            summary: "This browser has verified the morals history here before, and now the database says the tables do not exist. Someone with database access dropped them, or the project was reset. Nothing about Jackie's morals can be trusted until you find out which.",
+          }
+        : {
+            id: "setup", state: "warn", title: "Database not set up",
+            summary: "The morals tables do not exist in the database yet. Run `supabase db push`, then deploy the functions, and reload this page. Until then every engine answers on the base persona and says so.",
+          }],
       engines: [],
       seal: null,
       chain: null,
@@ -460,19 +624,22 @@ export function assessIntegrity(input: AssessmentInput): Assessment {
 
   // The ledger, then the witness: everything after leans on the history being sound.
   const rows = input.ledger.ok ? input.ledger.data : [];
+  const broken = !!input.chain && "reason" in input.chain;
+  const anchoredAt = input.chain && "anchoredAt" in input.chain ? input.chain.anchoredAt : null;
   if (!input.ledger.ok) {
     checks.push({ id: "chain", state: "fail", title: "Change history", summary: `Could not read the ledger: ${errorOf(input.ledger)}` });
   } else if (input.chain && "reason" in input.chain) {
     checks.push({
       id: "chain", state: "fail", title: "Change history",
-      summary: `Tampered: ${input.chain.reason}. Nothing written through the app can do this — it takes direct database access.`,
+      summary: `Tampered: ${input.chain.reason}. Nothing written through the app can do this — it takes direct database access. Once you know why, you can choose to trust the history from its current end.`,
     });
   } else {
     checks.push({
       id: "chain", state: "ok", title: "Change history",
-      summary: rows.length
-        ? `${rows.length} ${rows.length === 1 ? "entry" : "entries"}, every hash checks out against the one before it.`
-        : "Empty so far. Every change from now on is chained.",
+      summary: (rows.length
+        ? `${plural(rows.length, "entry", "entries")}, every hash checks out against the one before it.`
+        : "Empty so far. Every change from now on is chained.")
+        + (anchoredAt ? ` Checked from entry #${anchoredAt}, where you chose to trust it from.` : ""),
     });
   }
 
@@ -499,27 +666,57 @@ export function assessIntegrity(input: AssessmentInput): Assessment {
     });
   }
 
-  const outside = rows.filter((r) => r.actor === null);
-  if (outside.length) {
-    checks.push({
-      id: "outside", state: "fail", title: "Changes made outside the app",
-      summary: `${outside.length} ${outside.length === 1 ? "change was" : "changes were"} made with no signed-in account — the service role, the SQL editor or a migration (entries ${outside.map((r) => `#${r.seq}`).join(", ")}). If you did not make ${outside.length === 1 ? "it" : "them"}, someone with database access did.`,
-    });
-  }
-
-  // The seal, and what has moved since.
-  const seal = input.ledger.ok && (!input.chain || input.chain.ok) ? latestSeal(rows) : null;
-  const changesSinceSeal = seal ? rows.filter((r) => r.seq > seal.seq && r.action !== "seal") : rows.filter((r) => r.action !== "seal");
   const status = input.status.ok ? input.status.data : null;
-
   if (!input.status.ok) {
     checks.push({ id: "status", state: "fail", title: "Live persona", summary: `Could not ask the server what Jackie is running: ${errorOf(input.status)}` });
   }
 
-  if (!seal) {
+  // The morals table against its own history.
+  const replay = !broken && input.ledger.ok ? input.replay ?? null : null;
+  if (replay && status && !status.morals.error) {
+    checks.push(replay.fingerprint === status.morals.fingerprint
+      ? { id: "replay", state: "ok", title: "Morals against their history", summary: "Rebuilding your morals from the history gives exactly what the database holds now." }
+      : {
+          id: "replay", state: "fail", title: "Morals against their history",
+          summary: "Your morals in the database are not what their history says they should be. They were changed with the history's triggers switched off — something only direct database access can do.",
+        });
+  }
+
+  // The seal, and what has moved since. Nothing from before an anchor is relied on.
+  const seal = input.ledger.ok && !broken ? latestSeal(rows, anchoredAt ?? 0) : null;
+  const trustedFrom = Math.max(seal?.seq ?? 0, anchoredAt ?? 0);
+  const changesSinceSeal = rows.filter((r) => r.seq > trustedFrom && r.action !== "seal");
+
+  // Writes with no account behind them. Those after the seal are live findings;
+  // the seal itself is the owner's word on everything before it.
+  if (!broken) {
+    const outside = rows.filter((r) => signedOf(r).actor === null);
+    const fresh = outside.filter((r) => r.seq > trustedFrom);
+    const acknowledged = outside.length - fresh.length;
+    if (fresh.length) {
+      checks.push({
+        id: "outside", state: "fail", title: "Changes made outside the app",
+        summary: `${plural(fresh.length, "change was", "changes were")} made with no signed-in account — the service role, the SQL editor or a migration (${fresh.map((r) => `#${r.seq}`).join(", ")}). If you did not make ${fresh.length === 1 ? "it" : "them"}, someone with database access did. Sealing again records that you accept ${fresh.length === 1 ? "it" : "them"}.`,
+      });
+    } else if (acknowledged) {
+      checks.push({
+        id: "outside", state: "info", title: "Changes made outside the app",
+        summary: `${plural(acknowledged, "earlier change", "earlier changes")} had no account behind ${acknowledged === 1 ? "it" : "them"}, before your seal or the point you chose to trust from. You accepted ${acknowledged === 1 ? "it" : "them"} there.`,
+      });
+    }
+  }
+
+  if (broken) {
+    checks.push({
+      id: "seal", state: "fail", title: "Your seal",
+      summary: "No seal can be relied on while the history is broken. Once you have looked into it, trust the history from its current end, then seal again.",
+    });
+  } else if (!seal) {
     checks.push({
       id: "seal", state: "warn", title: "Your seal",
-      summary: "Nothing sealed yet. Review the persona and your morals below, then seal them — every later change is measured from that point.",
+      summary: anchoredAt
+        ? "Nothing sealed since you chose to trust the history again. Review the persona and your morals, then seal them."
+        : "Nothing sealed yet. Review the persona and your morals below, then seal them — every later change is measured from that point.",
     });
   } else if (status) {
     checks.push(status.persona.fingerprint === seal.persona_fp
@@ -535,7 +732,7 @@ export function assessIntegrity(input: AssessmentInput): Assessment {
     } else {
       checks.push({
         id: "morals", state: "fail", title: "Your morals",
-        summary: `Changed since you sealed them: ${changesSinceSeal.length} ${changesSinceSeal.length === 1 ? "change" : "changes"} after seal #${seal.seq}. History shows who made each one and Persona shows the difference; if they are yours, seal again.`,
+        summary: `Changed since you sealed them: ${plural(changesSinceSeal.length, "change", "changes")} after seal #${seal.seq}. History shows who made each one and Persona shows the difference; if they are yours, seal again.`,
       });
     }
   }
@@ -546,10 +743,20 @@ export function assessIntegrity(input: AssessmentInput): Assessment {
   if (!input.attestations.ok) {
     checks.push({ id: "engines", state: "fail", title: "Engine reports", summary: `Could not read what the engines reported: ${errorOf(input.attestations)}` });
   }
-  const lastMoralChange = rows.filter((r) => r.action !== "seal").map((r) => Date.parse(r.at)).reduce((m, t) => Math.max(m, t), 0);
   const names = Array.from(new Set([...(status?.engines ?? PERSONA_ENGINES), ...atts.map((a) => a.engine)]));
-  const expectedPersona = seal?.persona_fp ?? status?.persona.fingerprint ?? null;
+  const sealAt = seal ? Date.parse(seal.at) : null;
   const currentMorals = status && !status.morals.error ? status.morals.fingerprint : null;
+
+  // An engine's morals: current, the ones in force when it answered, or neither.
+  const judgeMorals = (fp: string, lastSeen: number): { state: CheckState; text: string } => {
+    if (currentMorals === null) return { state: "info", text: "Its morals cannot be compared: the live morals could not be read." };
+    if (fp === currentMorals) return { state: "ok", text: "your current morals" };
+    if (replay && wasInForce(replay.timeline, fp, lastSeen, propagationMs)) {
+      return { state: "info", text: "the morals in force at the time — it has not answered since your latest change" };
+    }
+    if (!replay) return { state: "warn", text: `morals that differ from the current ones (${short(fp)}); without a verified history it cannot be told whether they were ever yours` };
+    return { state: "fail", text: `morals that were never yours at that time (${short(fp)})` };
+  };
 
   for (const engine of names) {
     const mine = atts.filter((a) => a.engine === engine);
@@ -564,26 +771,38 @@ export function assessIntegrity(input: AssessmentInput): Assessment {
       summary = overrideRequests
         ? "Has only answered with a caller's own system prompt, never Jackie's persona."
         : "No requests recorded yet.";
-    } else if (latest.mode === "persona-without-morals") {
-      state = "fail";
-      summary = `Answered without your morals on ${when(latest.last_seen)}: ${latest.detail ?? "it could not load them"}.`;
-    } else if (expectedPersona && latest.persona_fp !== expectedPersona) {
-      state = "fail";
-      summary = seal
-        ? `Running a persona you did not seal (${short(latest.persona_fp)}) since ${when(latest.first_seen)}. Its deployed code differs from what you approved.`
-        : `Running a different persona (${short(latest.persona_fp)}) from the live one (${short(expectedPersona)}) — it was deployed from different code.`;
-    } else if (currentMorals && latest.morals_fp !== currentMorals) {
-      const stale = Date.parse(latest.last_seen) < lastMoralChange + propagationMs;
-      state = stale ? "info" : "fail";
-      summary = stale
-        ? `Last answered on ${when(latest.last_seen)}, before your latest change to the morals. Its next answer will show whether it picked the change up.`
-        : `Answered with morals that differ from the ones saved (${short(latest.morals_fp)}) on ${when(latest.last_seen)}.`;
     } else {
-      state = "ok";
-      summary = `Answered with ${seal ? "the sealed" : "the live"} persona and your current morals, last on ${when(latest.last_seen)} (${latest.requests} ${Number(latest.requests) === 1 ? "request" : "requests"} with this setup).`;
+      const lastSeen = Date.parse(latest.last_seen);
+      const beforeSeal = sealAt !== null && lastSeen < sealAt;
+      if (latest.mode === "persona-without-morals" || latest.morals_fp === MORALS_UNAVAILABLE) {
+        state = "fail";
+        summary = `Answered without your morals on ${when(latest.last_seen)}: ${latest.detail ?? "it could not load them"}.`;
+      } else if (latest.mode === "rig") {
+        // Jacky's persona lives on the rig, where this app cannot fingerprint
+        // it; only the morals put in front of its prompt are checked. Said
+        // outright, so the missing persona check is not mistaken for a pass.
+        const m = judgeMorals(latest.morals_fp, lastSeen);
+        state = m.state;
+        summary = (m.state === "info" && currentMorals === null ? m.text : `Last answered on ${when(latest.last_seen)} with ${m.text} in front of its prompt.`)
+          + " Its persona is the rig's own, which this app cannot see or fingerprint.";
+      } else if (seal && latest.persona_fp !== seal.persona_fp) {
+        state = beforeSeal ? "info" : "fail";
+        summary = beforeSeal
+          ? `Last answered on ${when(latest.last_seen)}, before your latest seal, with persona ${short(latest.persona_fp)}. Its next answer will show whether it runs what you sealed.`
+          : `Running a persona you did not seal (${short(latest.persona_fp)}) since ${when(latest.first_seen)}. Its deployed code differs from what you approved.`;
+      } else if (!seal && status && latest.persona_fp !== status.persona.fingerprint) {
+        state = "warn";
+        summary = `Its last answer (${when(latest.last_seen)}) used a different persona (${short(latest.persona_fp)}) from the one live now: either it answered before the latest deploy, or it runs different code.`;
+      } else {
+        const m = judgeMorals(latest.morals_fp, lastSeen);
+        state = m.state;
+        summary = m.state === "info" && currentMorals === null
+          ? m.text
+          : `Answered with ${seal ? "the sealed" : "the live"} persona and ${m.text}, last on ${when(latest.last_seen)} (${plural(Number(latest.requests), "request", "requests")} with this setup).`;
+      }
     }
     if (overrideRequests && latest) {
-      summary += ` Also ${overrideRequests} ${overrideRequests === 1 ? "request" : "requests"} with a caller's own system prompt (Agent Lab, operators) — your morals are not added to those.`;
+      summary += ` Also ${plural(overrideRequests, "request", "requests")} with a caller's own system prompt (Agent Lab, operators) — your morals are not added to those.`;
     }
     engines.push({
       engine, state, summary,
@@ -595,14 +814,14 @@ export function assessIntegrity(input: AssessmentInput): Assessment {
   }
 
   const verdict = worst([...checks.map((c) => c.state), ...engines.map((e) => e.state)]);
-  const reporting = engines.filter((e) => e.state === "ok").length;
-  // "Every engine says so" only when one has said anything: an engine that has
-  // not answered since the seal has confirmed nothing, and claiming otherwise is
-  // the success-when-nothing-happened this repo keeps having to unlearn.
+  // "Confirmed" only by engines that answered after the seal: a report from
+  // before it confirms nothing about what was sealed. Claiming otherwise is the
+  // success-when-nothing-happened this repo keeps having to unlearn.
+  const confirming = engines.filter((e) => e.state === "ok" && e.lastSeen && (sealAt === null || Date.parse(e.lastSeen) >= sealAt)).length;
   const headline =
     verdict === "fail" ? "Something changed that you did not approve, or could not be verified."
       : verdict === "warn" ? "Nothing looks tampered with, but it is not fully under watch yet."
-        : reporting === 0 ? "Intact so far: everything matches your seal. No engine has answered since, so none has confirmed it yet."
-          : `Intact: everything matches what you sealed, confirmed by ${reporting} ${reporting === 1 ? "engine" : "engines"} that answered since.`;
+        : confirming === 0 ? "Intact so far: everything matches your seal. No engine has answered since, so none has confirmed it yet."
+          : `Intact: everything matches what you sealed, confirmed by ${plural(confirming, "engine", "engines")} that answered since.`;
   return { verdict, headline, checks, engines, seal, chain: input.chain, witness: input.witness, changesSinceSeal };
 }

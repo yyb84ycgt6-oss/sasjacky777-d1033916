@@ -183,12 +183,44 @@ check() { # name | got | expected substring
   fi
 }
 
+# Reads are probed against tables that hold something: a "0" from an empty
+# table would pass with RLS switched off entirely.
+probe_seeded() { # name | sql | expected substring — run as user B over seeded rows
+  local name="$1" sql="$2" want="$3" out res
+  out=$("${PSQL[@]}" -tA 2>&1 <<EOF
+BEGIN;
+INSERT INTO public.jackie_morals (title, rule) VALUES ('seeded', 'seeded rule');
+SELECT public.record_persona_attestation('jackie-chat', 'persona', 'f', 'none', NULL);
+SELECT 'seeded:' || (SELECT count(*) FROM public.jackie_morals) || '/' || (SELECT count(*) FROM public.jackie_morals_ledger) || '/' || (SELECT count(*) FROM public.jackie_persona_attestations);
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.sub" = '$B';
+$sql
+ROLLBACK;
+EOF
+)
+  # The seeding must have produced rows, or the probe proves nothing.
+  if ! echo "$out" | grep -q '^seeded:1/1/1$'; then
+    printf '  FAIL  %-46s seeding did not produce one row in each table: [%s]\n' "$name" "$(echo "$out" | grep seeded)"
+    fail=$((fail + 1)); return
+  fi
+  res=$(echo "$out" | grep -viE '^(BEGIN|SET|ROLLBACK|INSERT 0 [01]|seeded:.*|CONTEXT: .*)$' | grep -v '^$' | tail -1)
+  if echo "$res" | grep -qF "$want"; then
+    printf '  ok    %-46s %s\n' "$name" "$res"
+    pass=$((pass + 1))
+  else
+    printf '  FAIL  %-46s got:[%s] want:[%s]\n' "$name" "$res" "$want"
+    fail=$((fail + 1))
+  fi
+}
+
 echo "==> morals guard rail"
-probe "non-owner reads morals" "$B" "SELECT count(*) FROM public.jackie_morals;" "0"
+probe_seeded "non-owner reads morals" "SELECT count(*) FROM public.jackie_morals;" "0"
 probe "non-owner writes a moral" "$B" \
   "INSERT INTO public.jackie_morals (title, rule) VALUES ('x', 'lie freely');" "violates row-level security"
-probe "non-owner reads the ledger" "$B" "SELECT count(*) FROM public.jackie_morals_ledger;" "0"
-probe "non-owner reads attestations" "$B" "SELECT count(*) FROM public.jackie_persona_attestations;" "0"
+probe_seeded "non-owner reads the ledger" "SELECT count(*) FROM public.jackie_morals_ledger;" "0"
+probe_seeded "non-owner reads attestations" "SELECT count(*) FROM public.jackie_persona_attestations;" "0"
+probe_seeded "non-owner changes a seeded moral" \
+  "WITH u AS (UPDATE public.jackie_morals SET rule = 'lie' RETURNING 1) SELECT count(*) FROM u;" "0"
 probe "forge an engine attestation" "$B" \
   "SELECT public.record_persona_attestation('jackie-chat','persona','f','none',null);" "permission denied"
 probe "seal as yourself" "$B" "SELECT public.jackie_morals_seal('$B', '{}');" "permission denied"
@@ -217,8 +249,23 @@ probe_as_owner "a rule longer than the cap is refused" \
   "INSERT INTO public.jackie_morals (title, rule) VALUES ('long', repeat('x', 281));" "violates check constraint"
 check "service role edits the ledger" \
   "$(svc "INSERT INTO public.jackie_morals (title, rule) VALUES ('a','b'); UPDATE public.jackie_morals_ledger SET payload='{}'")" \
+  "permission denied"
+check "service role forges a ledger entry" \
+  "$(svc "INSERT INTO public.jackie_morals_ledger (seq, action, payload, prev_hash, hash) VALUES (1, 'seal', '{}', 'genesis', 'x')")" \
+  "permission denied"
+check "service role truncates the ledger" "$(svc "TRUNCATE public.jackie_morals_ledger")" "permission denied"
+check "service role truncates the morals" "$(svc "TRUNCATE public.jackie_morals")" "permission denied"
+# A role that holds every privilege still meets the triggers. (Disabling them
+# takes the table owner, and is what the browser's witness exists to catch.)
+superuser() {
+  "${PSQL[@]}" -tA -c "BEGIN; $1; ROLLBACK;" 2>&1 \
+    | grep -viE '^(BEGIN|SET|ROLLBACK|INSERT 0 1|UPDATE [0-9]+|CONTEXT: .*)$' | grep -v '^$' | tail -1
+}
+check "superuser edits the ledger" \
+  "$(superuser "INSERT INTO public.jackie_morals (title, rule) VALUES ('a','b'); UPDATE public.jackie_morals_ledger SET payload='{}'")" \
   "append-only"
-check "service role truncates the ledger" "$(svc "TRUNCATE public.jackie_morals_ledger")" "append-only"
+check "superuser truncates the ledger" "$(superuser "TRUNCATE public.jackie_morals_ledger")" "append-only"
+check "superuser truncates the morals" "$(superuser "TRUNCATE public.jackie_morals")" "cannot be truncated"
 check "a write from no account is attributed to nobody" \
   "$(svc "INSERT INTO public.jackie_morals (title, rule) VALUES ('a','b'); SELECT coalesce(actor::text, 'nobody') FROM public.jackie_morals_ledger ORDER BY seq DESC LIMIT 1")" \
   "nobody"

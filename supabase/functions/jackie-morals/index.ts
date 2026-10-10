@@ -19,7 +19,7 @@
  */
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { adminClient, json, preflight, requireOwnerUser } from "../_shared/entitlement.ts";
-import { BASE_PROMPT } from "../_shared/persona.ts";
+import { PERSONA_SOURCE } from "../_shared/persona.ts";
 import {
   buildMoralsBlock, fingerprint, moralsFingerprint, PERSONA_ENGINES, type Moral,
 } from "../_shared/morals.ts";
@@ -53,15 +53,15 @@ serve(async (req) => {
     if (!payload || typeof payload !== "object") {
       return json({ error: "Expected a JSON body" }, 400);
     }
-    const { action, note } = payload as { action?: unknown; note?: unknown };
+    const { action, note, expected } = payload as { action?: unknown; note?: unknown; expected?: unknown };
 
-    const personaFp = await fingerprint(BASE_PROMPT);
+    const personaFp = await fingerprint(PERSONA_SOURCE);
     const morals = await currentMorals();
     const moralsFp = await moralsFingerprint(morals.block);
 
     if (action === "status") {
       return json({
-        persona: { text: BASE_PROMPT, fingerprint: personaFp },
+        persona: { text: PERSONA_SOURCE, fingerprint: personaFp },
         morals: {
           block: morals.block,
           fingerprint: moralsFp,
@@ -79,12 +79,28 @@ serve(async (req) => {
       if (morals.error) {
         return json({ error: morals.error, code: "MORALS_UNREADABLE" }, 503);
       }
+      // The owner approves what the dialog showed them, not whatever is here by
+      // the time they click. A deploy or an edit that landed in between would
+      // otherwise be sealed without ever having been seen.
+      const want = expected as { persona_fp?: unknown; morals_fp?: unknown } | undefined;
+      if (typeof want?.persona_fp !== "string" || typeof want?.morals_fp !== "string") {
+        return json({ error: "Say which persona and morals you are sealing (expected.persona_fp, expected.morals_fp)." }, 400);
+      }
+      if (want.persona_fp !== personaFp || want.morals_fp !== moralsFp) {
+        return json(
+          {
+            error: "Jackie changed while you were reviewing: what is live now is not what you were shown. Re-check, review the difference, and seal again.",
+            code: "SEAL_STALE",
+          },
+          409,
+        );
+      }
       const cleanNote = typeof note === "string" ? note.trim().slice(0, MAX_NOTE_CHARS) : "";
       const { data, error } = await adminClient().rpc("jackie_morals_seal", {
         p_actor: owner.userId,
         p_body: {
           persona_fp: personaFp,
-          persona_text: BASE_PROMPT,
+          persona_text: PERSONA_SOURCE,
           morals_fp: moralsFp,
           morals_block: morals.block,
           morals: morals.rows,

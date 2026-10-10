@@ -137,6 +137,14 @@ When discussing game design:
 You help the lead designer refine raw ideas into structured, implementable game systems.`;
 
 /**
+ * Everything persona.ts can put in front of a model, as one text: what the
+ * guard rail fingerprints and the owner seals. Fingerprinting BASE_PROMPT
+ * alone let a change to the game-design section — which rides on every
+ * request with context, i.e. most of the chat — pass as "matches your seal".
+ */
+export const PERSONA_SOURCE = `${BASE_PROMPT}${GAME_DESIGNER_PROMPT}`;
+
+/**
  * The system prompt for one request.
  *
  * The game-design section and the injected context ride together: both only

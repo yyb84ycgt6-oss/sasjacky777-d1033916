@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   ArrowDown, ArrowUp, Check, CircleAlert, CircleCheck, CircleHelp, Info, Lock, Pencil, Plus,
@@ -23,7 +23,8 @@ import {
 import {
   addMoral, addSuggested, assessIntegrity, buildMoralsBlock, checkWitness, deleteMoral, errorOf, fetchStatus,
   lineDiff, loadAttestations, loadLedger, loadMorals, MORAL_CATEGORIES, MORAL_LIMITS, parsePayload,
-  readWitness, sealNow, setMoralEnabled, swapOrder, updateMoral, verifyLedger, writeWitness,
+  moveMoral, readAnchor, readWitness, replayMorals, sealNow, setMoralEnabled, signedOf, updateMoral, verifyLedger,
+  writeAnchor, writeWitness,
   type Assessment, type CheckState, type LedgerRow, type MoralCategory, type MoralDraft, type MoralRow,
   type PersonaStatus, type Result,
 } from "@/lib/jackie-morals";
@@ -69,46 +70,75 @@ export default function JackieMorals() {
   const { user, loading } = useAuth();
   const { toast } = useToast();
   const [isOwner, setIsOwner] = useState<boolean | null>(null);
+  const [roleError, setRoleError] = useState<string | null>(null);
   const [data, setData] = useState<Loaded | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // Each check is numbered; only the newest may land. An older one finishing
+  // last would show a stale ledger and — worse — compare it against a witness
+  // a newer check had already moved, raising "entries were removed" for nothing.
+  const generation = useRef(0);
   const [checking, setChecking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [sealOpen, setSealOpen] = useState(false);
   const [sealNote, setSealNote] = useState("");
 
   const refresh = useCallback(async () => {
+    const mine = ++generation.current;
     setChecking(true);
     try {
       const [status, morals, ledger, attestations] = await Promise.all([
         fetchStatus(), loadMorals(), loadLedger(), loadAttestations(),
       ]);
-      const chain = ledger.ok ? await verifyLedger(ledger.data) : null;
-      const witness = ledger.ok ? checkWitness(readWitness(), ledger.data) : { state: "none" as const };
-      const assessment = assessIntegrity({ status, ledger, attestations, chain, witness });
+      const witnessed = readWitness();
+      const anchor = readAnchor();
+      const chain = ledger.ok ? await verifyLedger(ledger.data, anchor) : null;
+      const witness = ledger.ok ? checkWitness(witnessed, ledger.data) : { state: "none" as const };
+      const replay = ledger.ok && chain?.ok ? await replayMorals(ledger.data, anchor) : null;
+      if (mine !== generation.current) return;
+      const assessment = assessIntegrity({
+        status, ledger, attestations, chain, witness, replay, seenBefore: !!(witnessed || anchor),
+      });
       // Move the witness forward only over a history that verified. Advancing it
       // past a failure would make the alarm disappear on the next reload.
       if (chain?.ok && chain.head && (witness.state === "ok" || witness.state === "none")) {
         writeWitness({ seq: chain.head.seq, hash: chain.head.hash, at: new Date().toISOString() });
       }
       setData({ status, morals, ledger, assessment });
+      setLoadError(null);
+    } catch (e) {
+      // Not "Checking…" for ever: say what stopped the check.
+      if (mine === generation.current) setLoadError(e instanceof Error ? e.message : String(e));
     } finally {
-      setChecking(false);
+      if (mine === generation.current) setChecking(false);
     }
   }, []);
 
+  // Keyed on the account id, not the user object: the session refreshes when
+  // the tab regains focus, which hands over a new object for the same person
+  // and re-ran the whole check every time.
+  const userId = user?.id ?? null;
   useEffect(() => {
     if (loading) return;
-    if (!user) {
+    if (!userId) {
       setIsOwner(false);
       return;
     }
     (async () => {
-      const { data: roles } = await (supabase as unknown as { from: (t: string) => any })
-        .from("user_roles").select("role").eq("user_id", user.id);
+      const { data: roles, error } = await (supabase as unknown as { from: (t: string) => any })
+        .from("user_roles").select("role").eq("user_id", userId);
+      if (error) {
+        // A failed lookup is not an answer. Telling the real owner they are not
+        // the owner would send them off to claim a seat they already hold.
+        setRoleError(error.message ?? String(error));
+        setIsOwner(null);
+        return;
+      }
+      setRoleError(null);
       const owner = ((roles ?? []) as { role: string }[]).some((r) => r.role === "owner");
       setIsOwner(owner);
       if (owner) await refresh();
     })();
-  }, [loading, user, refresh]);
+  }, [loading, userId, refresh]);
 
   const run = useCallback(async (label: string, op: () => Promise<Result<unknown>>) => {
     setBusy(true);
@@ -123,7 +153,10 @@ export default function JackieMorals() {
   }, [refresh, toast]);
 
   const doSeal = async () => {
-    const ok = await run("Sealing", () => sealNow(sealNote));
+    const shown = data?.status.ok ? data.status.data : null;
+    if (!shown) return;
+    const ok = await run("Sealing", () =>
+      sealNow(sealNote, { persona_fp: shown.persona.fingerprint, morals_fp: shown.morals.fingerprint }));
     if (ok) {
       toast({ title: "Sealed", description: "Every later change will be measured from this point." });
       setSealOpen(false);
@@ -131,14 +164,45 @@ export default function JackieMorals() {
     }
   };
 
+  /**
+   * The owner's way forward after a break or a rewrite: trust the history as it
+   * stands. Checking restarts from its current end, with the morals as they are
+   * now, and nothing sealed before it is relied on — the owner seals again.
+   * An empty history has no end to trust from, so the witness is simply cleared.
+   */
   const trustCurrentHistory = () => {
     const rows = data?.ledger.ok ? data.ledger.data : [];
     const head = rows[rows.length - 1];
-    if (head && data?.assessment.chain?.ok) {
-      writeWitness({ seq: head.seq, hash: head.hash, at: new Date().toISOString() });
-      refresh();
+    const now = new Date().toISOString();
+    if (!head) {
+      writeWitness(null);
+      writeAnchor(null);
+    } else {
+      const current = data?.morals.ok ? data.morals.data : [];
+      writeAnchor({
+        seq: head.seq, hash: head.hash, at: now,
+        morals: current.map(({ id, title, rule, category, enabled, sort_order }) => ({ id, title, rule, category, enabled, sort_order })),
+      });
+      writeWitness({ seq: head.seq, hash: head.hash, at: now });
     }
+    toast({ title: "Trusting the history from here", description: "Seal again once you have reviewed the persona and your morals." });
+    refresh();
   };
+
+  if (roleError) {
+    return (
+      <div className="min-h-[60dvh] flex items-center justify-center px-4">
+        <div className="w-full max-w-md rounded-2xl border border-destructive/40 bg-destructive/10 p-6 space-y-3 text-center">
+          <h1 className="text-lg font-semibold text-foreground">Could not check who you are</h1>
+          <p className="text-sm text-muted-foreground break-words">
+            Asking the database whether this account holds the owner seat failed: {roleError}. That is not the same as
+            the answer being no — try again.
+          </p>
+          <Button onClick={() => window.location.reload()} className="min-h-11">Try again</Button>
+        </div>
+      </div>
+    );
+  }
 
   if (loading || isOwner === null) {
     return (
@@ -170,6 +234,7 @@ export default function JackieMorals() {
   const status = data?.status.ok ? data.status.data : null;
   const ledgerRows = data?.ledger.ok ? data.ledger.data : [];
   const witnessFailed = a?.witness.state === "shorter" || a?.witness.state === "rewritten";
+  const chainBroken = !!a?.chain && "reason" in a.chain;
 
   return (
     // pb-36 keeps the last entry clear of the floating nav bar, which sits
@@ -187,29 +252,41 @@ export default function JackieMorals() {
           <Button variant="outline" onClick={refresh} disabled={checking || busy} className="min-h-10">
             <RefreshCw className={`w-4 h-4 mr-2 ${checking ? "animate-spin" : ""}`} /> Re-check
           </Button>
-          <Button onClick={() => setSealOpen(true)} disabled={!a || a.verdict === "setup" || busy || !status} className="min-h-10">
+          <Button
+            onClick={() => setSealOpen(true)}
+            disabled={!a || a.verdict === "setup" || busy || !status || chainBroken}
+            title={chainBroken ? "Sealing on a broken history would mean nothing; trust it from its current end first." : undefined}
+            className="min-h-10"
+          >
             <Stamp className="w-4 h-4 mr-2" /> Seal current state
           </Button>
         </div>
       </header>
 
+      {loadError && (
+        <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-4 text-sm text-foreground break-words" role="alert">
+          The check could not finish: {loadError}
+        </div>
+      )}
+
       {!a ? (
-        <div className="rounded-xl border border-border bg-card/60 p-6 text-sm text-muted-foreground">Checking…</div>
+        !loadError && <div className="rounded-xl border border-border bg-card/60 p-6 text-sm text-muted-foreground">Checking…</div>
       ) : (
         <Verdict assessment={a} />
       )}
 
-      {witnessFailed && a?.chain?.ok && (
+      {(witnessFailed || chainBroken) && (
         <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-4 text-sm space-y-2">
           <p className="text-foreground">
-            This browser will keep raising the alarm above until you decide. If you have found out why the history
-            changed and are satisfied, you can trust the current history from here on.
+            This browser will keep raising the alarm above until you decide. Once you have found out why the history
+            {chainBroken ? " broke" : " changed"} and are satisfied, you can trust it as it stands now: checking restarts
+            from its current end, and you seal again.
           </p>
-          <Button size="sm" variant="outline" onClick={trustCurrentHistory}>I've checked — trust the current history</Button>
+          <Button size="sm" variant="outline" onClick={trustCurrentHistory}>I've checked — trust the history from here</Button>
         </div>
       )}
 
-      {a && a.verdict !== "setup" && (
+      {a && a.checks[0]?.id !== "setup" && (
         <Tabs defaultValue="overview" className="space-y-4">
           <TabsList className="flex flex-wrap h-auto">
             <TabsTrigger value="overview">Checks</TabsTrigger>
@@ -259,7 +336,13 @@ export default function JackieMorals() {
           </TabsContent>
 
           <TabsContent value="history">
-            <History rows={ledgerRows} brokenAt={a.chain && "brokenAt" in a.chain ? a.chain.brokenAt : null} sealSeq={a.seal?.seq ?? null} me={user?.id ?? null} />
+            <History
+              rows={ledgerRows}
+              brokenAt={a.chain && "brokenAt" in a.chain ? a.chain.brokenAt : null}
+              anchoredAt={a.chain && "anchoredAt" in a.chain ? a.chain.anchoredAt : null}
+              sealSeq={a.seal?.seq ?? null}
+              me={user?.id ?? null}
+            />
           </TabsContent>
 
           <TabsContent value="persona">
@@ -307,7 +390,7 @@ function Verdict({ assessment }: { assessment: Assessment }) {
       <div className="space-y-1 min-w-0">
         <div className={`text-xs font-semibold uppercase tracking-wide ${tone.text}`}>{tone.label}</div>
         <p className="text-base font-medium text-foreground">{assessment.headline}</p>
-        {v === "setup" && <p className="text-sm text-muted-foreground">{assessment.checks[0]?.summary}</p>}
+        {assessment.checks[0]?.id === "setup" && <p className="text-sm text-muted-foreground">{assessment.checks[0].summary}</p>}
         {assessment.seal && (
           <p className="text-xs text-muted-foreground">
             Last sealed {new Date(assessment.seal.at).toLocaleString()} (entry #{assessment.seal.seq})
@@ -331,9 +414,14 @@ function Limits() {
           migration or an agent that found a token. Changes with no signed-in account behind them are flagged.
         </li>
         <li>
-          Someone with full database access can rewrite the whole history so it checks out again. This browser
-          remembers the last entry it verified and flags a history that no longer contains it — but only if this browser
-          looked before the rewrite.
+          Someone with full database access can switch the history's triggers off. Changing your morals that way is
+          caught: rebuilding them from their history no longer gives what the database holds. Rewriting the history
+          itself so it checks out again is caught by this browser only if it looked before the rewrite — it remembers
+          the last entry it verified.
+        </li>
+        <li>
+          Jacky — the rig, first in the chat's chain — gets your morals in front of its prompt and reports like the
+          other engines, but its persona lives on the rig, where this app cannot see or fingerprint it.
         </li>
         <li>
           The persona comes from code. A deploy that changes it shows up here as a change from your seal, with the diff.
@@ -419,15 +507,15 @@ function MoralsEditor({
                   <p className="text-sm text-muted-foreground break-words">{m.rule}</p>
                 </div>
                 <div className="flex flex-col sm:flex-row gap-1 shrink-0">
-                  <Button size="icon" variant="ghost" disabled={busy || i === 0} aria-label="Move up"
-                    onClick={() => run("Reordering", () => swapOrder(m, morals[i - 1]))}><ArrowUp className="w-4 h-4" /></Button>
-                  <Button size="icon" variant="ghost" disabled={busy || i === morals.length - 1} aria-label="Move down"
-                    onClick={() => run("Reordering", () => swapOrder(m, morals[i + 1]))}><ArrowDown className="w-4 h-4" /></Button>
-                  <Button size="icon" variant="ghost" disabled={busy} aria-label="Edit"
+                  <Button size="icon" variant="ghost" disabled={busy || i === 0} aria-label={`Move “${m.title}” up`}
+                    onClick={() => run("Reordering", () => moveMoral(morals, i, -1))}><ArrowUp className="w-4 h-4" /></Button>
+                  <Button size="icon" variant="ghost" disabled={busy || i === morals.length - 1} aria-label={`Move “${m.title}” down`}
+                    onClick={() => run("Reordering", () => moveMoral(morals, i, 1))}><ArrowDown className="w-4 h-4" /></Button>
+                  <Button size="icon" variant="ghost" disabled={busy} aria-label={`Edit “${m.title}”`}
                     onClick={() => { setEditing(m.id); setEditDraft({ title: m.title, rule: m.rule, category: m.category }); }}>
                     <Pencil className="w-4 h-4" />
                   </Button>
-                  <Button size="icon" variant="ghost" disabled={busy} aria-label="Delete" onClick={() => setConfirmDelete(m)}>
+                  <Button size="icon" variant="ghost" disabled={busy} aria-label={`Delete “${m.title}”`} onClick={() => setConfirmDelete(m)}>
                     <Trash2 className="w-4 h-4" />
                   </Button>
                 </div>
@@ -548,7 +636,9 @@ function MoralForm({
   );
 }
 
-function History({ rows, brokenAt, sealSeq, me }: { rows: LedgerRow[]; brokenAt: number | null; sealSeq: number | null; me: string | null }) {
+function History({ rows, brokenAt, anchoredAt, sealSeq, me }: {
+  rows: LedgerRow[]; brokenAt: number | null; anchoredAt: number | null; sealSeq: number | null; me: string | null;
+}) {
   if (rows.length === 0) return <p className="text-sm text-muted-foreground">No changes yet.</p>;
   return (
     <ol className="space-y-2">
@@ -558,15 +648,18 @@ function History({ rows, brokenAt, sealSeq, me }: { rows: LedgerRow[]; brokenAt:
         const after = p.after as Record<string, unknown> | null | undefined;
         const title = String((after ?? before)?.title ?? "");
         const suspect = brokenAt !== null && r.seq >= brokenAt;
-        const who = r.actor === null ? "no account (service role / SQL)" : r.actor === me ? "you" : `account ${r.actor.slice(0, 8)}`;
+        const accepted = anchoredAt !== null && r.seq <= anchoredAt;
+        // Who and when come from the hashed record, not the editable columns.
+        const signed = signedOf(r);
+        const who = signed.actor === null ? "no account (service role / SQL)" : signed.actor === me ? "you" : `account ${signed.actor.slice(0, 8)}`;
         return (
-          <li key={r.seq} className={`rounded-xl border p-3 text-sm ${suspect ? "border-destructive/40 bg-destructive/10" : r.actor === null ? "border-destructive/30" : "border-border"}`}>
+          <li key={r.seq} className={`rounded-xl border p-3 text-sm ${suspect ? "border-destructive/40 bg-destructive/10" : signed.actor === null ? "border-destructive/30" : "border-border"}`}>
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-mono text-xs text-muted-foreground">#{r.seq}</span>
               <Badge variant={r.action === "seal" ? "default" : "secondary"} className="text-[11px]">{r.action}</Badge>
               {title && <span className="font-medium text-foreground">{title}</span>}
               {r.seq === sealSeq && <Badge variant="outline" className="text-[11px]">current seal</Badge>}
-              <span className="text-xs text-muted-foreground ml-auto">{new Date(r.at).toLocaleString()} · {who}</span>
+              <span className="text-xs text-muted-foreground ml-auto">{new Date(signed.at).toLocaleString()} · {who}</span>
             </div>
             {r.action === "update" && before && after && <FieldChanges before={before} after={after} />}
             {r.action === "create" && after && <p className="text-muted-foreground mt-1 break-words">{String(after.rule ?? "")}</p>}
@@ -578,6 +671,7 @@ function History({ rows, brokenAt, sealSeq, me }: { rows: LedgerRow[]; brokenAt:
               </p>
             )}
             {suspect && <p className="text-destructive text-xs mt-1">Not verifiable: the chain breaks at or before this entry.</p>}
+            {accepted && <p className="text-muted-foreground text-xs mt-1">Before the point you chose to trust the history from: accepted, not re-verified.</p>}
             <p className="font-mono text-[10px] text-muted-foreground mt-1 break-all">hash {r.hash.slice(0, 16)}… ← {r.prev_hash.slice(0, 16)}…</p>
           </li>
         );

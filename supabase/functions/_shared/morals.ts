@@ -39,6 +39,7 @@ export interface Moral {
  * calling it.
  */
 export const PERSONA_ENGINES = [
+  "jacky-proxy",
   "jackie-chat",
   "jackie-anthropic",
   "jackie-openrouter",
@@ -61,6 +62,10 @@ export const PERSONA_ENGINES = [
 /** What an engine reports when it had no morals to add, or could not load them. */
 export const MORALS_NONE = "none";
 export const MORALS_UNAVAILABLE = "unavailable";
+/** The persona marker for a request that brought its own system prompt. */
+export const OWN_PROMPT = "own-prompt";
+/** The persona marker for Jacky, whose persona lives on the rig, out of sight. */
+export const RIG_PERSONA = "rig";
 
 export const MORALS_HEADING = "## Your owner's morals";
 

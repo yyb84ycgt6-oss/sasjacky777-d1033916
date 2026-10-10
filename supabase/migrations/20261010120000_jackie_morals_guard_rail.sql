@@ -34,9 +34,11 @@ CREATE TABLE IF NOT EXISTS public.jackie_morals (
 );
 
 ALTER TABLE public.jackie_morals ENABLE ROW LEVEL SECURITY;
-REVOKE ALL ON public.jackie_morals FROM anon, authenticated;
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.jackie_morals TO authenticated;
-GRANT ALL ON public.jackie_morals TO service_role;
+-- Supabase's default privileges hand every new table to the service role whole,
+-- TRUNCATE included. TRUNCATE fires no row triggers, so it would empty the morals
+-- without a single ledger entry; it is taken away here and refused below.
+REVOKE ALL ON public.jackie_morals FROM PUBLIC, anon, authenticated, service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.jackie_morals TO authenticated, service_role;
 
 -- One set, for Jackie, editable by whoever holds the owner seat. Any account
 -- can sign in to this app; signing in must not make anyone her author.
@@ -68,9 +70,11 @@ CREATE TABLE IF NOT EXISTS public.jackie_morals_ledger (
 );
 
 ALTER TABLE public.jackie_morals_ledger ENABLE ROW LEVEL SECURITY;
-REVOKE ALL ON public.jackie_morals_ledger FROM anon, authenticated;
-GRANT SELECT ON public.jackie_morals_ledger TO authenticated;
-GRANT SELECT ON public.jackie_morals_ledger TO service_role;
+-- Read-only for every API role, the service role included: Supabase's default
+-- privileges would otherwise leave it INSERT, and a forged entry carrying a
+-- correct hash would verify. Only the SECURITY DEFINER append below writes.
+REVOKE ALL ON public.jackie_morals_ledger FROM PUBLIC, anon, authenticated, service_role;
+GRANT SELECT ON public.jackie_morals_ledger TO authenticated, service_role;
 
 DROP POLICY IF EXISTS "owners read the morals ledger" ON public.jackie_morals_ledger;
 CREATE POLICY "owners read the morals ledger" ON public.jackie_morals_ledger
@@ -177,10 +181,29 @@ CREATE TRIGGER jackie_morals_ledger_record
   AFTER INSERT OR UPDATE OR DELETE ON public.jackie_morals
   FOR EACH ROW EXECUTE FUNCTION private.jackie_morals_record_change();
 
+-- Row triggers do not fire on TRUNCATE, so it would be the one way to remove
+-- every moral without the ledger seeing it. Refused for whoever still holds it.
+CREATE OR REPLACE FUNCTION private.jackie_morals_refuse_truncate()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION 'jackie_morals cannot be truncated: delete the rows, so each removal is recorded'
+    USING ERRCODE = 'insufficient_privilege';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS jackie_morals_no_truncate ON public.jackie_morals;
+CREATE TRIGGER jackie_morals_no_truncate
+  BEFORE TRUNCATE ON public.jackie_morals
+  FOR EACH STATEMENT EXECUTE FUNCTION private.jackie_morals_refuse_truncate();
+
 -- Housekeeping that has to hold however the row was written.
 CREATE OR REPLACE FUNCTION private.jackie_morals_before_write()
 RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
+  -- Locked, so two inserts at once cannot both count 23 and both go in.
+  IF TG_OP = 'INSERT' THEN
+    PERFORM pg_advisory_xact_lock(hashtext('public.jackie_morals'));
+  END IF;
   IF TG_OP = 'INSERT' AND (SELECT count(*) FROM public.jackie_morals) >= 24 THEN
     RAISE EXCEPTION 'Jackie can hold at most 24 morals. Disable or remove one first.'
       USING ERRCODE = 'check_violation';
@@ -223,7 +246,9 @@ GRANT EXECUTE ON FUNCTION public.jackie_morals_seal(uuid, jsonb) TO service_role
 -- configurations there have been rather than by how many messages.
 CREATE TABLE IF NOT EXISTS public.jackie_persona_attestations (
   engine     text NOT NULL CHECK (char_length(engine) BETWEEN 1 AND 64),
-  mode       text NOT NULL CHECK (mode IN ('persona', 'persona-without-morals', 'override')),
+  -- 'rig' is Jacky: the owner's rig brings its own persona, which this side
+  -- cannot fingerprint, and gets the morals in front of its prompt.
+  mode       text NOT NULL CHECK (mode IN ('persona', 'persona-without-morals', 'override', 'rig')),
   persona_fp text NOT NULL CHECK (char_length(persona_fp) BETWEEN 1 AND 64),
   morals_fp  text NOT NULL CHECK (char_length(morals_fp) BETWEEN 1 AND 64),
   detail     text CHECK (detail IS NULL OR char_length(detail) <= 300),

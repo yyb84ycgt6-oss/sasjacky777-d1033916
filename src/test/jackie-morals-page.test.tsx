@@ -11,6 +11,7 @@ import golden from "./fixtures/morals-ledger.golden.json";
 
 const OWNER = "aaaaaaaa-0000-0000-0000-000000000001";
 let roles: { role: string }[] = [{ role: "owner" }];
+let roleError: { message: string } | null = null;
 
 const data = vi.hoisted(() => ({
   fetchStatus: vi.fn(),
@@ -27,12 +28,13 @@ vi.mock("@/lib/jackie-morals", async (importOriginal) => ({
 }));
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ user: { id: OWNER }, loading: false }) }));
 vi.mock("@/integrations/supabase/client", () => ({
-  supabase: { from: () => ({ select: () => ({ eq: async () => ({ data: roles, error: null }) }) }) },
+  supabase: { from: () => ({ select: () => ({ eq: async () => ({ data: roleError ? null : roles, error: roleError }) }) }) },
 }));
 
 import JackieMorals from "@/pages/JackieMorals";
 
-const ledger = golden.map((r) => ({ ...r, at: "2026-10-10T06:27:32Z", actor: OWNER, moral_id: null }));
+// The columns as the database fills them: the same values as the hashed record.
+const ledger = golden.map((r) => ({ ...r, at: JSON.parse(r.payload).at as string, actor: OWNER, moral_id: null }));
 const status = {
   persona: { text: "You are Jackie.", fingerprint: "p".repeat(64) },
   morals: { block: "", fingerprint: "none", count: 0, enabled: 0 },
@@ -49,6 +51,7 @@ function renderPage() {
 
 beforeEach(() => {
   roles = [{ role: "owner" }];
+  roleError = null;
   localStorage.clear();
   for (const fn of Object.values(data)) fn.mockReset();
   data.fetchStatus.mockResolvedValue({ ok: true, data: status });
@@ -86,6 +89,26 @@ describe("Jackie's morals page", () => {
     renderPage();
     await screen.findByText(/every hash checks out/);
     await waitFor(() => expect(localStorage.getItem("jackie-morals-witness:v1")).toContain(`"seq":4`));
+  });
+
+  it("does not tell the real owner they are not the owner when the lookup itself failed", async () => {
+    roleError = { message: "network timeout" };
+    renderPage();
+    expect(await screen.findByText("Could not check who you are")).toBeTruthy();
+    expect(screen.queryByText("Jackie's morals are the owner's to set")).toBeNull();
+  });
+
+  it("after a break, lets the owner trust the history from here — and holds the seal until they do", async () => {
+    const edited = ledger.map((r) => (r.seq === 2 ? { ...r, payload: r.payload.replace('"enabled": false', '"enabled": true') } : r));
+    data.loadLedger.mockResolvedValue({ ok: true, data: edited });
+    renderPage();
+    await screen.findByText(/Tampered: entry #2/);
+    expect((screen.getByRole("button", { name: /Seal current state/ }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: /trust the history from here/ }));
+    await waitFor(() => expect(localStorage.getItem("jackie-morals-anchor:v1")).toContain(`"seq":4`));
+    // Checking restarts from entry #4: the break before it no longer blocks, and nothing sealed before it is relied on.
+    expect(await screen.findByText(/Checked from entry #4/)).toBeTruthy();
+    expect(screen.getByText(/Nothing sealed since you chose to trust/)).toBeTruthy();
   });
 
   it("offers the suggested morals when there are none, and adds a moral the owner writes", async () => {
