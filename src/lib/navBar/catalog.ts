@@ -22,7 +22,7 @@ import {
   Activity, AppWindow, ArrowUpDown, Award, BarChart, BarChart2, BarChart3, Bot, Brain,
   CalendarDays, Code2, Coins, Compass, Cpu, Dna, Factory, FileSpreadsheet, FlaskConical, FolderLock,
   Gamepad2, Gauge, Gem, GitBranch, Hammer, HardDrive, Home, ImageIcon, KeyRound, Layers, LayoutGrid,
-  Library, Lightbulb, Mail, Monitor, Music, Network, PanelsTopLeft, Pickaxe, Plug, Route, ScanLine,
+  Library, Lightbulb, Mail, Monitor, Music, Network, PanelsTopLeft, Pickaxe, Plug, Route, Scale, ScanLine,
   Send, Settings, Share2, Shield, ShieldAlert, ShieldCheck, ShoppingBag, Sparkles, SquareKanban,
   StickyNote, Store, Sword, Terminal, UserCog, Users, Volume2, Wallet, Wand2, Wrench, Zap, Clock,
 } from "lucide-react";
@@ -83,6 +83,7 @@ const CURATED: readonly NavPage[] = [
   jackie("github", "GitHub Sync", GitBranch, "/github"),
   jackie("path", "Path Router", Route, "/path"),
   jackie("core", "Core", ShieldCheck, "/core"),
+  jackie("morals", "Morals", Scale, "/morals"),
   jackie("grok", "Grok", Sparkles, "/grok"),
   jackie("craft", "Craft", Pickaxe, "/craft"),
   jackie("play", "Play", Gamepad2, "/play"),

@@ -5,8 +5,8 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import {
   admit, corsHeaders, json, preflight, providerFailure, tooLarge,
 } from "../_shared/entitlement.ts";
-import { clampContext, normalizeMessages } from "../_shared/chatRequest.ts";
-import { buildSystemPrompt } from "../_shared/persona.ts";
+import { normalizeMessages } from "../_shared/chatRequest.ts";
+import { guardedSystemPrompt } from "../_shared/personaGuard.ts";
 
 // The Claude 3.x ids this listed have been retired; every request to them
 // failed upstream and the /micro cascade walked past Anthropic entirely.
@@ -108,6 +108,8 @@ serve(async (req) => {
     const admission = await admit(req, "jackie-anthropic", selected);
     if (admission instanceof Response) return admission;
 
+    const guarded = await guardedSystemPrompt("jackie-anthropic", { system: explicitSystem, context });
+
     const resp = await fetch(BASE, {
       method: "POST",
       headers: {
@@ -121,17 +123,23 @@ serve(async (req) => {
       body: JSON.stringify({
         model: selected,
         max_tokens: MAX_TOKENS,
-        system: explicitSystem || buildSystemPrompt(clampContext(context)),
+        system: guarded.prompt,
         messages: verdict.messages,
         fallbacks: "default",
         stream: true,
       }),
     });
+    await guarded.recorded;
     if (!resp.ok) return await providerFailure("jackie-anthropic", resp);
     if (!resp.body) return json({ error: "Anthropic returned an empty response." }, 502);
 
     return new Response(anthropicToOpenAIStream(resp.body), {
-      headers: { ...corsHeaders, "Content-Type": "text/event-stream", "Cache-Control": "no-cache, no-transform" },
+      headers: {
+        ...corsHeaders,
+        ...guarded.headers,
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache, no-transform",
+      },
     });
   } catch (e) {
     console.error("jackie-anthropic: unexpected failure", e);

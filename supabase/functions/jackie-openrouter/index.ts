@@ -16,8 +16,8 @@ import {
   admit, allowlistFromEnv, corsHeaders, json, pickModel, preflight,
   providerFailure, tooLarge,
 } from "../_shared/entitlement.ts";
-import { clampContext, normalizeMessages } from "../_shared/chatRequest.ts";
-import { buildSystemPrompt } from "../_shared/persona.ts";
+import { normalizeMessages } from "../_shared/chatRequest.ts";
+import { guardedSystemPrompt } from "../_shared/personaGuard.ts";
 
 const FUNCTION_NAME = "jackie-openrouter";
 const DEFAULT_MODEL = "meta-llama/llama-3.3-70b-instruct:free";
@@ -98,6 +98,7 @@ serve(async (req) => {
   if (admission instanceof Response) return admission;
 
   try {
+    const guarded = await guardedSystemPrompt(FUNCTION_NAME, { system, context: payload.context });
     const resp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -109,18 +110,16 @@ serve(async (req) => {
       body: JSON.stringify({
         model: chosen.model,
         // Jackie's persona when the caller brings no system prompt of its own (rule 6).
-        messages: [
-          { role: "system", content: system.trim() || buildSystemPrompt(clampContext(payload.context)) },
-          ...verdict.messages,
-        ],
+        messages: [{ role: "system", content: guarded.prompt }, ...verdict.messages],
         stream: true,
       }),
     });
 
+    await guarded.recorded;
     if (!resp.ok) return await providerFailure(FUNCTION_NAME, resp);
 
     return new Response(resp.body, {
-      headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
+      headers: { ...corsHeaders, ...guarded.headers, "Content-Type": "text/event-stream" },
     });
   } catch (e) {
     console.error(`${FUNCTION_NAME}: unexpected failure`, e);

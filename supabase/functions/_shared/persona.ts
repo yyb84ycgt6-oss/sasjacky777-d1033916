@@ -143,7 +143,10 @@ You help the lead designer refine raw ideas into structured, implementable game 
  * matter once there is project context to reason about, and sending the long
  * one unconditionally wastes a local model's window for nothing.
  */
-export function buildSystemPrompt(context: string): string {
-  if (!context) return BASE_PROMPT;
-  return `${BASE_PROMPT}${GAME_DESIGNER_PROMPT}\n\n## Current Project Context\n\n${context}`;
+export function buildSystemPrompt(context: string, morals = ""): string {
+  // The owner's morals sit straight after the persona and ahead of any context,
+  // so a long memory dump cannot push them out of a small model's attention.
+  const base = morals ? `${BASE_PROMPT}\n\n${morals}` : BASE_PROMPT;
+  if (!context) return base;
+  return `${base}${GAME_DESIGNER_PROMPT}\n\n## Current Project Context\n\n${context}`;
 }

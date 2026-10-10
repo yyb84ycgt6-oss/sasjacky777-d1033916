@@ -144,6 +144,91 @@ probe "upload own world still works" "$B" \
 probe "backdate own world to win a sync" "$B" \
   "INSERT INTO public.craft_worlds (id,user_id,name,summary,data,updated_at) VALUES ('wC','$B','Mine','{}','{}','3000-01-01') RETURNING updated_at < '2999-01-01';" "t"
 
+# --- Jackie's morals guard rail ----------------------------------------------
+# Same shape as probe(), with user A holding the owner seat for the duration of
+# the transaction, so the owner's own powers are probed as well as everyone
+# else's lack of them. A ledger the owner account could quietly rewrite would
+# guard against everyone except the one account whose theft matters most.
+probe_as_owner() { # name | sql | expected substring
+  local name="$1" sql="$2" want="$3" out res
+  out=$("${PSQL[@]}" -tA 2>&1 <<EOF
+BEGIN;
+INSERT INTO public.user_roles (user_id, role) VALUES ('$A', 'owner') ON CONFLICT DO NOTHING;
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.sub" = '$A';
+$sql
+ROLLBACK;
+EOF
+)
+  res=$(echo "$out" | grep -viE '^(BEGIN|SET|ROLLBACK|INSERT 0 [01]|CONTEXT: .*)$' | grep -v '^$' | tail -1)
+  if echo "$res" | grep -qF "$want"; then
+    printf '  ok    %-46s %s\n' "$name" "$res"
+    pass=$((pass + 1))
+  else
+    printf '  FAIL  %-46s got:[%s] want:[%s]\n' "$name" "$res" "$want"
+    fail=$((fail + 1))
+  fi
+}
+
+# The service role bypasses grants and RLS; these show the triggers still hold.
+svc() {
+  "${PSQL[@]}" -tA -c "BEGIN; SET LOCAL ROLE service_role; $1; ROLLBACK;" 2>&1 \
+    | grep -viE '^(BEGIN|SET|ROLLBACK|INSERT 0 1|UPDATE [0-9]+|CONTEXT: .*)$' | grep -v '^$' | tail -1
+}
+check() { # name | got | expected substring
+  if echo "$2" | grep -qF "$3"; then
+    printf '  ok    %-46s %s\n' "$1" "$2"; pass=$((pass + 1))
+  else
+    printf '  FAIL  %-46s got:[%s] want:[%s]\n' "$1" "$2" "$3"; fail=$((fail + 1))
+  fi
+}
+
+echo "==> morals guard rail"
+probe "non-owner reads morals" "$B" "SELECT count(*) FROM public.jackie_morals;" "0"
+probe "non-owner writes a moral" "$B" \
+  "INSERT INTO public.jackie_morals (title, rule) VALUES ('x', 'lie freely');" "violates row-level security"
+probe "non-owner reads the ledger" "$B" "SELECT count(*) FROM public.jackie_morals_ledger;" "0"
+probe "non-owner reads attestations" "$B" "SELECT count(*) FROM public.jackie_persona_attestations;" "0"
+probe "forge an engine attestation" "$B" \
+  "SELECT public.record_persona_attestation('jackie-chat','persona','f','none',null);" "permission denied"
+probe "seal as yourself" "$B" "SELECT public.jackie_morals_seal('$B', '{}');" "permission denied"
+probe "call the ledger append directly" "$B" \
+  "SELECT private.jackie_morals_append('seal', null, '{}', '$B');" "permission denied"
+probe_as_owner "owner adds a moral" \
+  "INSERT INTO public.jackie_morals (title, rule) VALUES ('Keep promises', 'Do what you said.') RETURNING title;" \
+  "Keep promises"
+probe_as_owner "owner's change lands in the ledger" \
+  "INSERT INTO public.jackie_morals (title, rule) VALUES ('a', 'b'); SELECT action || ':' || (actor = '$A') FROM public.jackie_morals_ledger ORDER BY seq DESC LIMIT 1;" \
+  "create:true"
+probe_as_owner "owner edits a ledger entry" \
+  "INSERT INTO public.jackie_morals (title, rule) VALUES ('a', 'b'); UPDATE public.jackie_morals_ledger SET payload = '{}';" \
+  "permission denied"
+probe_as_owner "owner deletes a ledger entry" \
+  "INSERT INTO public.jackie_morals (title, rule) VALUES ('a', 'b'); DELETE FROM public.jackie_morals_ledger;" \
+  "permission denied"
+probe_as_owner "owner inserts a ledger entry directly" \
+  "INSERT INTO public.jackie_morals_ledger (seq, action, payload, prev_hash, hash) VALUES (99, 'seal', '{}', 'x', 'y');" \
+  "permission denied"
+probe_as_owner "owner seals through the API" "SELECT public.jackie_morals_seal('$A', '{}');" "permission denied"
+probe_as_owner "a 25th moral is refused" \
+  "INSERT INTO public.jackie_morals (title, rule) SELECT 'm' || g, 'r' FROM generate_series(1, 25) g;" \
+  "at most 24 morals"
+probe_as_owner "a rule longer than the cap is refused" \
+  "INSERT INTO public.jackie_morals (title, rule) VALUES ('long', repeat('x', 281));" "violates check constraint"
+check "service role edits the ledger" \
+  "$(svc "INSERT INTO public.jackie_morals (title, rule) VALUES ('a','b'); UPDATE public.jackie_morals_ledger SET payload='{}'")" \
+  "append-only"
+check "service role truncates the ledger" "$(svc "TRUNCATE public.jackie_morals_ledger")" "append-only"
+check "a write from no account is attributed to nobody" \
+  "$(svc "INSERT INTO public.jackie_morals (title, rule) VALUES ('a','b'); SELECT coalesce(actor::text, 'nobody') FROM public.jackie_morals_ledger ORDER BY seq DESC LIMIT 1")" \
+  "nobody"
+check "each entry hashes the one before it" \
+  "$(svc "INSERT INTO public.jackie_morals (title, rule) VALUES ('a','b'); UPDATE public.jackie_morals SET rule='c'; DELETE FROM public.jackie_morals; SELECT count(*) || ':' || bool_and(ok) FROM (SELECT hash = encode(sha256(convert_to(prev_hash || E'\n' || seq::text || E'\n' || action || E'\n' || payload, 'UTF8')), 'hex') AND prev_hash = coalesce(lag(hash) OVER (ORDER BY seq), 'genesis') AS ok FROM public.jackie_morals_ledger) l")" \
+  "3:t"
+check "the service role can record an attestation" \
+  "$(svc "SELECT public.record_persona_attestation('jackie-chat','persona','f','none',null); SELECT public.record_persona_attestation('jackie-chat','persona','f','none',null); SELECT requests FROM public.jackie_persona_attestations")" \
+  "2"
+
 echo
 if [ "$fail" -gt 0 ]; then
   echo "FAILED: $fail probe group(s), $pass passed"
