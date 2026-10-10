@@ -24,8 +24,8 @@
 import {
   admit, corsHeaders, json, preflight, providerFailure, tooLarge,
 } from "./entitlement.ts";
-import { clampContext, normalizeMessages } from "./chatRequest.ts";
-import { buildSystemPrompt } from "./persona.ts";
+import { normalizeMessages } from "./chatRequest.ts";
+import { guardedSystemPrompt } from "./personaGuard.ts";
 
 export interface OpenAiCompatConfig {
   /** Edge function name, for quota accounting and logs. */
@@ -97,7 +97,6 @@ export function openAiCompatHandler(cfg: OpenAiCompatConfig): (req: Request) => 
       if (explicitSystem.length > MAX_SYSTEM_CHARS) {
         return json({ error: "System prompt too large" }, 413);
       }
-      const systemPrompt = explicitSystem || buildSystemPrompt(clampContext(context));
 
       // An unknown model falls back to the default rather than being refused:
       // the default is the cheapest sensible choice, and a picker that is one
@@ -106,6 +105,8 @@ export function openAiCompatHandler(cfg: OpenAiCompatConfig): (req: Request) => 
 
       const admission = await admit(req, cfg.fn, selected);
       if (admission instanceof Response) return admission;
+
+      const guarded = await guardedSystemPrompt(cfg.fn, { system: explicitSystem, context });
 
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), HEADER_TIMEOUT_MS);
@@ -116,7 +117,7 @@ export function openAiCompatHandler(cfg: OpenAiCompatConfig): (req: Request) => 
           headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
           body: JSON.stringify({
             model: selected,
-            messages: [{ role: "system", content: systemPrompt }, ...verdict.messages],
+            messages: [{ role: "system", content: guarded.prompt }, ...verdict.messages],
             stream: true,
           }),
           signal: controller.signal,
@@ -133,6 +134,7 @@ export function openAiCompatHandler(cfg: OpenAiCompatConfig): (req: Request) => 
         );
       } finally {
         clearTimeout(timer);
+        await guarded.recorded;
       }
 
       if (!upstream.ok) return await providerFailure(cfg.fn, upstream);
@@ -141,6 +143,7 @@ export function openAiCompatHandler(cfg: OpenAiCompatConfig): (req: Request) => 
       return new Response(upstream.body, {
         headers: {
           ...corsHeaders,
+          ...guarded.headers,
           "Content-Type": "text/event-stream",
           "Cache-Control": "no-cache, no-transform",
           "X-Accel-Buffering": "no",

@@ -15,6 +15,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { consumeQuota, requireOwnerUser } from "../_shared/entitlement.ts";
 import { checkJackyPath } from "../_shared/jackyPath.ts";
+import { guardedRigPrompt } from "../_shared/personaGuard.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -78,9 +79,22 @@ serve(async (req) => {
   // `assessment` are telemetry that JackyLive polls every few seconds; charging
   // for them used the whole per-minute allowance on polling alone and left the
   // chat rate-limited for as long as that page was open.
-  if (INFERENCE_PATH.test(rawPath)) {
+  const inference = INFERENCE_PATH.test(rawPath);
+  if (inference) {
     const denied = await consumeQuota({ userId: auth.userId, functionName: "jacky-proxy" });
     if (denied) return denied;
+  }
+
+  // Jacky is the first link of the chat's default chain, so it is the engine
+  // that answers most often — and it was the one engine the owner's morals
+  // never reached, with nothing anywhere saying so. Its persona is the rig's
+  // own; the morals ride at the front of the prompt it is given, and the
+  // request is attested like every other engine's.
+  let body: unknown = (payload as any).body ?? {};
+  let guarded: Awaited<ReturnType<typeof guardedRigPrompt>> | null = null;
+  if (inference && method === "POST" && typeof (body as any)?.prompt === "string") {
+    guarded = await guardedRigPrompt("jacky-proxy", (body as any).prompt);
+    body = { ...(body as Record<string, unknown>), prompt: guarded.prompt };
   }
 
   const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -92,7 +106,7 @@ serve(async (req) => {
     const upstream = await fetch(`${base}/api/${rawPath}`, {
       method,
       headers,
-      body: method === "POST" ? JSON.stringify((payload as any).body ?? {}) : undefined,
+      body: method === "POST" ? JSON.stringify(body) : undefined,
       signal: controller.signal,
     });
     const text = await upstream.text();
@@ -103,5 +117,6 @@ serve(async (req) => {
     return json({ error: "jacky upstream unreachable", detail: String((e as Error)?.message || e) }, 502);
   } finally {
     clearTimeout(timer);
+    if (guarded) await guarded.recorded;
   }
 });

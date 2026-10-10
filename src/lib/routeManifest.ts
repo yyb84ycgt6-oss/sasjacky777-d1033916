@@ -26,6 +26,7 @@ export const CORE_ROUTES: RouteEntry[] = [
   { path: "/work", label: "Workstation (alias)", group: "core", alias: true },
   { path: "/path", label: "Path Router", group: "core" },
   { path: "/core", label: "Jackie Core (owner only)", group: "core" },
+  { path: "/morals", label: "Jackie's Morals (guard rail, owner only)", group: "core" },
   { path: "/pc", label: "The PC", group: "core" },
   { path: "/pc-apps", label: "PC App Library", group: "core" },
   { path: "/repair", label: "Repair Bay", group: "core" },

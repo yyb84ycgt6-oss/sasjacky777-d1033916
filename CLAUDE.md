@@ -119,11 +119,18 @@ router probes every link, so an unconfigured engine is a normal, frequent
 event; charging quota for a call that cannot happen bills the caller for the
 chain's own bookkeeping.
 
-### 6. Every engine builds its system prompt from `_shared/persona.ts`.
+### 6. Every engine builds its system prompt through `_shared/personaGuard.ts`.
 
 A persona only one engine carries means Jackie's voice, her rules and her
 memory context vanish the moment that engine is unavailable, and the fallback
 answers as an anonymous assistant with no idea why it changed.
+
+`guardedSystemPrompt` builds it from `_shared/persona.ts`, adds the owner's
+morals, and records what the engine actually ran, which the `/morals` page
+checks against the owner's seal. A new engine calls it and joins
+`PERSONA_ENGINES` in `_shared/morals.ts`, and no agent surface may touch the
+morals. `docs/GUARD_RAIL.md` has the rest; `src/test/jackie-morals.test.ts`
+enforces it.
 
 ### 7. Python is a package, and its floor is 3.9.
 
@@ -192,6 +199,7 @@ src/lib/jackie-stream.ts      SSE parsing, success/failure decisions
 src/lib/edgeFunction.ts       headers the gateway will accept
 src/lib/jackie-*.ts           memory, tasks, tags, files, attachments, archive
 src/lib/appActions.ts         everything an agent may do to the app (rule 9)
+src/lib/jackie-morals.ts      the morals page's guard rail: ledger check, witness, verdicts (docs/GUARD_RAIL.md)
 src/lib/appAgent.ts           the in-app act→observe loop; localModels.ts reaches LM Studio/Ollama
 src/lib/mcp/                  the MCP server's tools (generates supabase/functions/mcp)
 src/components/nav/           the one nav bar, SANDi and the Guide (docs/NAV_BAR.md)

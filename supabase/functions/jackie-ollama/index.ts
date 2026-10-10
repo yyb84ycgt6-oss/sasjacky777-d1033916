@@ -23,8 +23,8 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import {
   admitOwner, allowlistFromEnv, corsHeaders, json, pickModel, preflight, providerFailure, tooLarge,
 } from "../_shared/entitlement.ts";
-import { clampContext, normalizeMessages } from "../_shared/chatRequest.ts";
-import { buildSystemPrompt } from "../_shared/persona.ts";
+import { normalizeMessages } from "../_shared/chatRequest.ts";
+import { guardedSystemPrompt } from "../_shared/personaGuard.ts";
 
 const FUNCTION_NAME = "jackie-ollama";
 const DEFAULT_MODEL = "llama3.2:3b";
@@ -119,7 +119,6 @@ serve(async (req) => {
   if (explicitSystem.length > MAX_SYSTEM_CHARS) {
     return json({ error: "System prompt too large" }, 413);
   }
-  const systemPrompt = explicitSystem || buildSystemPrompt(clampContext(payload.context));
 
   // Checked before admission on purpose. The main chat probes this engine as
   // one link in a chain, so an unconfigured runner is a normal, frequent event
@@ -141,6 +140,10 @@ serve(async (req) => {
   if (admission instanceof Response) return admission;
 
   try {
+    const guarded = await guardedSystemPrompt(FUNCTION_NAME, {
+      system: explicitSystem,
+      context: payload.context,
+    });
     const optionalKey = Deno.env.get("OLLAMA_API_KEY");
     const resp = await fetch(`${base.replace(/\/$/, "")}/api/chat`, {
       method: "POST",
@@ -150,15 +153,16 @@ serve(async (req) => {
       },
       body: JSON.stringify({
         model: chosen.model,
-        messages: [{ role: "system", content: systemPrompt }, ...verdict.messages],
+        messages: [{ role: "system", content: guarded.prompt }, ...verdict.messages],
         stream: true,
       }),
     });
 
+    await guarded.recorded;
     if (!resp.ok || !resp.body) return await providerFailure(FUNCTION_NAME, resp);
 
     return new Response(ndjsonToSse(resp.body), {
-      headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
+      headers: { ...corsHeaders, ...guarded.headers, "Content-Type": "text/event-stream" },
     });
   } catch (e) {
     console.error(`${FUNCTION_NAME}: unexpected failure`, e);

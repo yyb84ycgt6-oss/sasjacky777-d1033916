@@ -42,6 +42,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "🛠️ Workstation · the whole system", href: "/workstation", title: "Every station in one flow — ignition, core, workstation, field — with the offline partitions underneath and one next step" },
       { label: "🔒 Jackie Core · owner only", href: "/core", title: "Identity, behaviour, memory, security, architecture, roadmap — sealed to the owner account" },
+      { label: "⚖️ Jackie's Morals · guard rail", href: "/morals", title: "Set what Jackie holds to, and see what every engine actually ran — and whether anything changed that you did not approve" },
       { label: "🧭 Path Router · every location", href: "/path", title: "Type any app or surface name and get its exact path — the whole directory in one place" },
       { label: "🖥️ The PC · Visual Computer", href: "/pc", title: "The whole PC — 90+ apps, windows, ink gestures — embedded with nothing compromised" },
       { label: "🧰 Repair Bay · Maintenance Crew", href: "/repair", title: "Your rig profile, firmware log, emergency boot + recovery playbooks, and Jackie as repair consultant" },

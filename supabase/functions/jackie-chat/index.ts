@@ -1,11 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { gate } from "../_shared/entitlement.ts";
-import {
-  clampContext,
-  normalizeMessages,
-  resolveModel,
-} from "../_shared/chatRequest.ts";
-import { buildSystemPrompt } from "../_shared/persona.ts";
+import { normalizeMessages, resolveModel } from "../_shared/chatRequest.ts";
+import { guardedSystemPrompt } from "../_shared/personaGuard.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -94,7 +90,8 @@ serve(async (req) => {
     if (explicitSystem.length > MAX_SYSTEM_CHARS) {
       return json({ error: "System prompt too large" }, 413);
     }
-    const systemPrompt = explicitSystem || buildSystemPrompt(clampContext(context));
+    const guarded = await guardedSystemPrompt("jackie-chat", { system: explicitSystem, context });
+    const systemPrompt = guarded.prompt;
 
     // A gateway that accepts the connection and then never answers leaves the
     // browser holding an open stream with no content, which reads as "Jackie is
@@ -135,6 +132,7 @@ serve(async (req) => {
       );
     } finally {
       clearTimeout(timer);
+      await guarded.recorded;
     }
 
     if (!response.ok) {
@@ -176,6 +174,7 @@ serve(async (req) => {
     return new Response(response.body, {
       headers: {
         ...corsHeaders,
+        ...guarded.headers,
         "Content-Type": "text/event-stream",
         // Streaming through a proxy that buffers turns a live answer into a
         // long silence followed by everything at once.

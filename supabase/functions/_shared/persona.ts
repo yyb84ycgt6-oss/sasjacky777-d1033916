@@ -137,13 +137,24 @@ When discussing game design:
 You help the lead designer refine raw ideas into structured, implementable game systems.`;
 
 /**
+ * Everything persona.ts can put in front of a model, as one text: what the
+ * guard rail fingerprints and the owner seals. Fingerprinting BASE_PROMPT
+ * alone let a change to the game-design section — which rides on every
+ * request with context, i.e. most of the chat — pass as "matches your seal".
+ */
+export const PERSONA_SOURCE = `${BASE_PROMPT}${GAME_DESIGNER_PROMPT}`;
+
+/**
  * The system prompt for one request.
  *
  * The game-design section and the injected context ride together: both only
  * matter once there is project context to reason about, and sending the long
  * one unconditionally wastes a local model's window for nothing.
  */
-export function buildSystemPrompt(context: string): string {
-  if (!context) return BASE_PROMPT;
-  return `${BASE_PROMPT}${GAME_DESIGNER_PROMPT}\n\n## Current Project Context\n\n${context}`;
+export function buildSystemPrompt(context: string, morals = ""): string {
+  // The owner's morals sit straight after the persona and ahead of any context,
+  // so a long memory dump cannot push them out of a small model's attention.
+  const base = morals ? `${BASE_PROMPT}\n\n${morals}` : BASE_PROMPT;
+  if (!context) return base;
+  return `${base}${GAME_DESIGNER_PROMPT}\n\n## Current Project Context\n\n${context}`;
 }

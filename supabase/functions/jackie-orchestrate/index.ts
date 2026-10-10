@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { gate } from "../_shared/entitlement.ts";
+import { guardedSystemPrompt } from "../_shared/personaGuard.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -47,7 +48,9 @@ serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const model = typeof body?.model === "string" ? body.model : "google/gemini-3-flash-preview";
     const prompt = typeof body?.prompt === "string" ? body.prompt : "";
-    const system = typeof body?.system === "string" ? body.system : "You are Jackie, a precise system-level AI orchestrator.";
+    const system = typeof body?.system === "string" && body.system.trim()
+      ? body.system
+      : "You are Jackie, a precise system-level AI orchestrator.";
 
     if (!prompt || prompt.length > 50000) {
       return new Response(JSON.stringify({ error: "Invalid prompt" }), {
@@ -62,6 +65,11 @@ serve(async (req) => {
       });
     }
 
+    // Always its own prompt, never Jackie's persona — so the morals page lists
+    // this function among those answering in her name without her morals,
+    // instead of it doing so where nobody can see.
+    const guarded = await guardedSystemPrompt("jackie-orchestrate", { system });
+
     const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -71,11 +79,12 @@ serve(async (req) => {
       body: JSON.stringify({
         model,
         messages: [
-          { role: "system", content: system },
+          { role: "system", content: guarded.prompt },
           { role: "user", content: prompt },
         ],
       }),
     });
+    await guarded.recorded;
 
     if (!resp.ok) {
       if (resp.status === 429) {

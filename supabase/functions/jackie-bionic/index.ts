@@ -21,8 +21,8 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import {
   admitOwner, allowlistFromEnv, corsHeaders, json, pickModel, preflight, tooLarge,
 } from "../_shared/entitlement.ts";
-import { clampContext, normalizeMessages } from "../_shared/chatRequest.ts";
-import { buildSystemPrompt } from "../_shared/persona.ts";
+import { normalizeMessages } from "../_shared/chatRequest.ts";
+import { guardedSystemPrompt } from "../_shared/personaGuard.ts";
 import { bionicEndpoint } from "../_shared/bionicEndpoint.ts";
 
 const FUNCTION_NAME = "jackie-bionic";
@@ -109,10 +109,8 @@ serve(async (req) => {
 
     const selected = chosen.model;
 
-    const systemPrompt =
-      typeof system === "string" && system.trim()
-        ? system.trim()
-        : buildSystemPrompt(clampContext(context));
+    const guarded = await guardedSystemPrompt(FUNCTION_NAME, { system, context });
+    const systemPrompt = guarded.prompt;
 
     const apiKey = Deno.env.get("BIONIC_API_KEY");
 
@@ -150,6 +148,7 @@ serve(async (req) => {
       );
     } finally {
       clearTimeout(timer);
+      await guarded.recorded;
     }
 
     if (!upstream.ok || !upstream.body) {
@@ -167,6 +166,7 @@ serve(async (req) => {
     return new Response(upstream.body, {
       headers: {
         ...corsHeaders,
+        ...guarded.headers,
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache, no-transform",
         Connection: "keep-alive",
