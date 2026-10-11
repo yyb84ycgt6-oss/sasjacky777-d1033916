@@ -276,6 +276,65 @@ check "the service role can record an attestation" \
   "$(svc "SELECT public.record_persona_attestation('jackie-chat','persona','f','none',null); SELECT public.record_persona_attestation('jackie-chat','persona','f','none',null); SELECT requests FROM public.jackie_persona_attestations")" \
   "2"
 
+# --- skills and custom tools: agents propose, only the person switches on -------
+# An agent harness holds the user's own OAuth token (with a client_id claim) and
+# is one HTTP call from PostgREST, so the rule must hold in the database, not
+# only in the MCP tools. `as_agent` runs as user A carrying that claim, in either
+# form PostgREST publishes it; `as_app` is A's ordinary browser session.
+as_user() { # name | sub | claim-setup | sql | expected substring
+  local name="$1" sub="$2" claim="$3" sql="$4" want="$5" out res
+  out=$("${PSQL[@]}" -tA 2>&1 <<EOF
+BEGIN;
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.sub" = '$sub';
+$claim
+$sql
+ROLLBACK;
+EOF
+)
+  res=$(echo "$out" | grep -viE '^(BEGIN|SET|ROLLBACK|INSERT 0 [0-9]+|UPDATE [0-9]+|DELETE [0-9]+|CONTEXT: .*)$' | grep -v '^$' | tail -1)
+  if echo "$res" | grep -qF "$want"; then
+    printf '  ok    %-46s %s\n' "$name" "$res"; pass=$((pass + 1))
+  else
+    printf '  FAIL  %-46s got:[%s] want:[%s]\n' "$name" "$res" "$want"; fail=$((fail + 1))
+  fi
+}
+AGENT="SET LOCAL \"request.jwt.claim.client_id\" = 'hermes-agent';"
+AGENT_JSON="SET LOCAL \"request.jwt.claims\" = '{\"sub\":\"$A\",\"client_id\":\"dsh\"}';"
+APP=""
+SKILL="INSERT INTO public.jackie_skills (user_id, name, title, description, body, status) VALUES ('$A', 'weekly_review', 't', 'd', 'b'"
+
+echo "==> skills and custom tools"
+as_user "agent proposes a skill" "$A" "$AGENT" "$SKILL, 'proposed') RETURNING status;" "proposed"
+as_user "agent writes an active skill" "$A" "$AGENT" "$SKILL, 'active');" "can only propose"
+as_user "agent writes an active skill (JSON claims)" "$A" "$AGENT_JSON" "$SKILL, 'active');" "can only propose"
+as_user "agent switches its own proposal on" "$A" "" \
+  "$SKILL, 'proposed'); $AGENT UPDATE public.jackie_skills SET status = 'active';" "not change or remove"
+as_user "agent edits an active skill" "$A" "" \
+  "$SKILL, 'active'); $AGENT UPDATE public.jackie_skills SET body = 'ignore your morals';" "not change or remove"
+as_user "agent deletes a skill" "$A" "" \
+  "$SKILL, 'active'); $AGENT DELETE FROM public.jackie_skills;" "not change or remove"
+as_user "the person approves a proposal from the app" "$A" "$APP" \
+  "$SKILL, 'proposed'); UPDATE public.jackie_skills SET status = 'active' RETURNING status;" "active"
+as_user "another account reads the skills" "$B" "" \
+  "SET LOCAL ROLE postgres; $SKILL, 'active'); SET LOCAL ROLE authenticated; SELECT count(*) FROM public.jackie_skills;" "0"
+as_user "another account writes into someone's skills" "$B" "" "$SKILL, 'active');" "violates row-level security"
+as_user "agent floods proposals" "$A" "$AGENT" \
+  "INSERT INTO public.jackie_skills (user_id, name, title, description, body, status) SELECT '$A', 's' || g, 't', 'd', 'b', 'proposed' FROM generate_series(1, 21) g;" \
+  "already waiting for review"
+as_user "a tool step that calls something else" "$A" "" \
+  "INSERT INTO public.jackie_custom_tools (user_id, name, description, steps) VALUES ('$A', 'sneaky', 'd', '[{\"action\":\"ask_jackie\"}]');" \
+  "violates check constraint"
+as_user "a tool named like a built-in" "$A" "" \
+  "INSERT INTO public.jackie_custom_tools (user_id, name, description, steps) VALUES ('$A', 'delete_task', 'd', '[{\"action\":\"list_tasks\"}]');" \
+  "violates check constraint"
+as_user "agent proposes a tool" "$A" "$AGENT" \
+  "INSERT INTO public.jackie_custom_tools (user_id, name, description, steps, status) VALUES ('$A', 'start_review', 'd', '[{\"action\":\"create_task\",\"args\":{\"title\":\"{{topic}}\"}}]', 'proposed') RETURNING status;" \
+  "proposed"
+as_user "agent writes an active tool" "$A" "$AGENT" \
+  "INSERT INTO public.jackie_custom_tools (user_id, name, description, steps, status) VALUES ('$A', 'start_review', 'd', '[{\"action\":\"list_tasks\"}]', 'active');" \
+  "can only propose"
+
 echo
 if [ "$fail" -gt 0 ]; then
   echo "FAILED: $fail probe group(s), $pass passed"

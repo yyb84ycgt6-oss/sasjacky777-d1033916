@@ -52,6 +52,14 @@ export const AGENT_TOOLS: readonly AgentTool[] = [
   { name: "forget_fact", description: "Delete a memory entry by id or key.", args: `{"id"?: string, "key"?: string}`, destructive: true },
   { name: "list_conversations", description: "List the user's chat conversations.", args: `{"limit"?: number}` },
   { name: "read_conversation", description: "Read a conversation's recent messages.", args: `{"id": string, "limit"?: number}` },
+  // The person's own skills and tools (/skills). Proposals wait for their
+  // approval; an agent cannot switch one on.
+  { name: "list_skills", description: "List the skills the user wrote for agents: each one's name and when to use it.", args: `{"query"?: string}` },
+  { name: "get_skill", description: "Load a skill's full instructions. Do this before a task one fits, then follow it.", args: `{"name": string}` },
+  { name: "propose_skill", description: "Propose reusable instructions for a kind of task. Saved off until the user approves it.", args: `{"name": "lowercase_name", "title": string, "description": string, "body": string}` },
+  { name: "list_custom_tools", description: "List the user's custom tools (recipes of these actions) and their parameters.", args: `{}` },
+  { name: "run_custom_tool", description: "Run a custom tool by name. One that deletes needs Allow deletes.", args: `{"name": string, "args"?: {…its parameters}}` },
+  { name: "propose_tool", description: "Propose a custom tool: up to 8 steps of these actions; step args may use {{param}} and {{steps.N.field}}. Saved off until the user approves it.", args: `{"name": "lowercase_name", "description": string, "params"?: [{"name": string, "type": "string"|"number"|"boolean", "required"?: boolean}], "steps": [{"action": string, "args"?: object}]}` },
 ];
 
 export function findAgentTool(name: string): AgentTool | undefined {
@@ -72,6 +80,7 @@ export function actionManual(allowDestructive: boolean): string {
     "The app runs it and replies with the result. Use one action per reply; wait for its result before the next.",
     "When you are finished, reply normally with no action block — that reply is your final answer to the user.",
     "Never claim you did something unless an action result confirmed it. If an action fails, say so.",
+    "The user may have written skills for kinds of task: check list_skills first, and if one fits, get_skill and follow it.",
     "",
     "Actions:",
     tools,
@@ -146,7 +155,7 @@ export interface RunAppAgentOptions {
   /** One model call. Resolves to the reply text, or says why there is none. */
   callModel: (messages: ModelTurn[], system: string) => Promise<ActionResult<string>>;
   /** Runs one action as the signed-in user. */
-  execute: (tool: string, args: Record<string, unknown>) => Promise<ActionResult>;
+  execute: (tool: string, args: Record<string, unknown>, ctx: { allowDestructive: boolean }) => Promise<ActionResult>;
   allowDestructive?: boolean;
   /**
    * False runs a plain answer through the same model path — for an agent on a
@@ -205,7 +214,7 @@ export async function runAppAgent(opts: RunAppAgentOptions): Promise<AgentRun> {
         ? { ok: false, error: `There is no action called "${parsed.tool}".` }
         : tool.destructive && !allowDestructive
         ? { ok: false, error: `${tool.name} is turned off for this agent: it deletes things, and deletes were not allowed.` }
-        : await opts.execute(tool.name, parsed.args);
+        : await opts.execute(tool.name, parsed.args, { allowDestructive });
       step = { tool: parsed.tool, args: parsed.args, result };
     }
     steps.push(step);

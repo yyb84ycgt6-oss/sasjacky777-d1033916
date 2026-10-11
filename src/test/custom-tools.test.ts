@@ -1,0 +1,137 @@
+import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+import {
+  CUSTOM_TOOL_ACTIONS, LIMITS, NAME_PATTERN, RESERVED_NAMES, checkArgs, isDestructive, resolveTemplate,
+  toolSignature, validateSkill, validateToolSpec, type ToolSpec,
+} from "@/lib/customTools";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const SQL = readFileSync(path.join(ROOT, "supabase", "migrations", "20261011120000_jackie_skills_and_tools.sql"), "utf8");
+const quoted = (block: string) => [...block.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+
+const tool = (over: Partial<ToolSpec> = {}): ToolSpec => ({
+  name: "start_review",
+  description: "Open a review task and note the decision.",
+  params: [{ name: "topic", type: "string", required: true }, { name: "due", type: "string" }],
+  steps: [
+    { action: "create_task", args: { title: "Review {{topic}}", priority: "high", due_date: "{{due}}" } },
+    { action: "update_task", args: { id: "{{steps.0.id}}", status: "in_progress" } },
+  ],
+  ...over,
+});
+
+describe("what a skill must be", () => {
+  it("accepts a well-formed skill", () => {
+    expect(validateSkill({ name: "weekly_review", title: "Weekly review", description: "Fridays.", body: "1. List tasks." })).toBeNull();
+  });
+
+  it("refuses a name an agent could not type back exactly", () => {
+    expect(validateSkill({ name: "Weekly Review", title: "t", description: "d", body: "b" })).toContain("lowercase");
+  });
+
+  it("asks for the line agents choose skills by", () => {
+    expect(validateSkill({ name: "a_skill", title: "t", description: "  ", body: "b" })).toContain("agents choose skills");
+  });
+
+  it("caps the instructions, since a loaded skill rides on the agent's next request", () => {
+    expect(validateSkill({ name: "a_skill", title: "t", description: "d", body: "x".repeat(LIMITS.body + 1) })).toContain(String(LIMITS.body));
+  });
+});
+
+describe("what a custom tool must be", () => {
+  it("accepts a tool whose steps use its parameters and an earlier step's result", () => {
+    expect(validateToolSpec(tool())).toBeNull();
+  });
+
+  it("will not let a tool take a built-in's name", () => {
+    expect(validateToolSpec(tool({ name: "delete_task" }))).toContain("built-in");
+  });
+
+  it("only runs the agents' own actions — nothing that reaches a model or the network", () => {
+    const bad = tool({ steps: [{ action: "ask_jackie" as never, args: {} }] });
+    expect(validateToolSpec(bad)).toContain("must call one of");
+  });
+
+  it("refuses a step that refers to a later step's result", () => {
+    const bad = tool({ steps: [{ action: "update_task", args: { id: "{{steps.0.id}}" } }] });
+    expect(validateToolSpec(bad)).toContain("only earlier steps");
+  });
+
+  it("refuses a placeholder that names no parameter, instead of sending an empty value later", () => {
+    const bad = tool({ steps: [{ action: "create_task", args: { title: "{{topick}}" } }] });
+    expect(validateToolSpec(bad)).toContain("{{topick}}");
+  });
+
+  it("keeps 'steps' free for results, so a parameter cannot shadow them", () => {
+    expect(validateToolSpec(tool({ params: [{ name: "steps", type: "string" }] }))).toContain("reserved");
+  });
+
+  it("caps the steps, so one call cannot become an unbounded run", () => {
+    const many = Array.from({ length: LIMITS.steps + 1 }, () => ({ action: "list_tasks" as const }));
+    expect(validateToolSpec(tool({ steps: many }))).toContain(String(LIMITS.steps));
+  });
+
+  it("knows a tool with a deleting step deletes", () => {
+    expect(isDestructive(tool().steps)).toBe(false);
+    expect(isDestructive([{ action: "forget_fact" }])).toBe(true);
+  });
+
+  it("describes itself the way a model reads a signature", () => {
+    expect(toolSignature(tool())).toBe('start_review {"topic": string, "due"?: string} — Open a review task and note the decision.');
+  });
+});
+
+describe("filling a step in", () => {
+  const scope = { params: { topic: "billing", due: undefined, count: 3 }, steps: [{ id: "t1", title: "x" }] };
+
+  it("writes parameters into text and keeps a whole-placeholder's type", () => {
+    expect(resolveTemplate({ title: "Review {{topic}}", limit: "{{count}}" }, scope))
+      .toEqual({ ok: true, value: { title: "Review billing", limit: 3 } });
+  });
+
+  it("reads a field of an earlier step's result", () => {
+    expect(resolveTemplate({ id: "{{steps.0.id}}" }, scope)).toEqual({ ok: true, value: { id: "t1" } });
+  });
+
+  it("drops an argument whose optional parameter was left out, rather than sending it empty", () => {
+    expect(resolveTemplate({ title: "x", due_date: "{{due}}" }, scope)).toEqual({ ok: true, value: { title: "x" } });
+  });
+
+  it("names a placeholder it cannot fill, rather than sending text with a hole in it", () => {
+    expect(resolveTemplate({ title: "Due {{due}}" }, scope)).toEqual({ ok: false, error: "{{due}} has no value" });
+    expect(resolveTemplate({ id: "{{steps.1.id}}" }, scope)).toMatchObject({ ok: false });
+  });
+});
+
+describe("checking a call's arguments", () => {
+  const params = tool().params;
+  it("asks for what is required", () => {
+    expect(checkArgs(params, {})).toBe('"topic" is required.');
+  });
+  it("refuses an argument the tool does not take, instead of ignoring it", () => {
+    expect(checkArgs(params, { topic: "a", priority: "high" })).toContain('no parameter "priority"');
+  });
+  it("refuses the wrong type", () => {
+    expect(checkArgs([{ name: "n", type: "number" }], { n: "3" })).toBe('"n" must be a number.');
+  });
+});
+
+describe("the code and the database agree", () => {
+  it("allows the same step actions as the SQL check", () => {
+    const from = SQL.indexOf("s->>'action' NOT IN (") + "s->>'action' NOT IN (".length;
+    const block = SQL.slice(from, SQL.indexOf("OR (s ? 'args'"));
+    expect(quoted(block).sort()).toEqual([...CUSTOM_TOOL_ACTIONS].sort());
+  });
+
+  it("reserves the same names as the SQL check", () => {
+    const start = SQL.indexOf("AND name NOT IN (");
+    const block = SQL.slice(start, SQL.indexOf("description text", start));
+    expect(quoted(block).sort()).toEqual([...RESERVED_NAMES].sort());
+  });
+
+  it("uses the same name pattern as the SQL check", () => {
+    expect(SQL).toContain(`name ~ '${NAME_PATTERN.source}'`);
+  });
+});

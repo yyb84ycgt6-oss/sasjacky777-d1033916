@@ -199,6 +199,7 @@ src/lib/jackie-stream.ts      SSE parsing, success/failure decisions
 src/lib/edgeFunction.ts       headers the gateway will accept
 src/lib/jackie-*.ts           memory, tasks, tags, files, attachments, archive
 src/lib/appActions.ts         everything an agent may do to the app (rule 9)
+src/lib/customTools.ts        skills and custom tools: limits, validation, the {{template}} language (docs/SKILLS.md)
 src/lib/jackie-morals.ts      the morals page's guard rail: ledger check, witness, verdicts (docs/GUARD_RAIL.md)
 src/lib/appAgent.ts           the in-app act→observe loop; localModels.ts reaches LM Studio/Ollama
 src/lib/mcp/                  the MCP server's tools (generates supabase/functions/mcp)

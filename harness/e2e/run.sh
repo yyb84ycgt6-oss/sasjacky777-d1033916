@@ -148,10 +148,30 @@ wait_for "$ISSUER/.well-known/jwks.json" gateway
 wait_for "$MCP_URL/.well-known/oauth-protected-resource" "MCP function"
 wait_for "http://127.0.0.1:8102/" "jackie-bionic"
 
+db() { "${PSQL[@]}" -d "$DB" -c "$1"; }
+
+# One skill and one tool the owner switched on from the app (no OAuth client
+# behind the write), for the MCP check to load and run. Agents can only
+# propose; this is the part only the person can do.
+db "insert into jackie_skills (user_id, name, title, description, body)
+    values ('$OWNER_ID', 'e2e_skill', 'E2E skill', 'When the end-to-end run asks.', 'Say E2E-SKILL-LOADED.')" >/dev/null \
+  || fail "could not seed a skill"
+db "insert into jackie_custom_tools (user_id, name, description, params, steps)
+    values ('$OWNER_ID', 'e2e_start', 'Create a task and start it.',
+            '[{\"name\":\"topic\",\"type\":\"string\",\"required\":true}]',
+            '[{\"action\":\"create_task\",\"args\":{\"title\":\"E2E {{topic}}\"}},{\"action\":\"update_task\",\"args\":{\"id\":\"{{steps.0.id}}\",\"status\":\"in_progress\"}}]')" >/dev/null \
+  || fail "could not seed a custom tool"
+
 echo "==> MCP protocol check (official SDK client)"
 MCP_URL="$MCP_URL" TOKENS="$E2E_DIR/tokens.json" node "$HERE/mcp-check.mjs" || fail "MCP check (logs in $E2E_DIR/logs)"
 
-db() { "${PSQL[@]}" -d "$DB" -c "$1"; }
+# What the MCP check's agent proposed stayed a proposal, and what it did was
+# recorded where the person can see it.
+[ "$(db "select status from jackie_skills where user_id='$OWNER_ID' and name='e2e_proposed'")" = proposed ] \
+  || fail "an agent's proposed skill is not waiting as a proposal"
+[ "$(db "select count(*) from audit_events where user_id='$OWNER_ID' and action in ('skill.load','tool.run') and actor='agent:mcp'")" = 2 ] \
+  || fail "loading a skill and running a tool over MCP were not both recorded"
+ok "skills and tools: an agent's proposal waits for the person, and what agents used is on record"
 
 # ask_jackie goes through the engine's own gate, not around it: the owner
 # check passed and each ask spent a unit of quota.
@@ -173,15 +193,16 @@ assert_harness() { # label, key suffix, model log
   node -e "
     const lines = require('fs').readFileSync('$log','utf8').trim().split('\n').map(JSON.parse);
     const offered = lines.find((l) => l.tools?.length)?.tools ?? [];
-    const want = ['ask_jackie','create_task','list_tasks','remember_fact','search_memory','update_task','delete_task','forget_fact','read_conversation','list_conversations','create_conversation','update_task_status'];
+    const want = ['ask_jackie','create_task','list_tasks','remember_fact','search_memory','update_task','delete_task','forget_fact','read_conversation','list_conversations','create_conversation','update_task_status',
+      'list_skills','get_skill','propose_skill','list_custom_tools','run_custom_tool','propose_tool'];
     const missing = want.filter((w) => !offered.some((o) => o === w || o.endsWith('_' + w)));
     if (missing.length) { console.error('offered: ' + offered.join(', ')); process.exit(1); }
     // Harnesses also make tool-less side calls (session titles), so the plan's
     // finishing turn is looked for, not assumed to be the last request.
     const done = lines.some((l) => (l.decision?.text ?? '').startsWith('E2E-DONE after 4'));
     if (!done) { console.error('turns: ' + lines.map((l) => JSON.stringify(l.decision ?? l.unhandled)).join(' | ')); process.exit(1); }
-  " || fail "$label: did not see all twelve tools, or did not finish the plan (see $log)"
-  ok "$label: saw all 12 tools, created a task, stored a memory, and talked to Jackie"
+  " || fail "$label: did not see all eighteen tools, or did not finish the plan (see $log)"
+  ok "$label: saw all 18 tools, created a task, stored a memory, and talked to Jackie"
 }
 
 if [ -n "${HERMES_BIN:-}" ]; then

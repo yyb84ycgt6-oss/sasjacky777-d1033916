@@ -18,6 +18,10 @@
  * this file into a Deno function and the browser imports it directly.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  checkArgs, isDestructive, resolveTemplate, toolSignature, validateSkill, validateToolSpec,
+  type CustomToolAction, type ToolParam, type ToolStep,
+} from "./customTools";
 
 /** The values the database's CHECK constraints accept. Anything else is refused there. */
 export const TASK_STATUSES = ["todo", "in_progress", "done", "blocked"] as const;
@@ -376,4 +380,261 @@ export async function readSseText(resp: Response): Promise<ActionResult<string>>
   if (!text.trim()) return fail("Jackie's model returned an empty answer.");
   if (!finished) return fail("The answer was cut off before it finished.");
   return ok(text);
+}
+
+// ── Skills and custom tools ─────────────────────────────────────────────
+//
+// What the person teaches their agents. A skill is named instructions an agent
+// loads when a task fits it; a custom tool is a named recipe of the actions
+// above. Agents can list and use the active ones, and propose new ones — which
+// wait, switched off, until the person approves them on /skills. The database
+// enforces that last part (see the migration): a write from an agent token can
+// only ever add a proposal.
+
+/** Which surface an agent acts from, recorded with what it does. */
+export interface ActionContext {
+  via?: "mcp" | "agent-lab" | "app";
+  /** Whether this agent may delete. A tool with a deleting step is refused without it. */
+  allowDestructive?: boolean;
+}
+
+const SKILL_LIST_COLUMNS = "name,title,description,updated_at";
+const TOOL_COLUMNS = "name,description,params,steps,updated_at";
+
+/**
+ * What agents did with skills and tools, in the person's own audit trail, so
+ * /skills can show it. A failure to record does not undo the action — but it is
+ * reported back with it rather than dropped (rule 8).
+ */
+async function recordAgentActivity(
+  sb: Client,
+  userId: string,
+  ctx: ActionContext | undefined,
+  action: string,
+  details: Record<string, unknown>,
+  result: "success" | "denied" | "error" = "success",
+): Promise<boolean> {
+  const { error } = await sb.from("audit_events").insert({
+    user_id: userId,
+    action,
+    actor: `agent:${ctx?.via ?? "unknown"}`,
+    category: "other",
+    details,
+    result,
+  });
+  return !error;
+}
+
+export async function listSkills(
+  sb: Client,
+  userId: string,
+  args: { query?: unknown; limit?: unknown },
+): Promise<ActionResult> {
+  let q = sb.from("jackie_skills").select(SKILL_LIST_COLUMNS).eq("user_id", userId).eq("status", "active");
+  const query = typeof args.query === "string" ? filterSafe(args.query) : "";
+  if (query) q = q.or(`name.ilike.%${query}%,title.ilike.%${query}%,description.ilike.%${query}%`);
+  const { data, error } = await q.order("name").limit(clampLimit(args.limit, 50));
+  return error ? fail(error.message) : ok(data ?? []);
+}
+
+export async function getSkill(
+  sb: Client,
+  userId: string,
+  args: { name?: unknown },
+  ctx?: ActionContext,
+): Promise<ActionResult> {
+  const name = typeof args.name === "string" ? args.name.trim() : "";
+  if (!name) return fail("name is required — list_skills shows what there is");
+  const { data, error } = await sb
+    .from("jackie_skills")
+    .select("name,title,description,body,updated_at")
+    .eq("user_id", userId)
+    .eq("name", name)
+    .eq("status", "active")
+    .limit(1);
+  if (error) return fail(error.message);
+  if (!data?.length) return fail(`No active skill called "${name}". list_skills shows the ones you can use.`);
+  const logged = await recordAgentActivity(sb, userId, ctx, "skill.load", { name });
+  return ok(logged ? data[0] : { ...data[0], activity_logged: false });
+}
+
+export async function proposeSkill(
+  sb: Client,
+  userId: string,
+  args: { name?: unknown; title?: unknown; description?: unknown; body?: unknown },
+  ctx?: ActionContext,
+): Promise<ActionResult> {
+  const problem = validateSkill(args);
+  if (problem) return fail(problem);
+  const { data, error } = await sb
+    .from("jackie_skills")
+    .insert({
+      user_id: userId,
+      name: args.name,
+      title: (args.title as string).trim(),
+      description: (args.description as string).trim(),
+      body: (args.body as string).trim(),
+      status: "proposed",
+      proposed_by: `agent:${ctx?.via ?? "unknown"}`,
+    })
+    .select("name,title,status");
+  if (error) {
+    return fail(/duplicate key|unique/i.test(error.message)
+      ? `A skill called "${args.name}" already exists or is waiting for review. Propose it under another name.`
+      : error.message);
+  }
+  await recordAgentActivity(sb, userId, ctx, "skill.propose", { name: args.name });
+  return ok({ ...data?.[0], note: "Proposed. It stays off until the person approves it on the Skills page." });
+}
+
+interface StoredTool {
+  name: string;
+  description: string;
+  params: ToolParam[];
+  steps: ToolStep[];
+}
+
+export async function listCustomTools(sb: Client, userId: string, _args: Record<string, unknown>): Promise<ActionResult> {
+  const { data, error } = await sb
+    .from("jackie_custom_tools")
+    .select(TOOL_COLUMNS)
+    .eq("user_id", userId)
+    .eq("status", "active")
+    .order("name")
+    .limit(100);
+  if (error) return fail(error.message);
+  return ok(((data ?? []) as StoredTool[]).map((t) => ({
+    name: t.name,
+    description: t.description,
+    params: t.params,
+    deletes: isDestructive(t.steps),
+    signature: toolSignature(t),
+  })));
+}
+
+export async function proposeTool(
+  sb: Client,
+  userId: string,
+  args: { name?: unknown; description?: unknown; params?: unknown; steps?: unknown },
+  ctx?: ActionContext,
+): Promise<ActionResult> {
+  const spec = { ...args, params: args.params ?? [] };
+  const problem = validateToolSpec(spec);
+  if (problem) return fail(problem);
+  const { data, error } = await sb
+    .from("jackie_custom_tools")
+    .insert({
+      user_id: userId,
+      name: spec.name,
+      description: (spec.description as string).trim(),
+      params: spec.params,
+      steps: spec.steps,
+      status: "proposed",
+      proposed_by: `agent:${ctx?.via ?? "unknown"}`,
+    })
+    .select("name,status");
+  if (error) {
+    return fail(/duplicate key|unique/i.test(error.message)
+      ? `A tool called "${args.name}" already exists or is waiting for review. Propose it under another name.`
+      : error.message);
+  }
+  await recordAgentActivity(sb, userId, ctx, "tool.propose", { name: spec.name });
+  return ok({ ...data?.[0], note: "Proposed. It stays off until the person approves it on the Skills page." });
+}
+
+type StepExecutor = (sb: Client, userId: string, args: Record<string, unknown>) => Promise<ActionResult>;
+
+/** What a custom tool's steps run — the same functions agents call one at a time. */
+const STEP_EXECUTORS: Record<CustomToolAction, StepExecutor> = {
+  list_tasks: listTasks,
+  create_task: createTask,
+  update_task: updateTask,
+  delete_task: deleteTask,
+  search_memory: searchMemory,
+  remember_fact: rememberFact,
+  forget_fact: forgetFact,
+  list_conversations: listConversations,
+  read_conversation: readConversation,
+  create_conversation: createConversation,
+};
+
+export interface ToolRunStep {
+  step: number;
+  action: string;
+  args: Record<string, unknown>;
+  ok: boolean;
+  result?: unknown;
+  error?: string;
+}
+
+/**
+ * Runs an active custom tool, step by step, stopping at the first failure.
+ *
+ * A failure part-way names the step, and lists the steps that did run: an agent
+ * told only "failed" would retry from the top and do the first steps twice.
+ */
+export async function runCustomTool(
+  sb: Client,
+  userId: string,
+  args: { name?: unknown; args?: unknown },
+  ctx?: ActionContext,
+): Promise<ActionResult> {
+  const name = typeof args.name === "string" ? args.name.trim() : "";
+  if (!name) return fail("name is required — list_custom_tools shows what there is");
+  const callArgs = args.args === undefined || args.args === null ? {} : args.args;
+  if (typeof callArgs !== "object" || Array.isArray(callArgs)) return fail("args must be an object");
+
+  const { data, error } = await sb
+    .from("jackie_custom_tools")
+    .select(TOOL_COLUMNS)
+    .eq("user_id", userId)
+    .eq("name", name)
+    .eq("status", "active")
+    .limit(1);
+  if (error) return fail(error.message);
+  const tool = (data?.[0] ?? null) as StoredTool | null;
+  if (!tool) return fail(`No active tool called "${name}". list_custom_tools shows the ones you can run.`);
+
+  // Stored rows passed the database's checks; this catches one edited since in
+  // a way the checks allow but a run cannot honour (a placeholder to nowhere).
+  const broken = validateToolSpec(tool);
+  if (broken) return fail(`The tool "${name}" cannot run as saved: ${broken} Fix it on the Skills page.`);
+
+  if (isDestructive(tool.steps) && !ctx?.allowDestructive) {
+    await recordAgentActivity(sb, userId, ctx, "tool.run", { name, refused: "deletes not allowed" }, "denied");
+    return fail(`"${name}" deletes things, and this agent is not allowed to delete. Turn on Allow deletes for it, or run the steps yourself.`);
+  }
+  const bad = checkArgs(tool.params, callArgs as Record<string, unknown>);
+  if (bad) return fail(bad);
+
+  // Every declared parameter is in scope, so an optional one left out reads as
+  // "not given" rather than as a reference to nothing.
+  const params: Record<string, unknown> = Object.fromEntries(tool.params.map((p) => [p.name, (callArgs as Record<string, unknown>)[p.name]]));
+  const results: unknown[] = [];
+  const ran: ToolRunStep[] = [];
+  for (const [i, step] of tool.steps.entries()) {
+    const resolved = resolveTemplate(step.args ?? {}, { params, steps: results });
+    if (!resolved.ok) {
+      ran.push({ step: i + 1, action: step.action, args: {}, ok: false, error: resolved.error });
+      break;
+    }
+    const stepArgs = resolved.value as Record<string, unknown>;
+    const res = await STEP_EXECUTORS[step.action](sb, userId, stepArgs);
+    ran.push(res.ok
+      ? { step: i + 1, action: step.action, args: stepArgs, ok: true, result: res.data }
+      : { step: i + 1, action: step.action, args: stepArgs, ok: false, error: res.error });
+    if (!res.ok) break;
+    results.push(res.data);
+  }
+
+  const failed = ran.find((s) => !s.ok);
+  await recordAgentActivity(sb, userId, ctx, "tool.run", { name, steps: ran.length, failed_step: failed?.step ?? null }, failed ? "error" : "success");
+  if (failed) {
+    const done = ran.filter((s) => s.ok).map((s) => `${s.step} (${s.action})`);
+    return fail(
+      `Step ${failed.step} (${failed.action}) of "${name}" failed: ${failed.error}. `
+      + (done.length ? `Steps ${done.join(", ")} already ran and were not undone.` : "Nothing had run before it."),
+    );
+  }
+  return ok({ tool: name, steps: ran });
 }

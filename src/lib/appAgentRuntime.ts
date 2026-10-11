@@ -46,7 +46,12 @@ export function modelCaller(spec: AgentModelSpec, signal?: AbortSignal) {
   };
 }
 
-type Executor = (sb: typeof supabase, userId: string, args: Record<string, unknown>) => Promise<ActionResult>;
+type Executor = (
+  sb: typeof supabase,
+  userId: string,
+  args: Record<string, unknown>,
+  ctx: actions.ActionContext,
+) => Promise<ActionResult>;
 
 const EXECUTORS: Record<string, Executor> = {
   list_tasks: actions.listTasks,
@@ -58,14 +63,26 @@ const EXECUTORS: Record<string, Executor> = {
   forget_fact: actions.forgetFact,
   list_conversations: actions.listConversations,
   read_conversation: actions.readConversation,
+  list_skills: actions.listSkills,
+  get_skill: actions.getSkill,
+  propose_skill: actions.proposeSkill,
+  list_custom_tools: actions.listCustomTools,
+  run_custom_tool: actions.runCustomTool,
+  propose_tool: actions.proposeTool,
 };
 
 /** Runs one action as whoever is signed in. Refuses rather than acting anonymously. */
-export async function executeAsUser(tool: string, args: Record<string, unknown>): Promise<ActionResult> {
+export async function executeAsUser(
+  tool: string,
+  args: Record<string, unknown>,
+  ctx: { allowDestructive?: boolean } = {},
+): Promise<ActionResult> {
   const run = EXECUTORS[tool];
   if (!run) return { ok: false, error: `There is no action called "${tool}".` };
   const { data } = await supabase.auth.getUser();
   const userId = data.user?.id;
   if (!userId) return { ok: false, error: "You are signed out, so the agent cannot act on your app. Sign in and run it again." };
-  return run(supabase, userId, args);
+  // An in-app operator's own Allow deletes reaches its custom tools too: a tool
+  // with a deleting step is refused when deletes were not allowed.
+  return run(supabase, userId, args, { via: "agent-lab", allowDestructive: ctx.allowDestructive ?? false });
 }

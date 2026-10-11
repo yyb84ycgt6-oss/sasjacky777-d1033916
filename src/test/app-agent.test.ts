@@ -70,7 +70,7 @@ describe("running an acting agent", () => {
     const execute = vi.fn(async () => ({ ok: true as const, data: { id: "t1", title: "Ship v2" } }));
     const run = await runAppAgent({ system: "You operate the app.", prompt: "add a task", callModel, execute });
 
-    expect(execute).toHaveBeenCalledWith("create_task", { title: "Ship v2" });
+    expect(execute).toHaveBeenCalledWith("create_task", { title: "Ship v2" }, { allowDestructive: false });
     expect(run).toMatchObject({ ok: true, answer: "Created the task." });
     expect(run.steps).toHaveLength(1);
     // The second call carried the result, so the answer is grounded in it.
@@ -93,7 +93,7 @@ describe("running an acting agent", () => {
     const { callModel } = scripted(action("delete_task", { id: "t1" }), "Deleted.");
     const execute = vi.fn(async () => ({ ok: true as const, data: { deleted: { id: "t1" } } }));
     await runAppAgent({ system: "", prompt: "delete t1", callModel, execute, allowDestructive: true });
-    expect(execute).toHaveBeenCalledWith("delete_task", { id: "t1" });
+    expect(execute).toHaveBeenCalledWith("delete_task", { id: "t1" }, { allowDestructive: true });
   });
 
   it("hands an unknown action back as an error instead of running anything", async () => {
