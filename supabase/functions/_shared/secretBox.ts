@@ -67,6 +67,13 @@ export async function open(key: CryptoKey, box: { iv: string; ciphertext: string
 export function checkSecretValue(secret: unknown): string | null {
   if (typeof secret !== "string" || !secret.trim()) return "The secret is empty.";
   if (secret.length > 4096) return "The secret is longer than 4,096 characters.";
+  // A header carries bytes, not text: a zero-width space or a curly quote
+  // pasted with the key makes every call fail in fetch, which then reads to
+  // the person as the service being down. Said here, where they can fix it.
+  // eslint-disable-next-line no-control-regex
+  if (/[^\x20-\x7E]/.test(secret.replace(/[\x00-\x1F\x7F]/g, ""))) {
+    return "The key contains a character a request cannot carry — often an invisible one copied along with it. Paste it again, or type it.";
+  }
   // eslint-disable-next-line no-control-regex
   if (/[\u0000-\u001f\u007f]/.test(secret)) return "The secret contains a line break or control character.";
   return null;

@@ -401,7 +401,7 @@ as_user "the person's own session keeps its actor" "$A" "" \
   "actor=agent:agent-lab"
 
 # --- connections (docs/CONNECTIONS.md): the T-numbers name the threat each probe covers ---
-OPS='[{"name":"list","description":"d","method":"GET","path":"/x"}]'
+OPS='[{"name":"list","description":"d","method":"GET","path":"/x","params":[]}]'
 conn() { # base_url | auth_type | operations | status | agents_may_write
   echo "INSERT INTO public.jackie_connections (user_id, name, title, description, base_url, auth_type, operations, status, agents_may_write) VALUES ('$A', 'gh', 't', 'd', '$1', '$2', '$3', '$4', $5)"
 }
@@ -413,7 +413,7 @@ as_user "agent proposes a connection" "$A" "$AGENT" "$GH RETURNING 'status=' || 
 as_user "agent proposes one with writes on (T3)" "$A" "$AGENT" \
   "$(conn https://api.github.com bearer "$OPS" proposed true);" "cannot propose a connection with writes"
 as_user "agent proposes one taking app data (T3)" "$A" "$AGENT_JSON" \
-  "$(conn https://api.github.com bearer '[{"name":"post","description":"d","method":"POST","path":"/x","accepts_app_data":true}]' proposed false);" \
+  "$(conn https://api.github.com bearer '[{"name":"post","description":"d","method":"POST","path":"/x","params":[],"accepts_app_data":true}]' proposed false);" \
   "cannot propose a connection with writes"
 as_user "agent writes an active connection" "$A" "$AGENT" "$GH_ACTIVE;" "can only propose"
 as_user "agent switches its own proposal on" "$A" "" \
@@ -432,11 +432,35 @@ as_user "a connection over plain http (T2)" "$A" "" \
 as_user "a connection with a password in its URL (T2)" "$A" "" \
   "$(conn https://user:pw@api.github.com none "$OPS" active false);" "violates check constraint"
 as_user "an operation path that climbs out (T2)" "$A" "" \
-  "$(conn https://api.github.com none '[{"name":"up","description":"d","method":"GET","path":"/a/../admin"}]' active false);" \
+  "$(conn https://api.github.com none '[{"name":"up","description":"d","method":"GET","path":"/a/../admin","params":[]}]' active false);" \
   "violates check constraint"
 as_user "an operation path with an encoded slash (T2)" "$A" "" \
-  "$(conn https://api.github.com none '[{"name":"up","description":"d","method":"GET","path":"/a%2F..%2Fadmin"}]' active false);" \
+  "$(conn https://api.github.com none '[{"name":"up","description":"d","method":"GET","path":"/a%2F..%2Fadmin","params":[]}]' active false);" \
   "violates check constraint"
+as_user "agent proposes app data as the string \"false\" (T3)" "$A" "$AGENT" \
+  "$(conn https://api.github.com bearer '[{"name":"post","description":"d","method":"POST","path":"/x","params":[],"accepts_app_data":"false"}]' proposed false);" \
+  "cannot propose a connection with writes or app data"
+as_user "app data as the string \"false\", from the person's own session" "$A" "" \
+  "$(conn https://api.github.com bearer '[{"name":"post","description":"d","method":"POST","path":"/x","params":[],"accepts_app_data":"false"}]' active false);" \
+  "violates check constraint"
+as_user "a parameter typed object, which would pass uncapped (T3)" "$A" "" \
+  "$(conn https://api.github.com none '[{"name":"q","description":"d","method":"POST","path":"/x","params":[{"name":"data","in":"body","type":"object"}]}]' active false);" \
+  "violates check constraint"
+as_user "a parameter whose cap is not a number (T3)" "$A" "" \
+  "$(conn https://api.github.com none '[{"name":"q","description":"d","method":"GET","path":"/x","params":[{"name":"q","in":"query","type":"string","maxLength":"none"}]}]' active false);" \
+  "violates check constraint"
+as_user "an operation with no parameter list" "$A" "" \
+  "$(conn https://api.github.com none '[{"name":"q","description":"d","method":"GET","path":"/x"}]' active false);" \
+  "violates check constraint"
+as_user "an operation description that is not text" "$A" "" \
+  "$(conn https://api.github.com none '[{"name":"q","description":{"x":1},"method":"GET","path":"/x","params":[]}]' active false);" \
+  "violates check constraint"
+as_user "the key in the Host header (T2)" "$A" "" \
+  "INSERT INTO public.jackie_connections (user_id, name, title, description, base_url, auth_type, auth_name, operations) VALUES ('$A', 'gh', 't', 'd', 'https://api.github.com', 'header', 'Host', '$OPS');" \
+  "violates check constraint"
+as_user "the key as ?api_key=" "$A" "" \
+  "INSERT INTO public.jackie_connections (user_id, name, title, description, base_url, auth_type, auth_name, operations) VALUES ('$A', 'nasa', 't', 'd', 'https://api.nasa.gov', 'query', 'api_key', '$OPS') RETURNING 'saved=' || auth_name;" \
+  "saved=api_key"
 as_user "a header key with no header name" "$A" "" \
   "$(conn https://api.github.com header "$OPS" active false);" "violates check constraint"
 as_user "another account reads the connections" "$B" "" \

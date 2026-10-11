@@ -119,32 +119,51 @@ function asArgs(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
 
-/** Finds the one action a reply asks for, if any. */
+/**
+ * Finds the one action a reply asks for, if any.
+ *
+ * Only an explicit action block that ends the reply is an action: a
+ * ```action fence, or a Hermes <tool_call>. A ```json fence, or a block with
+ * text after it, never is — an operator that shows the person a connection's
+ * answer (which may hold {"tool": "remember_fact", …} written by whoever runs
+ * that service) would otherwise have the parser act on what it only quoted.
+ * The model never decided to act; the parser would have decided for it.
+ */
 export function parseAction(reply: string): ParsedAction {
-  const text = stripThinking(reply);
-  const fenced = /```(?:action|json)?\s*\n?([\s\S]*?)```/i.exec(text);
-  const hermes = /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/i.exec(text);
-  const raw = hermes?.[1] ?? fenced?.[1];
-  if (!raw) return { kind: "none" };
+  const text = stripThinking(reply).trimEnd();
+  const lower = text.toLowerCase();
+  let raw: string | null = null;
+  let hermes = false;
+  if (lower.endsWith("</tool_call>")) {
+    const open = lower.lastIndexOf("<tool_call>");
+    if (open >= 0) {
+      raw = text.slice(open + "<tool_call>".length, text.length - "</tool_call>".length);
+      hermes = true;
+    }
+  } else if (text.endsWith("```")) {
+    const open = lower.lastIndexOf("```action", text.length - 3);
+    if (open >= 0 && !text.slice(open + 3, text.length - 3).includes("```")) {
+      raw = text.slice(open + "```action".length, text.length - 3);
+    }
+  }
+  if (raw === null) {
+    // An action block that is not the last thing in the reply is named, so
+    // the model can put it right, rather than run or silently dropped.
+    return /```action|<tool_call>/i.test(text)
+      ? { kind: "malformed", reason: "an action block must be the last thing in your reply, with nothing after it" }
+      : { kind: "none" };
+  }
 
   let body: unknown;
   try {
     body = JSON.parse(raw.trim());
   } catch {
-    // A fenced block that is not JSON is ordinary prose with code in it, not
-    // an attempted action — unless it was explicitly marked as one.
-    return hermes || /```action/i.test(text)
-      ? { kind: "malformed", reason: "the action block is not valid JSON" }
-      : { kind: "none" };
+    return { kind: "malformed", reason: "the action block is not valid JSON" };
   }
   if (!body || typeof body !== "object") return { kind: "malformed", reason: "the action is not an object" };
   const obj = body as Record<string, unknown>;
-  const tool = typeof obj.tool === "string" ? obj.tool : typeof obj.name === "string" ? obj.name : "";
-  if (!tool) {
-    return fenced && !hermes && !/```action/i.test(text)
-      ? { kind: "none" } // a JSON code sample, not an action
-      : { kind: "malformed", reason: 'the action names no "tool"' };
-  }
+  const tool = typeof obj.tool === "string" ? obj.tool : hermes && typeof obj.name === "string" ? obj.name : "";
+  if (!tool) return { kind: "malformed", reason: 'the action names no "tool"' };
   const args = asArgs(obj.args ?? obj.arguments);
   if (!args) return { kind: "malformed", reason: `the arguments for ${tool} are not an object` };
   return { kind: "action", tool, args };

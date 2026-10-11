@@ -19,11 +19,11 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
-  checkArgs, isDestructive, resolveTemplate, toolSignature, validateSkill, validateToolSpec,
+  checkArgs, feedsEarlierResult, isDestructive, resolveTemplate, toolSignature, validateSkill, validateToolSpec,
   type CustomToolAction, type ToolParam, type ToolStep,
 } from "./customTools";
 import {
-  isWrite, operationSignature, validateConnectionSpec, type ConnectionOperation,
+  isWrite, normalizeBaseUrl, operationSignature, paramsOf, validateConnectionSpec, type ConnectionOperation,
 } from "../../supabase/functions/_shared/connections";
 
 /** The values the database's CHECK constraints accept. Anything else is refused there. */
@@ -662,9 +662,9 @@ export async function runCustomTool(
     // out; the function refuses that unless the person marked the operation
     // as accepting it (CONNECTIONS.md, T3). Read off the stored step, which no
     // caller's arguments can change.
-    // `\b`, not `\.`: validateToolSpec refuses a bare {{steps}} today, but this
-    // gate must not depend on that staying true.
-    const carriesAppData = step.action === "call_connection" && /\{\{\s*steps\b/.test(JSON.stringify(step.args ?? {}));
+    // Read with the resolver's own pattern: a regex over the JSON text missed
+    // {{\nsteps.0}}, which the resolver fills all the same.
+    const carriesAppData = step.action === "call_connection" && feedsEarlierResult(step);
     const res = await STEP_EXECUTORS[step.action](sb, userId, stepArgs, { ...ctx, carriesAppData });
     ran.push(res.ok
       ? { step: i + 1, action: step.action, args: stepArgs, ok: true, result: res.data }
@@ -735,6 +735,7 @@ export async function askJackie(
   const message = typeof args.message === "string" ? args.message.trim() : "";
   if (!message) return fail("message is required");
   if (message.length > 20_000) return fail("message is longer than 20,000 characters");
+  const speaker = ctx.via === "mcp" ? "An agent (MCP)" : ctx.via === "agent-lab" ? "An Agent Lab operator" : null;
   const engine = (args.engine ?? "cloud") as AskEngine;
   if (!(engine in ASK_ENGINES)) return fail(`engine must be one of: ${Object.keys(ASK_ENGINES).join(", ")}`);
   const model = typeof args.model === "string" && args.model.trim() ? args.model.trim().slice(0, 100) : undefined;
@@ -749,7 +750,12 @@ export async function askJackie(
       .filter((m) => m.role === "user" || m.role === "assistant")
       .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
   } else {
-    const title = typeof args.title === "string" && args.title.trim() ? args.title : message.slice(0, 60);
+    // An agent's words are titled as an agent's: a title taken from them
+    // would put whatever the agent was handed into the sidebar as the
+    // person's own topic.
+    const title = typeof args.title === "string" && args.title.trim()
+      ? args.title
+      : speaker ? `${speaker}: ${message.slice(0, 48)}` : message.slice(0, 60);
     const created = await createConversation(sb, userId, { title });
     if (!created.ok) return fail(created.error);
     conversationId = (created.data as { id: string }).id;
@@ -785,7 +791,10 @@ export async function askJackie(
 
   const answer = await readSseText(resp);
   if (!answer.ok) return fail(`${fn}: ${answer.error}`);
-  const savedQ = await saveMessage(sb, userId, conversationId, "user", message);
+  // Saved with who sent it. Without the mark, an agent's message — and any
+  // outside text it carried — reads in the person's chat, and to every agent
+  // that later reads the conversation, as the person's own words.
+  const savedQ = await saveMessage(sb, userId, conversationId, "user", speaker ? `(${speaker} sent this.)\n\n${message}` : message);
   const savedA = savedQ.ok ? await saveMessage(sb, userId, conversationId, "assistant", answer.data) : savedQ;
   return ok({
     conversation_id: conversationId,
@@ -814,21 +823,28 @@ export async function listConnections(sb: Client, userId: string, _args: Record<
     .order("name")
     .limit(100);
   if (error) return fail(error.message);
-  return ok(((data ?? []) as StoredConnectionRow[]).map((c) => ({
-    name: c.name,
-    title: c.title,
-    description: c.description,
-    host: new URL(c.base_url).host,
-    agents_may_write: c.agents_may_write,
-    operations: c.operations.map((o) => ({
-      name: o.name,
-      description: o.description,
-      method: o.method,
-      writes: isWrite(o.method),
-      params: o.params,
-      signature: operationSignature(c.name, o),
-    })),
-  })));
+  // A row the validator refuses is listed as broken, with the reason, rather
+  // than allowed to throw and take list_connections away from every agent.
+  return ok(((data ?? []) as StoredConnectionRow[]).map((c) => {
+    const broken = validateConnectionSpec({ ...c, auth_type: "none" });
+    if (broken) return { name: c.name, broken: `Cannot be used as saved: ${broken} The person can fix it on the Skills page.` };
+    return {
+      name: c.name,
+      title: c.title,
+      description: c.description,
+      host: new URL(c.base_url).host,
+      agents_may_write: c.agents_may_write,
+      operations: c.operations.map((o) => ({
+        name: o.name,
+        description: o.description,
+        method: o.method,
+        writes: isWrite(o.method),
+        accepts_app_data: o.accepts_app_data === true,
+        params: paramsOf(o),
+        signature: operationSignature(c.name, o),
+      })),
+    };
+  }));
 }
 
 /**
@@ -895,9 +911,9 @@ export async function proposeConnection(
       name: spec.name,
       title: (spec.title as string).trim(),
       description: (spec.description as string).trim(),
-      base_url: spec.base_url,
+      base_url: normalizeBaseUrl(spec.base_url as string),
       auth_type: spec.auth_type,
-      auth_name: spec.auth_name ?? null,
+      auth_name: spec.auth_type === "header" || spec.auth_type === "query" ? spec.auth_name : null,
       operations,
       agents_may_write: false,
       status: "proposed",

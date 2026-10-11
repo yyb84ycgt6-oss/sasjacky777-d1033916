@@ -25,6 +25,8 @@ import {
 import { ConnectionSummary, ConnectionsTab } from "@/components/skills/ConnectionsTab";
 import { Revealed } from "@/components/skills/Revealed";
 import { ParamInputs, typedArgs } from "@/components/skills/ParamInputs";
+import { feedsEarlierResult } from "@/lib/customTools";
+import { isWrite } from "../../supabase/functions/_shared/connections";
 import type { ActionResult } from "@/lib/appActions";
 
 /**
@@ -161,7 +163,7 @@ export default function JackieSkills() {
             <Proposal key={t.id} kind="tool" title={t.name} name={t.name} by={t.proposed_by} busy={busy}
               onApprove={() => act("Approving", () => activate("jackie_custom_tools", t))}
               onReject={() => act("Rejecting", () => remove("jackie_custom_tools", t.id))}>
-              <ToolSummary tool={t} />
+              <ToolSummary tool={t} connections={connections} />
             </Proposal>
           ))}
           {pendingConnections.map((c) => (
@@ -181,7 +183,7 @@ export default function JackieSkills() {
           <SkillsTab skills={skills.filter((s) => s.status !== "proposed")} busy={busy} act={act} />
         </TabsContent>
         <TabsContent value="tools">
-          <ToolsTab tools={tools.filter((t) => t.status !== "proposed")} busy={busy} act={act} />
+          <ToolsTab tools={tools.filter((t) => t.status !== "proposed")} busy={busy} act={act} connections={connections} />
         </TabsContent>
         <TabsContent value="connections">
           <ConnectionsTab connections={connections.filter((c) => c.status !== "proposed")} busy={busy} act={act} />
@@ -226,7 +228,10 @@ function Proposal({
  * parameter with its description (list_custom_tools sends them verbatim), and
  * every step, labelled the way templates refer to it.
  */
-function ToolSummary({ tool }: { tool: { name: string; description: string; params: ToolParam[]; steps: ToolSpec["steps"] } }) {
+function ToolSummary({ tool, connections = [] }: {
+  tool: { name: string; description: string; params: ToolParam[]; steps: ToolSpec["steps"] };
+  connections?: ConnectionRow[];
+}) {
   const params = Array.isArray(tool.params) ? tool.params : [];
   const steps = Array.isArray(tool.steps) ? tool.steps : [];
   return (
@@ -254,11 +259,34 @@ function ToolSummary({ tool }: { tool: { name: string; description: string; para
             <span className="text-xs text-muted-foreground">Step {i + 1} <code className="text-[10px]">steps.{i}</code></span>{" "}
             <span className="font-mono">{s.action}</span>{" "}
             <Revealed text={JSON.stringify(s.args ?? {})} className="font-mono text-xs text-muted-foreground" />
+            {s.action === "call_connection" && <ConnectionStepNote step={s} connections={connections} />}
           </li>
         ))}
       </ol>
     </div>
   );
+}
+
+/**
+ * What a connection step does, in words: which service, which method, whether
+ * it writes, and whether it sends an earlier step's result. A tool reaches the
+ * same operations as the connection's own Run button, which says "It writes";
+ * the tool's card has to say it too.
+ */
+function ConnectionStepNote({ step, connections }: { step: ToolSpec["steps"][number]; connections: ConnectionRow[] }) {
+  const args = (step.args ?? {}) as Record<string, unknown>;
+  const name = typeof args.connection === "string" ? args.connection : null;
+  const opName = typeof args.operation === "string" ? args.operation : null;
+  const c = name && !name.includes("{{") ? connections.find((x) => x.name === name) : undefined;
+  const op = c && opName && !opName.includes("{{") ? c.operations.find((o) => o.name === opName) : undefined;
+  const sends = feedsEarlierResult(step);
+  const parts: string[] = [];
+  if (!c) parts.push(name && !name.includes("{{") ? `calls "${name}", which is not one of your connections` : "calls a connection chosen when it runs");
+  else if (!op) parts.push(`calls ${c.name}.${opName ?? "?"}, which that connection does not have`);
+  else parts.push(`calls ${c.name}.${op.name}: ${op.method} to ${new URL(c.base_url).host}${isWrite(op.method) ? " — writes" : ""}`);
+  if (sends) parts.push("sends an earlier step's result");
+  const warn = (op && isWrite(op.method)) || sends || !op;
+  return <span className={`block text-xs ${warn ? "text-destructive" : "text-muted-foreground"}`}>{parts.join("; ")}.</span>;
 }
 
 type Act = (label: string, op: () => Promise<ActionResult<unknown>>) => Promise<boolean>;
@@ -357,7 +385,7 @@ function SkillsTab({ skills, busy, act }: { skills: SkillRow[]; busy: boolean; a
 
 const EMPTY_TOOL: ToolSpec = { name: "", description: "", params: [], steps: [{ action: "list_tasks", args: {} }] };
 
-function ToolsTab({ tools, busy, act }: { tools: ToolRow[]; busy: boolean; act: Act }) {
+function ToolsTab({ tools, busy, act, connections }: { tools: ToolRow[]; busy: boolean; act: Act; connections: ConnectionRow[] }) {
   const [editing, setEditing] = useState<string | "new" | null>(null);
   const [draft, setDraft] = useState<ToolSpec>(EMPTY_TOOL);
   // Args are edited as JSON text; a step whose text does not parse is named, not dropped.
@@ -514,12 +542,12 @@ function ToolsTab({ tools, busy, act }: { tools: ToolRow[]; busy: boolean; act: 
                 </Button>
               </div>
             </div>
-            <ToolSummary tool={t} />
+            <ToolSummary tool={t} connections={connections} />
           </li>
         ))}
       </ul>
 
-      {trying && <TryTool tool={trying} onClose={() => setTrying(null)} />}
+      {trying && <TryTool tool={trying} onClose={() => setTrying(null)} connections={connections} />}
       <ConfirmDelete what={confirm ? `the tool “${confirm.name}”` : ""} open={!!confirm}
         onCancel={() => setConfirm(null)}
         onConfirm={() => { const t = confirm; setConfirm(null); if (t) act("Deleting", () => remove("jackie_custom_tools", t.id)); }} />
@@ -527,7 +555,7 @@ function ToolsTab({ tools, busy, act }: { tools: ToolRow[]; busy: boolean; act: 
   );
 }
 
-function TryTool({ tool, onClose }: { tool: ToolRow; onClose: () => void }) {
+function TryTool({ tool, onClose, connections }: { tool: ToolRow; onClose: () => void; connections: ConnectionRow[] }) {
   const [values, setValues] = useState<Record<string, string>>({});
   const [running, setRunning] = useState(false);
   const [outcome, setOutcome] = useState<ActionResult | null>(null);
@@ -540,9 +568,15 @@ function TryTool({ tool, onClose }: { tool: ToolRow; onClose: () => void }) {
           <AlertDialogTitle>Run {tool.name}</AlertDialogTitle>
           <AlertDialogDescription>
             This really runs it, as you — the same runner agents use.{isDestructive(tool.steps) ? " It deletes things." : ""}
+            {tool.steps.some((s) => s.action === "call_connection") && (
+              <span className="block mt-1 text-destructive">
+                It calls outside services, as you: a connection's "agents may only read" does not stop a run you start here.
+              </span>
+            )}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <div className="space-y-2">
+          <ToolSummary tool={tool} connections={connections} />
           <ParamInputs params={tool.params} values={values} onChange={setValues} />
           {"error" in parsed && <p className="text-xs text-destructive">{parsed.error}</p>}
           {outcome && (

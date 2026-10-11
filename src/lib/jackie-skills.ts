@@ -10,7 +10,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { runCustomTool, type ActionResult } from "@/lib/appActions";
 import { callEdgeFunction, describeEdgeFailure } from "@/lib/edgeFunction";
-import { validateConnectionSpec, type ConnectionSpec } from "../../supabase/functions/_shared/connections";
+import { normalizeBaseUrl, validateConnectionSpec, type ConnectionSpec } from "../../supabase/functions/_shared/connections";
 import {
   validateSkill, validateToolSpec, type SkillSpec, type ToolParam, type ToolSpec, type ToolStep,
 } from "@/lib/customTools";
@@ -169,7 +169,7 @@ export async function saveConnection(spec: ConnectionSpec, id?: string): Promise
     name: spec.name,
     title: spec.title.trim(),
     description: spec.description.trim(),
-    base_url: spec.base_url.trim(),
+    base_url: normalizeBaseUrl(spec.base_url),
     auth_type: spec.auth_type,
     auth_name: spec.auth_type === "header" || spec.auth_type === "query" ? spec.auth_name : null,
     operations: spec.operations.map((o) => ({ ...o, params: o.params ?? [] })),
@@ -186,7 +186,7 @@ export const setAgentsMayWrite = (id: string, on: boolean) =>
 
 /** The person's mark that a tool may feed app data into this operation (T3). */
 export async function setAcceptsAppData(c: ConnectionRow, operation: string, on: boolean): Promise<ActionResult<null>> {
-  const operations = c.operations.map((o) => (o.name === operation ? { ...o, accepts_app_data: on } : o));
+  const operations = c.operations.map((o) => (o.name === operation ? { ...o, accepts_app_data: on === true } : o));
   return run(() => db.from("jackie_connections").update({ operations }).eq("id", c.id));
 }
 

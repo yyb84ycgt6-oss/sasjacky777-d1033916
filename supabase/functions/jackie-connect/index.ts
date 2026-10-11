@@ -15,9 +15,9 @@
  * carries CORS headers, failures included (rule 3).
  */
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { adminClient, consumeQuota, json, preflight, requireUser } from "../_shared/entitlement.ts";
+import { adminClient, consumeQuota, corsHeaders, json, preflight, requireUser } from "../_shared/entitlement.ts";
 import {
-  buildRequest, checkCallArgs, CONNECTION_LIMITS, isPublicAddress, isWrite, redact, wrapResponse,
+  buildRequest, checkCallArgs, CONNECTION_LIMITS, isPublicAddress, isWrite, redact, validateConnectionSpec, wrapResponse,
   type ConnectionOperation,
 } from "../_shared/connections.ts";
 import { checkSecretValue, importKey, open, seal, SecretBoxError } from "../_shared/secretBox.ts";
@@ -27,6 +27,8 @@ const FUNCTION_NAME = "jackie-connect";
 interface StoredConnection {
   id: string;
   name: string;
+  title: string;
+  description: string;
   base_url: string;
   auth_type: "none" | "bearer" | "header" | "query";
   auth_name: string | null;
@@ -184,7 +186,9 @@ serve(async (req) => {
     const connectionName = typeof p.connection === "string" ? p.connection.trim() : "";
     const operationName = typeof p.operation === "string" ? p.operation.trim() : "";
     const args = (p.args && typeof p.args === "object" && !Array.isArray(p.args) ? p.args : {}) as Record<string, unknown>;
-    const via = p.via === "agent-lab" ? "agent-lab" : clientId ? "mcp" : "app";
+    // The verified token decides first: an external agent naming itself
+    // "agent-lab" would otherwise have its calls recorded as an operator's.
+    const via = clientId ? "mcp" : p.via === "agent-lab" ? "agent-lab" : "app";
     const actor = via === "app" ? "person" : `agent:${via}`;
     const isAgent = via !== "app";
     if (!connectionName || !operationName) return json({ error: "Name the connection and the operation." }, 400);
@@ -194,12 +198,19 @@ serve(async (req) => {
 
     const { data: row, error: rowError } = await admin
       .from("jackie_connections")
-      .select("id,name,base_url,auth_type,auth_name,operations,agents_may_write")
+      .select("id,name,title,description,base_url,auth_type,auth_name,operations,agents_may_write")
       .eq("user_id", userId).eq("name", connectionName).eq("status", "active")
       .maybeSingle();
     if (rowError) return json({ error: `Could not read the connection: ${rowError.message}` }, 500);
     const conn = row as StoredConnection | null;
     if (!conn) return json({ error: `No active connection called "${connectionName}". list_connections shows the ones you can use.` }, 404);
+    // Approval only flips a status, and the database's checks can lag the
+    // validator's: a stored row is held to the same rules as a new one before
+    // anything is sent on its behalf.
+    const broken = validateConnectionSpec(conn);
+    if (broken) {
+      return json({ error: `"${connectionName}" cannot be used as saved: ${broken} The person can fix it on the Skills page.`, code: "CONNECTION_INVALID" }, 409);
+    }
 
     const op = conn.operations.find((o) => o.name === operationName);
     if (!op) {
@@ -217,7 +228,8 @@ serve(async (req) => {
         code: "WRITE_NOT_ALLOWED",
       }, 403);
     }
-    if (p.carries_app_data === true && !op.accepts_app_data) {
+    // Only a JSON true counts: a string "false" is truthy, and this is a grant.
+    if (p.carries_app_data === true && op.accepts_app_data !== true) {
       await record(userId, actor, "connection.call", { connection: connectionName, operation: operationName, refused: "app data not accepted" }, "denied");
       return json({
         error: `${connectionName}.${operationName} is not marked as accepting app data, so a tool cannot feed it an earlier step's result. The person can mark it on the connection.`,
@@ -289,15 +301,39 @@ serve(async (req) => {
       }, 502);
     }
 
-    const { text, truncated } = await readCapped(upstream, CONNECTION_LIMITS.readBytes);
-    const clean = redact(text, secret);
-    const wrapped = wrapResponse(connectionName, operationName, upstream.status, truncated ? `${clean}… (stopped reading at ${CONNECTION_LIMITS.readBytes} bytes)` : clean);
-    await record(
-      userId, actor, "connection.call",
-      { connection: connectionName, operation: operationName, method: op.method, args: loggable(args), status: upstream.status, ms: Date.now() - started },
-      upstream.ok ? "success" : "error",
+    const callDetails = { connection: connectionName, operation: operationName, method: op.method, args: loggable(args), status: upstream.status };
+    // fetch resolves at the headers; the body can still stall past the
+    // timeout or break. The request has been delivered by then, so the call is
+    // recorded either way — a service that stalls its answers must not keep
+    // what was sent to it off the person's activity trail.
+    let read: { text: string; truncated: boolean };
+    try {
+      read = await readCapped(upstream, CONNECTION_LIMITS.readBytes);
+    } catch (e) {
+      const timedOut = (e as Error)?.name === "TimeoutError" || (e as Error)?.name === "AbortError";
+      await record(userId, actor, "connection.call", { ...callDetails, error: timedOut ? "answer timed out" : "answer unreadable", ms: Date.now() - started }, "error");
+      return json({
+        error: `The request reached ${url.hostname} (HTTP ${upstream.status}), but its answer ${timedOut ? `did not finish within ${CONNECTION_LIMITS.timeoutMs / 1000} seconds` : "could not be read"}.`
+          + (isWrite(op.method) ? " It writes, so it may have taken effect: check before calling it again." : ""),
+        code: timedOut ? "ANSWER_TIMEOUT" : "ANSWER_UNREADABLE",
+      }, timedOut ? 504 : 502);
+    }
+    const wrapped = wrapResponse(
+      connectionName, operationName, upstream.status,
+      read.truncated ? `${redact(read.text, secret)}… (stopped reading at ${CONNECTION_LIMITS.readBytes} bytes)` : read.text,
+      secret,
     );
-    return json(wrapped);
+    // Serialised before it is recorded as a success, so an answer that cannot
+    // be sent is not logged as one that was.
+    let answer: string;
+    try {
+      answer = JSON.stringify(wrapped);
+    } catch {
+      await record(userId, actor, "connection.call", { ...callDetails, error: "answer could not be serialised", ms: Date.now() - started }, "error");
+      return json({ error: `${url.hostname} answered, but its answer could not be passed on.`, code: "ANSWER_UNREADABLE" }, 502);
+    }
+    await record(userId, actor, "connection.call", { ...callDetails, ms: Date.now() - started }, upstream.ok ? "success" : "error");
+    return new Response(answer, { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (e) {
     console.error(`${FUNCTION_NAME}: unexpected failure`, e);
     return json({ error: e instanceof Error ? e.message : "Internal error" }, 500);

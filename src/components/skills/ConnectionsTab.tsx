@@ -267,7 +267,7 @@ export function ConnectionsTab({ connections, busy, act }: { connections: Connec
                     <span className="font-mono text-xs text-foreground">{o.name}</span>
                     <span className="text-xs text-muted-foreground">— {o.description}</span>
                     <label className="flex items-center gap-1 ml-auto text-xs text-muted-foreground" title="Whether a custom tool may feed app data (an earlier step's result) into this operation">
-                      <Switch checked={!!o.accepts_app_data} disabled={busy} aria-label={`${o.name} accepts app data`}
+                      <Switch checked={o.accepts_app_data === true} disabled={busy} aria-label={`${o.name} accepts app data`}
                         onCheckedChange={(on) => act("Saving", () => setAcceptsAppData(c, o.name, on))} />
                       accepts app data
                     </label>

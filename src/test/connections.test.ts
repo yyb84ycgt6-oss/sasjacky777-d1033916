@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildRequest, checkBaseUrl, checkCallArgs, isPublicAddress, operationSignature, redact, validateConnectionSpec,
-  wrapResponse, CONNECTION_LIMITS, type ConnectionOperation, type ConnectionSpec,
+  buildRequest, checkBaseUrl, checkCallArgs, isPublicAddress, normalizeBaseUrl, operationSignature, redact, validateConnectionSpec,
+  wrapResponse, BASE_URL_PATTERN, CONNECTION_LIMITS, FORBIDDEN_KEY_HEADERS, type ConnectionOperation, type ConnectionSpec,
 } from "../../supabase/functions/_shared/connections";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 import { checkSecretValue, importKey, open, seal } from "../../supabase/functions/_shared/secretBox";
 
 /**
@@ -196,5 +199,117 @@ describe("T4 — what comes back is marked as someone else's words", () => {
     const w = wrapResponse("x", "y", 200, "a".repeat(CONNECTION_LIMITS.returnChars + 10));
     expect(String(w.body)).toMatch(/\(truncated\)$/);
     expect(String(w.body).length).toBeLessThan(CONNECTION_LIMITS.returnChars + 20);
+  });
+});
+
+const SQL = readFileSync(
+  path.join(path.dirname(fileURLToPath(import.meta.url)), "../../supabase/migrations/20261011130000_jackie_connections.sql"),
+  "utf8",
+);
+
+describe("T1 — a key echoed back in another spelling is still the key", () => {
+  const key = "Ab3/xY+9kL==";
+
+  it("scrubs a key a service echoes back URL-encoded, in either case of hex", () => {
+    for (const echo of ["Ab3%2FxY%2B9kL%3D%3D", "Ab3%2fxY%2b9kL%3d%3d"]) {
+      const w = wrapResponse("svc", "op", 200, `{"next":"https://api.example.com/v1?apikey=${echo}&page=2"}`, key);
+      expect(JSON.stringify(w)).not.toMatch(/Ab3/);
+      expect(decodeURIComponent(JSON.stringify(w))).not.toContain(key);
+    }
+  });
+
+  it("scrubs a key a JSON encoder escaped, before parsing turns the escape back into the key", () => {
+    const w = wrapResponse("svc", "op", 401, '{"error":"bad key Ab3\\/xY+9kL=="}', key);
+    expect(JSON.stringify(w)).not.toContain("Ab3");
+    expect((w.body as { error: string }).error).toBe("bad key [redacted]");
+  });
+
+  it("scrubs a key used as a field name, and one inside plain text", () => {
+    const w = wrapResponse("svc", "op", 200, `{"${key}":1}`, key);
+    expect(JSON.stringify(w)).not.toContain("Ab3");
+    expect(redact(`echo: ${encodeURIComponent(key)}`, key)).toBe("echo: [redacted]");
+  });
+});
+
+describe("T7 — an answer cannot be bigger, deeper or stranger than the caps say", () => {
+  it("replaces control characters before capping, since each becomes six once escaped", () => {
+    const w = wrapResponse("svc", "op", 200, `a${String.fromCharCode(1)}b${String.fromCharCode(27)}c`);
+    expect(w.body).toBe("a?b?c");
+  });
+
+  it("keeps a deeply nested answer as text instead of parsing it", () => {
+    const deep = "[".repeat(200) + "]".repeat(200);
+    expect(typeof wrapResponse("svc", "op", 200, deep).body).toBe("string");
+    expect(wrapResponse("svc", "op", 200, "[[1]]").body).toEqual([[1]]);
+  });
+});
+
+describe("T2, T3 and T8 — a stored row is held to the same rules as a new one", () => {
+  it("refuses a parameter type the app never sends, which would pass any array uncapped", () => {
+    const op = { ...searchIssues, params: [{ name: "data", in: "query", type: "object" }] } as unknown as ConnectionOperation;
+    expect(checkCallArgs(op, { data: ["x".repeat(50_000)] })).toMatch(/type this app does not send/);
+    expect(validateConnectionSpec(github({ operations: [op] }))).toMatch(/must be a string, number or boolean/);
+  });
+
+  it("keeps the 2,000-character cap when a stored maxLength is not a number", () => {
+    const op = { ...searchIssues, params: [{ name: "q", in: "query", type: "string", maxLength: "none" }] } as unknown as ConnectionOperation;
+    expect(checkCallArgs(op, { q: "x".repeat(CONNECTION_LIMITS.stringParam + 1) })).toMatch(/longer than its limit of 2000/);
+  });
+
+  it("reads accepts_app_data only as a real true or false", () => {
+    const op = { ...createIssue, accepts_app_data: "false" } as unknown as ConnectionOperation;
+    expect(validateConnectionSpec(github({ operations: [op] }))).toMatch(/accepts_app_data must be true or false/);
+  });
+
+  it("will not read a missing parameter list as a reason to throw", () => {
+    const op = { ...searchIssues, params: undefined } as unknown as ConnectionOperation;
+    expect(() => operationSignature("github", op)).not.toThrow();
+    expect(checkCallArgs(op, { owner: "o" })).toMatch(/no parameter "owner"/);
+  });
+
+  it("refuses a fixed path a URL cannot carry as written, instead of failing every call later", () => {
+    expect(validateConnectionSpec(github({ operations: [{ ...searchIssues, path: "/repos/{owner}/{repo}/caf\u{e9}", }] }))).toMatch(/cannot carry as written/);
+    expect(validateConnectionSpec(github({ operations: [{ ...searchIssues, path: "/a b/{owner}/{repo}" }] }))).toMatch(/cannot carry as written/);
+    expect(checkBaseUrl("https://api.example.com//evil.example/")).toMatch(/cannot start with \/\//);
+  });
+
+  it("stores one spelling of a base URL, the one the database accepts", () => {
+    expect(normalizeBaseUrl(" https://API.Example.com:443/v1/ ")).toBe("https://api.example.com/v1");
+    expect(BASE_URL_PATTERN.test(normalizeBaseUrl("https://bücher.de/api"))).toBe(true);
+    expect(checkBaseUrl("https://API.Example.com:443/v1/")).toBeNull();
+  });
+
+  it("uses the same base URL pattern as the database", () => {
+    expect(SQL).toContain(`base_url ~ '${BASE_URL_PATTERN.source.replace(/\\\//g, "/")}'`);
+  });
+});
+
+describe("T6 — where the key may go", () => {
+  it("takes a query key named the way services name it", () => {
+    expect(validateConnectionSpec(github({ auth_type: "query", auth_name: "api_key" }))).toBeNull();
+    expect(validateConnectionSpec(github({ auth_type: "query", auth_name: "access_token" }))).toBeNull();
+    expect(validateConnectionSpec(github({ auth_type: "query", auth_name: "a&b" }))).toMatch(/query parameter/);
+  });
+
+  it("refuses a header that frames the request or that the function sets itself", () => {
+    for (const h of ["Host", "Content-Length", "Content-Type", "Cookie", "X-Forwarded-For"]) {
+      expect(validateConnectionSpec(github({ auth_type: "header", auth_name: h }))).toMatch(/cannot go in the/);
+    }
+    expect(validateConnectionSpec(github({ auth_type: "header", auth_name: "X-Api-Key" }))).toBeNull();
+  });
+
+  it("refuses the same headers in the database", () => {
+    for (const h of FORBIDDEN_KEY_HEADERS) expect(SQL).toContain(`'${h}'`);
+  });
+
+  it("refuses a key a header cannot carry, such as one with an invisible character pasted in", () => {
+    expect(checkSecretValue(`ghp_abc${String.fromCharCode(0x200b)}`)).toMatch(/cannot carry/);
+    expect(checkSecretValue("ghp_ABCdef123-_.~+/=")).toBeNull();
+  });
+
+  it("treats 6to4 and Teredo addresses, which can embed a private IPv4, as private", () => {
+    expect(isPublicAddress("2002:a9fe:a9fe::1")).toBe(false);
+    expect(isPublicAddress("2001:0:4136:e378::1")).toBe(false);
+    expect(isPublicAddress("2606:4700::1111")).toBe(true);
   });
 });

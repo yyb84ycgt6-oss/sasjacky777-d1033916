@@ -100,6 +100,7 @@ var CUSTOM_TOOL_ACTIONS = [
   "ask_jackie",
   "call_connection"
 ];
+var MAY_TAKE_OUTSIDE_DATA = ["list_tasks", "search_memory", "list_conversations", "call_connection"];
 var DESTRUCTIVE_ACTIONS = ["delete_task", "forget_fact"];
 var RESERVED_NAMES = [
   ...CUSTOM_TOOL_ACTIONS,
@@ -178,21 +179,33 @@ function validateToolSpec(t) {
   if (!Array.isArray(steps) || steps.length < 1 || steps.length > LIMITS.steps) {
     return `A tool has 1\u2013${LIMITS.steps} steps.`;
   }
+  const outside = [];
   for (const [i, s] of steps.entries()) {
     if (!isObject(s) || !CUSTOM_TOOL_ACTIONS.includes(s.action)) {
       return `Step ${i + 1} must call one of: ${CUSTOM_TOOL_ACTIONS.join(", ")}.`;
     }
     if (s.args !== void 0 && !isObject(s.args)) return `Step ${i + 1}'s args must be an object.`;
+    let fedOutside = null;
     for (const ref of placeholders(s.args)) {
       const step = /^steps\.(\d+)(\.|$)/.exec(ref);
       if (step) {
         if (Number(step[1]) >= i) return `Step ${i + 1} refers to {{${ref}}}, but only earlier steps' results exist by then.`;
+        if (outside[Number(step[1])]) fedOutside ??= Number(step[1]);
+      } else if (ref === "steps") {
+        return `Step ${i + 1} refers to {{steps}}; name one earlier step's result, like {{steps.0.id}}.`;
       } else if (!paramNames.has(ref)) {
         return `Step ${i + 1} refers to {{${ref}}}, which is not one of the tool's parameters.`;
       }
     }
+    if (fedOutside !== null && !MAY_TAKE_OUTSIDE_DATA.includes(s.action)) {
+      return `Step ${i + 1} (${s.action}) would take step ${fedOutside + 1}'s result, which comes from an outside service. A service's answer cannot choose what a tool deletes, changes, remembers, adds to the board or says to Jackie; it can only narrow a read or go to another connection (${MAY_TAKE_OUTSIDE_DATA.join(", ")}).`;
+    }
+    outside.push(s.action === "call_connection" || fedOutside !== null);
   }
   return null;
+}
+function feedsEarlierResult(step) {
+  return placeholders(step.args).some((ref) => ref === "steps" || ref.startsWith("steps."));
 }
 function isDestructive(steps) {
   return steps.some((s) => DESTRUCTIVE_ACTIONS.includes(s.action));
@@ -291,10 +304,35 @@ var CONNECTION_LIMITS = {
 };
 var NAME = /^[a-z][a-z0-9_]{1,47}$/;
 var PARAM_NAME = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
-var TOKEN = /^[A-Za-z0-9-]{1,64}$/;
+var HEADER_NAME = /^[A-Za-z0-9-]{1,64}$/;
+var QUERY_NAME = /^[A-Za-z0-9_.-]{1,64}$/;
+var FORBIDDEN_KEY_HEADERS = [
+  "host",
+  "content-length",
+  "transfer-encoding",
+  "connection",
+  "keep-alive",
+  "upgrade",
+  "te",
+  "trailer",
+  "expect",
+  "cookie",
+  "content-type",
+  "accept",
+  "user-agent",
+  "forwarded",
+  "proxy-authorization",
+  "proxy-connection",
+  "x-forwarded-for",
+  "x-forwarded-host",
+  "x-forwarded-proto",
+  "x-real-ip"
+];
+var BASE_URL_PATTERN = /^https:\/\/([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}(\/[^?#@\s]*)?$/;
 var isObject2 = (v) => !!v && typeof v === "object" && !Array.isArray(v);
 var text = (v) => typeof v === "string" ? v.trim() : "";
 var isWrite = (method) => method !== "GET";
+var paramsOf = (op) => Array.isArray(op.params) ? op.params.filter(isObject2) : [];
 function checkBaseUrl(raw) {
   if (typeof raw !== "string" || raw.length > 300) return "The base URL must be text of at most 300 characters.";
   let url;
@@ -306,7 +344,8 @@ function checkBaseUrl(raw) {
   if (url.protocol !== "https:") return "Connections use https only.";
   if (url.username || url.password) return "Put credentials in the secret, not in the URL.";
   if (url.port && url.port !== "443") return "Connections use the standard https port (443).";
-  if (url.search || url.hash) return "The base URL cannot carry a query or a fragment; operations add those.";
+  if (url.search || url.hash || /[?#]/.test(raw)) return "The base URL cannot carry a query or a fragment; operations add those.";
+  if (url.pathname.startsWith("//")) return "The base URL's path cannot start with //.";
   const host = url.hostname.toLowerCase();
   if (host.startsWith("[") || /^[\d.]+$/.test(host) || host.includes(":")) {
     return "Use the service's hostname, not an IP address.";
@@ -317,7 +356,14 @@ function checkBaseUrl(raw) {
   if (/(^|\.)(localhost|local|internal|intranet|lan|home|corp|localdomain)$/.test(host)) {
     return "That hostname is for private networks. Connections reach public services only.";
   }
+  if (!BASE_URL_PATTERN.test(normalizeBaseUrl(raw))) {
+    return "The base URL must look like https://api.example.com/optional/path \u2014 a plain DNS name, and no spaces or @ in the path.";
+  }
   return null;
+}
+function normalizeBaseUrl(raw) {
+  const url = new URL(raw.trim());
+  return `https://${url.hostname.toLowerCase()}${url.pathname.replace(/\/+$/, "")}`;
 }
 function validateConnectionSpec(c) {
   if (typeof c.name !== "string" || !NAME.test(c.name)) {
@@ -332,11 +378,14 @@ function validateConnectionSpec(c) {
   const smuggled = smugglingProblem({ title: c.title, description: c.description, operations: c.operations });
   if (smuggled) return smuggled;
   if (!AUTH_TYPES.includes(c.auth_type)) return `Authentication must be one of: ${AUTH_TYPES.join(", ")}.`;
-  if ((c.auth_type === "header" || c.auth_type === "query") && (typeof c.auth_name !== "string" || !TOKEN.test(c.auth_name))) {
-    return "Name the header or query parameter the key goes in (letters, digits and dashes).";
+  if (c.auth_type === "header" && (typeof c.auth_name !== "string" || !HEADER_NAME.test(c.auth_name))) {
+    return "Name the header the key goes in (letters, digits and dashes).";
   }
-  if (c.auth_type === "header" && /^(host|content-length|transfer-encoding|connection|cookie)$/i.test(c.auth_name)) {
-    return `The key cannot go in the ${c.auth_name} header.`;
+  if (c.auth_type === "query" && (typeof c.auth_name !== "string" || !QUERY_NAME.test(c.auth_name))) {
+    return "Name the query parameter the key goes in (letters, digits, dashes, dots and underscores, e.g. api_key).";
+  }
+  if (c.auth_type === "header" && FORBIDDEN_KEY_HEADERS.includes(c.auth_name.toLowerCase())) {
+    return `The key cannot go in the ${c.auth_name} header: that header frames the request or is set by the function itself.`;
   }
   const ops = c.operations;
   if (!Array.isArray(ops) || ops.length < 1 || ops.length > CONNECTION_LIMITS.operations) {
@@ -366,6 +415,13 @@ function checkOperation(op, i) {
   if (/(^|\/)\.\.?(\/|$)|[?#\\]|%2e|%2f/i.test(op.path)) {
     return `${at} ("${op.name}")'s path cannot contain "..", "?", "#", "\\" or encoded slashes and dots.`;
   }
+  const sample = op.path.replace(/\{[^{}]*\}/g, "x");
+  if (sample.startsWith("//") || new URL(sample, "https://h.invalid").pathname !== sample) {
+    return `${at} ("${op.name}")'s path has a character a URL cannot carry as written; percent-encode it, or use a parameter.`;
+  }
+  if (op.accepts_app_data !== void 0 && typeof op.accepts_app_data !== "boolean") {
+    return `${at} ("${op.name}")'s accepts_app_data must be true or false.`;
+  }
   const params = op.params ?? [];
   if (!Array.isArray(params) || params.length > CONNECTION_LIMITS.params) {
     return `${at} ("${op.name}") takes at most ${CONNECTION_LIMITS.params} parameters.`;
@@ -380,8 +436,12 @@ function checkOperation(op, i) {
     if (!PARAM_PLACES.includes(p.in)) return `Parameter "${p.name}" must go in path, query or body.`;
     if (!CONNECTION_PARAM_TYPES.includes(p.type)) return `Parameter "${p.name}" must be a string, number or boolean.`;
     if (p.in === "body" && op.method === "GET") return `${at} ("${op.name}") is a GET; it cannot have body parameters.`;
-    if (p.maxLength !== void 0 && (typeof p.maxLength !== "number" || p.maxLength < 1 || p.maxLength > CONNECTION_LIMITS.stringParam)) {
-      return `Parameter "${p.name}"'s maxLength must be 1\u2013${CONNECTION_LIMITS.stringParam}.`;
+    if (p.maxLength !== void 0 && (typeof p.maxLength !== "number" || !Number.isInteger(p.maxLength) || p.maxLength < 1 || p.maxLength > CONNECTION_LIMITS.stringParam)) {
+      return `Parameter "${p.name}"'s maxLength must be a whole number from 1 to ${CONNECTION_LIMITS.stringParam}.`;
+    }
+    if (p.required !== void 0 && typeof p.required !== "boolean") return `Parameter "${p.name}"'s "required" must be true or false.`;
+    if (p.description !== void 0 && (typeof p.description !== "string" || p.description.length > CONNECTION_LIMITS.description)) {
+      return `Parameter "${p.name}"'s description must be text of at most ${CONNECTION_LIMITS.description} characters.`;
     }
   }
   const inPath = [...op.path.matchAll(/\{([^{}]*)\}/g)].map((m) => m[1]);
@@ -396,7 +456,7 @@ function checkOperation(op, i) {
   return null;
 }
 function operationSignature(connection, op) {
-  const args = op.params.map((p) => `"${p.name}"${p.required ? "" : "?"}: ${p.type}`).join(", ");
+  const args = paramsOf(op).map((p) => `"${p.name}"${p.required ? "" : "?"}: ${p.type}`).join(", ");
   return `${connection}.${op.name} ${op.method}${isWrite(op.method) ? " (writes)" : ""} {${args}} \u2014 ${op.description}`;
 }
 
@@ -740,7 +800,7 @@ async function runCustomTool(sb, userId, args, ctx) {
       break;
     }
     const stepArgs = resolved.value;
-    const carriesAppData = step.action === "call_connection" && /\{\{\s*steps\b/.test(JSON.stringify(step.args ?? {}));
+    const carriesAppData = step.action === "call_connection" && feedsEarlierResult(step);
     const res = await STEP_EXECUTORS[step.action](sb, userId, stepArgs, { ...ctx, carriesAppData });
     ran.push(res.ok ? { step: i + 1, action: step.action, args: stepArgs, ok: true, result: res.data } : { step: i + 1, action: step.action, args: stepArgs, ok: false, error: res.error });
     if (!res.ok) break;
@@ -779,6 +839,7 @@ async function askJackie(sb, userId, args, ctx = {}) {
   const message = typeof args.message === "string" ? args.message.trim() : "";
   if (!message) return fail("message is required");
   if (message.length > 2e4) return fail("message is longer than 20,000 characters");
+  const speaker = ctx.via === "mcp" ? "An agent (MCP)" : ctx.via === "agent-lab" ? "An Agent Lab operator" : null;
   const engine = args.engine ?? "cloud";
   if (!(engine in ASK_ENGINES)) return fail(`engine must be one of: ${Object.keys(ASK_ENGINES).join(", ")}`);
   const model = typeof args.model === "string" && args.model.trim() ? args.model.trim().slice(0, 100) : void 0;
@@ -790,7 +851,7 @@ async function askJackie(sb, userId, args, ctx = {}) {
     if (!past.ok) return fail(past.error);
     history = past.data.filter((m) => m.role === "user" || m.role === "assistant").map((m) => ({ role: m.role, content: m.content }));
   } else {
-    const title = typeof args.title === "string" && args.title.trim() ? args.title : message.slice(0, 60);
+    const title = typeof args.title === "string" && args.title.trim() ? args.title : speaker ? `${speaker}: ${message.slice(0, 48)}` : message.slice(0, 60);
     const created = await createConversation(sb, userId, { title });
     if (!created.ok) return fail(created.error);
     conversationId = created.data.id;
@@ -818,7 +879,9 @@ async function askJackie(sb, userId, args, ctx = {}) {
   }
   const answer = await readSseText(resp);
   if (!answer.ok) return fail(`${fn}: ${answer.error}`);
-  const savedQ = await saveMessage(sb, userId, conversationId, "user", message);
+  const savedQ = await saveMessage(sb, userId, conversationId, "user", speaker ? `(${speaker} sent this.)
+
+${message}` : message);
   const savedA = savedQ.ok ? await saveMessage(sb, userId, conversationId, "assistant", answer.data) : savedQ;
   return ok({
     conversation_id: conversationId,
@@ -830,21 +893,26 @@ async function askJackie(sb, userId, args, ctx = {}) {
 async function listConnections(sb, userId, _args) {
   const { data, error } = await sb.from("jackie_connections").select("name,title,description,base_url,agents_may_write,operations").eq("user_id", userId).eq("status", "active").order("name").limit(100);
   if (error) return fail(error.message);
-  return ok((data ?? []).map((c) => ({
-    name: c.name,
-    title: c.title,
-    description: c.description,
-    host: new URL(c.base_url).host,
-    agents_may_write: c.agents_may_write,
-    operations: c.operations.map((o) => ({
-      name: o.name,
-      description: o.description,
-      method: o.method,
-      writes: isWrite(o.method),
-      params: o.params,
-      signature: operationSignature(c.name, o)
-    }))
-  })));
+  return ok((data ?? []).map((c) => {
+    const broken = validateConnectionSpec({ ...c, auth_type: "none" });
+    if (broken) return { name: c.name, broken: `Cannot be used as saved: ${broken} The person can fix it on the Skills page.` };
+    return {
+      name: c.name,
+      title: c.title,
+      description: c.description,
+      host: new URL(c.base_url).host,
+      agents_may_write: c.agents_may_write,
+      operations: c.operations.map((o) => ({
+        name: o.name,
+        description: o.description,
+        method: o.method,
+        writes: isWrite(o.method),
+        accepts_app_data: o.accepts_app_data === true,
+        params: paramsOf(o),
+        signature: operationSignature(c.name, o)
+      }))
+    };
+  }));
 }
 async function callConnection(sb, userId, args, ctx = {}) {
   const connection = typeof args.connection === "string" ? args.connection.trim() : "";
@@ -885,9 +953,9 @@ async function proposeConnection(sb, userId, args, ctx) {
     name: spec.name,
     title: spec.title.trim(),
     description: spec.description.trim(),
-    base_url: spec.base_url,
+    base_url: normalizeBaseUrl(spec.base_url),
     auth_type: spec.auth_type,
-    auth_name: spec.auth_name ?? null,
+    auth_name: spec.auth_type === "header" || spec.auth_type === "query" ? spec.auth_name : null,
     operations,
     agents_may_write: false,
     status: "proposed",

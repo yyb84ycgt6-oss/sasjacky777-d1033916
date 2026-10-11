@@ -159,6 +159,36 @@ describe("the code and the database agree", () => {
     expect(validateToolSpec({ ...tool(), params: [{ name: "n", type: "string", required: "yes" }] } as never)).toMatch(/"required" must be true or false/);
   });
 
+  it("will not let an outside service's answer choose what a tool writes, deletes or tells Jackie", () => {
+    const fetchThen = (action: string, args: Record<string, unknown>) => ({
+      name: "fetch_then", description: "d", params: [],
+      steps: [{ action: "call_connection", args: { connection: "feed", operation: "today" } }, { action, args }],
+    });
+    for (const [action, args] of [
+      ["remember_fact", { key: "k", value: "{{steps.0.body.text}}" }],
+      ["delete_task", { id: "{{steps.0.body.id}}" }],
+      ["update_task", { id: "t1", title: "{{steps.0.body.title}}" }],
+      ["create_task", { title: "{{steps.0.body.title}}" }],
+      ["ask_jackie", { message: "Summarise {{steps.0.body}}" }],
+    ] as const) {
+      expect(validateToolSpec(fetchThen(action, args) as never)).toMatch(/comes from an outside service/);
+    }
+    expect(validateToolSpec(fetchThen("search_memory", { query: "{{steps.0.body.q}}" }) as never)).toBeNull();
+    expect(validateToolSpec(fetchThen("call_connection", { connection: "other", operation: "x", args: { q: "{{steps.0.body.q}}" } }) as never)).toBeNull();
+  });
+
+  it("follows outside data through a step that passed it on", () => {
+    const laundered = {
+      name: "laundered", description: "d", params: [],
+      steps: [
+        { action: "call_connection", args: { connection: "feed", operation: "today" } },
+        { action: "search_memory", args: { query: "{{steps.0.body.q}}" } },
+        { action: "forget_fact", args: { id: "{{steps.1.0.id}}" } },
+      ],
+    };
+    expect(validateToolSpec(laundered as never)).toMatch(/Step 3 \(forget_fact\) would take step 2's result/);
+  });
+
   it("uses the same name pattern as the SQL check", () => {
     expect(SQL).toContain(`name ~ '${NAME_PATTERN.source}'`);
   });

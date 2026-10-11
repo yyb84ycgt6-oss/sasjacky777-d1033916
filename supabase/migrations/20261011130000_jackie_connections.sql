@@ -12,23 +12,52 @@
 -- one more here — an agent's proposal cannot arrive with writes or app data
 -- already switched on. Those are the person's to grant, after reading it.
 
--- The shape the database insists on. The detailed rules live in
--- supabase/functions/_shared/connections.ts, which the page, the actions and
--- the function all run; this catches a row written around them.
+-- The shape the database insists on: the same rules as validateConnectionSpec
+-- in supabase/functions/_shared/connections.ts, which the page, the actions and
+-- the function all run. A row written around them — an agent's token posting
+-- straight to the API — meets these instead. Every field an agent reads or the
+-- function sends is checked, because approval only flips the status: a
+-- parameter typed "object" would otherwise pass any array uncapped, and
+-- accepts_app_data "false" (a string) would read as true where it is used.
+-- CASE guards each jsonb_array_elements: SQL does not promise to evaluate OR
+-- left to right, and expanding a non-array is an error, not a false.
+CREATE OR REPLACE FUNCTION private.connection_param_valid(p jsonb, method text)
+RETURNS boolean LANGUAGE sql IMMUTABLE AS $$
+  SELECT jsonb_typeof(p) = 'object'
+     AND coalesce(p->>'name', '') ~ '^[A-Za-z][A-Za-z0-9_]{0,63}$'
+     AND coalesce(p->>'in', '') IN ('path', 'query', 'body')
+     AND coalesce(p->>'type', '') IN ('string', 'number', 'boolean')
+     AND NOT (p->>'in' = 'body' AND method = 'GET')
+     AND (NOT p ? 'required' OR jsonb_typeof(p->'required') = 'boolean')
+     AND (NOT p ? 'description' OR (jsonb_typeof(p->'description') = 'string' AND char_length(p->>'description') <= 300))
+     AND CASE WHEN NOT p ? 'maxLength' THEN true
+              WHEN jsonb_typeof(p->'maxLength') <> 'number' THEN false
+              ELSE (p->>'maxLength')::numeric BETWEEN 1 AND 2000
+                   AND (p->>'maxLength')::numeric = trunc((p->>'maxLength')::numeric) END;
+$$;
+
 CREATE OR REPLACE FUNCTION private.connection_operations_valid(ops jsonb)
 RETURNS boolean LANGUAGE sql IMMUTABLE AS $$
-  SELECT jsonb_typeof(ops) = 'array'
-     AND jsonb_array_length(ops) BETWEEN 1 AND 20
-     AND NOT EXISTS (
+  SELECT CASE WHEN jsonb_typeof(ops) <> 'array' THEN false ELSE
+       jsonb_array_length(ops) BETWEEN 1 AND 20
+   AND (SELECT count(DISTINCT o->>'name') FROM jsonb_array_elements(ops) o) = jsonb_array_length(ops)
+   AND NOT EXISTS (
        SELECT 1 FROM jsonb_array_elements(ops) o
-       WHERE jsonb_typeof(o) <> 'object'
-          OR coalesce(o->>'name', '') !~ '^[a-z][a-z0-9_]{1,47}$'
-          OR coalesce(o->>'method', '') NOT IN ('GET', 'POST', 'PUT', 'PATCH', 'DELETE')
-          OR coalesce(o->>'path', '') !~ '^/'
-          OR char_length(o->>'path') > 300
-          OR (o->>'path') ~* '(^|/)\.\.?(/|$)|[?#\\]|%2e|%2f'
-          OR (o ? 'params' AND (jsonb_typeof(o->'params') <> 'array' OR jsonb_array_length(o->'params') > 12))
-     );
+       WHERE CASE WHEN jsonb_typeof(o) <> 'object' OR jsonb_typeof(o->'params') IS DISTINCT FROM 'array' THEN true ELSE
+               coalesce(o->>'name', '') !~ '^[a-z][a-z0-9_]{1,47}$'
+            OR jsonb_typeof(o->'description') IS DISTINCT FROM 'string'
+            OR private.visible_length(o->>'description') NOT BETWEEN 1 AND 300
+            OR coalesce(o->>'method', '') NOT IN ('GET', 'POST', 'PUT', 'PATCH', 'DELETE')
+            OR coalesce(o->>'path', '') !~ '^/'
+            OR (o->>'path') ~ '^//'
+            OR char_length(o->>'path') > 300
+            OR (o->>'path') ~* '(^|/)\.\.?(/|$)|[?#\\]|%2e|%2f'
+            OR (o ? 'accepts_app_data' AND jsonb_typeof(o->'accepts_app_data') <> 'boolean')
+            OR jsonb_array_length(o->'params') > 12
+            OR (SELECT count(DISTINCT p->>'name') FROM jsonb_array_elements(o->'params') p) <> jsonb_array_length(o->'params')
+            OR EXISTS (SELECT 1 FROM jsonb_array_elements(o->'params') p WHERE NOT private.connection_param_valid(p, o->>'method'))
+            END
+   ) END;
 $$;
 
 CREATE TABLE IF NOT EXISTS public.jackie_connections (
@@ -42,7 +71,10 @@ CREATE TABLE IF NOT EXISTS public.jackie_connections (
                      char_length(base_url) <= 300
                      AND base_url ~ '^https://([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}(/[^?#@\s]*)?$'),
   auth_type        text NOT NULL DEFAULT 'none' CHECK (auth_type IN ('none', 'bearer', 'header', 'query')),
-  auth_name        text CHECK (auth_name IS NULL OR auth_name ~ '^[A-Za-z0-9-]{1,64}$'),
+  -- A query name may carry _ and . (api_key, access_token); a header name is a
+  -- token, and never one that frames the request or that the function sets
+  -- (FORBIDDEN_KEY_HEADERS in connections.ts; a test keeps the lists equal).
+  auth_name        text CHECK (auth_name IS NULL OR auth_name ~ '^[A-Za-z0-9_.-]{1,64}$'),
   operations       jsonb NOT NULL CHECK (private.connection_operations_valid(operations)),
   agents_may_write boolean NOT NULL DEFAULT false,
   status           text NOT NULL DEFAULT 'active' CHECK (status IN ('proposed', 'active', 'archived')),
@@ -50,7 +82,13 @@ CREATE TABLE IF NOT EXISTS public.jackie_connections (
   created_at       timestamptz NOT NULL DEFAULT now(),
   updated_at       timestamptz NOT NULL DEFAULT now(),
   UNIQUE (user_id, name),
-  CHECK (auth_type IN ('none', 'bearer') OR auth_name IS NOT NULL)
+  CHECK (auth_type IN ('none', 'bearer') OR auth_name IS NOT NULL),
+  CHECK (auth_type <> 'header' OR (
+    auth_name ~ '^[A-Za-z0-9-]{1,64}$'
+    AND lower(auth_name) NOT IN (
+      'host', 'content-length', 'transfer-encoding', 'connection', 'keep-alive', 'upgrade', 'te', 'trailer', 'expect',
+      'cookie', 'content-type', 'accept', 'user-agent', 'forwarded', 'proxy-authorization', 'proxy-connection',
+      'x-forwarded-for', 'x-forwarded-host', 'x-forwarded-proto', 'x-real-ip')))
 );
 CREATE INDEX IF NOT EXISTS jackie_connections_user_status ON public.jackie_connections (user_id, status);
 
@@ -108,9 +146,14 @@ CREATE TRIGGER jackie_connections_agent_rule
 CREATE OR REPLACE FUNCTION private.agent_connection_grants()
 RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
+  -- Any accepts_app_data an agent writes is refused, not read: a text cast
+  -- turns "false" into false here while the function and the page, reading
+  -- JSON, would take the string as true.
   IF private.request_client_id() IS NOT NULL AND (
        NEW.agents_may_write
-       OR EXISTS (SELECT 1 FROM jsonb_array_elements(NEW.operations) o WHERE (o->>'accepts_app_data')::boolean IS TRUE)
+       OR (jsonb_typeof(NEW.operations) = 'array'
+           AND EXISTS (SELECT 1 FROM jsonb_array_elements(NEW.operations) o
+                       WHERE jsonb_typeof(o) = 'object' AND o ? 'accepts_app_data' AND o->'accepts_app_data' <> 'false'::jsonb))
      ) THEN
     RAISE EXCEPTION 'An agent cannot propose a connection with writes or app data already allowed; the person grants those after reading it.'
       USING ERRCODE = 'insufficient_privilege';

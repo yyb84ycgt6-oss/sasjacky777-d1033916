@@ -66,11 +66,34 @@ export interface ConnectionSpec {
 
 const NAME = /^[a-z][a-z0-9_]{1,47}$/;
 const PARAM_NAME = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
-const TOKEN = /^[A-Za-z0-9-]{1,64}$/;
+/** A header name the key may go in. Mirrored by the auth_name CHECK. */
+export const HEADER_NAME = /^[A-Za-z0-9-]{1,64}$/;
+/** A query parameter the key may go in: api_key and access_token are the common ones. */
+export const QUERY_NAME = /^[A-Za-z0-9_.-]{1,64}$/;
+/**
+ * Headers the key may not go in: the ones that frame the request (a key in
+ * Host or Content-Length changes where or how it is sent), the ones the
+ * function sets itself, and the ones proxies act on. Mirrored in SQL.
+ */
+export const FORBIDDEN_KEY_HEADERS = [
+  "host", "content-length", "transfer-encoding", "connection", "keep-alive", "upgrade", "te", "trailer", "expect",
+  "cookie", "content-type", "accept", "user-agent", "forwarded", "proxy-authorization", "proxy-connection",
+  "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "x-real-ip",
+] as const;
+/** The base URL as the database stores it. Mirrored by the base_url CHECK; a test keeps them equal. */
+export const BASE_URL_PATTERN = /^https:\/\/([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}(\/[^?#@\s]*)?$/;
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const text = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 
 export const isWrite = (method: string) => method !== "GET";
+
+/**
+ * An operation's parameters, as a list whatever the row holds. The database
+ * insists on a list, but a row is read in three places and none of them may
+ * throw on one written around the app (rule 8: say what is wrong instead).
+ */
+export const paramsOf = (op: { params?: unknown }): ConnectionParam[] =>
+  Array.isArray(op.params) ? (op.params as unknown[]).filter(isObject) as unknown as ConnectionParam[] : [];
 
 /** ".", "..", and the percent-encoded spellings URL parsers also treat as dot segments. */
 const isDotSegment = (v: string) => /^(\.|%2e){1,2}$/i.test(v);
@@ -92,7 +115,10 @@ export function checkBaseUrl(raw: unknown): string | null {
   if (url.protocol !== "https:") return "Connections use https only.";
   if (url.username || url.password) return "Put credentials in the secret, not in the URL.";
   if (url.port && url.port !== "443") return "Connections use the standard https port (443).";
-  if (url.search || url.hash) return "The base URL cannot carry a query or a fragment; operations add those.";
+  if (url.search || url.hash || /[?#]/.test(raw)) return "The base URL cannot carry a query or a fragment; operations add those.";
+  // "//evil.example" as a path is read by some parsers as a new host; every
+  // call from such a base would also fail the rewritten-path check.
+  if (url.pathname.startsWith("//")) return "The base URL's path cannot start with //.";
   const host = url.hostname.toLowerCase();
   if (host.startsWith("[") || /^[\d.]+$/.test(host) || host.includes(":")) {
     return "Use the service's hostname, not an IP address.";
@@ -103,7 +129,21 @@ export function checkBaseUrl(raw: unknown): string | null {
   if (/(^|\.)(localhost|local|internal|intranet|lan|home|corp|localdomain)$/.test(host)) {
     return "That hostname is for private networks. Connections reach public services only.";
   }
+  if (!BASE_URL_PATTERN.test(normalizeBaseUrl(raw))) {
+    return "The base URL must look like https://api.example.com/optional/path — a plain DNS name, and no spaces or @ in the path.";
+  }
   return null;
+}
+
+/**
+ * The base URL in the one spelling the database accepts: lower-case host
+ * (punycode for an international name), no default port, no trailing slash.
+ * "https://API.Example.com:443/v1/" and "https://api.example.com/v1" are the
+ * same connection, and saving the first must not fail on a CHECK.
+ */
+export function normalizeBaseUrl(raw: string): string {
+  const url = new URL(raw.trim());
+  return `https://${url.hostname.toLowerCase()}${url.pathname.replace(/\/+$/, "")}`;
 }
 
 /** Null when the database and the function will accept it; otherwise what to change. */
@@ -120,11 +160,14 @@ export function validateConnectionSpec(c: Partial<Record<keyof ConnectionSpec, u
   const smuggled = smugglingProblem({ title: c.title, description: c.description, operations: c.operations });
   if (smuggled) return smuggled;
   if (!(AUTH_TYPES as readonly string[]).includes(c.auth_type as string)) return `Authentication must be one of: ${AUTH_TYPES.join(", ")}.`;
-  if ((c.auth_type === "header" || c.auth_type === "query") && (typeof c.auth_name !== "string" || !TOKEN.test(c.auth_name))) {
-    return "Name the header or query parameter the key goes in (letters, digits and dashes).";
+  if (c.auth_type === "header" && (typeof c.auth_name !== "string" || !HEADER_NAME.test(c.auth_name))) {
+    return "Name the header the key goes in (letters, digits and dashes).";
   }
-  if (c.auth_type === "header" && /^(host|content-length|transfer-encoding|connection|cookie)$/i.test(c.auth_name as string)) {
-    return `The key cannot go in the ${c.auth_name} header.`;
+  if (c.auth_type === "query" && (typeof c.auth_name !== "string" || !QUERY_NAME.test(c.auth_name))) {
+    return "Name the query parameter the key goes in (letters, digits, dashes, dots and underscores, e.g. api_key).";
+  }
+  if (c.auth_type === "header" && (FORBIDDEN_KEY_HEADERS as readonly string[]).includes((c.auth_name as string).toLowerCase())) {
+    return `The key cannot go in the ${c.auth_name} header: that header frames the request or is set by the function itself.`;
   }
   const ops = c.operations;
   if (!Array.isArray(ops) || ops.length < 1 || ops.length > CONNECTION_LIMITS.operations) {
@@ -157,6 +200,16 @@ function checkOperation(op: unknown, i: number): string | null {
   if (/(^|\/)\.\.?(\/|$)|[?#\\]|%2e|%2f/i.test(op.path)) {
     return `${at} ("${op.name}")'s path cannot contain "..", "?", "#", "\\" or encoded slashes and dots.`;
   }
+  // The same test buildRequest makes before every call: a path the URL parser
+  // would rewrite (a space, a quote, an accented letter) saves fine and then
+  // fails every call, so it is refused here, where the person can fix it.
+  const sample = op.path.replace(/\{[^{}]*\}/g, "x");
+  if (sample.startsWith("//") || new URL(sample, "https://h.invalid").pathname !== sample) {
+    return `${at} ("${op.name}")'s path has a character a URL cannot carry as written; percent-encode it, or use a parameter.`;
+  }
+  if (op.accepts_app_data !== undefined && typeof op.accepts_app_data !== "boolean") {
+    return `${at} ("${op.name}")'s accepts_app_data must be true or false.`;
+  }
   const params = op.params ?? [];
   if (!Array.isArray(params) || params.length > CONNECTION_LIMITS.params) {
     return `${at} ("${op.name}") takes at most ${CONNECTION_LIMITS.params} parameters.`;
@@ -171,8 +224,12 @@ function checkOperation(op: unknown, i: number): string | null {
     if (!(PARAM_PLACES as readonly string[]).includes(p.in as string)) return `Parameter "${p.name}" must go in path, query or body.`;
     if (!(CONNECTION_PARAM_TYPES as readonly string[]).includes(p.type as string)) return `Parameter "${p.name}" must be a string, number or boolean.`;
     if (p.in === "body" && op.method === "GET") return `${at} ("${op.name}") is a GET; it cannot have body parameters.`;
-    if (p.maxLength !== undefined && (typeof p.maxLength !== "number" || p.maxLength < 1 || p.maxLength > CONNECTION_LIMITS.stringParam)) {
-      return `Parameter "${p.name}"'s maxLength must be 1–${CONNECTION_LIMITS.stringParam}.`;
+    if (p.maxLength !== undefined && (typeof p.maxLength !== "number" || !Number.isInteger(p.maxLength) || p.maxLength < 1 || p.maxLength > CONNECTION_LIMITS.stringParam)) {
+      return `Parameter "${p.name}"'s maxLength must be a whole number from 1 to ${CONNECTION_LIMITS.stringParam}.`;
+    }
+    if (p.required !== undefined && typeof p.required !== "boolean") return `Parameter "${p.name}"'s "required" must be true or false.`;
+    if (p.description !== undefined && (typeof p.description !== "string" || p.description.length > CONNECTION_LIMITS.description)) {
+      return `Parameter "${p.name}"'s description must be text of at most ${CONNECTION_LIMITS.description} characters.`;
     }
   }
   const inPath = [...op.path.matchAll(/\{([^{}]*)\}/g)].map((m) => m[1]);
@@ -189,12 +246,16 @@ function checkOperation(op: unknown, i: number): string | null {
 
 /** Checks a call's arguments against an operation's parameters (T3: types and caps). */
 export function checkCallArgs(op: ConnectionOperation, args: Record<string, unknown>): string | null {
+  const params = paramsOf(op);
   for (const key of Object.keys(args)) {
-    if (!op.params.some((p) => p.name === key)) {
-      return `"${op.name}" has no parameter "${key}". It takes: ${op.params.map((p) => p.name).join(", ") || "nothing"}.`;
+    if (!params.some((p) => p.name === key)) {
+      return `"${op.name}" has no parameter "${key}". It takes: ${params.map((p) => p.name).join(", ") || "nothing"}.`;
     }
   }
-  for (const p of op.params) {
+  for (const p of params) {
+    // A type the validator never allows ("object") would pass typeof for any
+    // array or object, uncapped; a row that carries one is refused, not trusted.
+    if (!(CONNECTION_PARAM_TYPES as readonly string[]).includes(p.type)) return `"${p.name}" has a type this app does not send (${String(p.type)}).`;
     const v = args[p.name];
     if (v === undefined || v === null || v === "") {
       if (p.required) return `"${p.name}" is required.`;
@@ -206,7 +267,8 @@ export function checkCallArgs(op: ConnectionOperation, args: Record<string, unkn
     // as dot segments — "/repos/../x" becomes "/x", off the operation's path.
     // Their percent-encoded forms count as dot segments too, so they are refused.
     if (p.in === "path" && isDotSegment(String(v))) return `"${p.name}" cannot be "." or "..".`;
-    const cap = Math.min(p.maxLength ?? CONNECTION_LIMITS.stringParam, CONNECTION_LIMITS.stringParam);
+    // Math.min with a non-number is NaN, and every length passes "> NaN".
+    const cap = Number.isFinite(p.maxLength) ? Math.min(p.maxLength as number, CONNECTION_LIMITS.stringParam) : CONNECTION_LIMITS.stringParam;
     if (typeof v === "string" && v.length > cap) return `"${p.name}" is longer than its limit of ${cap} characters.`;
   }
   return null;
@@ -234,7 +296,7 @@ export function buildRequest(
   // Belt and braces: whatever the parser did, the path sent must be the path built.
   if (url.pathname !== wanted) throw new Error("the request path was rewritten while building it");
   const body: Record<string, unknown> = {};
-  for (const p of op.params) {
+  for (const p of paramsOf(op)) {
     const v = args[p.name];
     if (v === undefined || v === null || v === "") continue;
     if (p.in === "query") url.searchParams.set(p.name, String(v));
@@ -280,23 +342,86 @@ function isPublicV6(a: string): boolean {
   if ((first & 0xff00) === 0xff00) return false; // multicast
   if (first === 0x2001 && parseInt(a.split(":")[1] || "0", 16) === 0x0db8) return false; // documentation
   if (first === 0x0064 && a.startsWith("64:ff9b:")) return false; // NAT64 can reach private v4
+  if (first === 0x2002) return false; // 6to4 embeds an IPv4 address, private ones included
+  if (first === 0x2001 && parseInt(a.split(":")[1] || "0", 16) === 0) return false; // Teredo, likewise
   if (first === 0) return false; // ::/8 reserved, IPv4-compatible
   return (first & 0xe000) === 0x2000; // only 2000::/3 is global unicast
 }
 
-/** Replaces any echo of the secret before a response reaches anyone (T1). */
-export function redact(body: string, secret: string | null): string {
-  if (!secret || secret.length < 4) return body;
-  return body.split(secret).join("[redacted]");
+/**
+ * Every spelling of the secret a response can echo back: as sent in a header,
+ * as a query string encodes it (with either case of hex), and as a JSON
+ * encoder escapes it ("/" as "\/" in PHP's default). An echo in any of them is
+ * the key, to anyone who decodes it.
+ */
+function secretSpellings(secret: string): string[] {
+  const forms = new Set<string>([secret]);
+  const percent = encodeURIComponent(secret);
+  const form = new URLSearchParams({ k: secret }).toString().slice(2);
+  for (const f of [percent, form]) {
+    forms.add(f);
+    forms.add(f.replace(/%[0-9A-F]{2}/g, (m) => m.toLowerCase()));
+  }
+  const json = JSON.stringify(secret).slice(1, -1);
+  forms.add(json);
+  forms.add(json.replace(/\//g, "\\/"));
+  return [...forms].filter((f) => f.length >= 4).sort((a, b) => b.length - a.length);
 }
 
-/** What an agent receives: marked as someone else's words, capped (T4). */
-export function wrapResponse(source: string, operation: string, status: number, body: string) {
-  const capped = body.length > CONNECTION_LIMITS.returnChars;
-  let parsed: unknown = body;
+/** Replaces any echo of the secret, in any spelling, before a response reaches anyone (T1). */
+export function redact(body: string, secret: string | null): string {
+  if (!secret || secret.length < 4) return body;
+  let out = body;
+  for (const form of secretSpellings(secret)) out = out.split(form).join("[redacted]");
+  return out;
+}
+
+/** The same, for every string inside a parsed answer — keys included, URL-decoded copies checked. */
+function redactDeep(value: unknown, secret: string | null): unknown {
+  if (!secret || secret.length < 4) return value;
+  if (typeof value === "string") {
+    let out = redact(value, secret);
+    if (out.includes("%")) {
+      try {
+        if (decodeURIComponent(out).includes(secret)) out = redact(decodeURIComponent(out), secret);
+      } catch {
+        /* not URL-encoded */
+      }
+    }
+    return out;
+  }
+  if (Array.isArray(value)) return value.map((v) => redactDeep(v, secret));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [redact(k, secret), redactDeep(v, secret)]));
+  }
+  return value;
+}
+
+/** How deeply nested a parsed answer may be. Deeper is kept as text: it serialises quadratically and can blow the stack. */
+const MAX_DEPTH = 64;
+function depthOf(value: unknown, limit: number): number {
+  if (!value || typeof value !== "object") return 0;
+  if (limit <= 0) return 1;
+  let deepest = 0;
+  for (const v of Object.values(value)) deepest = Math.max(deepest, depthOf(v, limit - 1));
+  return deepest + 1;
+}
+
+/**
+ * What an agent receives: marked as someone else's words, with the key
+ * redacted in every spelling, capped (T4, T7). Control characters are replaced
+ * before the cap, because each one becomes six characters once JSON-escaped and
+ * the cap is meant to bound what a model reads.
+ */
+export function wrapResponse(source: string, operation: string, status: number, body: string, secret: string | null = null) {
+  // eslint-disable-next-line no-control-regex
+  const clean = redact(body, secret).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "?");
+  const capped = clean.length > CONNECTION_LIMITS.returnChars;
+  let parsed: unknown = clean;
   if (!capped) {
     try {
-      parsed = JSON.parse(body);
+      const json = JSON.parse(clean);
+      parsed = depthOf(json, MAX_DEPTH + 1) > MAX_DEPTH ? clean : redactDeep(json, secret);
     } catch {
       /* not JSON — kept as text */
     }
@@ -307,12 +432,12 @@ export function wrapResponse(source: string, operation: string, status: number, 
     source,
     operation,
     status,
-    body: capped ? `${body.slice(0, CONNECTION_LIMITS.returnChars)}… (truncated)` : parsed,
+    body: capped ? `${clean.slice(0, CONNECTION_LIMITS.returnChars)}… (truncated)` : parsed,
   };
 }
 
 /** One line per operation, the way a model reads a signature. */
 export function operationSignature(connection: string, op: ConnectionOperation): string {
-  const args = op.params.map((p) => `"${p.name}"${p.required ? "" : "?"}: ${p.type}`).join(", ");
+  const args = paramsOf(op).map((p) => `"${p.name}"${p.required ? "" : "?"}: ${p.type}`).join(", ");
   return `${connection}.${op.name} ${op.method}${isWrite(op.method) ? " (writes)" : ""} {${args}} — ${op.description}`;
 }

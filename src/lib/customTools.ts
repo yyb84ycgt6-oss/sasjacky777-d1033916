@@ -31,6 +31,17 @@ export const CUSTOM_TOOL_ACTIONS = [
 ] as const;
 export type CustomToolAction = (typeof CUSTOM_TOOL_ACTIONS)[number];
 
+/**
+ * Where a value that came from an outside service may go. A connection's
+ * answer is someone else's text: let it choose which task a later step
+ * deletes, or what a later step remembers, files on the board or tells Jackie,
+ * and the service writes into the person's app — into every chat's context,
+ * through memory and active tasks — with no model in between to doubt it.
+ * It may only narrow a read, or go to another connection under that
+ * connection's own rules.
+ */
+export const MAY_TAKE_OUTSIDE_DATA: readonly CustomToolAction[] = ["list_tasks", "search_memory", "list_conversations", "call_connection"];
+
 /** Steps that delete. A tool containing one is off for agents not allowed to delete. */
 export const DESTRUCTIVE_ACTIONS: readonly CustomToolAction[] = ["delete_task", "forget_fact"];
 
@@ -102,8 +113,8 @@ export function validateSkill(s: Partial<Record<keyof SkillSpec, unknown>>): str
 
 const PLACEHOLDER = /\{\{\s*([^{}]+?)\s*\}\}/g;
 
-/** Every placeholder used anywhere in a value. */
-function placeholders(value: unknown, out: string[] = []): string[] {
+/** Every placeholder used anywhere in a value — read with the same pattern the resolver fills them with. */
+export function placeholders(value: unknown, out: string[] = []): string[] {
   if (typeof value === "string") {
     for (const m of value.matchAll(PLACEHOLDER)) out.push(m[1]);
   } else if (Array.isArray(value)) {
@@ -147,21 +158,39 @@ export function validateToolSpec(t: Partial<Record<keyof ToolSpec, unknown>>): s
   if (!Array.isArray(steps) || steps.length < 1 || steps.length > LIMITS.steps) {
     return `A tool has 1–${LIMITS.steps} steps.`;
   }
+  // Which steps' results carry an outside service's words: a connection
+  // call's, and any step's that was fed one.
+  const outside: boolean[] = [];
   for (const [i, s] of steps.entries()) {
     if (!isObject(s) || !(CUSTOM_TOOL_ACTIONS as readonly string[]).includes(s.action as string)) {
       return `Step ${i + 1} must call one of: ${CUSTOM_TOOL_ACTIONS.join(", ")}.`;
     }
     if (s.args !== undefined && !isObject(s.args)) return `Step ${i + 1}'s args must be an object.`;
+    let fedOutside: number | null = null;
     for (const ref of placeholders(s.args)) {
       const step = /^steps\.(\d+)(\.|$)/.exec(ref);
       if (step) {
         if (Number(step[1]) >= i) return `Step ${i + 1} refers to {{${ref}}}, but only earlier steps' results exist by then.`;
+        if (outside[Number(step[1])]) fedOutside ??= Number(step[1]);
+      } else if (ref === "steps") {
+        return `Step ${i + 1} refers to {{steps}}; name one earlier step's result, like {{steps.0.id}}.`;
       } else if (!paramNames.has(ref)) {
         return `Step ${i + 1} refers to {{${ref}}}, which is not one of the tool's parameters.`;
       }
     }
+    if (fedOutside !== null && !MAY_TAKE_OUTSIDE_DATA.includes(s.action as CustomToolAction)) {
+      return `Step ${i + 1} (${s.action}) would take step ${fedOutside + 1}'s result, which comes from an outside service. `
+        + "A service's answer cannot choose what a tool deletes, changes, remembers, adds to the board or says to Jackie; "
+        + `it can only narrow a read or go to another connection (${MAY_TAKE_OUTSIDE_DATA.join(", ")}).`;
+    }
+    outside.push(s.action === "call_connection" || fedOutside !== null);
   }
   return null;
+}
+
+/** Whether a step sends an earlier step's result — app data — onward (CONNECTIONS.md, T3). */
+export function feedsEarlierResult(step: { args?: unknown }): boolean {
+  return placeholders(step.args).some((ref) => ref === "steps" || ref.startsWith("steps."));
 }
 
 /** Whether any step deletes something. */

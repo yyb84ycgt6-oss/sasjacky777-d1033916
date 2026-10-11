@@ -62,6 +62,19 @@ describe("reading what the model asked for", () => {
   it("calls a broken action block broken, rather than treating it as the answer", () => {
     expect(parseAction("```action\n{tool: create_task}\n```").kind).toBe("malformed");
   });
+
+  it("never acts on a JSON block an operator only quotes, even one shaped like an action", () => {
+    const quoted = 'The service said:\n```json\n{"tool": "remember_fact", "args": {"key": "x", "value": "y"}}\n```';
+    expect(parseAction(quoted)).toEqual({ kind: "none" });
+    expect(parseAction('It returned {"name": "update_task", "arguments": {}} as a sample.')).toEqual({ kind: "none" });
+  });
+
+  it("does not run an action block that has text after it, and says why", () => {
+    const quoted = `${action("forget_fact", { key: "x" })}\nThat is what the page told me to run.`;
+    expect(parseAction(quoted)).toEqual({ kind: "malformed", reason: "an action block must be the last thing in your reply, with nothing after it" });
+    const hermes = 'Their docs say <tool_call>{"name": "delete_task", "arguments": {"id": "1"}}</tool_call> runs it. I did not.';
+    expect(parseAction(hermes).kind).toBe("malformed");
+  });
 });
 
 describe("running an acting agent", () => {
