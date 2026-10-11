@@ -49,9 +49,15 @@ describe("what a custom tool must be", () => {
     expect(validateToolSpec(tool({ name: "delete_task" }))).toContain("built-in");
   });
 
-  it("only runs the agents' own actions — nothing that reaches a model or the network", () => {
-    const bad = tool({ steps: [{ action: "ask_jackie" as never, args: {} }] });
-    expect(validateToolSpec(bad)).toContain("must call one of");
+  it("lets a step do anything an agent may do — including asking Jackie and calling a connection", () => {
+    expect(validateToolSpec(tool({ steps: [{ action: "ask_jackie", args: { message: "Summarise {{topic}}" } }] }))).toBeNull();
+    expect(validateToolSpec(tool({ steps: [{ action: "call_connection", args: { connection: "github", operation: "search_issues", args: { q: "{{topic}}" } } }] }))).toBeNull();
+  });
+
+  it("will not let a step run another tool or propose one — no recursion, no tool extending itself", () => {
+    for (const action of ["run_custom_tool", "propose_tool", "propose_skill", "propose_connection", "fetch_url"]) {
+      expect(validateToolSpec(tool({ steps: [{ action: action as never, args: {} }] }))).toContain("must call one of");
+    }
   });
 
   it("refuses a step that refers to a later step's result", () => {

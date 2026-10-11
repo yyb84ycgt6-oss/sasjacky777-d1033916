@@ -5,7 +5,7 @@
 // here; the in-app operators keep their own Allow deletes switch.
 import { defineTool } from "@lovable.dev/mcp-js";
 import { z } from "zod";
-import { supabaseForUser } from "../supabase";
+import { functionCaller, supabaseForUser } from "../supabase";
 import { runCustomTool } from "../../appActions";
 import { notAuthenticated, toToolResult } from "../result";
 
@@ -22,9 +22,13 @@ export default defineTool({
   },
   annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
   handler: async (args, ctx) => {
-    if (!ctx.isAuthenticated()) return notAuthenticated;
+    if (!ctx.isAuthenticated() || !ctx.getToken()) return notAuthenticated;
     return toToolResult(
-      await runCustomTool(supabaseForUser(ctx), ctx.getUserId(), args, { via: "mcp", allowDestructive: true }),
+      await runCustomTool(supabaseForUser(ctx), ctx.getUserId(), args, {
+        via: "mcp",
+        allowDestructive: true,
+        callFunction: functionCaller(ctx),
+      }),
       "run",
     );
   },

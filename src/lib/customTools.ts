@@ -23,6 +23,9 @@ export const CUSTOM_TOOL_ACTIONS = [
   "list_tasks", "create_task", "update_task", "delete_task",
   "search_memory", "remember_fact", "forget_fact",
   "list_conversations", "read_conversation", "create_conversation",
+  // Everything else an agent may do: ask Jackie, and call one of the person's
+  // approved connections — under that connection's own rules (CONNECTIONS.md).
+  "ask_jackie", "call_connection",
 ] as const;
 export type CustomToolAction = (typeof CUSTOM_TOOL_ACTIONS)[number];
 
@@ -31,8 +34,9 @@ export const DESTRUCTIVE_ACTIONS: readonly CustomToolAction[] = ["delete_task", 
 
 /** Names a custom tool may not take — the built-ins, so no tool impersonates one. Mirrored in SQL. */
 export const RESERVED_NAMES = [
-  ...CUSTOM_TOOL_ACTIONS, "update_task_status", "ask_jackie",
+  ...CUSTOM_TOOL_ACTIONS, "update_task_status",
   "list_skills", "get_skill", "propose_skill", "list_custom_tools", "run_custom_tool", "propose_tool",
+  "list_connections", "propose_connection",
 ] as const;
 
 export const NAME_PATTERN = /^[a-z][a-z0-9_]{1,47}$/;

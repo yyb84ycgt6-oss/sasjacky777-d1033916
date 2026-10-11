@@ -62,3 +62,24 @@ export function supabaseForUser(ctx: ToolContext) {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
+
+/**
+ * Calls one of the project's edge functions as the signed-in agent, the way
+ * the browser's callEdgeFunction does (rule 4): `apikey` is the publishable
+ * key, `Authorization` the caller's own token. Handed to appActions as
+ * ctx.callFunction, so an action never builds a request itself.
+ */
+export function functionCaller(ctx: ToolContext): (fn: string, body: unknown) => Promise<Response> {
+  const token = ctx.getToken();
+  if (!token) throw new Error("functionCaller requires a verified OAuth token");
+  return (fn, body) =>
+    fetch(`${supabaseProjectUrl()}/functions/v1/${fn}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: supabasePublishableKey(),
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(body),
+    });
+}

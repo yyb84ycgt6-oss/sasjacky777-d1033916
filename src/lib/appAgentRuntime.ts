@@ -9,6 +9,7 @@
  * uses for Hermes Agent and DeepSeek Harness.
  */
 import { supabase } from "@/integrations/supabase/client";
+import { callEdgeFunction } from "@/lib/edgeFunction";
 import { streamProviderChat } from "./jackie-provider-stream";
 import type { ProviderId } from "./jackie-providers";
 import { localChat, type LocalRuntime } from "./localModels";
@@ -63,12 +64,17 @@ const EXECUTORS: Record<string, Executor> = {
   forget_fact: actions.forgetFact,
   list_conversations: actions.listConversations,
   read_conversation: actions.readConversation,
+  create_conversation: actions.createConversation,
+  ask_jackie: actions.askJackie,
   list_skills: actions.listSkills,
   get_skill: actions.getSkill,
   propose_skill: actions.proposeSkill,
   list_custom_tools: actions.listCustomTools,
   run_custom_tool: actions.runCustomTool,
   propose_tool: actions.proposeTool,
+  list_connections: actions.listConnections,
+  call_connection: actions.callConnection,
+  propose_connection: actions.proposeConnection,
 };
 
 /** Runs one action as whoever is signed in. Refuses rather than acting anonymously. */
@@ -84,5 +90,10 @@ export async function executeAsUser(
   if (!userId) return { ok: false, error: "You are signed out, so the agent cannot act on your app. Sign in and run it again." };
   // An in-app operator's own Allow deletes reaches its custom tools too: a tool
   // with a deleting step is refused when deletes were not allowed.
-  return run(supabase, userId, args, { via: "agent-lab", allowDestructive: ctx.allowDestructive ?? false });
+  return run(supabase, userId, args, {
+    via: "agent-lab",
+    allowDestructive: ctx.allowDestructive ?? false,
+    // Rule 4: the browser reaches functions through edgeFunction.ts only.
+    callFunction: (fn, body) => callEdgeFunction(fn, body),
+  });
 }

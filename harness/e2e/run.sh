@@ -194,15 +194,16 @@ assert_harness() { # label, key suffix, model log
     const lines = require('fs').readFileSync('$log','utf8').trim().split('\n').map(JSON.parse);
     const offered = lines.find((l) => l.tools?.length)?.tools ?? [];
     const want = ['ask_jackie','create_task','list_tasks','remember_fact','search_memory','update_task','delete_task','forget_fact','read_conversation','list_conversations','create_conversation','update_task_status',
-      'list_skills','get_skill','propose_skill','list_custom_tools','run_custom_tool','propose_tool'];
+      'list_skills','get_skill','propose_skill','list_custom_tools','run_custom_tool','propose_tool',
+      'list_connections','call_connection','propose_connection'];
     const missing = want.filter((w) => !offered.some((o) => o === w || o.endsWith('_' + w)));
     if (missing.length) { console.error('offered: ' + offered.join(', ')); process.exit(1); }
     // Harnesses also make tool-less side calls (session titles), so the plan's
     // finishing turn is looked for, not assumed to be the last request.
     const done = lines.some((l) => (l.decision?.text ?? '').startsWith('E2E-DONE after 4'));
     if (!done) { console.error('turns: ' + lines.map((l) => JSON.stringify(l.decision ?? l.unhandled)).join(' | ')); process.exit(1); }
-  " || fail "$label: did not see all eighteen tools, or did not finish the plan (see $log)"
-  ok "$label: saw all 18 tools, created a task, stored a memory, and talked to Jackie"
+  " || fail "$label: did not see all twenty-one tools, or did not finish the plan (see $log)"
+  ok "$label: saw all 21 tools, created a task, stored a memory, and talked to Jackie"
 }
 
 if [ -n "${HERMES_BIN:-}" ]; then

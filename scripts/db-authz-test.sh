@@ -322,9 +322,15 @@ as_user "another account writes into someone's skills" "$B" "" "$SKILL, 'active'
 as_user "agent floods proposals" "$A" "$AGENT" \
   "INSERT INTO public.jackie_skills (user_id, name, title, description, body, status) SELECT '$A', 's' || g, 't', 'd', 'b', 'proposed' FROM generate_series(1, 21) g;" \
   "already waiting for review"
-as_user "a tool step that calls something else" "$A" "" \
-  "INSERT INTO public.jackie_custom_tools (user_id, name, description, steps) VALUES ('$A', 'sneaky', 'd', '[{\"action\":\"ask_jackie\"}]');" \
+as_user "a tool step that runs another tool" "$A" "" \
+  "INSERT INTO public.jackie_custom_tools (user_id, name, description, steps) VALUES ('$A', 'sneaky', 'd', '[{\"action\":\"run_custom_tool\"}]');" \
   "violates check constraint"
+as_user "a tool step that proposes a tool" "$A" "" \
+  "INSERT INTO public.jackie_custom_tools (user_id, name, description, steps) VALUES ('$A', 'sneaky', 'd', '[{\"action\":\"propose_tool\"}]');" \
+  "violates check constraint"
+as_user "a tool step may ask Jackie and call a connection" "$A" "" \
+  "INSERT INTO public.jackie_custom_tools (user_id, name, description, steps) VALUES ('$A', 'ask_then_post', 'd', '[{\"action\":\"ask_jackie\"},{\"action\":\"call_connection\"}]') RETURNING name;" \
+  "ask_then_post"
 as_user "a tool named like a built-in" "$A" "" \
   "INSERT INTO public.jackie_custom_tools (user_id, name, description, steps) VALUES ('$A', 'delete_task', 'd', '[{\"action\":\"list_tasks\"}]');" \
   "violates check constraint"
@@ -334,6 +340,57 @@ as_user "agent proposes a tool" "$A" "$AGENT" \
 as_user "agent writes an active tool" "$A" "$AGENT" \
   "INSERT INTO public.jackie_custom_tools (user_id, name, description, steps, status) VALUES ('$A', 'start_review', 'd', '[{\"action\":\"list_tasks\"}]', 'active');" \
   "can only propose"
+
+# --- connections (docs/CONNECTIONS.md): the T-numbers name the threat each probe covers ---
+OPS='[{"name":"list","description":"d","method":"GET","path":"/x"}]'
+conn() { # base_url | auth_type | operations | status | agents_may_write
+  echo "INSERT INTO public.jackie_connections (user_id, name, title, description, base_url, auth_type, operations, status, agents_may_write) VALUES ('$A', 'gh', 't', 'd', '$1', '$2', '$3', '$4', $5)"
+}
+GH=$(conn https://api.github.com bearer "$OPS" proposed false)
+GH_ACTIVE=$(conn https://api.github.com bearer "$OPS" active false)
+
+echo "==> connections"
+as_user "agent proposes a connection" "$A" "$AGENT" "$GH RETURNING status;" "proposed"
+as_user "agent proposes one with writes on (T3)" "$A" "$AGENT" \
+  "$(conn https://api.github.com bearer "$OPS" proposed true);" "cannot propose a connection with writes"
+as_user "agent proposes one taking app data (T3)" "$A" "$AGENT_JSON" \
+  "$(conn https://api.github.com bearer '[{"name":"post","description":"d","method":"POST","path":"/x","accepts_app_data":true}]' proposed false);" \
+  "cannot propose a connection with writes"
+as_user "agent writes an active connection" "$A" "$AGENT" "$GH_ACTIVE;" "can only propose"
+as_user "agent switches its own proposal on" "$A" "" \
+  "$GH; $AGENT UPDATE public.jackie_connections SET status = 'active';" "not change or remove"
+as_user "agent turns on writes (T3)" "$A" "" \
+  "$GH_ACTIVE; $AGENT UPDATE public.jackie_connections SET agents_may_write = true;" "not change or remove"
+as_user "agent repoints a connection (T2)" "$A" "" \
+  "$GH_ACTIVE; $AGENT UPDATE public.jackie_connections SET base_url = 'https://evil.example.com';" "not change or remove"
+as_user "the person approves and allows writes" "$A" "$APP" \
+  "$GH; UPDATE public.jackie_connections SET status = 'active', agents_may_write = true RETURNING status || ':' || agents_may_write;" "active:true"
+as_user "a connection to an IP address (T2)" "$A" "" \
+  "$(conn https://169.254.169.254 none "$OPS" active false);" "violates check constraint"
+as_user "a connection over plain http (T2)" "$A" "" \
+  "$(conn http://api.github.com none "$OPS" active false);" "violates check constraint"
+as_user "a connection with a password in its URL (T2)" "$A" "" \
+  "$(conn https://user:pw@api.github.com none "$OPS" active false);" "violates check constraint"
+as_user "an operation path that climbs out (T2)" "$A" "" \
+  "$(conn https://api.github.com none '[{"name":"up","description":"d","method":"GET","path":"/a/../admin"}]' active false);" \
+  "violates check constraint"
+as_user "an operation path with an encoded slash (T2)" "$A" "" \
+  "$(conn https://api.github.com none '[{"name":"up","description":"d","method":"GET","path":"/a%2F..%2Fadmin"}]' active false);" \
+  "violates check constraint"
+as_user "a header key with no header name" "$A" "" \
+  "$(conn https://api.github.com header "$OPS" active false);" "violates check constraint"
+as_user "another account reads the connections" "$B" "" \
+  "SET LOCAL ROLE postgres; $GH_ACTIVE; SET LOCAL ROLE authenticated; SELECT count(*) FROM public.jackie_connections;" "0"
+as_user "the person reads a stored key (T1)" "$A" "" \
+  "SELECT count(*) FROM public.jackie_connection_secrets;" "permission denied"
+as_user "the person writes a key around the function (T1)" "$A" "" \
+  "SET LOCAL ROLE postgres; $GH_ACTIVE; SET LOCAL ROLE authenticated; INSERT INTO public.jackie_connection_secrets (connection_id, user_id, iv, ciphertext) SELECT id, user_id, 'x', 'y' FROM public.jackie_connections;" \
+  "permission denied"
+as_user "an agent reads a stored key (T1)" "$A" "$AGENT" \
+  "SELECT count(*) FROM public.jackie_connection_secrets;" "permission denied"
+check "deleting a connection deletes its key" \
+  "$(svc "INSERT INTO public.jackie_connections (id, user_id, name, title, description, base_url, operations) VALUES ('00000000-0000-0000-0000-0000000000c1', '$A', 'gone', 't', 'd', 'https://api.github.com', '$OPS'); INSERT INTO public.jackie_connection_secrets (connection_id, user_id, iv, ciphertext) VALUES ('00000000-0000-0000-0000-0000000000c1', '$A', 'x', 'y'); DELETE FROM public.jackie_connections WHERE id = '00000000-0000-0000-0000-0000000000c1'; SELECT 'keys left: ' || count(*) FROM public.jackie_connection_secrets")" \
+  "keys left: 0"
 
 echo
 if [ "$fail" -gt 0 ]; then

@@ -42,7 +42,7 @@ mcp_servers:
 
 # Keep the app's tools directly in front of the model. Hermes otherwise hides
 # MCP tools behind a tool_search bridge; that pays off for servers with
-# hundreds of tools, but these are eighteen small ones, and Hermes's own docs
+# hundreds of tools, but these are twenty-one small ones, and Hermes's own docs
 # note models sometimes skip the search and assume a tool is missing. If you
 # attach many other MCP servers, delete this block to get the bridge back.
 tools:

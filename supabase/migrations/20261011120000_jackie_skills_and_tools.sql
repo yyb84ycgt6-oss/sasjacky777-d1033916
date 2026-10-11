@@ -28,8 +28,9 @@ $$;
 REVOKE ALL ON FUNCTION private.request_client_id() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION private.request_client_id() TO authenticated, service_role;
 
--- What a custom tool's steps may call: the agents' own actions, and nothing
--- that reaches a model, the network or another account. Kept in step with
+-- What a custom tool's steps may call: everything an agent may do itself —
+-- its own rows, asking Jackie, and the person's approved connections (whose
+-- own rules apply to each call; docs/CONNECTIONS.md). Kept in step with
 -- CUSTOM_TOOL_ACTIONS in src/lib/customTools.ts by a test.
 CREATE OR REPLACE FUNCTION private.custom_tool_steps_valid(steps jsonb)
 RETURNS boolean LANGUAGE sql IMMUTABLE AS $$
@@ -42,7 +43,8 @@ RETURNS boolean LANGUAGE sql IMMUTABLE AS $$
           OR s->>'action' NOT IN (
                'list_tasks', 'create_task', 'update_task', 'delete_task',
                'search_memory', 'remember_fact', 'forget_fact',
-               'list_conversations', 'read_conversation', 'create_conversation')
+               'list_conversations', 'read_conversation', 'create_conversation',
+               'ask_jackie', 'call_connection')
           OR (s ? 'args' AND jsonb_typeof(s->'args') <> 'object')
      );
 $$;
@@ -75,7 +77,8 @@ CREATE TABLE IF NOT EXISTS public.jackie_custom_tools (
                   'list_tasks', 'create_task', 'update_task', 'update_task_status', 'delete_task',
                   'search_memory', 'remember_fact', 'forget_fact', 'list_conversations',
                   'read_conversation', 'create_conversation', 'ask_jackie', 'list_skills', 'get_skill',
-                  'propose_skill', 'list_custom_tools', 'run_custom_tool', 'propose_tool')),
+                  'propose_skill', 'list_custom_tools', 'run_custom_tool', 'propose_tool',
+                  'list_connections', 'call_connection', 'propose_connection')),
   description text NOT NULL CHECK (char_length(btrim(description)) BETWEEN 1 AND 300),
   params      jsonb NOT NULL DEFAULT '[]'::jsonb
               CHECK (jsonb_typeof(params) = 'array' AND jsonb_array_length(params) <= 8),
@@ -111,7 +114,7 @@ END $$;
 CREATE OR REPLACE FUNCTION private.agent_proposals_only()
 RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE
-  kind text := CASE TG_TABLE_NAME WHEN 'jackie_skills' THEN 'skill' ELSE 'tool' END;
+  kind text := CASE TG_TABLE_NAME WHEN 'jackie_skills' THEN 'skill' WHEN 'jackie_connections' THEN 'connection' ELSE 'tool' END;
   pending integer;
   total integer;
 BEGIN

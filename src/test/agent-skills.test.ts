@@ -178,11 +178,14 @@ describe("custom tools, as an agent runs them", () => {
   });
 });
 
-describe("both kinds of agent get the same skills and tools", () => {
+describe("both kinds of agent get the same skills, tools and connections", () => {
   // Rule 9: a capability is an action, then an MCP tool, then an AGENT_TOOLS
   // entry. Missing one is how Hermes ends up able to do what the Agent Lab
   // cannot, for no reason anyone can see.
-  const NEW = ["list_skills", "get_skill", "propose_skill", "list_custom_tools", "run_custom_tool", "propose_tool"];
+  const NEW = [
+    "list_skills", "get_skill", "propose_skill", "list_custom_tools", "run_custom_tool", "propose_tool",
+    "list_connections", "call_connection", "propose_connection", "ask_jackie", "create_conversation",
+  ];
 
   it("offers each one to the in-app operators", () => {
     const names = AGENT_TOOLS.map((t) => t.name);

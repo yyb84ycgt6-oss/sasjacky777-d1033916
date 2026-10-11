@@ -65,8 +65,9 @@ const expected = [
   "ask_jackie", "create_conversation", "create_task", "delete_task", "forget_fact", "list_conversations",
   "list_tasks", "read_conversation", "remember_fact", "search_memory", "update_task", "update_task_status",
   "list_skills", "get_skill", "propose_skill", "list_custom_tools", "run_custom_tool", "propose_tool",
+  "list_connections", "call_connection", "propose_connection",
 ].sort();
-check("offers all eighteen tools", JSON.stringify(names) === JSON.stringify(expected), names.join(", "));
+check("offers all twenty-one tools", JSON.stringify(names) === JSON.stringify(expected), names.join(", "));
 
 const created = await mcp.callTool({ name: "create_task", arguments: { title: "MCP check task", priority: "high" } });
 const task = data(created, "task");
@@ -144,6 +145,33 @@ const proposedTool = await mcp.callTool({
   arguments: { name: "e2e_tool_idea", description: "An agent's recipe.", steps: [{ action: "list_tasks", args: { status: "todo" } }] },
 });
 check("propose_tool saves an agent's tool as a proposal", data(proposedTool, "proposal")?.status === "proposed", text(proposedTool));
+
+// ── Connections (docs/CONNECTIONS.md) ─────────────────────────────────────
+const proposedConn = await mcp.callTool({
+  name: "propose_connection",
+  arguments: {
+    name: "e2e_conn", title: "E2E service", description: "An agent's idea for a service.",
+    base_url: "https://api.example.com", auth_type: "bearer",
+    operations: [{ name: "ping", description: "Ping it.", method: "GET", path: "/ping" }],
+  },
+});
+check("propose_connection saves an agent's connection as a proposal", data(proposedConn, "proposal")?.status === "proposed", text(proposedConn));
+
+const conns = await mcp.callTool({ name: "list_connections", arguments: {} });
+check(
+  "list_connections does not offer a connection the person has not approved",
+  !conns.isError && !(data(conns, "connections") ?? []).some((c) => c.name === "e2e_conn"),
+  text(conns),
+);
+
+const metadata = await mcp.callTool({
+  name: "propose_connection",
+  arguments: {
+    name: "e2e_metadata", title: "Metadata", description: "The cloud metadata service.",
+    base_url: "https://169.254.169.254", operations: [{ name: "creds", description: "Read credentials.", method: "GET", path: "/latest" }],
+  },
+}).catch((e) => ({ isError: true, content: [{ text: String(e) }] }));
+check("refuses to propose a connection to an IP address", metadata.isError === true, text(metadata));
 
 await mcp.close();
 console.log(`\nMCP check: ${passed} passed`);

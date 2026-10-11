@@ -1,18 +1,26 @@
-# Skills and custom tools
+# Skills, custom tools and connections
 
 `/skills` is where you teach the agents that drive Jackie: Hermes Agent and DeepSeek
-Harness over MCP, and the Agent Lab's operators. There are two kinds of thing to
-teach them, and they can propose both themselves.
+Harness over MCP, and the Agent Lab's operators. There are three kinds of thing to
+teach them, and they can propose all three themselves.
 
 | | What it is | How an agent uses it |
 | --- | --- | --- |
 | **Skill** | Named instructions for a kind of task ("how I like a weekly review run"). A title, one line saying when it applies, and up to 8,000 characters of Markdown. | `list_skills` shows each skill's one line. `get_skill` loads the instructions when a task fits. |
-| **Custom tool** | A named recipe of up to 8 steps, each one of the actions agents already have (`create_task`, `remember_fact`, `list_tasks`, …), with parameters. | `list_custom_tools` shows signatures. `run_custom_tool` runs one. |
+| **Custom tool** | A named recipe of up to 8 steps, each one of the actions agents already have (`create_task`, `remember_fact`, `ask_jackie`, `call_connection`, …), with parameters. | `list_custom_tools` shows signatures. `run_custom_tool` runs one. |
+| **Connection** | An outside HTTPS service, its key, and the operations agents may call on it. | `list_connections` shows each one's operations. `call_connection` runs one. See [CONNECTIONS.md](CONNECTIONS.md). |
 
 A custom tool **adds no capability**. Each step goes through the same action an agent
-could call directly, under the same row-level security. There is no code, no network
-call and no model call in a tool, so a tool can never do more than the agent running
-it could already do one step at a time.
+could call directly, with the same checks: row-level security for the app's own rows,
+the chat's quota and model allowlist for `ask_jackie`, and the connection's own grants
+for `call_connection`. There is no code in a tool, so it can never do more than the
+agent running it could already do one step at a time.
+
+One thing a tool *can* do that a single call cannot is feed one step's result into
+the next. Into a connection, that would carry app data — your tasks, your memory —
+out to someone else's server. So a `call_connection` step whose arguments use
+`{{steps.…}}` is refused unless you marked that operation **accepts app data**.
+Agents cannot mark it, and cannot propose a connection with it already marked.
 
 ## Agents propose, you decide
 
@@ -69,14 +77,21 @@ step it stopped at.
   `private.custom_tool_steps_valid` in the migration. `src/test/custom-tools.test.ts`
   fails if they differ, and does the same for the reserved names and the name pattern.
 - A new agent capability is still an action in `appActions.ts` first (rule 9). Adding it
-  to `CUSTOM_TOOL_ACTIONS` is a separate decision: only actions that stay inside the
-  caller's own rows belong there.
-- The six actions are in `appActions.ts`, the six MCP tools in `src/lib/mcp/tools/`, and
-  the six `AGENT_TOOLS` entries in `appAgent.ts`. `src/test/agent-skills.test.ts` fails
-  if one surface is missing one.
+  to `CUSTOM_TOOL_ACTIONS` is a separate decision: a step may do anything an agent may
+  do, but never run another tool or propose one — a tool that runs tools is a loop, and
+  a tool that proposes tools is an agent writing its own permissions.
+- An action that reaches an edge function (`ask_jackie`, `call_connection`) does it
+  through `ctx.callFunction`, which each surface supplies: the MCP server a fetch with
+  the agent's token, the browser `callEdgeFunction` (rule 4). `appActions.ts` never
+  builds a request itself.
+- Every action is in `appActions.ts`, an MCP tool in `src/lib/mcp/tools/`, and an
+  `AGENT_TOOLS` entry in `appAgent.ts`. `src/test/agent-skills.test.ts` fails if one
+  surface is missing one.
 
 ## Switching it on
 
-Run `supabase db push` (`20261011120000_jackie_skills_and_tools.sql`). Until then the
-tools answer that the tables do not exist, and `/skills` says the same with the command
-to run.
+Run `supabase db push` (`20261011120000_jackie_skills_and_tools.sql` and
+`20261011130000_jackie_connections.sql`). Until then the tools answer that the tables
+do not exist, and `/skills` says the same with the command to run. Connections that
+need a key also need `CONNECTIONS_SECRET_KEY` in Cloud → Secrets; CONNECTIONS.md says
+how to make one.

@@ -212,6 +212,7 @@ src/test/                     vitest
 supabase/functions/_shared/   authGate, entitlement, chatRequest, persona, modelPolicy,
                               openaiCompat (the one handler behind ten providers)
 supabase/functions/jackie-*   the providers and engines
+supabase/functions/jackie-connect  the one place a request leaves for an outside service (docs/CONNECTIONS.md)
 supabase/migrations/          35 migrations; RLS lives here, not in function code
 
 jackierouter/                 predictive, hardware-aware routing (152 tests)

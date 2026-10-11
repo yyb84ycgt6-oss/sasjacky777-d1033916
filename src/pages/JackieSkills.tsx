@@ -20,14 +20,15 @@ import {
   type CustomToolAction, type ParamType, type SkillSpec, type ToolParam, type ToolSpec,
 } from "@/lib/customTools";
 import {
-  loadActivity, loadSkills, loadTools, remove, runToolNow, saveSkill, saveTool, setStatus,
-  type ActivityRow, type SkillRow, type ToolRow,
+  loadActivity, loadConnections, loadSkills, loadTools, remove, runToolNow, saveSkill, saveTool, setStatus,
+  type ActivityRow, type ConnectionRow, type SkillRow, type ToolRow,
 } from "@/lib/jackie-skills";
+import { ConnectionSummary, ConnectionsTab } from "@/components/skills/ConnectionsTab";
 import type { ActionResult } from "@/lib/appActions";
 
 /**
- * Skills and tools for the agents that drive Jackie — Hermes Agent and
- * DeepSeek Harness over MCP, and the Agent Lab's operators.
+ * Skills, tools and connections for the agents that drive Jackie — Hermes
+ * Agent and DeepSeek Harness over MCP, and the Agent Lab's operators.
  *
  * Agents may propose; only the person switches anything on, here. The
  * database holds that line (an agent's token can only insert a proposal), so
@@ -38,23 +39,25 @@ const errorOf = (r: ActionResult<unknown>) => ("error" in r ? r.error ?? null : 
 const who = (actor: string | null) =>
   actor === "agent:mcp" ? "an external agent (MCP)"
     : actor === "agent:agent-lab" ? "an Agent Lab operator"
-      : actor === "agent:app" || !actor ? "you"
+      : actor === "agent:app" || actor === "person" || !actor ? "you"
         : actor;
 
 export default function JackieSkills() {
   const { toast } = useToast();
   const [skills, setSkills] = useState<SkillRow[]>([]);
   const [tools, setTools] = useState<ToolRow[]>([]);
+  const [connections, setConnections] = useState<ConnectionRow[]>([]);
   const [activity, setActivity] = useState<ActivityRow[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState("skills");
 
   const refresh = useCallback(async () => {
-    const [s, t, a] = await Promise.all([loadSkills(), loadTools(), loadActivity()]);
-    setLoadError(errorOf(s) ?? errorOf(t) ?? null);
+    const [s, t, c, a] = await Promise.all([loadSkills(), loadTools(), loadConnections(), loadActivity()]);
+    setLoadError(errorOf(s) ?? errorOf(t) ?? errorOf(c) ?? null);
     if (s.ok) setSkills(s.data);
     if (t.ok) setTools(t.data);
+    if (c.ok) setConnections(c.data);
     // The activity trail is a view onto audit_events; failing to read it should
     // say so without hiding the skills themselves.
     if (a.ok) setActivity(a.data);
@@ -79,18 +82,20 @@ export default function JackieSkills() {
 
   const pendingSkills = skills.filter((s) => s.status === "proposed");
   const pendingTools = tools.filter((t) => t.status === "proposed");
-  const pending = pendingSkills.length + pendingTools.length;
+  const pendingConnections = connections.filter((c) => c.status === "proposed");
+  const pending = pendingSkills.length + pendingTools.length + pendingConnections.length;
 
   return (
     // pb-36 keeps the last entry clear of the floating nav bar.
     <div className="max-w-5xl mx-auto px-4 pt-6 pb-36 space-y-6">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1 min-w-0">
-          <h1 className="text-xl sm:text-2xl font-semibold text-foreground">Skills &amp; tools</h1>
+          <h1 className="text-xl sm:text-2xl font-semibold text-foreground">Skills, tools &amp; connections</h1>
           <p className="text-sm text-muted-foreground max-w-2xl">
             Teach the agents that drive Jackie — Hermes and DeepSeek over MCP, and the Agent Lab operators. A skill is
-            instructions they load when a task fits; a tool is a named recipe of the actions they already have. They
-            can propose their own; nothing an agent writes is used until you approve it here.
+            instructions they load when a task fits; a tool is a named recipe of the actions they already have; a
+            connection is an outside service they may call, on the terms you set. They can propose their own; nothing
+            an agent writes is used until you approve it here.
           </p>
         </div>
         <Button variant="outline" onClick={refresh} disabled={busy} className="min-h-10">
@@ -111,6 +116,7 @@ export default function JackieSkills() {
           </TabsTrigger>
           <TabsTrigger value="skills">Skills ({skills.filter((s) => s.status !== "proposed").length})</TabsTrigger>
           <TabsTrigger value="tools">Tools ({tools.filter((t) => t.status !== "proposed").length})</TabsTrigger>
+          <TabsTrigger value="connections">Connections ({connections.filter((c) => c.status !== "proposed").length})</TabsTrigger>
           <TabsTrigger value="activity">What agents did</TabsTrigger>
         </TabsList>
 
@@ -136,6 +142,17 @@ export default function JackieSkills() {
               <ToolSummary tool={t} />
             </Proposal>
           ))}
+          {pendingConnections.map((c) => (
+            <Proposal key={c.id} kind="connection" title={c.title} name={c.name} by={c.proposed_by} busy={busy}
+              onApprove={() => act("Approving", () => setStatus("jackie_connections", c.id, "active"))}
+              onReject={() => act("Rejecting", () => remove("jackie_connections", c.id))}>
+              <ConnectionSummary c={c} />
+              <p className="text-xs text-muted-foreground">
+                Approving lets agents read from this host with the operations above. Writes, app data and the key stay
+                off until you turn them on under Connections.
+              </p>
+            </Proposal>
+          ))}
         </TabsContent>
 
         <TabsContent value="skills">
@@ -143,6 +160,9 @@ export default function JackieSkills() {
         </TabsContent>
         <TabsContent value="tools">
           <ToolsTab tools={tools.filter((t) => t.status !== "proposed")} busy={busy} act={act} />
+        </TabsContent>
+        <TabsContent value="connections">
+          <ConnectionsTab connections={connections.filter((c) => c.status !== "proposed")} busy={busy} act={act} />
         </TabsContent>
         <TabsContent value="activity">
           <ActivityTab rows={activity} />
@@ -155,7 +175,7 @@ export default function JackieSkills() {
 function Proposal({
   kind, title, name, by, busy, onApprove, onReject, children,
 }: {
-  kind: "skill" | "tool"; title: string; name: string; by: string | null; busy: boolean;
+  kind: "skill" | "tool" | "connection"; title: string; name: string; by: string | null; busy: boolean;
   onApprove: () => void; onReject: () => void; children: React.ReactNode;
 }) {
   return (
@@ -514,10 +534,12 @@ function TryTool({ tool, onClose }: { tool: ToolRow; onClose: () => void }) {
 
 function ActivityTab({ rows }: { rows: ActivityRow[] }) {
   if (rows.length === 0) {
-    return <p className="text-sm text-muted-foreground">No agent has loaded a skill, run a tool or proposed one yet.</p>;
+    return <p className="text-sm text-muted-foreground">No agent has loaded a skill, run a tool, called a connection or proposed one yet.</p>;
   }
   const label: Record<string, string> = {
     "skill.load": "loaded skill", "skill.propose": "proposed skill", "tool.run": "ran tool", "tool.propose": "proposed tool",
+    "connection.call": "called", "connection.propose": "proposed connection",
+    "connection.secret_set": "stored a key for", "connection.secret_cleared": "cleared the key for",
   };
   return (
     <ol className="space-y-1">
@@ -526,14 +548,24 @@ function ActivityTab({ rows }: { rows: ActivityRow[] }) {
           <Activity className={`w-4 h-4 ${r.result === "success" ? "text-muted-foreground" : "text-destructive"}`} />
           <span className="text-foreground">{who(r.actor)}</span>
           <span className="text-muted-foreground">{label[r.action] ?? r.action}</span>
-          <span className="font-mono text-foreground">{String(r.details?.name ?? "")}</span>
+          <span className="font-mono text-foreground">{activityTarget(r)}</span>
           {r.result !== "success" && <Badge variant="destructive" className="text-[11px]">{r.result}</Badge>}
           {r.details?.failed_step ? <span className="text-xs text-destructive">failed at step {String(r.details.failed_step)}</span> : null}
+          {r.details?.refused ? <span className="text-xs text-destructive">refused: {String(r.details.refused)}</span> : null}
+          {typeof r.details?.status === "number" ? <span className="text-xs text-muted-foreground">HTTP {r.details.status}</span> : null}
           <span className="ml-auto text-xs text-muted-foreground">{new Date(r.ts).toLocaleString()}</span>
         </li>
       ))}
     </ol>
   );
+}
+
+/** What an activity row was about: a skill or tool by name, a call as connection.operation. */
+function activityTarget(r: ActivityRow): string {
+  const d = r.details ?? {};
+  if (d.connection) return d.operation ? `${String(d.connection)}.${String(d.operation)}` : String(d.connection);
+  if (d.connection_id) return "a connection";
+  return String(d.name ?? "");
 }
 
 function ConfirmDelete({ what, open, onCancel, onConfirm }: { what: string; open: boolean; onCancel: () => void; onConfirm: () => void }) {

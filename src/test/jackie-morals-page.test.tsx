@@ -122,5 +122,8 @@ describe("Jackie's morals page", () => {
     fireEvent.click(screen.getByRole("button", { name: /Add$/ }));
     await waitFor(() => expect(data.addMoral).toHaveBeenCalled());
     expect(data.addMoral.mock.calls[0][0]).toMatchObject({ title: "Keep promises", rule: "Do what you said you would.", category: "custom" });
+    // Let the add finish (its refresh, then busy off) before the file's
+    // environment is torn down; otherwise React's late setState finds no window.
+    await waitFor(() => expect((screen.getByRole("button", { name: /Re-check/ }) as HTMLButtonElement).disabled).toBe(false));
   });
 });

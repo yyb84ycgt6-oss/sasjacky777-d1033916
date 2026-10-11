@@ -9,6 +9,8 @@
  */
 import { supabase } from "@/integrations/supabase/client";
 import { runCustomTool, type ActionResult } from "@/lib/appActions";
+import { callEdgeFunction, describeEdgeFailure } from "@/lib/edgeFunction";
+import { validateConnectionSpec, type ConnectionSpec } from "../../supabase/functions/_shared/connections";
 import {
   validateSkill, validateToolSpec, type SkillSpec, type ToolParam, type ToolSpec, type ToolStep,
 } from "@/lib/customTools";
@@ -75,12 +77,12 @@ export const loadSkills = () =>
 export const loadTools = () =>
   run<ToolRow[]>(() => db.from("jackie_custom_tools").select("*").order("status").order("name"));
 
-/** What agents did with skills and tools, newest first, from the person's own audit trail. */
+/** What agents did with skills, tools and connections, newest first, from the person's own audit trail. */
 export const loadActivity = () =>
   run<ActivityRow[]>(() =>
     db.from("audit_events")
       .select("id,ts,action,actor,details,result")
-      .or("action.like.skill.%,action.like.tool.%")
+      .or("action.like.skill.%,action.like.tool.%,action.like.connection.%")
       .order("ts", { ascending: false })
       .limit(50));
 
@@ -104,15 +106,86 @@ export async function saveTool(spec: ToolSpec, id?: string): Promise<ActionResul
   return run(() => db.from("jackie_custom_tools").insert({ ...row, user_id: userId, status: "active" }));
 }
 
-export const setStatus = (table: "jackie_skills" | "jackie_custom_tools", id: string, status: Status) =>
+type Table = "jackie_skills" | "jackie_custom_tools" | "jackie_connections";
+
+export const setStatus = (table: Table, id: string, status: Status) =>
   run<null>(() => db.from(table).update({ status }).eq("id", id));
 
-export const remove = (table: "jackie_skills" | "jackie_custom_tools", id: string) =>
+export const remove = (table: Table, id: string) =>
   run<null>(() => db.from(table).delete().eq("id", id));
 
 /** Runs a tool now, as the person — the same runner agents use, so a test here is a real test. */
 export async function runToolNow(name: string, args: Record<string, unknown>): Promise<ActionResult> {
   const userId = await me();
   if (!userId) return { ok: false, error: "You are signed out. Sign in and try again." };
-  return runCustomTool(supabase, userId, { name, args }, { via: "app", allowDestructive: true });
+  return runCustomTool(supabase, userId, { name, args }, {
+    via: "app",
+    allowDestructive: true,
+    callFunction: (fn, body) => callEdgeFunction(fn, body),
+  });
 }
+
+// ── Connections (docs/CONNECTIONS.md) ─────────────────────────────────────
+
+export interface ConnectionRow extends ConnectionSpec {
+  id: string;
+  status: Status;
+  proposed_by: string | null;
+  agents_may_write: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export const loadConnections = () =>
+  run<ConnectionRow[]>(() => db.from("jackie_connections").select("*").order("status").order("name"));
+
+export async function saveConnection(spec: ConnectionSpec, id?: string): Promise<ActionResult<null>> {
+  const problem = validateConnectionSpec(spec);
+  if (problem) return { ok: false, error: problem };
+  const row = {
+    name: spec.name,
+    title: spec.title.trim(),
+    description: spec.description.trim(),
+    base_url: spec.base_url.trim(),
+    auth_type: spec.auth_type,
+    auth_name: spec.auth_type === "header" || spec.auth_type === "query" ? spec.auth_name : null,
+    operations: spec.operations.map((o) => ({ ...o, params: o.params ?? [] })),
+    agents_may_write: !!spec.agents_may_write,
+  };
+  if (id) return run(() => db.from("jackie_connections").update(row).eq("id", id));
+  const userId = await me();
+  if (!userId) return { ok: false, error: "You are signed out. Sign in and try again." };
+  return run(() => db.from("jackie_connections").insert({ ...row, user_id: userId, status: "active" }));
+}
+
+export const setAgentsMayWrite = (id: string, on: boolean) =>
+  run<null>(() => db.from("jackie_connections").update({ agents_may_write: on }).eq("id", id));
+
+/** The person's mark that a tool may feed app data into this operation (T3). */
+export async function setAcceptsAppData(c: ConnectionRow, operation: string, on: boolean): Promise<ActionResult<null>> {
+  const operations = c.operations.map((o) => (o.name === operation ? { ...o, accepts_app_data: on } : o));
+  return run(() => db.from("jackie_connections").update({ operations }).eq("id", c.id));
+}
+
+async function connectFn<T>(body: Record<string, unknown>): Promise<ActionResult<T>> {
+  try {
+    const resp = await callEdgeFunction("jackie-connect", body);
+    const parsed = (await resp.json().catch(() => null)) as (T & { error?: string }) | null;
+    if (!resp.ok || !parsed) return { ok: false, error: parsed?.error ?? `jackie-connect answered HTTP ${resp.status}` };
+    return { ok: true, data: parsed };
+  } catch (e) {
+    return { ok: false, error: describeEdgeFailure(e, "jackie-connect") };
+  }
+}
+
+/** Which connections have a secret stored. The secret itself never comes back (T1). */
+export const loadSecretStatus = () =>
+  connectFn<{ secrets: Array<{ connection_id: string; updated_at: string }> }>({ action: "secrets" });
+export const setSecret = (connectionId: string, secret: string) =>
+  connectFn<{ stored: boolean }>({ action: "set_secret", connection_id: connectionId, secret });
+export const clearSecret = (connectionId: string) =>
+  connectFn<{ cleared: boolean }>({ action: "clear_secret", connection_id: connectionId });
+
+/** Runs an operation now, as the person. */
+export const runOperationNow = (connection: string, operation: string, args: Record<string, unknown>) =>
+  connectFn<Record<string, unknown>>({ action: "call", connection, operation, args });
