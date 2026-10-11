@@ -18,6 +18,8 @@
  * number); one inside other text is written in as text.
  */
 
+import { smugglingProblem } from "../../supabase/functions/_shared/textSafety.ts";
+
 /** The actions a step may call. Mirrored by private.custom_tool_steps_valid in SQL; a test keeps them equal. */
 export const CUSTOM_TOOL_ACTIONS = [
   "list_tasks", "create_task", "update_task", "delete_task",
@@ -91,6 +93,7 @@ function nameProblem(kind: "skill" | "tool", name: unknown): string | null {
 /** Null when the database will accept it; otherwise what to change, in words an agent or a person can act on. */
 export function validateSkill(s: Partial<Record<keyof SkillSpec, unknown>>): string | null {
   return nameProblem("skill", s.name)
+    ?? smugglingProblem({ title: s.title, description: s.description, instructions: s.body })
     ?? (!str(s.title) || str(s.title).length > LIMITS.title ? `Give the skill a title of 1–${LIMITS.title} characters.` : null)
     ?? (!str(s.description) || str(s.description).length > LIMITS.description
       ? `Describe when to use it in 1–${LIMITS.description} characters — agents choose skills by this line.` : null)
@@ -120,6 +123,8 @@ export function validateToolSpec(t: Partial<Record<keyof ToolSpec, unknown>>): s
   if (!str(t.description) || str(t.description).length > LIMITS.description) {
     return `Describe what the tool does in 1–${LIMITS.description} characters — agents choose tools by this line.`;
   }
+  const smuggled = smugglingProblem({ description: t.description, parameters: t.params, steps: t.steps });
+  if (smuggled) return smuggled;
   const params = t.params ?? [];
   if (!Array.isArray(params) || params.length > LIMITS.params) return `A tool takes at most ${LIMITS.params} parameters, as a list.`;
   const paramNames = new Set<string>();
@@ -136,6 +141,7 @@ export function validateToolSpec(t: Partial<Record<keyof ToolSpec, unknown>>): s
     if (p.description !== undefined && (typeof p.description !== "string" || p.description.length > LIMITS.paramDescription)) {
       return `Parameter "${p.name}"'s description must be text of at most ${LIMITS.paramDescription} characters.`;
     }
+    if (p.required !== undefined && typeof p.required !== "boolean") return `Parameter "${p.name}"'s "required" must be true or false.`;
   }
   const steps = t.steps;
   if (!Array.isArray(steps) || steps.length < 1 || steps.length > LIMITS.steps) {
@@ -177,6 +183,8 @@ export function checkArgs(params: readonly ToolParam[], args: Record<string, unk
       continue;
     }
     if (typeof v !== p.type) return `"${p.name}" must be a ${p.type}.`;
+    // NaN and Infinity are numbers to typeof, and nonsense to every action.
+    if (p.type === "number" && !Number.isFinite(v)) return `"${p.name}" must be a finite number.`;
   }
   return null;
 }
@@ -212,6 +220,10 @@ export function resolveTemplate(value: unknown, scope: { params: Record<string, 
     let missing: string | null = null;
     const text = value.replace(PLACEHOLDER, (_, ref: string) => {
       const hit = lookup(ref, scope);
+      // An optional parameter left out reads as nothing inside text, the way
+      // it drops a whole-value argument. Otherwise a tool that advertises it as
+      // optional fails at that step — after earlier steps have already written.
+      if (hit.found && (hit.value === undefined || hit.value === null) && !ref.includes(".") && ref in scope.params) return "";
       if (!hit.found || hit.value === undefined || hit.value === null) {
         missing ??= ref;
         return "";

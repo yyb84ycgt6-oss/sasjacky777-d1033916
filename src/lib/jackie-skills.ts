@@ -77,14 +77,23 @@ export const loadSkills = () =>
 export const loadTools = () =>
   run<ToolRow[]>(() => db.from("jackie_custom_tools").select("*").order("status").order("name"));
 
-/** What agents did with skills, tools and connections, newest first, from the person's own audit trail. */
-export const loadActivity = () =>
-  run<ActivityRow[]>(() =>
+/**
+ * What agents did with skills, tools and connections, newest first, from the
+ * person's own audit trail. Pinned to them explicitly: row-level security lets
+ * an owner or auditor read every account's trail, and without the pin this tab
+ * showed other people's agents as the owner's own.
+ */
+export async function loadActivity(): Promise<ActionResult<ActivityRow[]>> {
+  const userId = await me();
+  if (!userId) return { ok: false, error: "You are signed out. Sign in and try again." };
+  return run<ActivityRow[]>(() =>
     db.from("audit_events")
       .select("id,ts,action,actor,details,result")
+      .eq("user_id", userId)
       .or("action.like.skill.%,action.like.tool.%,action.like.connection.%")
       .order("ts", { ascending: false })
       .limit(50));
+}
 
 export async function saveSkill(spec: SkillSpec, id?: string): Promise<ActionResult<null>> {
   const problem = validateSkill(spec);
@@ -110,6 +119,20 @@ type Table = "jackie_skills" | "jackie_custom_tools" | "jackie_connections";
 
 export const setStatus = (table: Table, id: string, status: Status) =>
   run<null>(() => db.from(table).update({ status }).eq("id", id));
+
+/**
+ * Switches a proposal (or an archived row) on — after checking it the way the
+ * page checks what the person writes. The database accepts some shapes the
+ * app refuses, and a row written around the app can be one of them; approving
+ * it blind would hand every agent something that cannot run.
+ */
+export function activate(table: Table, row: SkillRow | ToolRow | ConnectionRow): Promise<ActionResult<null>> {
+  const problem = table === "jackie_skills" ? validateSkill(row as SkillRow)
+    : table === "jackie_custom_tools" ? validateToolSpec(row as ToolRow)
+      : validateConnectionSpec(row as ConnectionRow);
+  if (problem) return Promise.resolve({ ok: false, error: `Not switched on: ${problem}` });
+  return setStatus(table, row.id, "active");
+}
 
 export const remove = (table: Table, id: string) =>
   run<null>(() => db.from(table).delete().eq("id", id));

@@ -78,6 +78,11 @@ describe("running an acting agent", () => {
     expect(seen[0].system).toContain("## Acting on the app");
   });
 
+  it("does not make every run spend an action on list_skills first", () => {
+    expect(actionManual(false)).not.toMatch(/check list_skills first/);
+    expect(actionManual(false)).toMatch(/steps\.0 is the FIRST step's result/);
+  });
+
   it("refuses a delete when deletes were not allowed, and tells the model why", async () => {
     const { callModel, seen } = scripted(action("delete_task", { id: "t1" }), "I could not delete it.");
     const execute = vi.fn();
@@ -102,6 +107,22 @@ describe("running an acting agent", () => {
     await runAppAgent({ system: "", prompt: "go", callModel, execute });
     expect(execute).not.toHaveBeenCalled();
     expect(seen[1].messages.at(-1)?.content).toMatch(/no action called "drop_database"/);
+  });
+
+  it("points a model that calls a custom tool by its own name at run_custom_tool", async () => {
+    const { callModel, seen } = scripted(action("weekly_review", {}), "ok");
+    await runAppAgent({ system: "", prompt: "go", callModel, execute: vi.fn() });
+    expect(seen[1].messages.at(-1)?.content).toContain('call run_custom_tool with {"name": "weekly_review", "args": {…}}');
+  });
+
+  it("hands an operator a whole skill — its last rule included — not the first 4,000 characters", async () => {
+    const body = `${"Step.\n".repeat(1100)}FINAL RULE: never mark a blocked task done.`;
+    const { callModel, seen } = scripted(action("get_skill", { name: "triage" }), "Following it.");
+    const execute = vi.fn(async () => ({ ok: true as const, data: { name: "triage", title: "Triage", description: "When triaging.", body } }));
+    await runAppAgent({ system: "", prompt: "triage", callModel, execute });
+    const shown = seen[1].messages.at(-1)?.content ?? "";
+    expect(shown).toContain("FINAL RULE: never mark a blocked task done.");
+    expect(shown).not.toContain("(truncated)");
   });
 
   it("does not report work as finished when it ran out of steps", async () => {

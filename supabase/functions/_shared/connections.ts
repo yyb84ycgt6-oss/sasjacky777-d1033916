@@ -9,6 +9,8 @@
  * and the function refuses would read to the person as the service being down.
  */
 
+import { smugglingProblem } from "./textSafety.ts";
+
 export const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
 export type HttpMethod = (typeof HTTP_METHODS)[number];
 export const PARAM_PLACES = ["path", "query", "body"] as const;
@@ -115,6 +117,8 @@ export function validateConnectionSpec(c: Partial<Record<keyof ConnectionSpec, u
   }
   const badUrl = checkBaseUrl(c.base_url);
   if (badUrl) return badUrl;
+  const smuggled = smugglingProblem({ title: c.title, description: c.description, operations: c.operations });
+  if (smuggled) return smuggled;
   if (!(AUTH_TYPES as readonly string[]).includes(c.auth_type as string)) return `Authentication must be one of: ${AUTH_TYPES.join(", ")}.`;
   if ((c.auth_type === "header" || c.auth_type === "query") && (typeof c.auth_name !== "string" || !TOKEN.test(c.auth_name))) {
     return "Name the header or query parameter the key goes in (letters, digits and dashes).";

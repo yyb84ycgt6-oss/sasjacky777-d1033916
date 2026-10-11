@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import ReactMarkdown from "react-markdown";
 import {
   Archive, ArchiveRestore, Bot, Check, Play, Plus, RefreshCw, Trash2, Wrench, X, BookOpen, Activity,
 } from "lucide-react";
@@ -20,10 +19,12 @@ import {
   type CustomToolAction, type ParamType, type SkillSpec, type ToolParam, type ToolSpec,
 } from "@/lib/customTools";
 import {
-  loadActivity, loadConnections, loadSkills, loadTools, remove, runToolNow, saveSkill, saveTool, setStatus,
+  activate, loadActivity, loadConnections, loadSkills, loadTools, remove, runToolNow, saveSkill, saveTool, setStatus,
   type ActivityRow, type ConnectionRow, type SkillRow, type ToolRow,
 } from "@/lib/jackie-skills";
 import { ConnectionSummary, ConnectionsTab } from "@/components/skills/ConnectionsTab";
+import { Revealed } from "@/components/skills/Revealed";
+import { ParamInputs, typedArgs } from "@/components/skills/ParamInputs";
 import type { ActionResult } from "@/lib/appActions";
 
 /**
@@ -36,11 +37,22 @@ import type { ActionResult } from "@/lib/appActions";
  */
 
 const errorOf = (r: ActionResult<unknown>) => ("error" in r ? r.error ?? null : null);
+/** Who did something in the activity trail. "person" is jackie-connect's word for the signed-in person. */
 const who = (actor: string | null) =>
   actor === "agent:mcp" ? "an external agent (MCP)"
     : actor === "agent:agent-lab" ? "an Agent Lab operator"
       : actor === "agent:app" || actor === "person" || !actor ? "you"
         : actor;
+/**
+ * Who proposed something. Never "you": the person writes active rows, not
+ * proposals, so a proposal whose author is missing or unfamiliar is said to be
+ * exactly that — the database pins agents' own writes to agent:mcp.
+ */
+const proposer = (by: string | null) =>
+  by === "agent:mcp" ? "an external agent (MCP)"
+    : by === "agent:agent-lab" ? "an Agent Lab operator"
+      : by ? `"${by}" (not a source this page recognises)`
+        : "an unrecorded source";
 
 export default function JackieSkills() {
   const { toast } = useToast();
@@ -48,6 +60,7 @@ export default function JackieSkills() {
   const [tools, setTools] = useState<ToolRow[]>([]);
   const [connections, setConnections] = useState<ConnectionRow[]>([]);
   const [activity, setActivity] = useState<ActivityRow[]>([]);
+  const [activityError, setActivityError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState("skills");
@@ -58,10 +71,10 @@ export default function JackieSkills() {
     if (s.ok) setSkills(s.data);
     if (t.ok) setTools(t.data);
     if (c.ok) setConnections(c.data);
-    // The activity trail is a view onto audit_events; failing to read it should
-    // say so without hiding the skills themselves.
-    if (a.ok) setActivity(a.data);
-    else setActivity([]);
+    // The activity trail is a view onto audit_events; failing to read it is
+    // said on its tab, never shown as "no agent has done anything" (rule 8).
+    setActivity(a.ok ? a.data : []);
+    setActivityError(errorOf(a));
   }, []);
 
   useEffect(() => {
@@ -84,6 +97,12 @@ export default function JackieSkills() {
   const pendingTools = tools.filter((t) => t.status === "proposed");
   const pendingConnections = connections.filter((c) => c.status === "proposed");
   const pending = pendingSkills.length + pendingTools.length + pendingConnections.length;
+
+  // The review tab is disabled once nothing waits; staying on it would leave
+  // the person on an empty, unreachable tab after their last decision.
+  useEffect(() => {
+    if (pending === 0 && tab === "review") setTab("skills");
+  }, [pending, tab]);
 
   return (
     // pb-36 keeps the last entry clear of the floating nav bar.
@@ -127,24 +146,27 @@ export default function JackieSkills() {
           </p>
           {pendingSkills.map((s) => (
             <Proposal key={s.id} kind="skill" title={s.title} name={s.name} by={s.proposed_by} busy={busy}
-              onApprove={() => act("Approving", () => setStatus("jackie_skills", s.id, "active"))}
+              onApprove={() => act("Approving", () => activate("jackie_skills", s))}
               onReject={() => act("Rejecting", () => remove("jackie_skills", s.id))}>
-              <p className="text-sm text-muted-foreground">{s.description}</p>
-              <div className="prose prose-sm dark:prose-invert max-w-none rounded-lg border border-border bg-muted/30 p-3">
-                <ReactMarkdown>{s.body}</ReactMarkdown>
-              </div>
+              <Revealed text={s.description} className="text-sm text-muted-foreground" />
+              {/* The raw text, not rendered Markdown: a link definition or an
+                  HTML comment renders as nothing, and get_skill hands agents
+                  every character of it. */}
+              <p className="text-xs text-muted-foreground">Exactly what agents will read:</p>
+              <Revealed block text={s.body}
+                className="whitespace-pre-wrap break-words font-mono text-xs rounded-lg border border-border bg-muted/30 p-3 max-h-96 overflow-auto" />
             </Proposal>
           ))}
           {pendingTools.map((t) => (
             <Proposal key={t.id} kind="tool" title={t.name} name={t.name} by={t.proposed_by} busy={busy}
-              onApprove={() => act("Approving", () => setStatus("jackie_custom_tools", t.id, "active"))}
+              onApprove={() => act("Approving", () => activate("jackie_custom_tools", t))}
               onReject={() => act("Rejecting", () => remove("jackie_custom_tools", t.id))}>
               <ToolSummary tool={t} />
             </Proposal>
           ))}
           {pendingConnections.map((c) => (
             <Proposal key={c.id} kind="connection" title={c.title} name={c.name} by={c.proposed_by} busy={busy}
-              onApprove={() => act("Approving", () => setStatus("jackie_connections", c.id, "active"))}
+              onApprove={() => act("Approving", () => activate("jackie_connections", c))}
               onReject={() => act("Rejecting", () => remove("jackie_connections", c.id))}>
               <ConnectionSummary c={c} />
               <p className="text-xs text-muted-foreground">
@@ -165,7 +187,7 @@ export default function JackieSkills() {
           <ConnectionsTab connections={connections.filter((c) => c.status !== "proposed")} busy={busy} act={act} />
         </TabsContent>
         <TabsContent value="activity">
-          <ActivityTab rows={activity} />
+          <ActivityTab rows={activity} error={activityError} />
         </TabsContent>
       </Tabs>
     </div>
@@ -182,31 +204,56 @@ function Proposal({
     <section className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <Bot className="w-4 h-4 text-amber-700 dark:text-amber-400" />
-        <span className="font-medium text-foreground">{title}</span>
+        <Revealed text={title} className="font-medium text-foreground" />
         <Badge variant="outline" className="font-mono text-[11px]">{kind}: {name}</Badge>
-        <span className="text-xs text-muted-foreground">proposed by {who(by)}</span>
+        <span className="text-xs text-muted-foreground">proposed by {proposer(by)}</span>
       </div>
       {children}
       <div className="flex gap-2">
-        <Button size="sm" disabled={busy} onClick={onApprove}><Check className="w-4 h-4 mr-1" /> Approve</Button>
-        <Button size="sm" variant="outline" disabled={busy} onClick={onReject}><X className="w-4 h-4 mr-1" /> Reject</Button>
+        <Button size="sm" disabled={busy} onClick={onApprove} aria-label={`Approve ${kind} ${name}`}>
+          <Check className="w-4 h-4 mr-1" /> Approve
+        </Button>
+        <Button size="sm" variant="outline" disabled={busy} onClick={onReject} aria-label={`Reject ${kind} ${name}`}>
+          <X className="w-4 h-4 mr-1" /> Reject
+        </Button>
       </div>
     </section>
   );
 }
 
-function ToolSummary({ tool }: { tool: { description: string; params: ToolParam[]; steps: ToolSpec["steps"] } }) {
+/**
+ * Everything about a tool that an agent will read: its description, every
+ * parameter with its description (list_custom_tools sends them verbatim), and
+ * every step, labelled the way templates refer to it.
+ */
+function ToolSummary({ tool }: { tool: { name: string; description: string; params: ToolParam[]; steps: ToolSpec["steps"] } }) {
+  const params = Array.isArray(tool.params) ? tool.params : [];
+  const steps = Array.isArray(tool.steps) ? tool.steps : [];
   return (
     <div className="space-y-2 text-sm">
-      <p className="text-muted-foreground">{tool.description}</p>
-      {isDestructive(tool.steps) && (
-        <p className="text-destructive text-xs">Deletes things. Agents without Allow deletes cannot run it.</p>
+      <Revealed text={tool.description} className="text-muted-foreground block" />
+      {isDestructive(steps) && (
+        <p className="text-destructive text-xs">
+          Deletes things. Agent Lab operators need Allow deletes to run it; MCP agents can delete with or without it.
+        </p>
       )}
-      <ol className="space-y-1 list-decimal pl-5">
-        {tool.steps.map((s, i) => (
+      {params.length > 0 && (
+        <ul className="space-y-1">
+          {params.map((p, i) => (
+            <li key={i} className="flex flex-wrap items-baseline gap-2 text-xs">
+              <Revealed text={String(p?.name ?? "")} className="font-mono text-foreground" />
+              <span className="text-muted-foreground">{String(p?.type ?? "?")}{p?.required ? ", required" : ", optional"}</span>
+              {p?.description ? <Revealed text={`— ${p.description}`} className="text-muted-foreground" /> : null}
+            </li>
+          ))}
+        </ul>
+      )}
+      <ol className="space-y-1">
+        {steps.map((s, i) => (
           <li key={i} className="break-words">
+            <span className="text-xs text-muted-foreground">Step {i + 1} <code className="text-[10px]">steps.{i}</code></span>{" "}
             <span className="font-mono">{s.action}</span>{" "}
-            <span className="font-mono text-xs text-muted-foreground">{JSON.stringify(s.args ?? {})}</span>
+            <Revealed text={JSON.stringify(s.args ?? {})} className="font-mono text-xs text-muted-foreground" />
           </li>
         ))}
       </ol>
@@ -286,7 +333,7 @@ function SkillsTab({ skills, busy, act }: { skills: SkillRow[]; busy: boolean; a
                 <Button size="icon" variant="ghost" disabled={busy}
                   aria-label={s.status === "archived" ? `Restore ${s.name}` : `Archive ${s.name}`}
                   onClick={() => act(s.status === "archived" ? "Restoring" : "Archiving",
-                    () => setStatus("jackie_skills", s.id, s.status === "archived" ? "active" : "archived"))}>
+                    () => (s.status === "archived" ? activate("jackie_skills", s) : setStatus("jackie_skills", s.id, "archived")))}>
                   {s.status === "archived" ? <ArchiveRestore className="w-4 h-4" /> : <Archive className="w-4 h-4" />}
                 </Button>
                 <Button size="icon" variant="ghost" disabled={busy} aria-label={`Delete ${s.name}`} onClick={() => setConfirm(s)}>
@@ -459,7 +506,7 @@ function ToolsTab({ tools, busy, act }: { tools: ToolRow[]; busy: boolean; act: 
                 <Button size="icon" variant="ghost" disabled={busy}
                   aria-label={t.status === "archived" ? `Restore ${t.name}` : `Archive ${t.name}`}
                   onClick={() => act(t.status === "archived" ? "Restoring" : "Archiving",
-                    () => setStatus("jackie_custom_tools", t.id, t.status === "archived" ? "active" : "archived"))}>
+                    () => (t.status === "archived" ? activate("jackie_custom_tools", t) : setStatus("jackie_custom_tools", t.id, "archived")))}>
                   {t.status === "archived" ? <ArchiveRestore className="w-4 h-4" /> : <Archive className="w-4 h-4" />}
                 </Button>
                 <Button size="icon" variant="ghost" disabled={busy} aria-label={`Delete ${t.name}`} onClick={() => setConfirm(t)}>
@@ -484,16 +531,7 @@ function TryTool({ tool, onClose }: { tool: ToolRow; onClose: () => void }) {
   const [values, setValues] = useState<Record<string, string>>({});
   const [running, setRunning] = useState(false);
   const [outcome, setOutcome] = useState<ActionResult | null>(null);
-
-  const args = () => {
-    const out: Record<string, unknown> = {};
-    for (const p of tool.params) {
-      const raw = values[p.name];
-      if (raw === undefined || raw === "") continue;
-      out[p.name] = p.type === "number" ? Number(raw) : p.type === "boolean" ? raw === "true" : raw;
-    }
-    return out;
-  };
+  const parsed = useMemo(() => typedArgs(tool.params, values), [tool.params, values]);
 
   return (
     <AlertDialog open onOpenChange={(o) => !o && onClose()}>
@@ -505,10 +543,8 @@ function TryTool({ tool, onClose }: { tool: ToolRow; onClose: () => void }) {
           </AlertDialogDescription>
         </AlertDialogHeader>
         <div className="space-y-2">
-          {tool.params.map((p) => (
-            <Input key={p.name} aria-label={p.name} placeholder={`${p.name} (${p.type}${p.required ? ", required" : ""})`}
-              value={values[p.name] ?? ""} onChange={(e) => setValues({ ...values, [p.name]: e.target.value })} />
-          ))}
+          <ParamInputs params={tool.params} values={values} onChange={setValues} />
+          {"error" in parsed && <p className="text-xs text-destructive">{parsed.error}</p>}
           {outcome && (
             <pre className={`rounded-lg border p-2 text-xs whitespace-pre-wrap break-words ${outcome.ok ? "border-border bg-muted/40" : "border-destructive/40 bg-destructive/10"}`}>
               {outcome.ok ? JSON.stringify(outcome.data, null, 1) : outcome.error}
@@ -517,11 +553,12 @@ function TryTool({ tool, onClose }: { tool: ToolRow; onClose: () => void }) {
         </div>
         <AlertDialogFooter>
           <AlertDialogCancel>Close</AlertDialogCancel>
-          <AlertDialogAction disabled={running}
+          <AlertDialogAction disabled={running || "error" in parsed}
             onClick={async (e) => {
               e.preventDefault();
+              if (!("args" in parsed)) return;
               setRunning(true);
-              setOutcome(await runToolNow(tool.name, args()));
+              setOutcome(await runToolNow(tool.name, parsed.args));
               setRunning(false);
             }}>
             <Play className="w-4 h-4 mr-1" /> {running ? "Running…" : "Run"}
@@ -532,7 +569,14 @@ function TryTool({ tool, onClose }: { tool: ToolRow; onClose: () => void }) {
   );
 }
 
-function ActivityTab({ rows }: { rows: ActivityRow[] }) {
+function ActivityTab({ rows, error }: { rows: ActivityRow[]; error: string | null }) {
+  if (error) {
+    return (
+      <p className="text-sm text-destructive" role="alert">
+        Could not read what agents did: {error}
+      </p>
+    );
+  }
   if (rows.length === 0) {
     return <p className="text-sm text-muted-foreground">No agent has loaded a skill, run a tool, called a connection or proposed one yet.</p>;
   }

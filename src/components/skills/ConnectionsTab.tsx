@@ -14,10 +14,12 @@ import {
   AUTH_TYPES, isWrite, validateConnectionSpec, type AuthType, type ConnectionOperation, type ConnectionSpec,
 } from "../../../supabase/functions/_shared/connections";
 import {
-  clearSecret, loadSecretStatus, remove, runOperationNow, saveConnection, setAcceptsAppData, setAgentsMayWrite,
+  activate, clearSecret, loadSecretStatus, remove, runOperationNow, saveConnection, setAcceptsAppData, setAgentsMayWrite,
   setSecret, setStatus, type ConnectionRow,
 } from "@/lib/jackie-skills";
 import type { ActionResult } from "@/lib/appActions";
+import { Revealed } from "./Revealed";
+import { ParamInputs, typedArgs } from "./ParamInputs";
 
 /**
  * Connections on /skills: outside services the person lets their agents use.
@@ -55,22 +57,42 @@ export const hostOf = (url: string) => {
   }
 };
 
-/** What an approval card shows before Approve: host, auth, and every operation, writes marked (T8). */
+/**
+ * What an approval card shows before Approve (T8): the host, where the key
+ * goes, and every operation with every parameter — list_connections sends
+ * agents all of it, descriptions included, so the person sees all of it, with
+ * invisible characters spelled out.
+ */
 export function ConnectionSummary({ c }: { c: Pick<ConnectionSpec, "base_url" | "auth_type" | "auth_name" | "operations" | "description"> }) {
+  const operations = Array.isArray(c.operations) ? c.operations : [];
   return (
     <div className="space-y-2 text-sm">
-      <p className="text-muted-foreground">{c.description}</p>
+      <Revealed text={c.description} className="text-muted-foreground block" />
       <div className="flex flex-wrap items-center gap-2 text-xs">
         <Globe className="w-3.5 h-3.5 text-muted-foreground" />
-        <span className="font-mono text-foreground break-all">{c.base_url}</span>
-        <Badge variant="outline" className="text-[11px]">auth: {c.auth_type}{c.auth_name ? ` (${c.auth_name})` : ""}</Badge>
+        <Revealed text={c.base_url} className="font-mono text-foreground break-all" />
+        <Badge variant="outline" className="text-[11px]">
+          key: {c.auth_type === "none" ? "none" : c.auth_type === "bearer" ? "Authorization: Bearer" : `${c.auth_type} ${c.auth_name ?? "?"}`}
+        </Badge>
       </div>
-      <ul className="space-y-1">
-        {c.operations.map((o) => (
-          <li key={o.name} className="flex flex-wrap items-center gap-2">
-            <Badge variant={isWrite(o.method) ? "destructive" : "secondary"} className="text-[11px] font-mono">{o.method}</Badge>
-            <span className="font-mono text-xs text-foreground break-all">{o.path}</span>
-            <span className="text-xs text-muted-foreground">— {o.description}</span>
+      <ul className="space-y-2">
+        {operations.map((o, i) => (
+          <li key={`${o.name}-${i}`} className="space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant={isWrite(o.method) ? "destructive" : "secondary"} className="text-[11px] font-mono">{o.method}</Badge>
+              <Revealed text={o.path} className="font-mono text-xs text-foreground break-all" />
+              <Revealed text={`${o.name} — ${o.description}`} className="text-xs text-muted-foreground" />
+            </div>
+            {(o.params ?? []).length > 0 && (
+              <ul className="pl-6 space-y-0.5">
+                {(o.params ?? []).map((p, j) => (
+                  <li key={j} className="text-xs text-muted-foreground">
+                    <Revealed text={p.name} className="font-mono text-foreground" /> ({p.in}, {p.type}{p.required ? ", required" : ""})
+                    {p.description ? <Revealed text={` — ${p.description}`} /> : null}
+                  </li>
+                ))}
+              </ul>
+            )}
           </li>
         ))}
       </ul>
@@ -156,7 +178,10 @@ export function ConnectionsTab({ connections, busy, act }: { connections: Connec
               <Input aria-label="Key name" className="w-56" placeholder={draft.auth_type === "header" ? "X-Api-Key" : "api_key"}
                 value={draft.auth_name ?? ""} onChange={(e) => setDraft({ ...draft, auth_name: e.target.value })} />
             )}
-            <span className="text-xs text-muted-foreground">The key itself is added after saving, and never shown again.</span>
+            <span className="text-xs text-muted-foreground">
+              The key itself is added after saving, and never shown again.
+              {editing !== "new" && " Changing the address or where the key goes clears a stored key, so it is never sent somewhere you did not give it to."}
+            </span>
           </div>
           <Textarea aria-label="Operations" className="font-mono text-xs min-h-56" value={opsText} onChange={(e) => setOpsText(e.target.value)} />
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -199,7 +224,7 @@ export function ConnectionsTab({ connections, busy, act }: { connections: Connec
                   <Button size="icon" variant="ghost" disabled={busy}
                     aria-label={c.status === "archived" ? `Restore ${c.name}` : `Archive ${c.name}`}
                     onClick={() => act(c.status === "archived" ? "Restoring" : "Archiving",
-                      () => setStatus("jackie_connections", c.id, c.status === "archived" ? "active" : "archived"))}>
+                      () => (c.status === "archived" ? activate("jackie_connections", c) : setStatus("jackie_connections", c.id, "archived")))}>
                     {c.status === "archived" ? <ArchiveRestore className="w-4 h-4" /> : <Archive className="w-4 h-4" />}
                   </Button>
                   <Button size="icon" variant="ghost" disabled={busy} aria-label={`Delete ${c.name}`} onClick={() => setConfirm(c)}>
@@ -310,15 +335,7 @@ function RunOperation({ c, op, onClose }: { c: ConnectionRow; op: ConnectionOper
   const [values, setValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<ActionResult<Record<string, unknown>> | null>(null);
-  const args = () => {
-    const out: Record<string, unknown> = {};
-    for (const p of op.params ?? []) {
-      const raw = values[p.name];
-      if (raw === undefined || raw === "") continue;
-      out[p.name] = p.type === "number" ? Number(raw) : p.type === "boolean" ? raw === "true" : raw;
-    }
-    return out;
-  };
+  const parsed = useMemo(() => typedArgs(op.params ?? [], values), [op.params, values]);
   return (
     <AlertDialog open onOpenChange={(o) => !o && onClose()}>
       <AlertDialogContent className="max-h-[85vh] overflow-auto">
@@ -332,10 +349,9 @@ function RunOperation({ c, op, onClose }: { c: ConnectionRow; op: ConnectionOper
           </AlertDialogDescription>
         </AlertDialogHeader>
         <div className="space-y-2">
-          {(op.params ?? []).map((p) => (
-            <Input key={p.name} aria-label={p.name} placeholder={`${p.name} (${p.in}, ${p.type}${p.required ? ", required" : ""})`}
-              value={values[p.name] ?? ""} onChange={(e) => setValues({ ...values, [p.name]: e.target.value })} />
-          ))}
+          <ParamInputs params={op.params ?? []} values={values} onChange={setValues}
+            describe={(p) => `${p.name} (${p.in}, ${p.type}${p.required ? ", required" : ""})`} />
+          {"error" in parsed && <p className="text-xs text-destructive">{parsed.error}</p>}
           {outcome && (
             <pre className={`rounded-lg border p-2 text-xs whitespace-pre-wrap break-words max-h-80 overflow-auto ${outcome.ok ? "border-border bg-muted/40" : "border-destructive/40 bg-destructive/10"}`}>
               {outcome.ok ? JSON.stringify(outcome.data, null, 1) : outcome.error}
@@ -344,11 +360,12 @@ function RunOperation({ c, op, onClose }: { c: ConnectionRow; op: ConnectionOper
         </div>
         <AlertDialogFooter>
           <AlertDialogCancel>Close</AlertDialogCancel>
-          <AlertDialogAction disabled={busy}
+          <AlertDialogAction disabled={busy || "error" in parsed}
             onClick={async (e) => {
               e.preventDefault();
+              if (!("args" in parsed)) return;
               setBusy(true);
-              setOutcome(await runOperationNow(c.name, op.name, args()));
+              setOutcome(await runOperationNow(c.name, op.name, parsed.args));
               setBusy(false);
             }}>
             <Play className="w-4 h-4 mr-1" /> {busy ? "Calling…" : "Call"}

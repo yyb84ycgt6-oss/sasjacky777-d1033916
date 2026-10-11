@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import {
-  CUSTOM_TOOL_ACTIONS, LIMITS, NAME_PATTERN, RESERVED_NAMES, checkArgs, isDestructive, resolveTemplate,
+  CUSTOM_TOOL_ACTIONS, LIMITS, NAME_PATTERN, PARAM_TYPES, RESERVED_NAMES, checkArgs, isDestructive, resolveTemplate,
   toolSignature, validateSkill, validateToolSpec, type ToolSpec,
 } from "@/lib/customTools";
 
@@ -106,8 +106,13 @@ describe("filling a step in", () => {
   });
 
   it("names a placeholder it cannot fill, rather than sending text with a hole in it", () => {
-    expect(resolveTemplate({ title: "Due {{due}}" }, scope)).toEqual({ ok: false, error: "{{due}} has no value" });
+    expect(resolveTemplate({ title: "Due {{nothing}}" }, scope)).toEqual({ ok: false, error: "{{nothing}} has no value" });
     expect(resolveTemplate({ id: "{{steps.1.id}}" }, scope)).toMatchObject({ ok: false });
+    expect(resolveTemplate({ title: "Re {{steps.0.missing}}" }, scope)).toMatchObject({ ok: false });
+  });
+
+  it("reads an optional parameter that was left out as nothing inside text, so the tool does not fail half-way", () => {
+    expect(resolveTemplate({ value: "Started {{topic}}. {{due}}" }, scope)).toEqual({ ok: true, value: { value: "Started billing. " } });
   });
 });
 
@@ -116,6 +121,13 @@ describe("checking a call's arguments", () => {
   it("asks for what is required", () => {
     expect(checkArgs(params, {})).toBe('"topic" is required.');
   });
+  it("refuses NaN and Infinity, which typeof calls numbers", () => {
+    const counted = [{ name: "count", type: "number" as const, required: true }];
+    expect(checkArgs(counted, { count: Number.NaN })).toBe('"count" must be a finite number.');
+    expect(checkArgs(counted, { count: Infinity })).toBe('"count" must be a finite number.');
+    expect(checkArgs(counted, { count: 3 })).toBeNull();
+  });
+
   it("refuses an argument the tool does not take, instead of ignoring it", () => {
     expect(checkArgs(params, { topic: "a", priority: "high" })).toContain('no parameter "priority"');
   });
@@ -135,6 +147,16 @@ describe("the code and the database agree", () => {
     const start = SQL.indexOf("AND name NOT IN (");
     const block = SQL.slice(start, SQL.indexOf("description text", start));
     expect(quoted(block).sort()).toEqual([...RESERVED_NAMES].sort());
+  });
+
+  it("checks a parameter's shape the way the SQL check does", () => {
+    const fn = SQL.slice(SQL.indexOf("FUNCTION private.custom_tool_params_valid"), SQL.indexOf("FUNCTION private.visible_length"));
+    expect(fn).toContain("'^[a-z][a-z0-9_]{0,31}$'");
+    expect(fn).toContain(`jsonb_array_length(params) <= ${LIMITS.params}`);
+    expect(fn).toContain(`char_length(p->>'description') > ${LIMITS.paramDescription}`);
+    expect(fn).toContain("p->>'name' = 'steps'");
+    for (const t of PARAM_TYPES) expect(fn).toContain(`'${t}'`);
+    expect(validateToolSpec({ ...tool(), params: [{ name: "n", type: "string", required: "yes" }] } as never)).toMatch(/"required" must be true or false/);
   });
 
   it("uses the same name pattern as the SQL check", () => {

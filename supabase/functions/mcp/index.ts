@@ -71,6 +71,18 @@ function functionCaller(ctx) {
   });
 }
 
+// supabase/functions/_shared/textSafety.ts
+var SMUGGLING_CHARS = /[\u202A-\u202E\u2066-\u2069]|[\u{E0000}-\u{E007F}]|[\u{E0100}-\u{E01EF}]/u;
+function smugglingProblem(fields) {
+  for (const [field, value] of Object.entries(fields)) {
+    const text2 = typeof value === "string" ? value : value === void 0 ? "" : JSON.stringify(value);
+    if (SMUGGLING_CHARS.test(text2)) {
+      return `The ${field} contains invisible or text-reordering characters (bidi controls or Unicode tags). Remove them: a person reviewing it would not see what an agent reads.`;
+    }
+  }
+  return null;
+}
+
 // src/lib/customTools.ts
 var CUSTOM_TOOL_ACTIONS = [
   "list_tasks",
@@ -120,7 +132,7 @@ function nameProblem(kind, name) {
   return null;
 }
 function validateSkill(s) {
-  return nameProblem("skill", s.name) ?? (!str(s.title) || str(s.title).length > LIMITS.title ? `Give the skill a title of 1\u2013${LIMITS.title} characters.` : null) ?? (!str(s.description) || str(s.description).length > LIMITS.description ? `Describe when to use it in 1\u2013${LIMITS.description} characters \u2014 agents choose skills by this line.` : null) ?? (!str(s.body) || str(s.body).length > LIMITS.body ? `Write the skill's instructions in 1\u2013${LIMITS.body} characters.` : null);
+  return nameProblem("skill", s.name) ?? smugglingProblem({ title: s.title, description: s.description, instructions: s.body }) ?? (!str(s.title) || str(s.title).length > LIMITS.title ? `Give the skill a title of 1\u2013${LIMITS.title} characters.` : null) ?? (!str(s.description) || str(s.description).length > LIMITS.description ? `Describe when to use it in 1\u2013${LIMITS.description} characters \u2014 agents choose skills by this line.` : null) ?? (!str(s.body) || str(s.body).length > LIMITS.body ? `Write the skill's instructions in 1\u2013${LIMITS.body} characters.` : null);
 }
 var PLACEHOLDER = /\{\{\s*([^{}]+?)\s*\}\}/g;
 function placeholders(value, out = []) {
@@ -142,6 +154,8 @@ function validateToolSpec(t) {
   if (!str(t.description) || str(t.description).length > LIMITS.description) {
     return `Describe what the tool does in 1\u2013${LIMITS.description} characters \u2014 agents choose tools by this line.`;
   }
+  const smuggled = smugglingProblem({ description: t.description, parameters: t.params, steps: t.steps });
+  if (smuggled) return smuggled;
   const params = t.params ?? [];
   if (!Array.isArray(params) || params.length > LIMITS.params) return `A tool takes at most ${LIMITS.params} parameters, as a list.`;
   const paramNames = /* @__PURE__ */ new Set();
@@ -158,6 +172,7 @@ function validateToolSpec(t) {
     if (p.description !== void 0 && (typeof p.description !== "string" || p.description.length > LIMITS.paramDescription)) {
       return `Parameter "${p.name}"'s description must be text of at most ${LIMITS.paramDescription} characters.`;
     }
+    if (p.required !== void 0 && typeof p.required !== "boolean") return `Parameter "${p.name}"'s "required" must be true or false.`;
   }
   const steps = t.steps;
   if (!Array.isArray(steps) || steps.length < 1 || steps.length > LIMITS.steps) {
@@ -195,6 +210,7 @@ function checkArgs(params, args) {
       continue;
     }
     if (typeof v !== p.type) return `"${p.name}" must be a ${p.type}.`;
+    if (p.type === "number" && !Number.isFinite(v)) return `"${p.name}" must be a finite number.`;
   }
   return null;
 }
@@ -220,6 +236,7 @@ function resolveTemplate(value, scope) {
     let missing = null;
     const text2 = value.replace(PLACEHOLDER, (_, ref) => {
       const hit = lookup(ref, scope);
+      if (hit.found && (hit.value === void 0 || hit.value === null) && !ref.includes(".") && ref in scope.params) return "";
       if (!hit.found || hit.value === void 0 || hit.value === null) {
         missing ??= ref;
         return "";
@@ -312,6 +329,8 @@ function validateConnectionSpec(c) {
   }
   const badUrl = checkBaseUrl(c.base_url);
   if (badUrl) return badUrl;
+  const smuggled = smugglingProblem({ title: c.title, description: c.description, operations: c.operations });
+  if (smuggled) return smuggled;
   if (!AUTH_TYPES.includes(c.auth_type)) return `Authentication must be one of: ${AUTH_TYPES.join(", ")}.`;
   if ((c.auth_type === "header" || c.auth_type === "query") && (typeof c.auth_name !== "string" || !TOKEN.test(c.auth_name))) {
     return "Name the header or query parameter the key goes in (letters, digits and dashes).";
@@ -628,19 +647,28 @@ async function proposeSkill(sb, userId, args, ctx) {
   if (error) {
     return fail(/duplicate key|unique/i.test(error.message) ? `A skill called "${args.name}" already exists or is waiting for review. Propose it under another name.` : error.message);
   }
-  await recordAgentActivity(sb, userId, ctx, "skill.propose", { name: args.name });
-  return ok({ ...data?.[0], note: "Proposed. It stays off until the person approves it on the Skills page." });
+  const logged = await recordAgentActivity(sb, userId, ctx, "skill.propose", { name: args.name });
+  return ok({
+    ...data?.[0],
+    note: "Proposed. It stays off until the person approves it on the Skills page.",
+    ...logged ? {} : { activity_logged: false }
+  });
 }
 async function listCustomTools(sb, userId, _args) {
   const { data, error } = await sb.from("jackie_custom_tools").select(TOOL_COLUMNS).eq("user_id", userId).eq("status", "active").order("name").limit(100);
   if (error) return fail(error.message);
-  return ok((data ?? []).map((t) => ({
-    name: t.name,
-    description: t.description,
-    params: t.params,
-    deletes: isDestructive(t.steps),
-    signature: toolSignature(t)
-  })));
+  return ok((data ?? []).map((t) => {
+    const broken = validateToolSpec(t);
+    if (broken) return { name: t.name, broken: `Cannot run as saved: ${broken} The person can fix it on the Skills page.` };
+    return {
+      name: t.name,
+      params: t.params,
+      deletes: isDestructive(t.steps),
+      // The signature carries the description; sending it twice only made the
+      // list longer than the Agent Lab shows a model.
+      signature: toolSignature(t)
+    };
+  }));
 }
 async function proposeTool(sb, userId, args, ctx) {
   const spec = { ...args, params: args.params ?? [] };
@@ -658,8 +686,12 @@ async function proposeTool(sb, userId, args, ctx) {
   if (error) {
     return fail(/duplicate key|unique/i.test(error.message) ? `A tool called "${args.name}" already exists or is waiting for review. Propose it under another name.` : error.message);
   }
-  await recordAgentActivity(sb, userId, ctx, "tool.propose", { name: spec.name });
-  return ok({ ...data?.[0], note: "Proposed. It stays off until the person approves it on the Skills page." });
+  const logged = await recordAgentActivity(sb, userId, ctx, "tool.propose", { name: spec.name });
+  return ok({
+    ...data?.[0],
+    note: "Proposed. It stays off until the person approves it on the Skills page.",
+    ...logged ? {} : { activity_logged: false }
+  });
 }
 var STEP_EXECUTORS = {
   list_tasks: listTasks,
@@ -678,6 +710,12 @@ var STEP_EXECUTORS = {
 async function runCustomTool(sb, userId, args, ctx) {
   const name = typeof args.name === "string" ? args.name.trim() : "";
   if (!name) return fail("name is required \u2014 list_custom_tools shows what there is");
+  const stray = Object.keys(args).filter((k) => k !== "name" && k !== "args");
+  if (stray.length) {
+    return fail(
+      `${stray.map((k) => `"${k}"`).join(", ")} must go inside args: {"name": "${name}", "args": {${stray.map((k) => `"${k}": \u2026`).join(", ")}}}`
+    );
+  }
   const callArgs = args.args === void 0 || args.args === null ? {} : args.args;
   if (typeof callArgs !== "object" || Array.isArray(callArgs)) return fail("args must be an object");
   const { data, error } = await sb.from("jackie_custom_tools").select(TOOL_COLUMNS).eq("user_id", userId).eq("name", name).eq("status", "active").limit(1);
@@ -709,14 +747,26 @@ async function runCustomTool(sb, userId, args, ctx) {
     results.push(res.data);
   }
   const failed = ran.find((s) => !s.ok);
-  await recordAgentActivity(sb, userId, ctx, "tool.run", { name, steps: ran.length, failed_step: failed?.step ?? null }, failed ? "error" : "success");
+  const done = ran.filter((s) => s.ok);
+  const logged = await recordAgentActivity(
+    sb,
+    userId,
+    ctx,
+    "tool.run",
+    { name, steps: ran.length, failed_step: failed?.step ?? null, made: done.map((s) => idOf(s.result)).filter(Boolean) },
+    failed ? "error" : "success"
+  );
   if (failed) {
-    const done = ran.filter((s) => s.ok).map((s) => `${s.step} (${s.action})`);
+    const results2 = JSON.stringify(done.map((s) => ({ step: s.step, action: s.action, result: s.result })));
     return fail(
-      `Step ${failed.step} (${failed.action}) of "${name}" failed: ${failed.error}. ` + (done.length ? `Steps ${done.join(", ")} already ran and were not undone.` : "Nothing had run before it.")
+      `Step ${failed.step} (${failed.action}) of "${name}" failed: ${failed.error}. ` + (done.length ? `Steps ${done.map((s) => `${s.step} (${s.action})`).join(", ")} already ran and were not undone. What they returned: ` + (results2.length > 2e3 ? `${results2.slice(0, 2e3)}\u2026 (cut)` : results2) : "Nothing had run before it.") + (logged ? "" : " This run could not be recorded in the person's activity trail.")
     );
   }
-  return ok({ tool: name, steps: ran });
+  return ok({ tool: name, steps: ran, ...logged ? {} : { activity_logged: false } });
+}
+function idOf(result) {
+  const r = Array.isArray(result) ? result.length === 1 ? result[0] : null : result;
+  return r && typeof r === "object" && typeof r.id === "string" ? r.id : null;
 }
 var ASK_ENGINES = {
   cloud: "jackie-chat",
@@ -846,10 +896,11 @@ async function proposeConnection(sb, userId, args, ctx) {
   if (error) {
     return fail(/duplicate key|unique/i.test(error.message) ? `A connection called "${spec.name}" already exists or is waiting for review. Propose it under another name.` : error.message);
   }
-  await recordAgentActivity(sb, userId, ctx, "connection.propose", { name: spec.name, host: new URL(spec.base_url).host });
+  const logged = await recordAgentActivity(sb, userId, ctx, "connection.propose", { name: spec.name, host: new URL(spec.base_url).host });
   return ok({
     ...data?.[0],
-    note: "Proposed. It stays off until the person approves it on the Skills page and, if it needs one, adds its secret there. Writes and app data stay off until they allow them."
+    note: "Proposed. It stays off until the person approves it on the Skills page and, if it needs one, adds its secret there. Writes and app data stay off until they allow them.",
+    ...logged ? {} : { activity_logged: false }
   });
 }
 

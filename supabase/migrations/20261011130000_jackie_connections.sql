@@ -35,8 +35,8 @@ CREATE TABLE IF NOT EXISTS public.jackie_connections (
   id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id          uuid NOT NULL DEFAULT auth.uid() REFERENCES auth.users(id) ON DELETE CASCADE,
   name             text NOT NULL CHECK (name ~ '^[a-z][a-z0-9_]{1,47}$'),
-  title            text NOT NULL CHECK (char_length(btrim(title)) BETWEEN 1 AND 80),
-  description      text NOT NULL CHECK (char_length(btrim(description)) BETWEEN 1 AND 300),
+  title            text NOT NULL CHECK (private.visible_length(title) BETWEEN 1 AND 80),
+  description      text NOT NULL CHECK (private.visible_length(description) BETWEEN 1 AND 300),
   -- https, a DNS name, the default port, no credentials, query or fragment (T2).
   base_url         text NOT NULL CHECK (
                      char_length(base_url) <= 300
@@ -75,6 +75,27 @@ CREATE TABLE IF NOT EXISTS public.jackie_connection_secrets (
 ALTER TABLE public.jackie_connection_secrets ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.jackie_connection_secrets FROM PUBLIC, anon, authenticated;
 GRANT ALL ON public.jackie_connection_secrets TO service_role;
+
+-- T1: a key is given for one address and one placement. Changing either
+-- clears it, so no edit — the person's own, or a row written around the app —
+-- can send an existing key somewhere it was not given to. SECURITY DEFINER
+-- because no API role may touch the secrets table, the person included.
+CREATE OR REPLACE FUNCTION private.connection_key_follows_address()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+BEGIN
+  IF NEW.base_url IS DISTINCT FROM OLD.base_url
+     OR NEW.auth_type IS DISTINCT FROM OLD.auth_type
+     OR NEW.auth_name IS DISTINCT FROM OLD.auth_name THEN
+    DELETE FROM public.jackie_connection_secrets WHERE connection_id = OLD.id;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+REVOKE ALL ON FUNCTION private.connection_key_follows_address() FROM PUBLIC;
+DROP TRIGGER IF EXISTS jackie_connections_key_follows_address ON public.jackie_connections;
+CREATE TRIGGER jackie_connections_key_follows_address
+  AFTER UPDATE ON public.jackie_connections
+  FOR EACH ROW EXECUTE FUNCTION private.connection_key_follows_address();
 
 -- The propose-only rule, shared with skills and tools.
 DROP TRIGGER IF EXISTS jackie_connections_agent_rule ON public.jackie_connections;

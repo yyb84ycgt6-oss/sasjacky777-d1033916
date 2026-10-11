@@ -494,8 +494,12 @@ export async function proposeSkill(
       ? `A skill called "${args.name}" already exists or is waiting for review. Propose it under another name.`
       : error.message);
   }
-  await recordAgentActivity(sb, userId, ctx, "skill.propose", { name: args.name });
-  return ok({ ...data?.[0], note: "Proposed. It stays off until the person approves it on the Skills page." });
+  const logged = await recordAgentActivity(sb, userId, ctx, "skill.propose", { name: args.name });
+  return ok({
+    ...data?.[0],
+    note: "Proposed. It stays off until the person approves it on the Skills page.",
+    ...(logged ? {} : { activity_logged: false }),
+  });
 }
 
 interface StoredTool {
@@ -514,13 +518,21 @@ export async function listCustomTools(sb: Client, userId: string, _args: Record<
     .order("name")
     .limit(100);
   if (error) return fail(error.message);
-  return ok(((data ?? []) as StoredTool[]).map((t) => ({
-    name: t.name,
-    description: t.description,
-    params: t.params,
-    deletes: isDestructive(t.steps),
-    signature: toolSignature(t),
-  })));
+  // A row written around the app can be in a shape the database accepted but
+  // no run can honour. It is listed as broken, with the reason — not allowed
+  // to throw, which would take list_custom_tools away from every agent.
+  return ok(((data ?? []) as StoredTool[]).map((t) => {
+    const broken = validateToolSpec(t);
+    if (broken) return { name: t.name, broken: `Cannot run as saved: ${broken} The person can fix it on the Skills page.` };
+    return {
+      name: t.name,
+      params: t.params,
+      deletes: isDestructive(t.steps),
+      // The signature carries the description; sending it twice only made the
+      // list longer than the Agent Lab shows a model.
+      signature: toolSignature(t),
+    };
+  }));
 }
 
 export async function proposeTool(
@@ -549,8 +561,12 @@ export async function proposeTool(
       ? `A tool called "${args.name}" already exists or is waiting for review. Propose it under another name.`
       : error.message);
   }
-  await recordAgentActivity(sb, userId, ctx, "tool.propose", { name: spec.name });
-  return ok({ ...data?.[0], note: "Proposed. It stays off until the person approves it on the Skills page." });
+  const logged = await recordAgentActivity(sb, userId, ctx, "tool.propose", { name: spec.name });
+  return ok({
+    ...data?.[0],
+    note: "Proposed. It stays off until the person approves it on the Skills page.",
+    ...(logged ? {} : { activity_logged: false }),
+  });
 }
 
 type StepExecutor = (sb: Client, userId: string, args: Record<string, unknown>, ctx: ActionContext) => Promise<ActionResult>;
@@ -594,6 +610,16 @@ export async function runCustomTool(
 ): Promise<ActionResult> {
   const name = typeof args.name === "string" ? args.name.trim() : "";
   if (!name) return fail("name is required — list_custom_tools shows what there is");
+  // A model that writes the tool's parameters beside "name" instead of inside
+  // "args" would otherwise have them dropped without a word, and the tool run
+  // without the filter it asked for.
+  const stray = Object.keys(args).filter((k) => k !== "name" && k !== "args");
+  if (stray.length) {
+    return fail(
+      `${stray.map((k) => `"${k}"`).join(", ")} must go inside args: `
+      + `{"name": "${name}", "args": {${stray.map((k) => `"${k}": …`).join(", ")}}}`,
+    );
+  }
   const callArgs = args.args === undefined || args.args === null ? {} : args.args;
   if (typeof callArgs !== "object" || Array.isArray(callArgs)) return fail("args must be an object");
 
@@ -648,15 +674,33 @@ export async function runCustomTool(
   }
 
   const failed = ran.find((s) => !s.ok);
-  await recordAgentActivity(sb, userId, ctx, "tool.run", { name, steps: ran.length, failed_step: failed?.step ?? null }, failed ? "error" : "success");
+  const done = ran.filter((s) => s.ok);
+  const logged = await recordAgentActivity(
+    sb, userId, ctx, "tool.run",
+    { name, steps: ran.length, failed_step: failed?.step ?? null, made: done.map((s) => idOf(s.result)).filter(Boolean) },
+    failed ? "error" : "success",
+  );
   if (failed) {
-    const done = ran.filter((s) => s.ok).map((s) => `${s.step} (${s.action})`);
+    // What the finished steps made goes back with the failure: an agent told
+    // only that step 1 "already ran" cannot finish or undo it without guessing,
+    // and a guess is how a retry makes the same task twice.
+    const results = JSON.stringify(done.map((s) => ({ step: s.step, action: s.action, result: s.result })));
     return fail(
       `Step ${failed.step} (${failed.action}) of "${name}" failed: ${failed.error}. `
-      + (done.length ? `Steps ${done.join(", ")} already ran and were not undone.` : "Nothing had run before it."),
+      + (done.length
+        ? `Steps ${done.map((s) => `${s.step} (${s.action})`).join(", ")} already ran and were not undone. What they returned: `
+          + (results.length > 2000 ? `${results.slice(0, 2000)}… (cut)` : results)
+        : "Nothing had run before it.")
+      + (logged ? "" : " This run could not be recorded in the person's activity trail."),
     );
   }
-  return ok({ tool: name, steps: ran });
+  return ok({ tool: name, steps: ran, ...(logged ? {} : { activity_logged: false }) });
+}
+
+/** The id a step's result carries, when it made or touched one row. */
+function idOf(result: unknown): string | null {
+  const r = Array.isArray(result) ? (result.length === 1 ? result[0] : null) : result;
+  return r && typeof r === "object" && typeof (r as { id?: unknown }).id === "string" ? (r as { id: string }).id : null;
 }
 
 // ── Asking Jackie, and connections ──────────────────────────────────────
@@ -865,9 +909,10 @@ export async function proposeConnection(
       ? `A connection called "${spec.name}" already exists or is waiting for review. Propose it under another name.`
       : error.message);
   }
-  await recordAgentActivity(sb, userId, ctx, "connection.propose", { name: spec.name, host: new URL(spec.base_url as string).host });
+  const logged = await recordAgentActivity(sb, userId, ctx, "connection.propose", { name: spec.name, host: new URL(spec.base_url as string).host });
   return ok({
     ...data?.[0],
     note: "Proposed. It stays off until the person approves it on the Skills page and, if it needs one, adds its secret there. Writes and app data stay off until they allow them.",
+    ...(logged ? {} : { activity_logged: false }),
   });
 }

@@ -305,7 +305,22 @@ APP=""
 SKILL="INSERT INTO public.jackie_skills (user_id, name, title, description, body, status) VALUES ('$A', 'weekly_review', 't', 'd', 'b'"
 
 echo "==> skills and custom tools"
-as_user "agent proposes a skill" "$A" "$AGENT" "$SKILL, 'proposed') RETURNING status;" "proposed"
+# Expected values are written as status=… so the refusal text, which also
+# says "proposed", can never satisfy a probe that expects success.
+as_user "agent proposes a skill" "$A" "$AGENT" "$SKILL, 'proposed') RETURNING 'status=' || status;" "status=proposed"
+as_user "agent names itself as the author" "$A" "$AGENT" \
+  "INSERT INTO public.jackie_skills (user_id, name, title, description, body, status, proposed_by) VALUES ('$A', 'mine', 't', 'd', 'b', 'proposed', 'agent:app') RETURNING 'by=' || proposed_by;" \
+  "by=agent:mcp"
+as_user "agent leaves the author out" "$A" "$AGENT_JSON" "$SKILL, 'proposed') RETURNING 'by=' || coalesce(proposed_by, 'nobody');" "by=agent:mcp"
+as_user "agent hides text in Unicode tags" "$A" "$AGENT" \
+  "INSERT INTO public.jackie_skills (user_id, name, title, description, body, status) VALUES ('$A', 'tags', 't', 'd', E'Be brief.\\U000E0049\\U000E0067\\U000E006E', 'proposed');" \
+  "invisible or text-reordering"
+as_user "agent reorders text with a bidi override" "$A" "$AGENT" \
+  "INSERT INTO public.jackie_skills (user_id, name, title, description, body, status) VALUES ('$A', 'bidi', E'safe\\u202Eetirw', 'd', 'b', 'proposed');" \
+  "invisible or text-reordering"
+as_user "a title that is only a newline" "$A" "" \
+  "INSERT INTO public.jackie_skills (user_id, name, title, description, body) VALUES ('$A', 'blank', E'\\n', 'd', 'b');" \
+  "violates check constraint"
 as_user "agent writes an active skill" "$A" "$AGENT" "$SKILL, 'active');" "can only propose"
 as_user "agent writes an active skill (JSON claims)" "$A" "$AGENT_JSON" "$SKILL, 'active');" "can only propose"
 as_user "agent switches its own proposal on" "$A" "" \
@@ -335,11 +350,55 @@ as_user "a tool named like a built-in" "$A" "" \
   "INSERT INTO public.jackie_custom_tools (user_id, name, description, steps) VALUES ('$A', 'delete_task', 'd', '[{\"action\":\"list_tasks\"}]');" \
   "violates check constraint"
 as_user "agent proposes a tool" "$A" "$AGENT" \
-  "INSERT INTO public.jackie_custom_tools (user_id, name, description, steps, status) VALUES ('$A', 'start_review', 'd', '[{\"action\":\"create_task\",\"args\":{\"title\":\"{{topic}}\"}}]', 'proposed') RETURNING status;" \
-  "proposed"
+  "INSERT INTO public.jackie_custom_tools (user_id, name, description, steps, status) VALUES ('$A', 'start_review', 'd', '[{\"action\":\"create_task\",\"args\":{\"title\":\"{{topic}}\"}}]', 'proposed') RETURNING 'status=' || status;" \
+  "status=proposed"
 as_user "agent writes an active tool" "$A" "$AGENT" \
   "INSERT INTO public.jackie_custom_tools (user_id, name, description, steps, status) VALUES ('$A', 'start_review', 'd', '[{\"action\":\"list_tasks\"}]', 'active');" \
   "can only propose"
+TOOL="INSERT INTO public.jackie_custom_tools (user_id, name, description, steps) VALUES ('$A', 'tidy', 'd', '[{\"action\":\"list_tasks\"}]')"
+as_user "agent edits an active tool's steps" "$A" "" \
+  "$TOOL; $AGENT UPDATE public.jackie_custom_tools SET steps = '[{\"action\":\"delete_task\",\"args\":{\"id\":\"x\"}}]';" "not change or remove"
+as_user "agent deletes a tool" "$A" "" "$TOOL; $AGENT DELETE FROM public.jackie_custom_tools;" "not change or remove"
+as_user "a parameter that is not an object" "$A" "" \
+  "INSERT INTO public.jackie_custom_tools (user_id, name, description, params, steps) VALUES ('$A', 'tidy', 'd', '[null]', '[{\"action\":\"list_tasks\"}]');" \
+  "violates check constraint"
+as_user "a parameter of an unknown type" "$A" "" \
+  "INSERT INTO public.jackie_custom_tools (user_id, name, description, params, steps) VALUES ('$A', 'tidy', 'd', '[{\"name\":\"n\",\"type\":\"date\"}]', '[{\"action\":\"list_tasks\"}]');" \
+  "violates check constraint"
+as_user "two parameters with one name" "$A" "" \
+  "INSERT INTO public.jackie_custom_tools (user_id, name, description, params, steps) VALUES ('$A', 'tidy', 'd', '[{\"name\":\"n\",\"type\":\"string\"},{\"name\":\"n\",\"type\":\"number\"}]', '[{\"action\":\"list_tasks\"}]');" \
+  "violates check constraint"
+as_user "a well-formed parameter list" "$A" "" \
+  "INSERT INTO public.jackie_custom_tools (user_id, name, description, params, steps) VALUES ('$A', 'tidy', 'd', '[{\"name\":\"status\",\"type\":\"string\",\"required\":false,\"description\":\"which\"}]', '[{\"action\":\"list_tasks\",\"args\":{\"status\":\"{{status}}\"}}]') RETURNING 'saved=' || name;" \
+  "saved=tidy"
+
+# The caps are counted under a per-account lock. Without it, two floods sent
+# at once each count only committed rows and both pass. Session one holds 20
+# uncommitted proposals for two seconds; session two must wait for them and
+# then be refused, not slip in beside them.
+"${PSQL[@]}" -tA >/dev/null 2>&1 <<EOF &
+BEGIN;
+SET LOCAL ROLE authenticated;
+SET LOCAL "request.jwt.claim.sub" = '$A';
+SET LOCAL "request.jwt.claim.client_id" = 'race-one';
+INSERT INTO public.jackie_skills (user_id, name, title, description, body, status)
+  SELECT '$A', 'race_' || g, 't', 'd', 'b', 'proposed' FROM generate_series(1, 20) g;
+SELECT pg_sleep(2);
+COMMIT;
+EOF
+racer=$!
+sleep 0.5
+as_user "two floods at once cannot both pass the cap" "$A" "$AGENT" "$SKILL, 'proposed');" "already waiting for review"
+wait "$racer"
+svc "DELETE FROM public.jackie_skills WHERE name LIKE 'race_%'" >/dev/null
+
+echo "==> the activity trail"
+as_user "agent writes history as the person" "$A" "$AGENT" \
+  "INSERT INTO public.audit_events (user_id, action, actor, details) VALUES ('$A', 'tool.run', 'person', '{}') RETURNING 'actor=' || actor;" \
+  "actor=agent:mcp"
+as_user "the person's own session keeps its actor" "$A" "" \
+  "INSERT INTO public.audit_events (user_id, action, actor, details) VALUES ('$A', 'tool.run', 'agent:agent-lab', '{}') RETURNING 'actor=' || actor;" \
+  "actor=agent:agent-lab"
 
 # --- connections (docs/CONNECTIONS.md): the T-numbers name the threat each probe covers ---
 OPS='[{"name":"list","description":"d","method":"GET","path":"/x"}]'
@@ -350,7 +409,7 @@ GH=$(conn https://api.github.com bearer "$OPS" proposed false)
 GH_ACTIVE=$(conn https://api.github.com bearer "$OPS" active false)
 
 echo "==> connections"
-as_user "agent proposes a connection" "$A" "$AGENT" "$GH RETURNING status;" "proposed"
+as_user "agent proposes a connection" "$A" "$AGENT" "$GH RETURNING 'status=' || status || ' by=' || proposed_by;" "status=proposed by=agent:mcp"
 as_user "agent proposes one with writes on (T3)" "$A" "$AGENT" \
   "$(conn https://api.github.com bearer "$OPS" proposed true);" "cannot propose a connection with writes"
 as_user "agent proposes one taking app data (T3)" "$A" "$AGENT_JSON" \
@@ -363,6 +422,7 @@ as_user "agent turns on writes (T3)" "$A" "" \
   "$GH_ACTIVE; $AGENT UPDATE public.jackie_connections SET agents_may_write = true;" "not change or remove"
 as_user "agent repoints a connection (T2)" "$A" "" \
   "$GH_ACTIVE; $AGENT UPDATE public.jackie_connections SET base_url = 'https://evil.example.com';" "not change or remove"
+as_user "agent deletes a connection" "$A" "" "$GH_ACTIVE; $AGENT DELETE FROM public.jackie_connections;" "not change or remove"
 as_user "the person approves and allows writes" "$A" "$APP" \
   "$GH; UPDATE public.jackie_connections SET status = 'active', agents_may_write = true RETURNING status || ':' || agents_may_write;" "active:true"
 as_user "a connection to an IP address (T2)" "$A" "" \
@@ -388,6 +448,16 @@ as_user "the person writes a key around the function (T1)" "$A" "" \
   "permission denied"
 as_user "an agent reads a stored key (T1)" "$A" "$AGENT" \
   "SELECT count(*) FROM public.jackie_connection_secrets;" "permission denied"
+KEYED="INSERT INTO public.jackie_connections (id, user_id, name, title, description, base_url, auth_type, operations) VALUES ('00000000-0000-0000-0000-0000000000c2', '$A', 'keyed', 't', 'd', 'https://api.github.com', 'bearer', '$OPS'); INSERT INTO public.jackie_connection_secrets (connection_id, user_id, iv, ciphertext) VALUES ('00000000-0000-0000-0000-0000000000c2', '$A', 'x', 'y')"
+as_user "the person moves a connection to a new address (T1)" "$A" "" \
+  "SET LOCAL ROLE postgres; $KEYED; SET LOCAL ROLE authenticated; UPDATE public.jackie_connections SET base_url = 'https://api.other.example.com' WHERE name = 'keyed'; SET LOCAL ROLE postgres; SELECT 'keys left: ' || count(*) FROM public.jackie_connection_secrets;" \
+  "keys left: 0"
+check "a new key header clears the key (T1)" \
+  "$(svc "$KEYED; UPDATE public.jackie_connections SET auth_type = 'header', auth_name = 'X-Api-Key' WHERE name = 'keyed'; SELECT 'keys left: ' || count(*) FROM public.jackie_connection_secrets")" \
+  "keys left: 0"
+check "a new title keeps the key" \
+  "$(svc "$KEYED; UPDATE public.jackie_connections SET title = 'GitHub (work)' WHERE name = 'keyed'; SELECT 'keys left: ' || count(*) FROM public.jackie_connection_secrets")" \
+  "keys left: 1"
 check "deleting a connection deletes its key" \
   "$(svc "INSERT INTO public.jackie_connections (id, user_id, name, title, description, base_url, operations) VALUES ('00000000-0000-0000-0000-0000000000c1', '$A', 'gone', 't', 'd', 'https://api.github.com', '$OPS'); INSERT INTO public.jackie_connection_secrets (connection_id, user_id, iv, ciphertext) VALUES ('00000000-0000-0000-0000-0000000000c1', '$A', 'x', 'y'); DELETE FROM public.jackie_connections WHERE id = '00000000-0000-0000-0000-0000000000c1'; SELECT 'keys left: ' || count(*) FROM public.jackie_connection_secrets")" \
   "keys left: 0"

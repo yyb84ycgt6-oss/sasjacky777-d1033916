@@ -140,10 +140,45 @@ describe("custom tools, as an agent runs them", () => {
       { data: null },
     ]);
     const r = await runCustomTool(sb, USER, { name: "start_review", args: { topic: "billing" } }, { allowDestructive: true });
-    expect(r).toEqual({
-      ok: false,
-      error: 'Step 2 (update_task) of "start_review" failed: No task found with id t9. Steps 1 (create_task) already ran and were not undone.',
-    });
+    expect(r.ok).toBe(false);
+    expect(r.ok ? "" : r.error).toMatch(
+      /^Step 2 \(update_task\) of "start_review" failed: No task found with id t9\. Steps 1 \(create_task\) already ran and were not undone\./,
+    );
+  });
+
+  it("hands back what the finished steps made, so the agent can finish or undo them instead of guessing", async () => {
+    const { sb, calls } = fakeSupabase([{ data: [reviewTool] }, { data: [{ id: "t9" }] }, { data: [] }, { data: null }]);
+    const r = await runCustomTool(sb, USER, { name: "start_review", args: { topic: "billing" } }, {});
+    expect(r.ok ? "" : r.error).toContain('What they returned: [{"step":1,"action":"create_task","result":{"id":"t9"}}]');
+    const audit = calls.find((c) => c.table === "audit_events");
+    expect(audit?.payload).toMatchObject({ details: { made: ["t9"], failed_step: 2 } });
+  });
+
+  it("refuses parameters written beside the name instead of inside args, rather than dropping them", async () => {
+    const { sb, calls } = fakeSupabase();
+    const r = await runCustomTool(sb, USER, { name: "close_out", status: "blocked" } as never, {});
+    expect(r).toEqual({ ok: false, error: '"status" must go inside args: {"name": "close_out", "args": {"status": …}}' });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("says so when a run could not be recorded in the person's activity, instead of dropping it", async () => {
+    const { sb } = fakeSupabase([
+      { data: [reviewTool] }, { data: [{ id: "t9" }] }, { data: [{ id: "t9", status: "in_progress" }] },
+      { error: { message: "permission denied for table audit_events" } },
+    ]);
+    const r = await runCustomTool(sb, USER, { name: "start_review", args: { topic: "billing" } }, {});
+    expect(r).toMatchObject({ ok: true, data: { activity_logged: false } });
+  });
+
+  it("lists a tool it cannot run as broken, with the reason, instead of failing the whole list", async () => {
+    const broken = { name: "tidy", description: "Tidy.", params: [null], steps: [{ action: "list_tasks", args: {} }] };
+    const { sb } = fakeSupabase([{ data: [reviewTool, broken] }]);
+    const r = await listCustomTools(sb, USER, {});
+    expect(r.ok).toBe(true);
+    const listed = (r.ok ? r.data : []) as Array<Record<string, unknown>>;
+    expect(listed[0].signature).toMatch(/^start_review /);
+    expect(listed[1]).toMatchObject({ name: "tidy" });
+    expect(String(listed[1].broken)).toMatch(/Cannot run as saved: Parameter 1 needs a name/);
   });
 
   it("refuses a tool that deletes when this agent may not delete — the same rule as calling delete_task itself", async () => {
@@ -197,9 +232,18 @@ describe("both kinds of agent get the same skills, tools and connections", () =>
     for (const n of NEW) expect(runtime).toMatch(new RegExp(`\\b${n}: actions\\.`));
   });
 
-  it("offers each one over MCP", () => {
-    const tools = readdirSync(path.join(ROOT, "src", "lib", "mcp", "tools"))
-      .map((f) => /name: "([a-z_]+)"/.exec(readFileSync(path.join(ROOT, "src", "lib", "mcp", "tools", f), "utf8"))?.[1]);
-    for (const n of NEW) expect(tools).toContain(n);
+  it("offers each one over MCP — a tool file the server never registers is offered to no one", () => {
+    const dir = path.join(ROOT, "src", "lib", "mcp", "tools");
+    const index = readFileSync(path.join(ROOT, "src", "lib", "mcp", "index.ts"), "utf8");
+    const registered = new Set([...index.matchAll(/^import (\w+) from "\.\/tools\/([\w-]+)";$/gm)]
+      .filter(([, ident]) => new RegExp(`\\b${ident}\\b[,\\s]`).test(index.slice(index.indexOf("tools:"))))
+      .map(([, , file]) => file));
+    const byName = new Map(readdirSync(dir).map((f) => [
+      /name: "([a-z_]+)"/.exec(readFileSync(path.join(dir, f), "utf8"))?.[1], f.replace(/\.ts$/, ""),
+    ]));
+    for (const n of NEW) {
+      expect(byName.has(n), `${n} has a tool file`).toBe(true);
+      expect(registered.has(byName.get(n) as string), `${n} is registered in src/lib/mcp/index.ts`).toBe(true);
+    }
   });
 });
