@@ -207,7 +207,7 @@ describe("the world's clock and place under the sky", () => {
 
   it("describes the sky in words: the Sun, the Moon, the planets and what is coming", () => {
     const lines = describeSky(jd("2024-08-12T08:00:00Z"), 40, -100);
-    expect(lines[0]).toContain("local solar time");
+    expect(lines[0]).toContain("local mean time");
     expect(lines.some((l) => l.includes("The Moon is"))).toBe(true);
     expect(lines.some((l) => l.includes("Perseids"))).toBe(true);
     expect(lines.some((l) => l.startsWith("Next eclipses:"))).toBe(true);

@@ -36,13 +36,40 @@ import { engageWarp, shipPosition, topSpeed, wanted, warpStep, type BurnDir, typ
 export type FlightEvent = "warp" | "arrived" | "orbit" | "entry" | "chute" | "landed" | "pullup" | "soi";
 
 /**
+ * The Earth's air, density (kg/m³) by geometric altitude (km): the U.S.
+ * Standard Atmosphere, 1976. One exponential with a 7 km scale height was a
+ * third too thin at 70 km and twice too thick at 120 — enough to move a
+ * landing by a hundred kilometres. Between rows the logarithm of density is
+ * interpolated, which follows each layer's own scale height to within 2%.
+ */
+export const US76: readonly [number, number][] = [
+  [0, 1.225], [5, 0.73643], [10, 0.41351], [15, 0.19476], [20, 0.08891], [25, 0.040084], [30, 0.01841],
+  [40, 3.9957e-3], [50, 1.0269e-3], [60, 3.0968e-4], [70, 8.2829e-5], [80, 1.8458e-5], [90, 3.416e-6],
+  [100, 5.604e-7], [110, 9.708e-8], [120, 2.222e-8],
+];
+
+/** Density at an altitude from an atmosphere's table, or its exponential where it has none. */
+export function densityAt(air: { H: number; rho0: number; table?: readonly [number, number][] }, alt: number): number {
+  const h = Math.max(0, alt), t = air.table;
+  if (!t) return air.rho0 * Math.exp(-h / air.H);
+  if (h >= t[t.length - 1][0]) {
+    const [h1, r1] = t[t.length - 1], [h0, r0] = t[t.length - 2];
+    return r1 * Math.exp(((h - h1) * Math.log(r1 / r0)) / (h1 - h0));
+  }
+  let k = 0;
+  while (t[k + 1][0] < h) k++;
+  const [h0, r0] = t[k], [h1, r1] = t[k + 1];
+  return r0 * Math.exp(((h - h0) * Math.log(r1 / r0)) / (h1 - h0));
+}
+
+/**
  * Atmospheres: scale height H (km), density at the surface or, for a giant, at
  * the one-bar level (kg/m³), and where the air stops mattering (km up). The
- * Earth's scale height is the one that fits the layer an entry actually
- * slows in, 50–100 km up (7 km), rather than the sea-level figure.
+ * Earth's density comes from its table; its scale height is kept for anything
+ * that asks for one, and fits the layer an entry slows in, 50–100 km up.
  */
-export const AIR: Record<string, { H: number; rho0: number; top: number; lands?: boolean }> = {
-  earth: { H: 7.0, rho0: 1.225, top: 120, lands: true },
+export const AIR: Record<string, { H: number; rho0: number; top: number; lands?: boolean; table?: readonly [number, number][] }> = {
+  earth: { H: 7.0, rho0: 1.225, top: 120, lands: true, table: US76 },
   venus: { H: 15.9, rho0: 65, top: 250 },
   mars: { H: 11.1, rho0: 0.02, top: 130 },
   titan: { H: 21, rho0: 5.3, top: 600 },
@@ -66,7 +93,7 @@ export const thrustOf = (s: Ship): number => s.cls.thrust * (s.mwd ? 5 : 1);
 const gmOf = (w: Surroundings, id: string): number => w.gm?.(id) ?? 0;
 
 /** The air round a body: the system's, or the Solar System's own table. */
-export const airOf = (w: Surroundings, id: string): { H: number; rho0: number; top: number } | null => (w.air ? w.air(id) : AIR[id] ?? null);
+export const airOf = (w: Surroundings, id: string): { H: number; rho0: number; top: number; table?: readonly [number, number][] } | null => (w.air ? w.air(id) : AIR[id] ?? null);
 /** Whether the ship can come down on a body. */
 export const landsOn = (w: Surroundings, id: string): boolean => (w.lands ? w.lands(id) : !!AIR[id]?.lands);
 
@@ -98,7 +125,7 @@ export function airAround(s: Ship, w: Surroundings, r: Vec3 = s.pos, v: Vec3 = s
   const alt = len(r) - w.radius(s.frame);
   if (alt > air.top) return null;
   const spin = w.spin?.(s.frame) ?? [0, 0, 0];
-  return { rho: air.rho0 * Math.exp(-Math.max(0, alt) / air.H), vAir: sub(v, cross(spin, r)), alt };
+  return { rho: densityAt(air, alt), vAir: sub(v, cross(spin, r)), alt };
 }
 
 /** Drag's deceleration, km/s²: half ρv² over the ballistic coefficient, against the velocity through the air. */

@@ -686,21 +686,31 @@ under real physics, with EVE Online's orders for an autopilot.
   the 2024 total eclipse, the 2022 lunar eclipse, the 2020 great conjunction
   and Mars's opposition, both of Halley's perihelia):
   - The planets and Pluto from JPL's Keplerian elements for approximate
-    positions (Standish): good to seconds of arc for the inner planets and
-    minutes for the outer ones, 1800–2050, and still close from 3000 BC to
-    3000 AD. The Earth is placed off the Earth–Moon barycentre by the Moon.
-  - The Moon from the largest terms of the ELP-2000/82 lunar theory, as Meeus
-    tabulates them.
-  - 29 moons in their planets' equatorial planes, with their real sizes,
-    shapes, tilts and periods (their places along the orbit are approximate);
-    Triton goes backwards.
+    positions (Standish): good to tens of arcseconds for the inner planets,
+    a couple of arcminutes for Mars, and up to ten to fifteen for Jupiter and
+    Saturn (Standish's own error table) between 1800 and 2050; still close
+    from 3000 BC to 3000 AD. The Earth is placed off the Earth–Moon barycentre by the Moon.
+  - The Moon from the ELP-2000/82 lunar theory as Meeus tabulates it, all
+    sixty latitude terms, carried from the ecliptic of date to J2000's as a
+    whole vector (Meeus's Example 47.a to the millionth of a degree).
+  - 29 moons with their real sizes, shapes, tilts and periods, each placed
+    along its orbit where its standard theory puts it — ESAPHO/ESADE for
+    Mars's, Lieske's E5 for Jupiter's, TASS 1.7 for Saturn's, GUST86 for
+    Uranus's — to within a few degrees from 2000 to 2035
+    (`src/test/craft-moons.test.ts`). Mimas swings ±44° in its resonance with
+    Tethys; Charon keeps Pluto's prime meridian and Triton faces Neptune, both
+    from the IAU's rotation models, Triton going backwards with its plane
+    precessing half a degree a year. Hyperion, whose orbit Titan makes
+    chaotic, is the one left loose.
   - Asteroids (Vesta, Pallas, Juno, Hygiea, Psyche, Eros, Bennu, Ryugu,
     Apophis, Phaethon), dwarf planets (Pluto, Ceres, Eris, Haumea, Makemake,
     Sedna, Quaoar) and comets (Halley, Encke, Swift–Tuttle, Tempel–Tuttle,
     Hale–Bopp, Hyakutake, McNaught, NEOWISE, 67P) from Minor Planet Center
     and JPL elements, the old catalogues' B1950 ones precessed to J2000.
-    Periodic comets are timed between real perihelia: Halley's next is
-    28 July 2061. ʻOumuamua and Borisov pass through on open hyperbolas.
+    Periodic comets are timed between real perihelia; Halley return by
+    return, through all thirty-two from 240 BC to 2134 (Yeomans & Kiang), so
+    it is over the Bayeux Tapestry in 1066 and the Earth passes through its
+    tail in May 1910. Its next perihelion is 28 July 2061. ʻOumuamua and Borisov pass through on open hyperbolas.
   - The main belt with its Kirkwood gaps, the Hildas, Jupiter's Trojans and
     the Kuiper belt, as a few thousand representative orbits.
   - The Webb telescope at L2, and the two Voyagers heading out.
@@ -710,8 +720,11 @@ under real physics, with EVE Online's orders for an autopilot.
     in pulls on it (patched conics, as Kerbal Space Program and mission
     planners' first sketches do). With the engine off the ship follows its
     conic exactly — Kepler's problem solved in universal variables (Vallado,
-    algorithm 8), not stepped — so an orbit stays an orbit at a million times
-    real speed. Crossing into a moon's sphere or out to the Sun's, its
+    algorithm 8), not stepped, with Newton kept inside a bracket so it cannot
+    fail to converge on an eccentric ellipse or a hyperbola — so an orbit
+    stays an orbit at a million times real speed. Every moon and asteroid
+    big enough to matter has its measured mass (JPL), so its sphere of
+    influence is the Laplace radius it really has, not a guess. Crossing into a moon's sphere or out to the Sun's, its
     velocity is carried across by the two bodies' own velocities, which is
     what bends a flyby.
   - *An engine that can only push so hard.* The scout has 5 g (25 g on the
@@ -733,9 +746,9 @@ under real physics, with EVE Online's orders for an autopilot.
   - *Warp* needs the nose on the target and three seconds of spool-up, and
     drops the ship into a circular orbit where there is gravity to hold one
     (109 km over the Moon, 1.63 km/s), or holding station where there is not.
-  - *The air.* Earth, Venus, Mars, Titan and the giants have exponential
-    atmospheres (NASA's planetary fact sheets; the Earth's fitted to the
-    50–100 km layer an entry slows in) that turn with their planets. Land (`D`)
+  - *The air.* The Earth's is the U.S. Standard Atmosphere, 1976, layer by
+    layer; Venus, Mars, Titan and the giants have exponential atmospheres
+    (NASA's planetary fact sheets). All turn with their planets. Land (`D`)
     burns about 100 m/s retrograde to put the orbit's low point 50 km up and
     lets the air do the rest: drag and heat through the fire (a ballistic
     entry peaking near 7 g, as a Soyuz's does when it cannot fly a lifting
@@ -850,7 +863,9 @@ clockwork sky.
 
 - **Its own calendar.** A world keeps a date (`WorldMeta.skyEpoch`): its first
   day is the real day it was first played, and every game day after is the
-  next real day. Game noon is local solar noon. So the Moon runs through its
+  next real day. Game noon is local mean noon; the real Sun crosses the
+  meridian up to a quarter of an hour either side of it, as it does over any
+  sundial. So the Moon runs through its
   phases in twenty-nine and a half game days, the planets creep along the
   zodiac, and a world played through a game year sees the real year's
   eclipses and showers.
@@ -880,6 +895,16 @@ clockwork sky.
   their radiants at the rate the radiant's height allows; sporadic ones fall
   every night. The chat says which shower is falling, from where, and whose
   dust it is.
+- **An astronomer's clock and frame.** The ephemeris runs on Terrestrial Time
+  (the clock plus ΔT: a minute today, hours in antiquity); the Earth turns on
+  apparent sidereal time about the true equator of date (precession and
+  nutation from J2000), so the pole wanders off Polaris toward Thuban as
+  `/sky date` goes back; the player stands on the WGS-84 ellipsoid; and the
+  Sun, Moon and planets are seen where their light left them, shifted by the
+  Earth's own motion. Dates before 1582 October 15 are Julian, as history
+  books write them. Checked against Meeus's worked examples, NASA's eclipse
+  predictions and DE421 (`src/test/craft-precision.test.ts`): the 2024 and
+  2017 eclipses' greatest points land within 20 s and a few kilometres.
 - **Eclipses.** The Moon's disc crosses the Sun's where it really does, seen
   from the player's own spot on the Earth (the Moon is near enough that a few
   hundred kilometres matter). The day dims only a little until the last
@@ -898,7 +923,7 @@ clockwork sky.
 `/sky` says what is up — the time, the Sun and Moon, the planets and comets
 in view, the showers, and the next eclipses. With cheats on, the host can move
 the sky: `/sky now` (the real sky this minute), `/sky date 2024-04-08 13:40`
-(local solar time), `/sky moon full`, `/sky eclipse [solar|lunar]` (the next
+(local mean time; before 1582, the Julian calendar), `/sky moon full`, `/sky eclipse [solar|lunar]` (the next
 one that can be seen from here, a little before it deepens), `/sky shower
 perseids` (two in the morning of the peak night), and `/sky chase` — any one
 place sees a total eclipse only every few centuries, so this finds the next

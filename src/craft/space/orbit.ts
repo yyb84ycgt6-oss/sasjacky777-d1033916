@@ -41,20 +41,50 @@ export function propagate(r0v: Vec3, v0v: Vec3, mu: number, dt: number): { r: Ve
     const period = TAU / Math.sqrt(mu * alpha * alpha * alpha);
     dt %= period;
   }
+  // Kepler's equation in the universal anomaly χ: F(χ) is the time of flight
+  // (times √μ) less the time asked for. Its slope is r > 0, so it rises
+  // monotonically and has exactly one root. Plain Newton from Vallado's guess
+  // wandered off on eccentric ellipses and hyperbolas and handed back its last
+  // guess as if it had converged — a Jupiter flyby at full clock speed threw
+  // the ship thousands of AU (rule 8). Newton is kept inside a bracket and
+  // falls back to bisection when it steps out, so it cannot fail to converge.
+  const F = (x: number): number => {
+    const p = x * x * alpha, [k2, k3] = stumpff(p);
+    const value = (rv / sqmu) * x * x * k2 + (1 - r0 * alpha) * x * x * x * k3 + r0 * x - sqmu * dt;
+    // Far out on a hyperbola the terms overflow; out there the flight time has passed any finite target.
+    return Number.isFinite(value) ? value : Math.sign(dt) || 1;
+  };
+  const sg = dt >= 0 ? 1 : -1;
+  let lo: number, hi: number;
+  if (alpha > 1e-12) {
+    // An ellipse less whole turns: χ for one full turn is 2π/√α.
+    lo = sg > 0 ? 0 : -TAU / Math.sqrt(alpha);
+    hi = sg > 0 ? TAU / Math.sqrt(alpha) : 0;
+  } else {
+    let far = Math.max(Math.abs(sqmu * dt) / r0, 1e-9);
+    for (let i = 0; i < 400 && F(sg * far) * sg < 0; i++) far *= 2;
+    lo = sg > 0 ? 0 : -far;
+    hi = sg > 0 ? far : 0;
+  }
   let chi: number;
   if (alpha > 1e-9) chi = sqmu * dt * alpha;
   else if (alpha < -1e-9) {
-    const a = 1 / alpha, sg = Math.sign(dt);
+    const a = 1 / alpha;
     const arg = (-2 * mu * alpha * dt) / (rv + sg * Math.sqrt(-mu * a) * (1 - r0 * alpha));
     chi = arg > 0 ? sg * Math.sqrt(-a) * Math.log(arg) : (sqmu * dt) / r0;
   } else chi = (sqmu * dt) / r0;
+  if (!(chi > lo && chi < hi)) chi = (lo + hi) / 2;
   let psi = 0, c2 = 0.5, c3 = 1 / 6, r = r0;
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 200; i++) {
     psi = chi * chi * alpha;
     [c2, c3] = stumpff(psi);
     r = chi * chi * c2 + (rv / sqmu) * chi * (1 - psi * c3) + r0 * (1 - psi * c2);
-    const next = chi + (sqmu * dt - chi * chi * chi * c3 - (rv / sqmu) * chi * chi * c2 - r0 * chi * (1 - psi * c3)) / r;
-    const done = Math.abs(next - chi) < 1e-12 * Math.max(1, Math.abs(chi));
+    const f = F(chi);
+    if (f === 0) break;
+    if (f < 0) lo = chi; else hi = chi;
+    let next = chi - f / r;
+    if (!(next > lo && next < hi)) next = (lo + hi) / 2;
+    const done = Math.abs(next - chi) < 1e-12 * Math.max(1, Math.abs(chi)) || hi - lo < 1e-14 * Math.max(1, Math.abs(chi));
     chi = next;
     if (done) break;
   }

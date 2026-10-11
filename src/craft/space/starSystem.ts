@@ -19,7 +19,7 @@ import { keplerPosition, systemOf, type StarSystemDef } from "./systems";
 import { flightAir, solWorld, WORLD_LABEL, type WorldInfo } from "./worlds";
 
 /** Air as the flight model wants it: scale height (km), density at the ground (kg/m³), and where it stops mattering (km up). */
-export interface FlightAir { H: number; rho0: number; top: number }
+export interface FlightAir { H: number; rho0: number; top: number; table?: readonly [number, number][] }
 
 export interface StarSystem {
   /** The star's id on the galaxy map. */
@@ -62,7 +62,7 @@ class SolarSystem implements StarSystem {
   body(id: string) { return BODY[id]; }
   positions(jd: number) { return ephemeris(jd); }
   velocity(id: string, jd: number): Vec3 { return id === "sun" ? [0, 0, 0] : solVelocity(id, jd); }
-  air(id: string): FlightAir | null { const a = AIR[id]; return a ? { H: a.H, rho0: a.rho0, top: a.top } : null; }
+  air(id: string): FlightAir | null { const a = AIR[id]; return a ? { H: a.H, rho0: a.rho0, top: a.top, table: a.table } : null; }
   world(id: string): WorldInfo | null {
     if (!this.worlds.has(id)) { const b = BODY[id]; this.worlds.set(id, b ? solWorld(id, b.gm, b.radius) : null); }
     return this.worlds.get(id)!;

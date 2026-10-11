@@ -12,15 +12,69 @@
  *
  * Directions come out in the voxel world's axes: x east, y up, z south.
  *
+ * Time and frames are an astronomer's, because a player can ask for any date:
+ * the ephemeris runs on Terrestrial Time (the clock plus ΔT), the Earth turns
+ * on apparent sidereal time about the true equator of date (precession and
+ * nutation from J2000), the observer stands on the WGS-84 ellipsoid, and the
+ * Sun, Moon and planets are seen where their light left them, displaced by the
+ * Earth's own motion (light-time and aberration). Leave any of these out and
+ * the sky drifts — by a minute of noon today, by hours and by the pole star
+ * itself in 3000 BC.
+ *
  * The world's clock is a game's (a day in twenty minutes), so the sky keeps a
  * date of its own that advances a real day for every game day: the Moon runs
  * through its phases in twenty-nine and a half game days, the planets creep
  * along the zodiac, and the meteor showers come round on their real dates.
  */
 import { BODIES, BODY } from "./bodies";
-import { ephemeris } from "./ephemeris";
+import { earthAndMoon, ephemeris } from "./ephemeris";
 import { cometActivity, tailLength } from "./comets";
-import { AU, DEG, dot, eclToEq, gmst, len, norm, scale, sub, add, type Vec3 } from "./kepler";
+import { AU, DAY, DEG, dot, eclToEq, eqToEcl, gast, len, norm, scale, sub, add, trueOfDate, tt, type Mat3, type Vec3 } from "./kepler";
+
+/** The speed of light, km a day, and the light-time across one astronomical unit (days). */
+const C_KM_DAY = 299792.458 * DAY;
+const LIGHT_AU = AU / C_KM_DAY;
+/** WGS-84: the Earth's equatorial radius (km) and flattening. */
+export const EARTH_A = 6378.137;
+export const EARTH_F = 1 / 298.257223563;
+
+/** A row-major 3×3 matrix (nine numbers) times a frame matrix. */
+function withFrame(m: number[], F: Mat3): number[] {
+  const out: number[] = [];
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) out.push(m[r * 3] * F[0][c] + m[r * 3 + 1] * F[1][c] + m[r * 3 + 2] * F[2][c]);
+  return out;
+}
+const transposeTimes = (F: Mat3, v: Vec3): Vec3 => [
+  F[0][0] * v[0] + F[1][0] * v[1] + F[2][0] * v[2], F[0][1] * v[0] + F[1][1] * v[1] + F[2][1] * v[2], F[0][2] * v[0] + F[1][2] * v[1] + F[2][2] * v[2],
+];
+const times = (F: Mat3, v: Vec3): Vec3 => [
+  F[0][0] * v[0] + F[0][1] * v[1] + F[0][2] * v[2], F[1][0] * v[0] + F[1][1] * v[1] + F[1][2] * v[2], F[2][0] * v[0] + F[2][1] * v[1] + F[2][2] * v[2],
+];
+
+/**
+ * A place on the WGS-84 ellipsoid, km from the Earth's centre, in the equator
+ * of date, at a geodetic latitude and a local sidereal time (Meeus ch. 11).
+ * Geodetic latitude — the one maps give — is not the angle from the centre:
+ * they differ by up to 11.5 arcminutes, 21 km on the ground.
+ */
+export function surfacePoint(latDeg: number, lstDeg: number): Vec3 {
+  const phi = latDeg * DEG, L = lstDeg * DEG;
+  const u = Math.atan((1 - EARTH_F) * Math.tan(phi));
+  const rc = EARTH_A * Math.cos(u), rs = EARTH_A * (1 - EARTH_F) * Math.sin(u);
+  return [rc * Math.cos(L), rc * Math.sin(L), rs];
+}
+
+/**
+ * Where a body is seen from a point: the direction its light arrives from,
+ * which left it a light-time ago and is tilted by the observer's own motion.
+ * To first order that is the relative position less the relative velocity
+ * times the light-time — 20 arcseconds for the Sun, which moves every eclipse
+ * by most of a minute.
+ */
+function apparent(target: Vec3, targetVel: Vec3, from: Vec3, fromVel: Vec3): Vec3 {
+  const rel = sub(target, from);
+  return sub(rel, scale(sub(targetVel, fromVel), len(rel) / C_KM_DAY));
+}
 
 /** How much bigger than life the Sun and Moon are drawn: at their real half a degree they would be a few pixels. */
 export const DISC_SCALE = 8;
@@ -182,21 +236,28 @@ export function eclipseLight(coverage: number): number {
   return 1 - 0.55 * coverage ** 4 - 0.33 * t * t * (3 - 2 * t);
 }
 
-/** The sky at a Julian date over a latitude and longitude. */
+/** The sky at a Julian date (UT) over a latitude and longitude. */
 export function skyAt(jd: number, lat: number, lon: number): SkyObjects {
-  const e = ephemeris(jd);
-  const earth = e.get("earth")!;
-  const lst = gmst(jd) + lon;
-  const m = horizonMatrix(lat, lst);
-  // The observer, on the surface: the Earth's centre plus a radius toward the zenith (in the ecliptic frame).
-  const zenithEq: Vec3 = [Math.cos(lat * DEG) * Math.cos(lst * DEG), Math.cos(lat * DEG) * Math.sin(lst * DEG), Math.sin(lat * DEG)];
-  const c = Math.cos(23.4392911 * DEG), s = Math.sin(23.4392911 * DEG);
-  const zenithEcl: Vec3 = [zenithEq[0], zenithEq[1] * c + zenithEq[2] * s, -zenithEq[1] * s + zenithEq[2] * c];
-  const here = add(earth, scale(zenithEcl, 6371));
-  const local = (helio: Vec3): Vec3 => applyMatrix(m, norm(eclToEq(sub(helio, here))));
+  const jdTT = tt(jd);
+  const e = ephemeris(jdTT);
+  // The same a light-time across an AU earlier: velocities for light-time and aberration, by difference.
+  const lag = ephemeris(jdTT - LIGHT_AU);
+  const vel = (id: string): Vec3 => {
+    const a = e.get(id), b = lag.get(id);
+    return a && b ? scale(sub(a, b), 1 / LIGHT_AU) : [0, 0, 0];
+  };
+  const earth = e.get("earth")!, vEarth = vel("earth");
+  const NP = trueOfDate(jdTT);
+  const lst = gast(jd) + lon;
+  // J2000 equatorial straight to the horizon: precession and nutation, then the Earth's turn.
+  const m = withFrame(horizonMatrix(lat, lst), NP);
+  // The observer, on the ellipsoid, carried from the equator of date back to the J2000 ecliptic.
+  const here = add(earth, eqToEcl(transposeTimes(NP, surfacePoint(lat, lst))));
+  const see = (target: Vec3, id: string | null): Vec3 => apparent(target, id ? vel(id) : [0, 0, 0], here, vEarth);
+  const toLocal = (rel: Vec3): Vec3 => applyMatrix(m, norm(eclToEq(rel)));
 
-  const sunRel = sub([0, 0, 0], here), moonRel = sub(e.get("moon")!, here);
-  const sun = local([0, 0, 0]), moon = local(e.get("moon")!);
+  const sunRel = see([0, 0, 0], null), moonRel = see(e.get("moon")!, "moon");
+  const sun = toLocal(sunRel), moon = toLocal(moonRel);
   const sunRadius = Math.asin(BODY.sun.radius / len(sunRel)) * DISC_SCALE;
   const moonRadius = Math.asin(BODY.moon.radius / len(moonRel)) * DISC_SCALE;
   const sep = Math.acos(Math.max(-1, Math.min(1, dot(norm(sunRel), norm(moonRel)))));
@@ -212,7 +273,9 @@ export function skyAt(jd: number, lat: number, lon: number): SkyObjects {
   const moonDrawn = sep < 1e-9 ? moon : norm(add(scale(sun, Math.cos(drawnSep)), scale(toward, Math.sin(drawnSep))));
 
   // The Earth's shadow where the Moon is, with the 2% its air adds (Danjon), seen from the Earth's centre.
-  const RE = 6378.137, geo = sub(e.get("moon")!, earth), dist = len(geo), toMoon = norm(geo), axis = norm(earth);
+  // The shadow points away from where the Sun is seen, not where it geometrically is.
+  const RE = EARTH_A, geo = sub(e.get("moon")!, earth), dist = len(geo), toMoon = norm(geo);
+  const axis = norm(scale(apparent([0, 0, 0], [0, 0, 0], earth, vEarth), -1));
   const pm = Math.asin(RE / dist), sunR = Math.asin(BODY.sun.radius / len(earth)), ps = Math.asin(RE / len(earth));
   const moonR = Math.asin(BODY.moon.radius / dist);
   const off = Math.acos(Math.max(-1, Math.min(1, dot(toMoon, axis))));
@@ -231,7 +294,7 @@ export function skyAt(jd: number, lat: number, lon: number): SkyObjects {
     if (!p) continue;
     const r = len(p) / AU, delta = len(sub(p, here)) / AU;
     const phase = Math.acos(Math.max(-1, Math.min(1, dot(norm(sub(here, p)), norm(sub([0, 0, 0], p)))))) / DEG;
-    planets.push({ id, dir: local(p), mag: v0 + 5 * Math.log10(r * delta) + phaseLaw(id, phase), color });
+    planets.push({ id, dir: toLocal(see(p, id)), mag: v0 + 5 * Math.log10(r * delta) + phaseLaw(id, phase), color });
   }
   const comets: SkyComet[] = [];
   for (const b of BODIES) {
@@ -243,7 +306,7 @@ export function skyAt(jd: number, lat: number, lon: number): SkyObjects {
     if (mag > 6.5 || cometActivity(b, p) <= 0) continue;
     const L = tailLength(b, p);
     const end = add(p, scale(norm(p), L));
-    const a = local(p), z = local(end);
+    const a = toLocal(see(p, b.id)), z = toLocal(sub(end, here));
     const tailDeg = Math.acos(Math.max(-1, Math.min(1, dot(a, z)))) / DEG;
     comets.push({ id: b.id, dir: a, tail: norm(sub(z, a)), tailDeg, mag });
   }
@@ -257,12 +320,29 @@ export function skyAt(jd: number, lat: number, lon: number): SkyObjects {
 
 // ---- the calendar ----------------------------------------------------------------------------------------------
 
+/**
+ * The Earth and Moon at a UT date, the Moon as seen from the Earth's centre
+ * (light-time) and the Sun as seen from it (aberration): what decides the
+ * moment of a new moon or an eclipse.
+ */
+function apparentEarthMoon(jd: number): { earth: Vec3; moon: Vec3; sunFromEarth: Vec3; moonFromEarth: Vec3; vMoon: Vec3 } {
+  const t = tt(jd), h = 1 / 1440;
+  const now = earthAndMoon(t), before = earthAndMoon(t - h);
+  const vEarth = scale(sub(now.earth, before.earth), 1 / h), vMoon = scale(sub(now.moon, before.moon), 1 / h);
+  return {
+    earth: now.earth,
+    moon: now.moon,
+    vMoon,
+    sunFromEarth: apparent([0, 0, 0], [0, 0, 0], now.earth, vEarth),
+    moonFromEarth: apparent(now.moon, vMoon, now.earth, vEarth),
+  };
+}
+
 /** The Moon's elongation from the Sun seen from the Earth's centre, signed: waxing positive, 0 at new moon, 180 at full. */
 export function elongation(jd: number): number {
-  const e = ephemeris(jd);
-  const earth = e.get("earth")!, moon = sub(e.get("moon")!, earth), sun = sub([0, 0, 0], earth);
+  const { sunFromEarth, moonFromEarth } = apparentEarthMoon(jd);
   const lon = (v: Vec3) => Math.atan2(v[1], v[0]) / DEG;
-  return ((lon(moon) - lon(sun)) % 360 + 360) % 360;
+  return ((lon(moonFromEarth) - lon(sunFromEarth)) % 360 + 360) % 360;
 }
 
 /** The next moment after `jd` the Moon reaches a phase (0 new, 90 first quarter, 180 full, 270 last quarter). */
@@ -297,8 +377,8 @@ export function eclipsesFrom(jd: number, count: number): Eclipse[] {
     const nm = nextPhase(t, 0), fm = nextPhase(t, 180);
     const next = Math.min(nm, fm);
     const kind = next === nm ? "solar" : "lunar";
-    const e = ephemeris(next);
-    const earth = e.get("earth")!, moon = sub(e.get("moon")!, earth);
+    const em = earthAndMoon(tt(next));
+    const earth = em.earth, moon = sub(em.moon, earth);
     const dist = len(moon);
     const gamma = Math.abs(moon[2]) / RE;
     if (kind === "solar") {
@@ -331,19 +411,20 @@ export function localEclipse(jd: number, lat: number, lon: number): { coverage: 
 }
 /**
  * Where on the Earth a solar eclipse is greatest: the moment near a new moon
- * when the line from the Sun through the Moon passes closest to the Earth's
- * centre, and the point where that line meets the ground. The Earth here is
- * the same round one of radius 6,371 km that skyAt stands its observer on,
- * so the place found is one skyAt puts under the Moon's shadow. Null if the
- * line misses the Earth (a partial eclipse has no centre on the ground).
+ * when the shadow's axis — from the Sun through the Moon as it was a
+ * light-time ago — passes closest to the Earth's centre, and the point where
+ * that axis meets the WGS-84 ellipsoid, as a geodetic latitude and a longitude
+ * reckoned from apparent sidereal time. Null if the axis misses the Earth (a
+ * partial eclipse has no centre on the ground).
  */
 export function eclipseCentre(jd: number): { jd: number; lat: number; lon: number } | null {
-  const RE = 6371;
   const miss = (t: number) => {
-    const e = ephemeris(t);
-    const earth = e.get("earth")!, u = norm(e.get("moon")!);
-    const along = dot(earth, u);
-    return { d: len(sub(earth, scale(u, along))), along, earth, u };
+    const { earth, moon, vMoon } = apparentEarthMoon(t);
+    // The shadow that reaches the ground left the Moon about 1.3 s earlier.
+    const moonThen = sub(moon, scale(vMoon, len(sub(moon, earth)) / C_KM_DAY));
+    const u = norm(moonThen);
+    const along = dot(sub(earth, moonThen), u);
+    return { d: len(sub(sub(earth, moonThen), scale(u, along))), earth, moonThen, u };
   };
   let best = jd, bestD = Infinity;
   for (let m = -360; m <= 360; m += 4) {
@@ -357,12 +438,19 @@ export function eclipseCentre(jd: number): { jd: number; lat: number; lon: numbe
     if (miss(a).d < miss(b).d) hi = b; else lo = a;
   }
   best = (lo + hi) / 2;
-  const { d, along, earth, u } = miss(best);
-  if (d >= RE) return null;
-  const t = along - Math.sqrt(RE * RE - d * d);
-  const ground = sub(scale(u, t), earth);
-  const q = eclToEq(norm(ground));
-  const lat = Math.asin(q[2]) / DEG;
-  const lon = ((((Math.atan2(q[1], q[0]) / DEG - gmst(best)) % 360) + 540) % 360) - 180;
+  const { earth, moonThen, u } = miss(best);
+  // In the equator of date, with the polar axis stretched so the ellipsoid becomes a sphere of radius a.
+  const NP = trueOfDate(tt(best));
+  const k = 1 / (1 - EARTH_F);
+  const p0 = times(NP, eclToEq(sub(moonThen, earth))), dir = times(NP, eclToEq(u));
+  const P: Vec3 = [p0[0], p0[1], p0[2] * k], D: Vec3 = [dir[0], dir[1], dir[2] * k];
+  const A = dot(D, D), B = 2 * dot(P, D), C = dot(P, P) - EARTH_A * EARTH_A;
+  const disc = B * B - 4 * A * C;
+  if (disc < 0) return null;
+  const s = (-B - Math.sqrt(disc)) / (2 * A);
+  const g = add(p0, scale(dir, s));
+  const e2 = EARTH_F * (2 - EARTH_F);
+  const lat = Math.atan2(g[2], (1 - e2) * Math.hypot(g[0], g[1])) / DEG;
+  const lon = ((((Math.atan2(g[1], g[0]) / DEG - gast(best)) % 360) + 540) % 360) - 180;
   return { jd: best, lat, lon };
 }
