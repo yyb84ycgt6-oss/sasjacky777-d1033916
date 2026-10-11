@@ -3,12 +3,13 @@
  * coming — and the searches behind the command's jumps (the next eclipse seen
  * from here, the next total one anywhere, a shower's next peak).
  *
- * Times are given in local solar time, the clock the world keeps (noon is
- * when the Sun is due south or north), so what /sky says matches what the
- * player sees.
+ * Times are given in local mean time, the clock the world keeps, so what
+ * /sky says matches what the player sees. Its noon is the mean Sun's: the real
+ * Sun crosses the meridian up to a quarter of an hour either side of it (the
+ * equation of time), as it does over any sundial.
  */
 import { BODY } from "./bodies";
-import { dateString, DEG, jdFromMs, msFromJd, type Vec3 } from "./kepler";
+import { calendarString, dateString, DEG, jdFromCalendar, type Vec3 } from "./kepler";
 import { ephemeris } from "./ephemeris";
 import {
   DISC_SCALE, eclipseCentre, eclipsesFrom, elongation, localEclipse, nextPhase, SHOWERS, skyAt, solarLongitude, type Eclipse,
@@ -30,27 +31,37 @@ export function placeText(lat: number, lon: number): string {
   return `${Math.abs(lat).toFixed(1)}°${lat >= 0 ? "N" : "S"} ${Math.abs(lon).toFixed(1)}°${lon >= 0 ? "E" : "W"}`;
 }
 
-/** A moment as the date and time on a sundial at a longitude. */
+/**
+ * A moment as the date and time on a clock keeping local mean time at a
+ * longitude, in the calendar of its day: Julian before 1582 October 15,
+ * Gregorian after, and years before 1 AD as BC.
+ */
 export function localClock(jd: number, lon: number): string {
-  const d = new Date(msFromJd(jd + lon / 360));
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+  return calendarString(jd + lon / 360);
 }
 
 /** A moment's date at a longitude, without the time. */
 export function localDay(jd: number, lon: number): string {
-  return localClock(jd, lon).slice(0, 10);
+  return localClock(jd, lon).replace(/ \d{2}:\d{2}$/, "");
 }
 
-/** The Julian date of a local solar time on a date at a longitude: "2024-04-08", 13.5 hours, −96.8°. */
+/**
+ * The Julian date of a local mean time on a date at a longitude: "2024-04-08",
+ * 13.5 hours, −96.8°. Dates before 1582 October 15 are read in the Julian
+ * calendar, as history books and eclipse canons write them; years may be
+ * astronomical (−584) or written "585 BC".
+ */
 export function jdOfLocal(date: string, hours: number, lon: number): number | null {
-  const m = /^(-?\d{1,6})-(\d{1,2})-(\d{1,2})$/.exec(date.trim());
+  const m = /^(-?\d{1,6})(\s*BC)?-(\d{1,2})-(\d{1,2})$/i.exec(date.trim());
   if (!m) return null;
-  const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
-  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
-  const ms = new Date(0).setUTCFullYear(y, mo - 1, d);
-  if (!Number.isFinite(ms)) return null;
-  return jdFromMs(ms) + hours / 24 - lon / 360;
+  const y = m[2] ? 1 - Number(m[1]) : Number(m[1]), mo = Number(m[3]), d = Number(m[4]);
+  if (mo < 1 || mo > 12 || d < 1 || d > 31 || (m[2] && Number(m[1]) < 1)) return null;
+  // October 5–14, 1582 never happened: the reform skipped them.
+  if (y === 1582 && mo === 10 && d > 4 && d < 15) return null;
+  const jd = jdFromCalendar(y, mo, d);
+  // Before the oldest date the calendar arithmetic is defined for (4713 BC), nothing is answered.
+  if (!Number.isFinite(jd) || jd < 0) return null;
+  return jd + hours / 24 - lon / 360;
 }
 
 export function phaseName(elong: number): string {
@@ -80,7 +91,7 @@ export function describeSky(jd: number, lat: number, lon: number): string[] {
   const sky = skyAt(jd, lat, lon);
   const lines: string[] = [];
   const sunAlt = altitude(sky.sun);
-  lines.push(`${localClock(jd, lon)} local solar time at ${placeText(lat, lon)} (${dateString(jd)}) — ${twilight(sunAlt)}.`);
+  lines.push(`${localClock(jd, lon)} local mean time at ${placeText(lat, lon)} (${dateString(jd)}) — ${twilight(sunAlt)}.`);
   lines.push(sunAlt > -0.83
     ? `The Sun is ${Math.round(sunAlt)}° up in the ${compassPoint(sky.sun)}${sky.eclipse > 0.01 ? `, ${Math.round(sky.eclipse * 100)}% covered by the Moon` : ""}.`
     : `The Sun is ${Math.round(-sunAlt)}° below the horizon, under the ${compassPoint(sky.sun)}.`);

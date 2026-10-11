@@ -20,10 +20,12 @@ from the other, and one that is refused is refused by both, with the same words.
 | `list_tasks` · `create_task` · `update_task` · `update_task_status` · `delete_task` | The task board. Statuses: `todo`, `in_progress`, `done`, `blocked`. |
 | `search_memory` · `remember_fact` · `forget_fact` | Jackie's long-term memory — what she knows in every chat. |
 | `list_conversations` · `read_conversation` · `create_conversation` | Chat history. |
+| `list_skills` · `get_skill` · `propose_skill` | Your skills: instructions an agent loads when a task fits. Agents may propose new ones; they stay off until you approve them on `/skills`. |
+| `list_custom_tools` · `run_custom_tool` · `propose_tool` | Your custom tools: named recipes of the actions above, with parameters. Same rule for proposals. See [SKILLS.md](SKILLS.md). |
+| `list_connections` · `call_connection` · `propose_connection` | Outside HTTPS services you connected, and the operations agents may call on each. Responses arrive marked untrusted. Writes need your say-so per connection; keys are never readable. See [CONNECTIONS.md](CONNECTIONS.md). |
 
-The in-app agents have the same set minus `ask_jackie` (inside the app, the
-agent *is* the model). Deletes are off for them unless you turn on **Allow
-deletes**.
+The in-app agents have the same set, minus `update_task_status` (`update_task`
+covers it). Deletes are off for them unless you turn on **Allow deletes**.
 
 `bionic` and `ollama` answer the **owner only** — they run on your own
 hardware. Your account needs the `owner` role (granted once by `core-claim`).
@@ -61,7 +63,7 @@ hardware. Your account needs the `owner` role (granted once by `core-claim`).
    ```
    A browser opens to sign in to SAS-JACKY. The token is kept in
    `~/.hermes/mcp-tokens/sas-jacky.json` and refreshed automatically. You should
-   see `✓ Tools discovered: 12`.
+   see `✓ Tools discovered: 18`.
 
 5. **Use it:**
    ```bash
@@ -140,9 +142,12 @@ the real migrations under PostgREST, and the real built MCP function and
 whenever something an agent touches changes. It proves that:
 
 - the MCP server refuses a call with no token, and a copied browser session;
-- all twelve tools work against the real schema and row-level security,
+- all twenty-one tools work against the real schema and row-level security,
   including `ask_jackie` reaching Jackie through the engine's own quota gate;
-- **Hermes Agent**, using `harness/hermes/config.yaml`, discovers all twelve
+- a skill the person wrote loads over MCP and a custom tool runs both its
+  steps, while what the agent proposes stays a proposal it cannot use, and
+  both uses are recorded in the person's activity;
+- **Hermes Agent**, using `harness/hermes/config.yaml`, discovers all twenty-one
   tools and uses them: it creates a task, stores a memory, reads the board, and
   holds a conversation with Jackie that lands in the app;
 - **DeepSeek Harness**, using `sas-jacky.token.patch.yml`, does the same, and
@@ -153,7 +158,7 @@ proves the wiring, not a model's judgement. Three things need your real
 project and keys:
 
 - [ ] **Sign-in.** `hermes mcp test sas-jacky` opens the SAS-JACKY sign-in and
-      ends with `✓ Tools discovered: 12`. If it fails before the browser opens,
+      ends with `✓ Tools discovered: 18`. If it fails before the browser opens,
       check that the deployed `mcp` function lets unauthenticated requests reach
       its `/.well-known/oauth-protected-resource` document — see "Rig endpoints
       behind the platform JWT check" in `SECURITY_HARDENING.md`.

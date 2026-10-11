@@ -117,6 +117,7 @@ quota, so the chat router moves past these engines at no cost.
 
 | Secret | Used by | Notes |
 | --- | --- | --- |
+| `CONNECTIONS_SECRET_KEY` | `jackie-connect` | 32 random bytes, base64 (`openssl rand -base64 32`). Encrypts the keys people store for their connections. Lose it and every stored key must be re-entered; leak it alongside a database dump and every stored key is readable. Without it, connections that need no key still work. See `docs/CONNECTIONS.md`. |
 | `GITHUB_API_KEY` | `github-sync` | Read-only repo access through the connector gateway. |
 | `GITHUB_SYNC_REPOS` | optional | Comma-separated `owner/repo` list `github-sync` may read. Defaults to `93jessycollin93-del/sas-jacky`; any other repository is refused, however the request names it. |
 | `TELEGRAM_API_KEY` | `telegram-validate` | The bot token. Validates `initData` HMAC signatures — the token *is* the signing key, so a leak forges logins. |

@@ -7,7 +7,10 @@
  * north pole), heliocentric unless a function says otherwise. Distances are
  * in astronomical units where the Sun is the centre and in kilometres around
  * a planet; angles go in and out in degrees at the edges and radians inside.
- * Times are Julian dates.
+ * Times are Julian dates: Universal Time (UT1, which the world's clocks keep
+ * to within a second) unless a name says TT, the uniform time the planetary
+ * theories run on. tt() converts; deltaT() is the difference, a minute today
+ * and hours in antiquity, because the Earth's turning slows.
  */
 
 export type Vec3 = [number, number, number];
@@ -102,6 +105,14 @@ export interface Conic {
   peri: number;
   tp: number;
   n?: number;
+  /**
+   * Perihelion dates (Julian dates, TT), oldest first, when they are known
+   * return by return. The planets stretch and shrink a comet's period by
+   * years; one mean motion for every return put Halley 14 years off in 1066
+   * and two AU from the Sun on its 1910 perihelion. Between two listed
+   * returns the mean anomaly runs at that interval's own rate.
+   */
+  returns?: number[];
 }
 
 /** Elements given the usual way for an asteroid (semi-major axis and mean anomaly at an epoch), as a conic. */
@@ -120,7 +131,13 @@ export function meanMotion(c: Conic, gm: number): number {
 /** Where a conic's body is at a Julian date: in its units, relative to what it orbits. */
 export function conicPosition(c: Conic, jd: number, gm = GAUSS_K * GAUSS_K): Vec3 {
   const n = meanMotion(c, gm);
-  const M = n * (jd - c.tp);
+  let M = n * (jd - c.tp);
+  const R = c.returns;
+  if (R && R.length >= 2 && c.e < 1) {
+    let k = 0;
+    while (k < R.length - 2 && jd >= R[k + 1]) k++;
+    M = (TAU * (jd - R[k])) / (R[k + 1] - R[k]);
+  }
   let xp: number, yp: number;
   if (c.e < 1) {
     const a = c.q / (1 - c.e);
@@ -189,9 +206,11 @@ export function raDecToEcl(ra: number, dec: number): Vec3 {
   return eqToEcl([Math.cos(d) * Math.cos(r), Math.cos(d) * Math.sin(r), Math.sin(d)]);
 }
 
-type Mat3 = [Vec3, Vec3, Vec3];
+export type Mat3 = [Vec3, Vec3, Vec3];
+const mul = (m: Mat3, v: Vec3): Vec3 => [m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2], m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2], m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2]];
 const mulT = (m: Mat3, v: Vec3): Vec3 => [m[0][0] * v[0] + m[1][0] * v[1] + m[2][0] * v[2], m[0][1] * v[0] + m[1][1] * v[1] + m[2][1] * v[2], m[0][2] * v[0] + m[1][2] * v[1] + m[2][2] * v[2]];
 const matMul = (a: Mat3, b: Mat3): Mat3 => a.map((row) => [0, 1, 2].map((j) => row[0] * b[0][j] + row[1] * b[1][j] + row[2] * b[2][j])) as Mat3;
+const R1 = (t: number): Mat3 => [[1, 0, 0], [0, Math.cos(t), Math.sin(t)], [0, -Math.sin(t), Math.cos(t)]];
 const R2 = (t: number): Mat3 => [[Math.cos(t), 0, -Math.sin(t)], [0, 1, 0], [Math.sin(t), 0, Math.cos(t)]];
 const R3 = (t: number): Mat3 => [[Math.cos(t), Math.sin(t), 0], [-Math.sin(t), Math.cos(t), 0], [0, 0, 1]];
 
@@ -246,23 +265,180 @@ export function fromFrame(f: { x: Vec3; y: Vec3; z: Vec3 }, v: Vec3): Vec3 {
   ];
 }
 
+// ---- time, and the Earth's turning axis --------------------------------------------------------------------------
+
 /**
- * Greenwich mean sidereal time at a Julian date, in degrees: how far round
- * the Earth has turned against the stars. It sets which half of the planet
- * the Sun lights, and where above it a launch comes up.
+ * ΔT = TT − UT, in seconds: how far the Earth's turning has fallen behind a
+ * uniform clock. The ephemeris runs on TT and the sky turns on UT, so without
+ * it the Moon sits half an arcminute behind today, every eclipse comes a
+ * minute late — and in antiquity, when ΔT was hours, the shadow lands on the
+ * wrong continent.
+ *
+ * Measured values (IERS/USNO, start of each year) from 1955 to 2025; Espenak
+ * and Meeus's polynomials (the NASA Five Millennium Canon of Solar Eclipses)
+ * before; a straight line from the last measurement to their 2050 value after,
+ * since their 2005–2050 fit overshoots what the Earth has since done by 5 s.
+ */
+const DELTA_T_OBSERVED: [number, number][] = [
+  [1955, 31.1], [1960, 33.15], [1965, 35.73], [1970, 40.18], [1975, 45.48], [1980, 50.54], [1985, 54.34],
+  [1990, 56.86], [1995, 60.78], [2000, 63.83], [2005, 64.69], [2010, 66.07], [2015, 67.64], [2016, 68.1],
+  [2017, 68.59], [2018, 68.97], [2019, 69.22], [2020, 69.36], [2021, 69.36], [2022, 69.29], [2023, 69.2],
+  [2024, 69.18], [2025, 69.1],
+];
+
+function espenakMeeus(y: number): number {
+  if (y < -500 || y >= 2150) { const u = (y - 1820) / 100; return -20 + 32 * u * u; }
+  if (y < 500) { const u = y / 100; return 10583.6 - 1014.41 * u + 33.78311 * u ** 2 - 5.952053 * u ** 3 - 0.1798452 * u ** 4 + 0.022174192 * u ** 5 + 0.0090316521 * u ** 6; }
+  if (y < 1600) { const u = (y - 1000) / 100; return 1574.2 - 556.01 * u + 71.23472 * u ** 2 + 0.319781 * u ** 3 - 0.8503463 * u ** 4 - 0.005050998 * u ** 5 + 0.0083572073 * u ** 6; }
+  if (y < 1700) { const t = y - 1600; return 120 - 0.9808 * t - 0.01532 * t ** 2 + t ** 3 / 7129; }
+  if (y < 1800) { const t = y - 1700; return 8.83 + 0.1603 * t - 0.0059285 * t ** 2 + 0.00013336 * t ** 3 - t ** 4 / 1174000; }
+  if (y < 1860) { const t = y - 1800; return 13.72 - 0.332447 * t + 0.0068612 * t ** 2 + 0.0041116 * t ** 3 - 0.00037436 * t ** 4 + 0.0000121272 * t ** 5 - 0.0000001699 * t ** 6 + 0.000000000875 * t ** 7; }
+  if (y < 1900) { const t = y - 1860; return 7.62 + 0.5737 * t - 0.251754 * t ** 2 + 0.01680668 * t ** 3 - 0.0004473624 * t ** 4 + t ** 5 / 233174; }
+  if (y < 1920) { const t = y - 1900; return -2.79 + 1.494119 * t - 0.0598939 * t ** 2 + 0.0061966 * t ** 3 - 0.000197 * t ** 4; }
+  if (y < 1941) { const t = y - 1920; return 21.2 + 0.84493 * t - 0.0761 * t ** 2 + 0.0020936 * t ** 3; }
+  if (y < 1961) { const t = y - 1950; return 29.07 + 0.407 * t - t ** 2 / 233 + t ** 3 / 2547; }
+  if (y < 1986) { const t = y - 1975; return 45.45 + 1.067 * t - t ** 2 / 260 - t ** 3 / 718; }
+  if (y < 2005) { const t = y - 2000; return 63.86 + 0.3345 * t - 0.060374 * t ** 2 + 0.0017275 * t ** 3 + 0.000651814 * t ** 4 + 0.00002373599 * t ** 5; }
+  if (y < 2050) { const t = y - 2000; return 62.92 + 0.32217 * t + 0.005589 * t ** 2; }
+  return -20 + 32 * ((y - 1820) / 100) ** 2 - 0.5628 * (2150 - y);
+}
+
+/** ΔT (seconds) at a Julian date. */
+export function deltaT(jd: number): number {
+  const y = 2000 + (jd - J2000) / 365.25;
+  const first = DELTA_T_OBSERVED[0], last = DELTA_T_OBSERVED[DELTA_T_OBSERVED.length - 1];
+  if (y < first[0]) return espenakMeeus(y);
+  if (y <= last[0]) {
+    let k = 0;
+    while (DELTA_T_OBSERVED[k + 1][0] < y) k++;
+    const [y0, v0] = DELTA_T_OBSERVED[k], [y1, v1] = DELTA_T_OBSERVED[k + 1];
+    return v0 + ((v1 - v0) * (y - y0)) / (y1 - y0);
+  }
+  if (y < 2050) return last[1] + ((espenakMeeus(2050) - last[1]) * (y - last[0])) / (2050 - last[0]);
+  return espenakMeeus(y);
+}
+
+/** Terrestrial Time for a Universal Time (both Julian dates). */
+export const tt = (jdUT: number): number => jdUT + deltaT(jdUT) / DAY;
+
+const ARCSEC = DEG / 3600;
+
+/**
+ * IAU 1976 precession (Lieske; Meeus 21.2): the matrix that carries J2000
+ * equatorial coordinates to the mean equator and equinox of a date (TT). The
+ * pole wanders 50 arcseconds a year — enough to put Thuban, not Polaris, over
+ * the pole when the pyramids were built.
+ */
+export function precessionMatrix(jdTT: number): Mat3 {
+  const T = (jdTT - J2000) / 36525;
+  const zeta = (2306.2181 * T + 0.30188 * T * T + 0.017998 * T ** 3) * ARCSEC;
+  const z = (2306.2181 * T + 1.09468 * T * T + 0.018203 * T ** 3) * ARCSEC;
+  const theta = (2004.3109 * T - 0.42665 * T * T - 0.041833 * T ** 3) * ARCSEC;
+  return matMul(matMul(R3(-z), R2(theta)), R3(-zeta));
+}
+
+/**
+ * Nutation, the axis's 18.6-year nod (Meeus ch. 22, the four-term series good
+ * to half an arcsecond), and the mean obliquity of the date (22.2). Radians.
+ */
+export function nutation(jdTT: number): { dpsi: number; deps: number; eps0: number } {
+  const T = (jdTT - J2000) / 36525;
+  const O = (125.04452 - 1934.136261 * T + 0.0020708 * T * T + T ** 3 / 450000) * DEG;
+  const L = (280.4665 + 36000.7698 * T) * DEG, Lm = (218.3165 + 481267.8813 * T) * DEG;
+  const dpsi = (-17.2 * Math.sin(O) - 1.32 * Math.sin(2 * L) - 0.23 * Math.sin(2 * Lm) + 0.21 * Math.sin(2 * O)) * ARCSEC;
+  const deps = (9.2 * Math.cos(O) + 0.57 * Math.cos(2 * L) + 0.1 * Math.cos(2 * Lm) - 0.09 * Math.cos(2 * O)) * ARCSEC;
+  const eps0 = (23 + 26 / 60 + 21.448 / 3600) * DEG + (-46.815 * T - 0.00059 * T * T + 0.001813 * T ** 3) * ARCSEC;
+  return { dpsi, deps, eps0 };
+}
+
+/**
+ * J2000 equatorial to the true equator and equinox of date: nutation after
+ * precession. Everything Earth-fixed — the sky over a place, a launch site,
+ * the ground under a ship — turns on this frame, not on J2000's: GAST counts
+ * from the true equinox of date, and applying it to J2000 coordinates turned
+ * the whole sky 20 arcminutes in 2026 and by degrees in antiquity.
+ */
+export function trueOfDate(jdTT: number): Mat3 {
+  const { dpsi, deps, eps0 } = nutation(jdTT);
+  const N = matMul(matMul(R1(-(eps0 + deps)), R3(-dpsi)), R1(eps0));
+  return matMul(N, precessionMatrix(jdTT));
+}
+
+/** A J2000 equatorial vector in the true-of-date frame at a UT date, and back. */
+export const toDate = (v: Vec3, jdUT: number): Vec3 => mul(trueOfDate(tt(jdUT)), v);
+export const fromDate = (v: Vec3, jdUT: number): Vec3 => mulT(trueOfDate(tt(jdUT)), v);
+
+/**
+ * Greenwich mean sidereal time at a Julian date (UT), in degrees: how far
+ * round the Earth has turned against the mean equinox of date (Meeus 12.4,
+ * with the T² and T³ terms that reach a degree by 3000 BC).
  */
 export function gmst(jd: number): number {
-  const d = jd - J2000;
-  return ((280.46061837 + 360.98564736629 * d) % 360 + 360) % 360;
+  const d = jd - J2000, T = d / 36525;
+  return ((280.46061837 + 360.98564736629 * d + 0.000387933 * T * T - T ** 3 / 38710000) % 360 + 360) % 360;
+}
+
+/**
+ * Greenwich apparent sidereal time (degrees): GMST plus the equation of the
+ * equinoxes, measured from the true equinox of date — the angle that, with
+ * trueOfDate, takes the sky from J2000 to the ground.
+ */
+export function gast(jd: number): number {
+  const { dpsi, deps, eps0 } = nutation(tt(jd));
+  return ((gmst(jd) + (dpsi * Math.cos(eps0 + deps)) / DEG) % 360 + 360) % 360;
+}
+
+// ---- the calendar --------------------------------------------------------------------------------------------------
+
+/**
+ * The Julian date of a calendar date (Meeus ch. 7): the Julian calendar up to
+ * 1582 October 4, the Gregorian from October 15. History books and eclipse
+ * canons date everything before the reform in the Julian calendar; reading
+ * "1066 March 20" as Gregorian put the Bayeux Tapestry's comet six days early.
+ * Years are astronomical: 0 is 1 BC, −584 is 585 BC. `day` may carry a fraction.
+ */
+export function jdFromCalendar(year: number, month: number, day: number): number {
+  const gregorian = year > 1582 || (year === 1582 && (month > 10 || (month === 10 && day >= 15)));
+  let y = year, m = month;
+  if (m <= 2) { y -= 1; m += 12; }
+  const A = Math.floor(y / 100);
+  const B = gregorian ? 2 - A + Math.floor(A / 4) : 0;
+  return Math.floor(365.25 * (y + 4716)) + Math.floor(30.6001 * (m + 1)) + day + B - 1524.5;
+}
+
+/** The calendar date of a Julian date (Meeus ch. 7), the inverse of jdFromCalendar. */
+export function calendarFromJd(jd: number): { year: number; month: number; day: number; hours: number } {
+  const z0 = jd + 0.5;
+  const Z = Math.floor(z0), F = z0 - Z;
+  let A = Z;
+  if (Z >= 2299161) {
+    const alpha = Math.floor((Z - 1867216.25) / 36524.25);
+    A = Z + 1 + alpha - Math.floor(alpha / 4);
+  }
+  const B = A + 1524, C = Math.floor((B - 122.1) / 365.25), D = Math.floor(365.25 * C), E = Math.floor((B - D) / 30.6001);
+  const day = B - D - Math.floor(30.6001 * E);
+  const month = E < 14 ? E - 1 : E - 13;
+  const year = month > 2 ? C - 4716 : C - 4715;
+  return { year, month, day, hours: F * 24 };
+}
+
+/** A year as people write it: 2061, 79 AD, 585 BC (astronomical year −584). */
+export function yearLabel(y: number): string {
+  return y <= 0 ? `${1 - y} BC` : y < 1000 ? `${y} AD` : String(y);
+}
+
+/** "2061-07-28 03:10", for a Julian date, in the calendar of its day. */
+export function calendarString(jd: number): string {
+  if (!Number.isFinite(jd) || jd < 0) return "?";
+  // Rounded to the minute first, so 23:59.6 becomes the next day's 00:00 rather than "24:00".
+  const c = calendarFromJd(Math.round(jd * 1440) / 1440);
+  const minutes = Math.round(c.hours * 60);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${yearLabel(c.year)}-${pad(c.month)}-${pad(c.day)} ${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}`;
 }
 
 /** "2061-07-28 03:10 UTC", for a Julian date. */
 export function dateString(jd: number): string {
-  const ms = msFromJd(jd);
-  if (!Number.isFinite(ms) || Math.abs(ms) > 8.64e15) return "?";
-  const d = new Date(ms);
-  const y = d.getUTCFullYear();
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const year = y < 0 ? `${-y + 1} BC` : y < 1000 ? `${y} AD` : String(y);
-  return `${year}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} UTC`;
+  const s = calendarString(jd);
+  return s === "?" ? s : `${s} UTC`;
 }

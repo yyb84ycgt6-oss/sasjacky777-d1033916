@@ -69,6 +69,7 @@ const Workstation = lazy(() => import("./pages/Workstation"));
 const Guide = lazy(() => import("./pages/Guide"));
 const JackieCore = lazy(() => import("./pages/JackieCore"));
 const JackieMorals = lazy(() => import("./pages/JackieMorals"));
+const JackieSkills = lazy(() => import("./pages/JackieSkills"));
 const GithubSync = lazy(() => import("./pages/GithubSync"));
 const LocalAITest = lazy(() => import("./pages/LocalAITest"));
 const MicroAI = lazy(() => import("./pages/MicroAI"));
@@ -211,6 +212,14 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <JackieMorals />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/skills"
+                    element={
+                      <ProtectedRoute>
+                        <JackieSkills />
                       </ProtectedRoute>
                     }
                   />

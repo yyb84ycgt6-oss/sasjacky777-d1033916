@@ -84,6 +84,7 @@ const CURATED: readonly NavPage[] = [
   jackie("path", "Path Router", Route, "/path"),
   jackie("core", "Core", ShieldCheck, "/core"),
   jackie("morals", "Morals", Scale, "/morals"),
+  jackie("skills", "Skills", Hammer, "/skills"),
   jackie("grok", "Grok", Sparkles, "/grok"),
   jackie("craft", "Craft", Pickaxe, "/craft"),
   jackie("play", "Play", Gamepad2, "/play"),

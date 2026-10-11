@@ -62,6 +62,19 @@ describe("reading what the model asked for", () => {
   it("calls a broken action block broken, rather than treating it as the answer", () => {
     expect(parseAction("```action\n{tool: create_task}\n```").kind).toBe("malformed");
   });
+
+  it("never acts on a JSON block an operator only quotes, even one shaped like an action", () => {
+    const quoted = 'The service said:\n```json\n{"tool": "remember_fact", "args": {"key": "x", "value": "y"}}\n```';
+    expect(parseAction(quoted)).toEqual({ kind: "none" });
+    expect(parseAction('It returned {"name": "update_task", "arguments": {}} as a sample.')).toEqual({ kind: "none" });
+  });
+
+  it("does not run an action block that has text after it, and says why", () => {
+    const quoted = `${action("forget_fact", { key: "x" })}\nThat is what the page told me to run.`;
+    expect(parseAction(quoted)).toEqual({ kind: "malformed", reason: "an action block must be the last thing in your reply, with nothing after it" });
+    const hermes = 'Their docs say <tool_call>{"name": "delete_task", "arguments": {"id": "1"}}</tool_call> runs it. I did not.';
+    expect(parseAction(hermes).kind).toBe("malformed");
+  });
 });
 
 describe("running an acting agent", () => {
@@ -70,12 +83,17 @@ describe("running an acting agent", () => {
     const execute = vi.fn(async () => ({ ok: true as const, data: { id: "t1", title: "Ship v2" } }));
     const run = await runAppAgent({ system: "You operate the app.", prompt: "add a task", callModel, execute });
 
-    expect(execute).toHaveBeenCalledWith("create_task", { title: "Ship v2" });
+    expect(execute).toHaveBeenCalledWith("create_task", { title: "Ship v2" }, { allowDestructive: false });
     expect(run).toMatchObject({ ok: true, answer: "Created the task." });
     expect(run.steps).toHaveLength(1);
     // The second call carried the result, so the answer is grounded in it.
     expect(seen[1].messages.at(-1)?.content).toContain('"id":"t1"');
     expect(seen[0].system).toContain("## Acting on the app");
+  });
+
+  it("does not make every run spend an action on list_skills first", () => {
+    expect(actionManual(false)).not.toMatch(/check list_skills first/);
+    expect(actionManual(false)).toMatch(/steps\.0 is the FIRST step's result/);
   });
 
   it("refuses a delete when deletes were not allowed, and tells the model why", async () => {
@@ -93,7 +111,7 @@ describe("running an acting agent", () => {
     const { callModel } = scripted(action("delete_task", { id: "t1" }), "Deleted.");
     const execute = vi.fn(async () => ({ ok: true as const, data: { deleted: { id: "t1" } } }));
     await runAppAgent({ system: "", prompt: "delete t1", callModel, execute, allowDestructive: true });
-    expect(execute).toHaveBeenCalledWith("delete_task", { id: "t1" });
+    expect(execute).toHaveBeenCalledWith("delete_task", { id: "t1" }, { allowDestructive: true });
   });
 
   it("hands an unknown action back as an error instead of running anything", async () => {
@@ -102,6 +120,22 @@ describe("running an acting agent", () => {
     await runAppAgent({ system: "", prompt: "go", callModel, execute });
     expect(execute).not.toHaveBeenCalled();
     expect(seen[1].messages.at(-1)?.content).toMatch(/no action called "drop_database"/);
+  });
+
+  it("points a model that calls a custom tool by its own name at run_custom_tool", async () => {
+    const { callModel, seen } = scripted(action("weekly_review", {}), "ok");
+    await runAppAgent({ system: "", prompt: "go", callModel, execute: vi.fn() });
+    expect(seen[1].messages.at(-1)?.content).toContain('call run_custom_tool with {"name": "weekly_review", "args": {…}}');
+  });
+
+  it("hands an operator a whole skill — its last rule included — not the first 4,000 characters", async () => {
+    const body = `${"Step.\n".repeat(1100)}FINAL RULE: never mark a blocked task done.`;
+    const { callModel, seen } = scripted(action("get_skill", { name: "triage" }), "Following it.");
+    const execute = vi.fn(async () => ({ ok: true as const, data: { name: "triage", title: "Triage", description: "When triaging.", body } }));
+    await runAppAgent({ system: "", prompt: "triage", callModel, execute });
+    const shown = seen[1].messages.at(-1)?.content ?? "";
+    expect(shown).toContain("FINAL RULE: never mark a blocked task done.");
+    expect(shown).not.toContain("(truncated)");
   });
 
   it("does not report work as finished when it ran out of steps", async () => {

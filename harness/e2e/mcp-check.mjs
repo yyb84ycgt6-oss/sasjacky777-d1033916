@@ -64,8 +64,10 @@ const names = tools.map((t) => t.name).sort();
 const expected = [
   "ask_jackie", "create_conversation", "create_task", "delete_task", "forget_fact", "list_conversations",
   "list_tasks", "read_conversation", "remember_fact", "search_memory", "update_task", "update_task_status",
+  "list_skills", "get_skill", "propose_skill", "list_custom_tools", "run_custom_tool", "propose_tool",
+  "list_connections", "call_connection", "propose_connection",
 ].sort();
-check("offers all twelve tools", JSON.stringify(names) === JSON.stringify(expected), names.join(", "));
+check("offers all twenty-one tools", JSON.stringify(names) === JSON.stringify(expected), names.join(", "));
 
 const created = await mcp.callTool({ name: "create_task", arguments: { title: "MCP check task", priority: "high" } });
 const task = data(created, "task");
@@ -109,6 +111,67 @@ check("list_conversations shows it", (data(convs, "conversations") ?? []).some((
 
 const deleted = await mcp.callTool({ name: "delete_task", arguments: { id: task.id } });
 check("delete_task removes the task", !deleted.isError, text(deleted));
+
+// ── Skills and custom tools (run.sh seeded one of each, as the person) ──────
+const skills = await mcp.callTool({ name: "list_skills", arguments: {} });
+check("list_skills shows the person's skill", (data(skills, "skills") ?? []).some((s) => s.name === "e2e_skill"), text(skills));
+
+const loaded = await mcp.callTool({ name: "get_skill", arguments: { name: "e2e_skill" } });
+check("get_skill loads its instructions", data(loaded, "skill")?.body === "Say E2E-SKILL-LOADED.", text(loaded));
+
+const proposed = await mcp.callTool({
+  name: "propose_skill",
+  arguments: { name: "e2e_proposed", title: "Proposed", description: "An agent's idea.", body: "Do it this way." },
+});
+check("propose_skill saves an agent's skill as a proposal", data(proposed, "proposal")?.status === "proposed", text(proposed));
+
+const notYet = await mcp.callTool({ name: "get_skill", arguments: { name: "e2e_proposed" } });
+check("an agent cannot use its own proposal before the person approves it", notYet.isError === true && /No active skill/.test(text(notYet)), text(notYet));
+
+const customTools = await mcp.callTool({ name: "list_custom_tools", arguments: {} });
+check("list_custom_tools shows the person's tool", (data(customTools, "tools") ?? []).some((t) => t.name === "e2e_start"), text(customTools));
+
+const ran = await mcp.callTool({ name: "run_custom_tool", arguments: { name: "e2e_start", args: { topic: "custom tool" } } });
+const ranSteps = data(ran, "run")?.steps ?? [];
+check(
+  "run_custom_tool runs both steps, the second using the first's result",
+  !ran.isError && ranSteps.length === 2 && ranSteps[1].result?.status === "in_progress" && ranSteps[1].result?.title === "E2E custom tool",
+  text(ran),
+);
+await mcp.callTool({ name: "delete_task", arguments: { id: ranSteps[0]?.result?.id } });
+
+const proposedTool = await mcp.callTool({
+  name: "propose_tool",
+  arguments: { name: "e2e_tool_idea", description: "An agent's recipe.", steps: [{ action: "list_tasks", args: { status: "todo" } }] },
+});
+check("propose_tool saves an agent's tool as a proposal", data(proposedTool, "proposal")?.status === "proposed", text(proposedTool));
+
+// ── Connections (docs/CONNECTIONS.md) ─────────────────────────────────────
+const proposedConn = await mcp.callTool({
+  name: "propose_connection",
+  arguments: {
+    name: "e2e_conn", title: "E2E service", description: "An agent's idea for a service.",
+    base_url: "https://api.example.com", auth_type: "bearer",
+    operations: [{ name: "ping", description: "Ping it.", method: "GET", path: "/ping" }],
+  },
+});
+check("propose_connection saves an agent's connection as a proposal", data(proposedConn, "proposal")?.status === "proposed", text(proposedConn));
+
+const conns = await mcp.callTool({ name: "list_connections", arguments: {} });
+check(
+  "list_connections does not offer a connection the person has not approved",
+  !conns.isError && !(data(conns, "connections") ?? []).some((c) => c.name === "e2e_conn"),
+  text(conns),
+);
+
+const metadata = await mcp.callTool({
+  name: "propose_connection",
+  arguments: {
+    name: "e2e_metadata", title: "Metadata", description: "The cloud metadata service.",
+    base_url: "https://169.254.169.254", operations: [{ name: "creds", description: "Read credentials.", method: "GET", path: "/latest" }],
+  },
+}).catch((e) => ({ isError: true, content: [{ text: String(e) }] }));
+check("refuses to propose a connection to an IP address", metadata.isError === true, text(metadata));
 
 await mcp.close();
 console.log(`\nMCP check: ${passed} passed`);

@@ -25,7 +25,7 @@ import { modeDef, MODES as GAME_MODES } from "../modes/modes";
 import type { Game } from "./game";
 import { jdFromMs } from "../space/kepler";
 import { nextPhase } from "../space/sky";
-import { describeSky, jdOfLocal, localClock, nextCentralEclipse, nextSeenEclipse, nextShowerPeak, placeText, SHOWER_NAMES } from "../space/skyReport";
+import { describeSky, jdOfLocal, localClock, localDay, nextCentralEclipse, nextSeenEclipse, nextShowerPeak, placeText, SHOWER_NAMES } from "../space/skyReport";
 import { DEFAULT_RULES, type GameRules } from "./save";
 
 interface Line { text: string; color?: string }
@@ -490,7 +490,7 @@ function skyCommand(game: Game, args: string[], needCheats: () => Line[] | null,
   if (sub === "place" && !args[1]) return [{ text: `This spot is ${placeText(lat, lon)}${game.meta.place ? " (the world has been moved; /sky place home puts it back)" : ""}.` }];
   const denied = needCheats() ?? needHost();
   if (denied) return denied;
-  const went = (what: string): Line[] => [{ text: `${what} — ${localClock(game.skyDate(), game.latLon().lon)} local solar time.` }];
+  const went = (what: string): Line[] => [{ text: `${what} — ${localClock(game.skyDate(), game.latLon().lon)} local mean time.` }];
   switch (sub) {
     case "now":
       game.setSkyDate(jdFromMs(Date.now()));
@@ -499,7 +499,7 @@ function skyCommand(game: Game, args: string[], needCheats: () => Line[] | null,
       const [h, m] = (args[2] ?? "").split(":").map(Number);
       const hours = args[2] ? (Number.isFinite(h) ? h : 0) + (Number.isFinite(m) ? m : 0) / 60 : ((game.time % 24000) / 1000 + 6) % 24;
       const target = jdOfLocal(args[1] ?? "", hours, lon);
-      if (!args[1] || target === null) return [{ text: "Usage: /sky date <yyyy-mm-dd> [hh:mm]   (local solar time)", color: ERR }];
+      if (!args[1] || target === null) return [{ text: "Usage: /sky date <yyyy-mm-dd> [hh:mm]   (local mean time; before 1582, the Julian calendar; 585 BC as -584-05-28 or 585BC-05-28)", color: ERR }];
       game.setSkyDate(target);
       return went("The sky has moved");
     }
@@ -524,7 +524,7 @@ function skyCommand(game: Game, args: string[], needCheats: () => Line[] | null,
       if (!next) return [{ text: `No ${type} eclipse found ahead.`, color: ERR }];
       game.moveWorldTo(next.lat, next.lon);
       game.setSkyDate(next.jd - 25 / 1440, next.lon);
-      return went(`The world has moved to ${placeText(next.lat, next.lon)}, under the path of the ${type} eclipse of ${localClock(next.jd, next.lon).slice(0, 10)}. /sky place home moves it back`);
+      return went(`The world has moved to ${placeText(next.lat, next.lon)}, under the path of the ${type} eclipse of ${localDay(next.jd, next.lon)}. /sky place home moves it back`);
     }
     case "shower": {
       const peak = nextShowerPeak(jd, args.slice(1).join(" ") || "x");

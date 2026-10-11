@@ -117,7 +117,7 @@ export interface Surroundings {
    * the current star system's answer (starSystem.ts). Absent, the Solar
    * System's own table is used, with only the Earth to land on.
    */
-  air?(id: string): { H: number; rho0: number; top: number } | null;
+  air?(id: string): { H: number; rho0: number; top: number; table?: readonly [number, number][] } | null;
   lands?(id: string): boolean;
 }
 
@@ -328,20 +328,22 @@ export function warpTime(cls: ShipClass, distance: number): number {
 /**
  * Where the ship starts after a launch: `altitude` km above a latitude and
  * longitude of the turning Earth, in the Earth's frame, nose to the east.
+ * `siderealDeg` is Greenwich apparent sidereal time, and `eqToEcl` carries the
+ * equator of date to the ecliptic (session.ts passes precession and nutation).
  */
-export function aboveEarth(lat: number, lon: number, altitude: number, gmstDeg: number, eqToEcl: (v: Vec3) => Vec3, radius = 6378.137): { pos: Vec3; heading: Vec3 } {
-  const la = (lat * Math.PI) / 180, lo = ((lon + gmstDeg) * Math.PI) / 180;
+export function aboveEarth(lat: number, lon: number, altitude: number, siderealDeg: number, eqToEcl: (v: Vec3) => Vec3, radius = 6378.137): { pos: Vec3; heading: Vec3 } {
+  const la = (lat * Math.PI) / 180, lo = ((lon + siderealDeg) * Math.PI) / 180;
   const up: Vec3 = [Math.cos(la) * Math.cos(lo), Math.cos(la) * Math.sin(lo), Math.sin(la)];
   const east: Vec3 = [-Math.sin(lo), Math.cos(lo), 0];
   return { pos: eqToEcl(scale(up, radius + altitude)), heading: eqToEcl(east) };
 }
 
 /** The latitude and longitude under a point of the Earth's frame, and the height above the surface (km). */
-export function belowShip(pos: Vec3, gmstDeg: number, eclToEq: (v: Vec3) => Vec3, radius = 6378.137): { lat: number; lon: number; altitude: number } {
+export function belowShip(pos: Vec3, siderealDeg: number, eclToEq: (v: Vec3) => Vec3, radius = 6378.137): { lat: number; lon: number; altitude: number } {
   const q = eclToEq(pos);
   const r = len(q);
   const lat = (Math.asin(q[2] / r) * 180) / Math.PI;
-  let lon = (Math.atan2(q[1], q[0]) * 180) / Math.PI - gmstDeg;
+  let lon = (Math.atan2(q[1], q[0]) * 180) / Math.PI - siderealDeg;
   lon = ((lon % 360) + 540) % 360 - 180;
   return { lat, lon, altitude: r - radius };
 }

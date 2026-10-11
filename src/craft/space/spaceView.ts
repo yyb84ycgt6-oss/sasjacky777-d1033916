@@ -18,7 +18,7 @@
 import * as THREE from "three";
 import type { BodyDef } from "./bodies";
 import type { StarSystem } from "./starSystem";
-import { AU, cross, DEG, dot, eqToEcl, gmst, J2000, len, norm, raDecToEcl, scale, sub, type Vec3 } from "./kepler";
+import { AU, cross, DEG, dot, eqToEcl, fromDate, gast, J2000, len, norm, raDecToEcl, scale, sub, type Vec3 } from "./kepler";
 import { beltPositions } from "./belts";
 import { apparentMagnitude, galacticToEquatorial, SUN_POS } from "./galaxy";
 import { cityLightsCanvas, cloudCanvas, detailCanvas, milkyWayCanvas, surfaceCanvas } from "./textures";
@@ -794,7 +794,13 @@ export class SpaceView {
     const frame = def.pole ? sys.frame(def.id) : def.parent && sys.body(def.parent)?.pole ? sys.frame(def.parent) : sys.frame(sys.solar ? "earth" : "sun");
     let w = 0;
     const d = f.jd - J2000;
-    if (def.id === "earth") w = (gmst(f.jd) - 90) * DEG;
+    if (def.id === "earth") {
+      // Greenwich, where apparent sidereal time puts it on the equator of date, found in the J2000 frame the globe
+      // is drawn in — so the ground under a ship (session.ts) is the ground drawn under it.
+      const g = gast(f.jd) * DEG;
+      const greenwich = eqToEcl(fromDate([Math.cos(g), Math.sin(g), 0], f.jd));
+      w = Math.atan2(dot(greenwich, frame.y), dot(greenwich, frame.x));
+    }
     else if (def.locked && def.parent) {
       // The prime meridian faces the planet: find the angle of the planet's direction in the equatorial plane.
       const toParent = norm(sub(f.positions.get(def.parent) ?? [0, 0, 0], helio));

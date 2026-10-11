@@ -5,9 +5,11 @@
  *
  * - The planets and Pluto follow JPL's "Keplerian Elements for Approximate
  *   Positions of the Major Planets" (E. M. Standish): table 1 between 1800
- *   and 2050, where it is good to a few arcseconds for the inner planets and a
- *   few arcminutes for the outer ones; table 2, with its extra terms for the
- *   giants, from 3000 BC to 3000 AD.
+ *   and 2050, where it is good to tens of arcseconds for the inner planets, a
+ *   couple of arcminutes for Mars and up to ten or fifteen for Jupiter and
+ *   Saturn (Standish's own table; VSOP87 would do better for the giants);
+ *   table 2, with its extra terms for the giants, from 3000 BC to 3000 AD.
+ * - Everything is evaluated at Terrestrial Time; sky.ts converts the clock.
  * - The table gives the Earth–Moon barycentre. The Earth sits 1/82.3 of the way
  *   from it toward the Moon's opposite, and the Moon comes from a lunar theory:
  *   the largest terms of the ELP-2000/82 series as Jean Meeus tabulates them
@@ -18,8 +20,8 @@
  */
 import { BODIES, BODY, type BodyDef } from "./bodies";
 import {
-  AU, conicPath, conicPosition, DEG, eccentricAnomaly, equatorFrame, fromFrame, fromOrbitPlane, J2000, len, precessB1950, raDecToEcl,
-  scale, add, sub, type Conic, type Vec3,
+  AU, conicPath, conicPosition, DEG, eccentricAnomaly, eqToEcl, equatorFrame, fromFrame, fromOrbitPlane, J2000, len, nutation, precessB1950,
+  precessionMatrix, raDecToEcl, scale, add, sub, type Conic, type Vec3,
 } from "./kepler";
 
 // ---- the planets --------------------------------------------------------------------------------------------------
@@ -115,13 +117,21 @@ const MOON_B: [number, number, number, number, number][] = [
   [2, -1, 0, 1, 2211], [2, -1, -1, -1, 2065], [0, 1, -1, -1, -1870], [4, 0, -1, -1, 1828], [0, 1, 0, 1, -1794],
   [0, 0, 0, 3, -1749], [0, 1, -1, 1, -1565], [1, 0, 0, 1, -1491], [0, 1, 1, 1, -1475], [0, 1, 1, -1, -1410],
   [0, 1, 0, -1, -1344], [1, 0, 0, -1, -1335], [0, 0, 3, 1, 1107], [4, 0, 0, -1, 1021], [4, 0, -1, 1, 833],
+  // Rows 31–60. Each is under a thousandth of a degree, but together they were
+  // half the latitude error: up to 34 arcseconds, the width of an eclipse path's edge.
+  [0, 0, 1, -3, 777], [4, 0, -2, 1, 671], [2, 0, 0, -3, 607], [2, 0, 2, -1, 596], [2, -1, 1, -1, 491],
+  [2, 0, -2, 1, -451], [0, 0, 3, -1, 439], [2, 0, 2, 1, 422], [2, 0, -3, -1, 421], [2, 1, -1, 1, -366],
+  [2, 1, 0, 1, -351], [4, 0, 0, 1, 331], [2, -1, 1, 1, 315], [2, -2, 0, -1, 302], [0, 0, 1, 3, -283],
+  [2, 1, 1, -1, -229], [1, 1, 0, -1, 223], [1, 1, 0, 1, 223], [0, 1, -2, -1, -220], [2, 1, -1, -1, -220],
+  [1, 0, 1, 1, -185], [2, -1, -2, -1, 181], [0, 1, 2, 1, -177], [4, 0, -2, -1, 176], [4, -1, -1, -1, 166],
+  [1, 0, 1, -1, -164], [4, 0, 1, -1, 132], [1, 0, -1, -1, -119], [4, -1, 0, -1, 115], [2, -2, 0, 1, 107],
 ];
 
 /**
- * The Moon's place from the Earth's centre: ecliptic longitude and latitude
- * (degrees, J2000) and distance (km).
+ * The Moon's place from the Earth's centre as Meeus's series gives it: on the
+ * mean ecliptic and equinox of the date (degrees), and its distance (km). TT.
  */
-export function moonEcliptic(jd: number): { lon: number; lat: number; dist: number } {
+export function moonOfDate(jd: number): { lon: number; lat: number; dist: number } {
   const T = (jd - J2000) / 36525;
   const Lp = 218.3164477 + 481267.88123421 * T - 0.0015786 * T * T + (T * T * T) / 538841;
   const D = 297.8501921 + 445267.1114034 * T - 0.0018819 * T * T + (T * T * T) / 545868;
@@ -145,10 +155,35 @@ export function moonEcliptic(jd: number): { lon: number; lat: number; dist: numb
   sl += 3958 * Math.sin(A1 * DEG) + 1962 * Math.sin((Lp - F) * DEG) + 318 * Math.sin(A2 * DEG);
   sb += -2235 * Math.sin(Lp * DEG) + 382 * Math.sin(A3 * DEG) + 175 * Math.sin((A1 - F) * DEG) + 175 * Math.sin((A1 + F) * DEG)
     + 127 * Math.sin((Lp - Mp) * DEG) - 115 * Math.sin((Lp + Mp) * DEG);
-  // The series gives longitude from the equinox of the date; the general precession takes it back to J2000's.
-  const precession = (5029.0966 * T + 1.11113 * T * T) / 3600;
-  const lon = Lp + sl / 1e6 - precession;
+  const lon = Lp + sl / 1e6;
   return { lon: ((lon % 360) + 360) % 360, lat: sb / 1e6, dist: 385000.56 + sr / 1000 };
+}
+
+/**
+ * The Moon's place from the Earth's centre: ecliptic longitude and latitude
+ * (degrees, J2000) and distance (km).
+ *
+ * The series is referred to the ecliptic of the date, which tilts against
+ * J2000's by 47 arcseconds a century; subtracting the precession from the
+ * longitude alone left the latitude on the wrong plane. The whole vector is
+ * carried instead: ecliptic of date → equator of date → J2000 equator (the
+ * transposed precession matrix) → J2000 ecliptic.
+ */
+export function moonEcliptic(jd: number): { lon: number; lat: number; dist: number } {
+  const m = moonOfDate(jd);
+  const l = m.lon * DEG, b = m.lat * DEG;
+  const v: Vec3 = [Math.cos(b) * Math.cos(l), Math.cos(b) * Math.sin(l), Math.sin(b)];
+  const eps = nutation(jd).eps0, c = Math.cos(eps), s = Math.sin(eps);
+  const eqDate: Vec3 = [v[0], v[1] * c - v[2] * s, v[1] * s + v[2] * c];
+  const P = precessionMatrix(jd);
+  const eq2000: Vec3 = [
+    P[0][0] * eqDate[0] + P[1][0] * eqDate[1] + P[2][0] * eqDate[2],
+    P[0][1] * eqDate[0] + P[1][1] * eqDate[1] + P[2][1] * eqDate[2],
+    P[0][2] * eqDate[0] + P[1][2] * eqDate[1] + P[2][2] * eqDate[2],
+  ];
+  const w = eqToEcl(eq2000);
+  const lon = Math.atan2(w[1], w[0]) / DEG;
+  return { lon: ((lon % 360) + 360) % 360, lat: Math.asin(Math.max(-1, Math.min(1, w[2]))) / DEG, dist: m.dist };
 }
 
 export function moonGeocentric(jd: number): Vec3 {
@@ -159,6 +194,17 @@ export function moonGeocentric(jd: number): Vec3 {
 
 /** The Moon's share of the Earth–Moon pair's mass: how far the Earth sits from their barycentre, as a fraction of the Moon's distance. */
 const MOON_SHARE = 1 / (1 + 81.30056907);
+
+/**
+ * Just the Earth and the Moon (km from the Sun) at a date (TT): the same
+ * numbers ephemeris() gives them, without the hundred other bodies. Eclipse
+ * and phase searches ask for these hundreds of times.
+ */
+export function earthAndMoon(jd: number): { earth: Vec3; moon: Vec3 } {
+  const geo = moonGeocentric(jd);
+  const earth = sub(scale(planetPosition(2, jd), AU), scale(geo, MOON_SHARE));
+  return { earth, moon: add(earth, geo) };
+}
 
 // ---- everything ------------------------------------------------------------------------------------------------------
 
@@ -185,10 +231,12 @@ export function frameOf(id: string): ReturnType<typeof equatorFrame> {
 /** A moon's place around its planet (km, ecliptic axes). */
 function equatorialOffset(b: BodyDef, jd: number): Vec3 {
   const o = b.orbit as Extract<BodyDef["orbit"], { kind: "equatorial" }>;
-  const M = (o.L0 + (360 * (jd - J2000)) / o.period - o.node - o.peri) * DEG;
+  const swing = o.libration ? o.libration[0] * Math.sin(o.libration[1] * (2000 + (jd - J2000) / 365.25 - o.libration[2]) * DEG) : 0;
+  const node = o.node + (o.nodeRate ?? 0) * (jd - J2000);
+  const M = (o.L0 + (360 * (jd - J2000)) / o.period + swing - node - o.peri) * DEG;
   const E = eccentricAnomaly(M, o.e);
   const xp = o.a * (Math.cos(E) - o.e), yp = o.a * Math.sqrt(1 - o.e * o.e) * Math.sin(E);
-  return fromFrame(frameOf(b.parent!), fromOrbitPlane(xp, yp, o.node * DEG, o.i * DEG, o.peri * DEG));
+  return fromFrame(frameOf(b.parent!), fromOrbitPlane(xp, yp, node * DEG, o.i * DEG, o.peri * DEG));
 }
 
 /**

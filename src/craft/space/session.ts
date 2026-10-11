@@ -18,7 +18,7 @@
  */
 import type { BodyDef } from "./bodies";
 import { planetConic } from "./ephemeris";
-import { AU, eclToEq, eqToEcl, gmst, jdFromMs, len, norm, raDecToEcl, scale, sub, type Vec3 } from "./kepler";
+import { AU, eclToEq, eqToEcl, fromDate, gast, jdFromMs, len, norm, raDecToEcl, scale, sub, toDate, type Vec3 } from "./kepler";
 import { SOLAR_SYSTEM, systemFor, type StarSystem } from "./starSystem";
 import { distance, LY_PER_PC, type Star } from "./galaxy";
 import {
@@ -172,7 +172,9 @@ export class SpaceSession {
 
   constructor(readonly seed: number, launch: { lat: number; lon: number }, jd = jdFromMs(Date.now()), readonly place: Place | null = null, physics: Ship["physics"] = "newton") {
     this.jd = jd;
-    const up = aboveEarth(launch.lat, launch.lon, 400, gmst(jd), eqToEcl);
+    // The Earth turns about its axis of date, not J2000's: apparent sidereal time on the true equator of date,
+    // carried back to J2000 — otherwise the launch site sits 0.34° (38 km) off against the Sun and Moon in 2026.
+    const up = aboveEarth(launch.lat, launch.lon, 400, gast(jd), (v) => eqToEcl(fromDate(v, jd)));
     this.ship = newShip(SCOUT, "earth", up.pos, up.heading, physics);
     // Under real physics a launch ends in a real orbit: 7.7 km/s eastward, the way rockets fly to use the Earth's spin.
     if (physics === "newton") this.ship.vel = scale(norm(up.heading), Math.sqrt((this.body("earth")?.gm ?? 398600.435) / len(up.pos)));
@@ -655,7 +657,7 @@ export class SpaceSession {
   /** Where below the ship, if it is low enough over the Earth to come down (under real physics, anywhere near it: the landing flies itself down). */
   landingSite(): { lat: number; lon: number; altitude: number } | null {
     if (!this.system.solar || this.ship.frame !== "earth" || this.ship.warp) return null;
-    const under = belowShip(this.ship.pos, gmst(this.jd), eclToEq);
+    const under = belowShip(this.ship.pos, gast(this.jd), (v) => toDate(eclToEq(v), this.jd));
     return under.altitude < 2000 || (this.ship.physics === "newton" && !this.ship.landed) ? under : null;
   }
 
