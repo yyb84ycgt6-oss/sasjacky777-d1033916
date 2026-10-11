@@ -443,16 +443,32 @@ export class Projectile extends Entity {
    * mark — turning every half second or so onto whichever axis still has the
    * most distance to close. That is what makes it dodgeable, and why it
    * swerves around corners. With its mark gone it sinks and bursts.
+   *
+   * A leg also ends as soon as it has closed its axis or passed the mark on
+   * it. Run for its full half second regardless, a leg overshot the mark's
+   * line, came back and overshot again, and a bullet whose passes stayed half
+   * a block to one side never struck at all — one in forty, standing still.
+   * An axis counts as closed only inside the mark's hitbox (a quarter block),
+   * so the last leg lands on it rather than beside it.
    */
   private steerBullet(ctx: EntityContext): void {
     const b = this.body;
     const mark = this.homing ? ctx.players().find((p) => p.id === this.homing && p.targetable) : undefined;
+    const d = mark ? [mark.x - b.x, mark.y + mark.height / 2 - b.y, mark.z - b.z] : [0, 0, 0];
+    const leg = this.heading.findIndex((h) => h !== 0);
+    const legDone = !!mark && leg >= 0 && (Math.abs(d[leg]) < 0.25 || Math.sign(d[leg]) !== Math.sign(this.heading[leg]));
     if (!mark) {
       this.heading = [0, -0.15, 0];
-    } else if (--this.turnIn <= 0) {
-      const d = [mark.x - b.x, mark.y + mark.height / 2 - b.y, mark.z - b.z];
-      const axes = [0, 1, 2].filter((i) => Math.abs(d[i]) > 0.5);
-      let axis = axes.length ? axes[0] : 1;
+    } else if (--this.turnIn <= 0 || legDone) {
+      // A leg that reached the mark's line stops on it, rather than drifting on across while the next leg starts.
+      if (legDone) {
+        if (leg === 0) b.vx = 0;
+        else if (leg === 1) b.vy = 0;
+        else b.vz = 0;
+      }
+      const axes = [0, 1, 2].filter((i) => Math.abs(d[i]) > 0.25);
+      // Already on its mark on every axis: keep closing on the farthest, however little is left.
+      let axis = axes.length ? axes[0] : [0, 1, 2].reduce((m, i) => (Math.abs(d[i]) > Math.abs(d[m]) ? i : m), 0);
       // Weighted toward the longest leg, but not always it.
       let total = 0;
       for (const i of axes) total += Math.abs(d[i]);

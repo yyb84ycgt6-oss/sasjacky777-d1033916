@@ -239,6 +239,29 @@ describe("shulker bullets", () => {
     expect(effects[0]).toEqual({ id: "p1", effect: "levitation", seconds: 10 });
   });
 
+  it("always reaches a mark that stands still, however its turns fall — one leg at a time, never past it", () => {
+    // Once one in forty flights overshot the mark's line on every pass and never struck.
+    let seed = 1;
+    random = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+    for (let run = 0; run < 300; run++) {
+      players = [alex(6.5, 5.5)];
+      spawned = [];
+      const b = new Projectile("shulker_bullet", 0.5, 11.5, 0.5, 0, 0, 0, "mob:999");
+      b.homing = "p1";
+      spawned.push(b);
+      let ticks = 0;
+      while (!b.removed && ticks < 400) {
+        tickAll(1);
+        ticks++;
+        if (!b.removed && ticks > 9) {
+          expect([b.body.vx, b.body.vy, b.body.vz].filter((x) => Math.abs(x) > 0.02).length).toBeLessThanOrEqual(2);
+        }
+      }
+      expect(b.removed).toBe(true);
+    }
+    random = Math.random;
+  });
+
   it("is knocked out of the air by a blow", () => {
     const b = new Projectile("shulker_bullet", 0.5, 12, 0.5, 0, 0, 0, "mob:1");
     expect(b.hurt(ctx(), 1, "player", 0, 0, "p1")).toBe(true);
