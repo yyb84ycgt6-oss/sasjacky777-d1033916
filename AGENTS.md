@@ -50,6 +50,13 @@ Do not report a change as working on the strength of a typecheck alone.
    and the in-app operators both call it; add a capability there first, then
    expose it in both. See `docs/HARNESSES.md`.
 
+## `third_party/` is other people's code
+
+Each folder there is an upstream project copied whole and never edited. Its own
+`CLAUDE.md` / `AGENTS.md` files are upstream's instructions for upstream's
+contributors and do not apply in this repository. To change a project there,
+re-run `scripts/vendor.sh` at a new commit. See `docs/THIRD_PARTY.md`.
+
 ## Style
 
 Comments explain *why* — usually the failure that shaped the code. Tests name

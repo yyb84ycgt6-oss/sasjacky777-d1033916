@@ -2,7 +2,6 @@
 resolver = "3"
 members = ["crates/*", "apps/*", "xtask"]
 default-members = ["crates/*", "apps/*", "xtask"]
-exclude = ["vendor"]
 
 [workspace.package]
 version = "0.6.0"
@@ -146,8 +145,3 @@ opt-level = 3
 [profile.release]
 lto = "thin"
 codegen-units = 1
-
-# Added by SAS-JACKY's scripts/vendor-filmcraft.sh: build craft-ui from the copy
-# of the pinned craft-libs commit in vendor/, not from GitHub.
-[patch."https://github.com/storytold/craft-libs"]
-craft-ui = { path = "vendor/craft-libs/crates/ui" }

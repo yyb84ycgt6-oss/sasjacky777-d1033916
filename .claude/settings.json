@@ -1,5 +1,12 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "claudeMdExcludes": [
+    "**/third_party/**/CLAUDE.md",
+    "**/third_party/**/CLAUDE.local.md",
+    "**/third_party/**/.claude/CLAUDE.md",
+    "**/third_party/**/.claude/rules/**",
+    "**/third_party/**/AGENTS.md"
+  ],
   "permissions": {
     "allow": [
       "Bash(npm test)",

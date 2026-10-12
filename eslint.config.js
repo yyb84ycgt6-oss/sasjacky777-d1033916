@@ -16,9 +16,9 @@ export default tseslint.config(
       // not edit it directly" and are rewritten by the Supabase integration.
       "src/integrations/supabase/previewAuthStorage.ts",
       "src/integrations/supabase/types.ts",
-      // FilmCraft is upstream's code, imported whole by scripts/vendor-filmcraft.sh.
+      // Upstream projects, imported whole and untouched by scripts/vendor.sh.
       // A lint fix here would be drift the next import silently throws away.
-      "filmcraft",
+      "third_party",
     ],
   },
   {

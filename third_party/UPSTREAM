@@ -1,0 +1,10 @@
+# Projects vendored whole into third_party/<name>/ by scripts/vendor.sh.
+# Each is upstream's tracked tree at exactly this commit, never edited here:
+# `scripts/vendor.sh --check` proves it. To move one, run
+# `scripts/vendor.sh <name> <commit>` rather than editing this file.
+#
+# name        url                                           commit
+filmcraft     https://github.com/storytold/filmcraft        ca36cf9a6af29ca6de15ebcbfbd052e6470fef8c
+# FilmCraft's one git dependency, at the commit its Cargo.toml pins
+# (src/test/third-party.test.ts fails if the two drift apart).
+craft-libs    https://github.com/storytold/craft-libs       5c874d51eeb3de70e735c8ce87a59a7dedd47675
