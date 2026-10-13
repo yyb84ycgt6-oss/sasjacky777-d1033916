@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -250,9 +251,15 @@ describe("keeping the advertised size honest", () => {
     // The registry and the LFS pointer describe the same file. They disagreed
     // before: the registry said 248 — correct in decimal MB — while the app's
     // own probe divides by 1024 twice and computed 237 from the same bytes.
-    const pointer = readFileSync(join(process.cwd(), WEIGHTS_PATH), "utf8");
+    //
+    // Read from git, not from the working tree: the committed blob is the LFS
+    // pointer whether or not LFS has fetched the weights. Reading the file
+    // instead loaded 237 MB as text in a checkout that had them — slow enough
+    // to time out under a full run — found no pointer in it, and passed
+    // without comparing anything.
+    const pointer = execFileSync("git", ["cat-file", "-p", `HEAD:${WEIGHTS_PATH}`], { encoding: "utf8" });
     const bytes = Number(/^size (\d+)$/m.exec(pointer)?.[1]);
-    if (!bytes) return; // weights not fetched in this checkout — nothing to compare
+    expect(bytes, `${WEIGHTS_PATH} is not committed as an LFS pointer`).toBeGreaterThan(0);
     expect(toMB(bytes)).toBe(declared);
   });
 
