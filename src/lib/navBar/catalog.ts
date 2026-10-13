@@ -19,7 +19,7 @@
  */
 import type { LucideIcon } from "lucide-react";
 import {
-  Activity, AppWindow, ArrowUpDown, Award, BarChart, BarChart2, BarChart3, Bot, Brain,
+  Activity, AppWindow, ArrowUpDown, Award, BarChart, BarChart2, BarChart3, Bot, Boxes, Brain,
   CalendarDays, Code2, Coins, Compass, Cpu, Dna, Factory, FileSpreadsheet, FlaskConical, FolderLock,
   Gamepad2, Gauge, Gem, GitBranch, Hammer, HardDrive, Home, ImageIcon, KeyRound, Layers, LayoutGrid,
   Library, Lightbulb, Mail, Monitor, Music, Network, PanelsTopLeft, Pickaxe, Plug, Route, Scale, ScanLine,
@@ -72,6 +72,7 @@ const CURATED: readonly NavPage[] = [
   jackie("swarm", "Swarm", Network, "/swarm"),
   jackie("providers", "Providers", Plug, "/providers"),
   jackie("micro", "Micro-AI", Brain, "/micro"),
+  jackie("models", "Model Queue", Boxes, "/models"),
   jackie("local-ai", "Local AI", HardDrive, "/local-ai"),
   jackie("jacky-live", "Jacky Live", Activity, "/jacky-live"),
   jackie("pc", "The PC", Monitor, "/pc"),
