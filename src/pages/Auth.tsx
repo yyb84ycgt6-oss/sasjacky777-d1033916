@@ -40,10 +40,22 @@ const Auth = () => {
   // relative paths only, so it can't be used as an open redirect.
   const nextPath = (() => {
     const raw = new URLSearchParams(window.location.search).get("next");
-    if (!raw) return null;
-    return raw.startsWith("/") && !raw.startsWith("//") ? raw : null;
+    if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return null;
+    try {
+      const target = new URL(raw, window.location.origin);
+      return target.origin === window.location.origin
+        ? target.pathname + target.search + target.hash
+        : null;
+    } catch {
+      return null;
+    }
   })();
   const returnUrl = nextPath ? `${window.location.origin}${nextPath}` : window.location.origin;
+
+  const enterApp = () => {
+    if (nextPath) window.location.href = returnUrl;
+    else navigate("/", { replace: true });
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,10 +74,8 @@ const Auth = () => {
       if (view === "login") {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
-        if (nextPath) {
-          window.location.href = returnUrl;
-          return;
-        }
+        enterApp();
+        return;
       } else if (view === "signup") {
         if (password.length < 6) {
           toast.error("Password must be at least 6 characters.");
@@ -258,6 +268,7 @@ const Auth = () => {
                   try {
                     await startDemoSession();
                     toast.success("Welcome, demo user!");
+                    enterApp();
                   } catch (err: any) {
                     toast.error(err.message || "Demo login failed.");
                   } finally {

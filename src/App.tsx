@@ -9,8 +9,9 @@ import { I18nProvider } from "@/game/i18n";
 import { LocalAIProvider } from "@/providers/LocalAIProvider";
 import React, { useEffect, lazy, Suspense } from "react";
 import { supabase } from "@/integrations/supabase/client";
-// One silent guest sign-in per page load, however many routes mount.
-const guestStarted = { current: false };
+// Share one attempt across route mounts; a completed attempt must not trap
+// a later sign-out behind a loading screen.
+let guestSession: ReturnType<typeof supabase.auth.signInAnonymously> | null = null;
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import Sandbox from "./pages/Sandbox";
@@ -124,19 +125,34 @@ const ProtectedRoute = ({
   fallback?: React.ReactNode;
 }) => {
   const { user, loading } = useAuth();
+  const location = useLocation();
   const [guestError, setGuestError] = React.useState<string | null>(null);
+  const [guestSettled, setGuestSettled] = React.useState(false);
   void fallback;
 
-  // No login wall: a visitor without an account gets a private guest account
-  // silently, so RLS still walls each browser's data off from everyone else's.
-  // /auth stays reachable directly for the owner's real account.
+  // A private guest account still opens the app on the first visit. Every
+  // route observes the same attempt, including a route mounted while it runs.
   React.useEffect(() => {
-    if (loading || user || guestStarted.current) return;
-    guestStarted.current = true;
-    void supabase.auth.signInAnonymously().then(({ error }) => {
-      if (error) setGuestError(error.message);
-    });
+    if (loading || user) return;
+    let active = true;
+    guestSession ??= Promise.resolve().then(() => supabase.auth.signInAnonymously());
+    void guestSession.then(
+      ({ error }) => {
+        if (!active) return;
+        setGuestError(error?.message ?? null);
+        setGuestSettled(true);
+      },
+      (error: unknown) => {
+        if (!active) return;
+        setGuestError(error instanceof Error ? error.message : "Guest sign-in failed.");
+        setGuestSettled(true);
+      },
+    );
+    return () => { active = false; };
   }, [loading, user]);
+
+  // A stale guest error must not hide a subsequent successful account login.
+  if (!loading && user) return <>{children}</>;
 
   if (guestError) {
     return (
@@ -147,7 +163,7 @@ const ProtectedRoute = ({
     );
   }
 
-  if (loading || !user) {
+  if (loading || !guestSettled) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <span className="font-mono text-4xl font-bold text-primary animate-pulse">J</span>
@@ -155,7 +171,10 @@ const ProtectedRoute = ({
     );
   }
 
-  return <>{children}</>;
+  // The one guest attempt has finished, but its session is now gone. Give
+  // the visitor a sign-in path instead of waiting for an attempt we won't make.
+  const next = location.pathname + location.search + location.hash;
+  return <Navigate to={`/auth?next=${encodeURIComponent(next)}`} replace />;
 };
 
 const EruAliasRedirect = () => {
