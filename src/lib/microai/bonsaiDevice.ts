@@ -36,7 +36,7 @@
 import type { ModelManager, Wllama } from "@wllama/wllama";
 import { GUIDE_WEIGHTS_PATH, GUIDE_WEIGHTS_SOURCE } from "@/lib/guide/weights";
 import { GUIDANCE_MODEL } from "./models";
-import { createWllama, hasWebGpu, loadWllamaModule, supportsDeviceModels } from "./wllamaRuntime";
+import { createWllama, hasWebGpu, loadWllamaModule, needsCompatBuild, supportsDeviceModels } from "./wllamaRuntime";
 
 /** The build Jackie runs: what public/models/bonsai-1.7b/bonsai-1.7b.gguf's LFS pointer names. */
 export const BONSAI_SHA256 = "3d7c6c90dd98717a203adb22d5eacd2581850e40aa5327e144b97766cae5f7e3";
@@ -55,8 +55,7 @@ export const BONSAI_CONTEXT_CHARS = 2000;
 
 const HF = "https://huggingface.co";
 
-export const UNSUPPORTED_BROWSER =
-  "This browser cannot run Bonsai: it lacks 64-bit WebAssembly memory. Chrome, Edge or Firefox (current versions) can.";
+export const UNSUPPORTED_BROWSER = "This browser cannot run WebAssembly, which Bonsai needs to run here.";
 
 export const NOT_DOWNLOADED =
   `Bonsai is not on this device yet. Choose On-device in the engine menu and download it (${BONSAI_MB} MB, once).`;
@@ -164,10 +163,12 @@ export interface BonsaiStatus {
   /** A download that stopped partway left files behind; Remove clears them. */
   partial: boolean;
   gpu: boolean;
+  /** Runs wllama's slower compatibility build: Safari, every iOS browser. */
+  compat: boolean;
   error?: string;
 }
 
-export type StoredBonsai = Omit<BonsaiStatus, "gpu">;
+export type StoredBonsai = Omit<BonsaiStatus, "gpu" | "compat">;
 
 /**
  * Whether this browser can run Bonsai and has it stored. Reads the cache,
@@ -188,7 +189,7 @@ export async function storedBonsai(): Promise<StoredBonsai> {
 /** Everything the panel shows: what is stored, and whether a GPU will run it. */
 export async function bonsaiStatus(): Promise<BonsaiStatus> {
   const [stored, gpu] = await Promise.all([storedBonsai(), hasWebGpu()]);
-  return { ...stored, gpu };
+  return { ...stored, gpu, compat: needsCompatBuild() };
 }
 
 export interface DownloadProgress {
@@ -385,7 +386,14 @@ async function openSession(): Promise<Wllama> {
   const wllama = await createWllama({ modelManager: mm });
   // Every layer goes to WebGPU when the browser has it, and llama.cpp falls
   // back to the CPU on its own when it does not.
-  await wllama.loadModel(model, { n_ctx: BONSAI_CONTEXT_TOKENS });
+  await wllama.loadModel(model, {
+    n_ctx: BONSAI_CONTEXT_TOKENS,
+    // The compatibility build is what a phone runs, and a phone gives a tab a
+    // fraction of a desktop's memory. Keys stored at 8 bits take about 115 MB
+    // off the 460 MB the window costs, for a small loss of precision; values
+    // stay at 16 because quantizing them needs flash attention.
+    ...(needsCompatBuild() ? { cache_type_k: "q8_0" as const } : {}),
+  });
   return wllama;
 }
 

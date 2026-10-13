@@ -38,25 +38,59 @@ export async function createWllama(options: { modelManager?: ModelManager } = {}
       ...(options.modelManager ? { modelManager: options.modelManager } : {}),
     },
   );
-  // wllama's constructor opts every browser without JSPI or 64-bit memory —
-  // Safari, and Firefox unless a flag is set — into a "compat" build fetched
-  // from cdn.jsdelivr.net at load time: code from a third party, run with the
-  // owner's persona and memory in the same tab. Turned off, those browsers run
-  // the same-origin build or fail to start it, and a failure is named by the
-  // caller instead of quietly trading where the code comes from.
-  wllama.setCompat(null);
+  // wllama's constructor opts every browser without JSPI or 64-bit memory into
+  // a "compat" build — WebAssembly that suspends with Asyncify and addresses
+  // 32-bit memory — and by default fetches it from cdn.jsdelivr.net at load
+  // time: code from a third party, run with the owner's persona and memory in
+  // the same tab. It is served from this origin instead, from the
+  // @wllama/wllama-compat package pinned to the same version. Turning compat
+  // off altogether, as this did at first, left every iPhone without Bonsai:
+  // Safari has neither feature, and on iOS Chrome, Edge and Firefox are all
+  // Safari underneath.
+  if (needsCompatBuild()) {
+    const [{ default: compatWasm }, { default: compatWorker }] = await Promise.all([
+      import("@wllama/wllama-compat/wasm/wllama.wasm?url"),
+      // ?raw, not ?url: wllama starts the worker from the code itself.
+      import("@wllama/wllama-compat/wasm/wllama.js?raw"),
+    ]);
+    wllama.setCompat({ wasm: compatWasm, worker: { code: compatWorker } } as unknown as Parameters<
+      typeof wllama.setCompat
+    >[0]);
+  } else {
+    wllama.setCompat(null);
+  }
   return wllama;
 }
 
+function hasMemory64(): boolean {
+  try {
+    new WebAssembly.Memory({ address: "i64", initial: BigInt(1) } as unknown as WebAssembly.MemoryDescriptor);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Whether this browser has what the same-origin build needs: 64-bit
- * WebAssembly memory. Asked before a 237 MB download rather than after it.
+ * Whether this browser needs the compat build: no JSPI or no 64-bit memory.
+ * The same test wllama makes, so the two agree on which build runs. Safari,
+ * every iOS browser, and Firefox without its JSPI flag.
+ */
+export function needsCompatBuild(): boolean {
+  try {
+    return !(WebAssembly as unknown as { Suspending?: unknown }).Suspending || !hasMemory64();
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Whether this browser can run Bonsai at all: WebAssembly, in either build.
+ * Asked before a 237 MB download rather than after it.
  */
 export function supportsDeviceModels(): boolean {
   try {
-    if (typeof WebAssembly !== "object") return false;
-    new WebAssembly.Memory({ address: "i64", initial: BigInt(1) } as unknown as WebAssembly.MemoryDescriptor);
-    return true;
+    return typeof WebAssembly === "object" && typeof WebAssembly.instantiate === "function";
   } catch {
     return false;
   }

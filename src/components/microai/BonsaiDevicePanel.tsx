@@ -22,6 +22,32 @@ import {
 
 const mb = (bytes: number) => Math.round(bytes / (1024 * 1024));
 
+/**
+ * An iPhone or iPad browsing in a tab rather than as a Home Screen app.
+ *
+ * WebKit deletes everything a site has stored once the site goes seven days
+ * of browser use without a visit, and 237 MB downloaded over a phone's
+ * connection should not quietly vanish a week later. Home Screen apps are
+ * exempt, so on iOS the panel says how to keep it. iPadOS reports itself as a
+ * Mac; the touch points give it away.
+ */
+function iosInBrowserTab(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ios =
+    /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  if (!ios) return false;
+  const installed =
+    (navigator as { standalone?: boolean }).standalone === true ||
+    (typeof matchMedia === "function" && matchMedia("(display-mode: standalone)").matches);
+  return !installed;
+}
+
+// A Home Screen app also has its own storage, separate from Safari's: a copy
+// downloaded in a tab does not follow it there. So the advice is where to
+// download, not just where to open.
+const KEEP_ON_IPHONE =
+  "To keep Bonsai on this iPhone, download it from the Home Screen app, not a Safari tab: Share → Add to Home Screen, open it from there and sign in. Safari deletes a website's stored data after seven days without a visit; a Home Screen app keeps its own.";
+
 export function BonsaiDevicePanel() {
   const [status, setStatus] = useState<BonsaiStatus | null>(null);
   const [progress, setProgress] = useState<{ loaded: number; total: number } | null>(null);
@@ -96,6 +122,7 @@ export function BonsaiDevicePanel() {
           <span className="flex-1">
             <span className="text-primary">●</span> Bonsai 1.7B is on this device ·{" "}
             {status.gpu ? "runs on the GPU (WebGPU)" : "no WebGPU here, so it runs on the CPU: a first answer can take minutes"}
+            {status.compat && " · Safari's engine runs the slower compatibility build"}
           </span>
           {confirmRemove ? (
             <>
@@ -122,6 +149,12 @@ export function BonsaiDevicePanel() {
           {!status.gpu && (
             <p>This browser has no WebGPU, so Bonsai would run on the CPU — expect minutes, not seconds, for a first answer.</p>
           )}
+          {status.compat && (
+            <p>
+              This browser runs Bonsai in its slower compatibility build (Safari's engine — on an iPhone, every browser
+              is Safari underneath). It works; it is not quick.
+            </p>
+          )}
           <div className="flex gap-2">
             <button className={button} onClick={follow}>
               Download ({BONSAI_MB} MB)
@@ -134,6 +167,7 @@ export function BonsaiDevicePanel() {
           </div>
         </div>
       )}
+      {status.supported && iosInBrowserTab() && <p className="mt-1">{KEEP_ON_IPHONE}</p>}
       {status.error && <p className="mt-1 text-destructive">{status.error}</p>}
       {note && <p className="mt-1" role="status">{note}</p>}
     </div>
