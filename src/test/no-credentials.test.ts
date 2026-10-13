@@ -19,8 +19,10 @@ import { credentialMatches } from "@/lib/jackie-security";
  *   a project rather than unlock it and ship to every browser by design; its
  *   safety is the key's restrictions in Google Cloud, which docs/SECURITY_SCAN.md
  *   asks the owner to set.
- * - "sk-proj-404792141secretkeythatshouldnotbehere", a fake key the bundle's
- *   TermStudio demo plants on purpose for its code reviewer to find.
+ * - an OpenAI-shaped fake key the bundle's TermStudio demo plants on purpose
+ *   for its code reviewer to find; its own text says it should not be there.
+ *   (Not quoted here: this file is scanned too, and quoting it once made the
+ *   test flag itself.)
  */
 const KNOWN: Record<string, string> = {
   be0314d56ee89f54: "public/pc-os/assets/ Firebase web API key (public by design; restrict it in Google Cloud)",
