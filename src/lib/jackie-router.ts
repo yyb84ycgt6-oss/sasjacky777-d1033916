@@ -28,9 +28,13 @@
  * before a failover that follows output, the router calls `onReset` and the
  * caller clears the half answer. A caller that cannot reset gets the break
  * reported as an error instead, with nothing spliced.
+ *
+ * On-device is a chain of its own (see `jackie-engines`): when Bonsai cannot
+ * answer in this tab, the reason is reported and nothing else is asked.
  */
 import { streamSse, type ChatMessage } from "@/lib/jackie-stream";
 import { callEdgeFunction, describeEdgeFailure, describesUnreachable, NotSignedInError } from "@/lib/edgeFunction";
+import { clampContext } from "../../supabase/functions/_shared/chatRequest";
 import {
   chainFrom,
   findEngine,
@@ -76,6 +80,12 @@ export interface RouteChatOptions {
   onError: (error: string) => void;
   /** Fired before each attempt, including the first. */
   onRoute?: (attempt: RouteAttempt) => void;
+  /**
+   * What an engine that runs here is doing before its first word — loading,
+   * reading the persona — and null once text flows. On a CPU that is minutes,
+   * and a blank bubble for minutes reads as a hang.
+   */
+  onStatus?: (note: string | null) => void;
   signal?: AbortSignal;
   /** Walk the rest of the chain on failure. Default true. */
   fallback?: boolean;
@@ -234,6 +244,66 @@ async function streamEngine(
   return outcome;
 }
 
+/**
+ * The on-device turn: Bonsai in this tab, answering as Jackie.
+ *
+ * Its system prompt comes from `jackie-device`, built by the same guard as
+ * every other engine's — the persona never ships in the bundle — so the one
+ * request that leaves the machine carries the memory context and nothing of
+ * the conversation. Every failure is a `failed` with words to act on; there
+ * is no next engine to try.
+ */
+async function askDevice(args: RouteChatOptions): Promise<Attempt> {
+  const device = await import("@/lib/microai/bonsaiDevice");
+  const status = await device.bonsaiStatus();
+  if (!status.supported) return { kind: "failed", reason: device.UNSUPPORTED_BROWSER };
+  if (!status.downloaded) return { kind: "failed", reason: status.error ?? device.NOT_DOWNLOADED };
+
+  args.onStatus?.("Fetching Jackie's persona…");
+  let system: string;
+  try {
+    const resp = await callEdgeFunction(
+      "jackie-device",
+      { context: clampContext(args.context, device.BONSAI_CONTEXT_CHARS) },
+      { signal: args.signal },
+    );
+    const body = await resp.json().catch(() => null);
+    if (resp.status === 401) {
+      args.onStatus?.(null);
+      return { kind: "stop", reason: "You are signed out, so Jackie cannot answer. Sign in and try again." };
+    }
+    if (!resp.ok || typeof body?.prompt !== "string" || !body.prompt.trim()) {
+      args.onStatus?.(null);
+      const detail = typeof body?.error === "string" ? body.error : `HTTP ${resp.status}`;
+      return {
+        kind: "failed",
+        reason:
+          resp.status === 403
+            ? "On-device answers use Jackie's persona, which only the owner's account can fetch, and this account is not the owner's."
+            : `Bonsai is ready, but Jackie's persona could not be fetched (jackie-device: ${detail}), so it did not answer as someone else.`,
+      };
+    }
+    system = body.prompt;
+  } catch (e) {
+    args.onStatus?.(null);
+    if (args.signal?.aborted || (e as Error)?.name === "AbortError") return { kind: "stop" };
+    const reason = describeEdgeFailure(e, "jackie-device");
+    return e instanceof NotSignedInError
+      ? { kind: "stop", reason }
+      : { kind: "failed", reason: `Bonsai is ready, but Jackie's persona could not be fetched: ${reason}` };
+  }
+
+  const result = await device.chatOnDevice({
+    system,
+    messages: args.messages,
+    onDelta: args.onDelta,
+    onStatus: args.onStatus,
+    signal: args.signal,
+  });
+  if (args.signal?.aborted) return { kind: "stop" };
+  return result.ok ? { kind: "ok" } : { kind: "failed", reason: result.error };
+}
+
 async function attempt(
   args: RouteChatOptions,
   id: EngineId,
@@ -244,6 +314,9 @@ async function attempt(
 
   if (def.kind === "jacky") {
     return { result: await askJacky(args, pace) };
+  }
+  if (def.kind === "device") {
+    return { result: await askDevice(args), model: def.models[0]?.id };
   }
 
   // The chosen model only belongs to the chosen engine. Every engine further

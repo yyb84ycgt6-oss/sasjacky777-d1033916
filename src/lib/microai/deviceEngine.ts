@@ -38,6 +38,7 @@
 import { GUIDE_WEIGHTS_PATH, checkGuideWeights } from "@/lib/guide/weights";
 import { GUIDANCE_MODEL } from "./models";
 import type { InferenceEngine } from "./contextRouter";
+import { createWllama } from "./wllamaRuntime";
 
 /** How far the load has got, for a UI that has 248 MB to explain. */
 export interface DeviceLoadProgress {
@@ -77,36 +78,9 @@ export interface DeviceRuntime {
   exit(): Promise<void>;
 }
 
-/**
- * Loads wllama, and only then.
- *
- * The import is dynamic because the static one put the library and its 8 MB
- * WebAssembly binary into the main bundle — paid for by every visitor to every
- * route, including the ones who never ask a question, and including the ones on
- * a phone. Nothing about this rung should cost anything until it answers.
- */
+/** Loads wllama, and only then — `wllamaRuntime.ts` says why it is lazy and same-origin. */
 async function realRuntime(): Promise<DeviceRuntime> {
-  const { Wllama } = await import("@wllama/wllama");
-  // Vite fingerprints this and emits it as a build asset, so the binary is
-  // served from this origin like everything else. The alternative wllama offers
-  // is a CDN, which would make the offline-first engine depend on a third party
-  // being reachable — the one thing this ladder exists to avoid.
-  const { default: wasmUrl } = await import("@wllama/wllama/esm/wasm/wllama.wasm?url");
-  const wllama = new Wllama(
-    // The key has to be exactly "wllama.wasm": wllama throws
-    // `"wllama.wasm" is missing in pathConfig` without it, and its `locateFile`
-    // returns `pathConfig[filename]` with no fallback, so `default` alone does
-    // not satisfy it. The shipped `AssetsPathConfig` type declares neither —
-    // it still describes the old single-thread/multi-thread split — so the cast
-    // is against a stale declaration, not against the runtime.
-    { "wllama.wasm": wasmUrl, default: wasmUrl } as unknown as ConstructorParameters<typeof Wllama>[0],
-    {
-      suppressNativeLog: true,
-      // Answer from the cached weights when the network is gone. Without this
-      // the engine that exists to work offline refuses to start offline.
-      allowOffline: true,
-    },
-  );
+  const wllama = await createWllama();
   return {
     loadModelFromUrl: (url, params) => wllama.loadModelFromUrl(url, params ?? {}),
     createCompletion: (options) => wllama.createCompletion({ ...options, stream: false }),

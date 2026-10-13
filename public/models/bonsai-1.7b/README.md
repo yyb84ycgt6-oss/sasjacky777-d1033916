@@ -82,3 +82,12 @@ the app. Until then it still answers — from the route manifest, deterministica
 per-file limit and an entry this size fails the build outright, the same way the
 embedded PC's on-device AI wasm does. The file is still served, and still
 available offline once Ollama has built the model from it.
+
+## Running it in the browser
+
+The chat's **On-device** engine runs these exact weights in the browser tab
+(`docs/ON_DEVICE_CHAT.md`). It downloads them from this folder when the host serves
+the real file, and from Hugging Face — the same SHA-256, nothing newer — when it
+serves only the LFS pointer. Changing the weights here means changing the pins
+in `src/lib/microai/bonsaiDevice.ts`; `src/test/jackie-device.test.ts` fails
+until the two agree.

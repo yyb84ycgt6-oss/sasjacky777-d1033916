@@ -77,6 +77,27 @@ ends up lying about what it is.
 rule that one engine's model id is never handed to the next — a Gemini id means
 nothing to Ollama, and carrying it across made every switch fail twice.
 
+## On-device: Bonsai in the browser
+
+One engine sits outside the chain: **On-device**, Bonsai 1.7B running in the
+browser tab through wllama (llama.cpp compiled to WebAssembly). It is chosen
+from the same menu, downloads once (237 MB, into the browser's own storage) and
+answers from there. `docs/ON_DEVICE_CHAT.md` has the whole of it; the parts that
+touch the pipeline:
+
+- **A chain of one.** `chainFrom("device")` is `["device"]` and no other chain
+  contains it. Picking it means no provider sees the question, so falling back
+  to the cloud would do exactly what was not asked; and no server engine falls
+  back *to* it, because that would start a 237 MB model nobody chose.
+- **Its persona comes from a function.** The persona never ships in the bundle,
+  so before each answer the router asks `jackie-device` (owner-only) for the
+  system prompt, which the same guard as every other engine builds and attests.
+  Only the memory context is sent; the conversation is not. If the prompt cannot
+  be fetched, the device does not answer — it does not answer as somebody else.
+- **It reports what it is doing.** Loading the model and reading the persona can
+  take minutes on a CPU, so `onStatus` carries a line for the composer until the
+  first token arrives.
+
 ## What was broken
 
 `jackie-chat` opened with `supabase.auth.getClaims(token)` against a client
