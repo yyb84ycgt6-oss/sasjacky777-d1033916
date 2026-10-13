@@ -52,7 +52,10 @@ export function GuidePanel({
           ? `answering through ${readyEngine.name}`
           : weights.present
             ? `No runner is up. Weights ship with the app (${GUIDE_WEIGHTS_MB} MB) — ${GUIDE_INSTALL_COMMAND}`
-            : "No local runner is up. Start LM Studio's server (lms server start) or Ollama, and load a model.",
+            : // The one route that works on a host serving only the LFS pointer,
+              // and the one a phone can take: the device rung uses the chat's
+              // download, so naming it is what makes "map only" fixable there.
+              "No local model is up. Download Bonsai once in the chat (engine menu → On-device), or start LM Studio's server (lms server start) or Ollama and load a model.",
       });
     })();
     inputRef.current?.focus();
