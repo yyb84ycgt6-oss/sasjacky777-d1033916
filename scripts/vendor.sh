@@ -155,7 +155,9 @@ while read -r name url pinned; do
     if ! git -C "$ROOT" archive "HEAD:third_party/$name" 2>/dev/null | tar -x -C "$committed"; then
       echo "$name: nothing committed at third_party/$name yet." >&2
       status=1
-    elif diff -r -q "$out" "$committed" >"$work/drift-$name"; then
+    # --no-dereference compares a symlink by where it points. Following it
+    # would trip over the ones whose target only exists after a build.
+    elif diff -r -q --no-dereference "$out" "$committed" >"$work/drift-$name" 2>&1; then
       echo "$name: committed tree is upstream $commit, byte for byte."
     else
       echo "$name: committed tree differs from upstream $commit:" >&2
