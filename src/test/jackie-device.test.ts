@@ -4,9 +4,9 @@ import {
   BONSAI_BYTES,
   BONSAI_MB,
   BONSAI_SHA256,
-  bonsaiDownloadInProgress,
+  deviceDownloadInProgress,
   chatOnDevice,
-  downloadBonsai,
+  downloadDeviceModel,
   fitToWindow,
   NOT_DOWNLOADED,
   NOT_ON_THIS_HOST,
@@ -52,7 +52,7 @@ describe("which Bonsai the device downloads", () => {
     const r = await resolveBonsaiSource(fetchImpl as unknown as typeof fetch, ORIGIN);
     expect(r).toEqual({
       ok: true,
-      source: { url: `${ORIGIN}/models/bonsai-1.7b/bonsai-1.7b.gguf`, from: "this app" },
+      source: { url: `${ORIGIN}/models/bonsai-1.7b/bonsai-1.7b.gguf`, from: "this app", bytes: BONSAI_BYTES },
     });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
@@ -68,6 +68,7 @@ describe("which Bonsai the device downloads", () => {
       source: {
         url: `https://huggingface.co/prism-ml/Bonsai-1.7B-gguf/resolve/${"a".repeat(40)}/Bonsai-1.7B.gguf`,
         from: "Hugging Face",
+        bytes: BONSAI_BYTES,
       },
     });
   });
@@ -108,10 +109,10 @@ describe("downloading without being asked twice", () => {
       return url.startsWith("/") ? head(134) : listing([]);
     });
 
-    const first = downloadBonsai({ fetchImpl: fetchImpl as unknown as typeof fetch });
+    const first = downloadDeviceModel("bonsai-1.7b", { fetchImpl: fetchImpl as unknown as typeof fetch });
     const heard: Array<{ loaded: number; total: number }> = [];
-    const second = downloadBonsai({ onProgress: (p) => heard.push(p) });
-    expect(bonsaiDownloadInProgress()).toEqual({ loaded: 0, total: BONSAI_BYTES });
+    const second = downloadDeviceModel("bonsai-1.7b", { onProgress: (p) => heard.push(p) });
+    expect(deviceDownloadInProgress()).toEqual({ modelId: "bonsai-1.7b", loaded: 0, total: BONSAI_BYTES });
 
     release();
     const [a, b] = await Promise.all([first, second]);
@@ -120,7 +121,7 @@ describe("downloading without being asked twice", () => {
     // One HEAD and one listing between them, not two of each.
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     expect(heard[0]).toEqual({ loaded: 0, total: BONSAI_BYTES });
-    expect(bonsaiDownloadInProgress()).toBeNull();
+    expect(deviceDownloadInProgress()).toBeNull();
   });
 });
 
@@ -287,7 +288,7 @@ describe("routing a question to the device", () => {
   }
 
   it("answers with the persona jackie-device built, sending it the memory context and not the conversation", async () => {
-    vi.spyOn(device, "storedBonsai").mockResolvedValue(ready);
+    vi.spyOn(device, "storedModel").mockResolvedValue(ready);
     const call = vi
       .spyOn(edge, "callEdgeFunction")
       .mockResolvedValue(new Response(JSON.stringify({ prompt: "You are Jackie. (guarded)", mode: "persona" }), { status: 200 }));
@@ -306,7 +307,7 @@ describe("routing a question to the device", () => {
   });
 
   it("does not answer at all, rather than as an anonymous assistant, when the persona cannot be fetched", async () => {
-    vi.spyOn(device, "storedBonsai").mockResolvedValue(ready);
+    vi.spyOn(device, "storedModel").mockResolvedValue(ready);
     vi.spyOn(edge, "callEdgeFunction").mockResolvedValue(new Response(JSON.stringify({ error: "boom" }), { status: 500 }));
     const chat = vi.spyOn(device, "chatOnDevice");
     const c = collect();
@@ -318,7 +319,7 @@ describe("routing a question to the device", () => {
   });
 
   it("tells a non-owner account why, instead of a bare 403", async () => {
-    vi.spyOn(device, "storedBonsai").mockResolvedValue(ready);
+    vi.spyOn(device, "storedModel").mockResolvedValue(ready);
     vi.spyOn(edge, "callEdgeFunction").mockResolvedValue(new Response(JSON.stringify({ error: "Forbidden" }), { status: 403 }));
     const c = collect();
     await routeChat({ messages: ask, engine: "device", ...c.handlers });
@@ -326,7 +327,7 @@ describe("routing a question to the device", () => {
   });
 
   it("says how to download Bonsai when it is not on this device, and asks no other engine", async () => {
-    vi.spyOn(device, "storedBonsai").mockResolvedValue({ ...ready, downloaded: false });
+    vi.spyOn(device, "storedModel").mockResolvedValue({ ...ready, downloaded: false });
     const call = vi.spyOn(edge, "callEdgeFunction");
     const c = collect();
     await routeChat({ messages: ask, engine: "device", ...c.handlers });

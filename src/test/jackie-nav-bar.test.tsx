@@ -16,10 +16,12 @@ vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ user: auth.user, loading: 
 vi.mock("sonner", () => ({ toast: { error: toastError, success: vi.fn() } }));
 // The panels probe local runners and the weights file when they open; there
 // are none in a test, and the probes are not what these tests are about.
-vi.mock("@/lib/guide/weights", () => ({
+// Only the network check is stubbed: the rest of the module is constants that
+// other modules read at import (the On-device model list among them), and a
+// mock without them fails before a single test runs.
+vi.mock("@/lib/guide/weights", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/guide/weights")>()),
   checkGuideWeights: async () => ({ present: false, detail: "no weights in tests" }),
-  GUIDE_INSTALL_COMMAND: "npm run weights",
-  GUIDE_WEIGHTS_MB: 248,
 }));
 vi.mock("@/lib/microai/contextRouterService", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/microai/contextRouterService")>()),

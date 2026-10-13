@@ -35,6 +35,7 @@
 import { streamSse, type ChatMessage } from "@/lib/jackie-stream";
 import { callEdgeFunction, describeEdgeFailure, describesUnreachable, NotSignedInError } from "@/lib/edgeFunction";
 import { clampContext } from "../../supabase/functions/_shared/chatRequest";
+import { deviceModelOrDefault } from "@/lib/microai/deviceModels";
 import {
   chainFrom,
   findEngine,
@@ -245,7 +246,8 @@ async function streamEngine(
 }
 
 /**
- * The on-device turn: Bonsai in this tab, answering as Jackie.
+ * The on-device turn: Bonsai, or another downloaded model, in this tab,
+ * answering as Jackie.
  *
  * Its system prompt comes from `jackie-device`, built by the same guard as
  * every other engine's — the persona never ships in the bundle — so the one
@@ -253,18 +255,18 @@ async function streamEngine(
  * the conversation. Every failure is a `failed` with words to act on; there
  * is no next engine to try.
  */
-async function askDevice(args: RouteChatOptions): Promise<Attempt> {
+async function askDevice(args: RouteChatOptions, modelId: string): Promise<Attempt> {
   const device = await import("@/lib/microai/bonsaiDevice");
-  const status = await device.storedBonsai();
+  const status = await device.storedModel(modelId);
   if (!status.supported) return { kind: "failed", reason: device.UNSUPPORTED_BROWSER };
-  if (!status.downloaded) return { kind: "failed", reason: status.error ?? device.NOT_DOWNLOADED };
+  if (!status.downloaded) return { kind: "failed", reason: status.error ?? device.notDownloaded(deviceModelOrDefault(modelId)) };
 
   args.onStatus?.("Fetching Jackie's persona…");
   let system: string;
   try {
     const resp = await callEdgeFunction(
       "jackie-device",
-      { context: clampContext(args.context, device.BONSAI_CONTEXT_CHARS) },
+      { context: clampContext(args.context, device.DEVICE_CONTEXT_CHARS) },
       { signal: args.signal },
     );
     const body = await resp.json().catch(() => null);
@@ -294,6 +296,7 @@ async function askDevice(args: RouteChatOptions): Promise<Attempt> {
   }
 
   const result = await device.chatOnDevice({
+    modelId,
     system,
     messages: args.messages,
     onDelta: args.onDelta,
@@ -316,7 +319,9 @@ async function attempt(
     return { result: await askJacky(args, pace) };
   }
   if (def.kind === "device") {
-    return { result: await askDevice(args), model: def.models[0]?.id };
+    // The model picked for this engine, or Bonsai; never another engine's id.
+    const model = deviceModelOrDefault(id === args.engine ? args.model : undefined).id;
+    return { result: await askDevice(args, model), model };
   }
 
   // The chosen model only belongs to the chosen engine. Every engine further

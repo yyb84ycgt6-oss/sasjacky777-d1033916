@@ -1,9 +1,24 @@
-# On-device in the chat: Bonsai 1.7B in the browser
+# On-device in the chat: Bonsai and small models in the browser
 
-Jackie's chat can answer from **Bonsai 1.7B running in the browser tab**: pick
-**On-device** in the engine menu, press **Download (237 MB)** once, and ask.
-No AI provider sees the question. This is what PocketPal does on a phone,
+Jackie's chat can answer from **a model running in the browser tab**: pick
+**On-device** in the engine menu, pick a model, press **Download** once, and
+ask. No AI provider sees the question. This is what PocketPal does on a phone,
 done inside the web app.
+
+| Model | Size | Where it fits | Licence |
+| --- | --- | --- | --- |
+| Bonsai 1.7B (default) | 237 MB, 1-bit | anywhere, phones included | Apache-2.0 |
+| SmolLM2 360M Instruct | about 270–390 MB | anywhere; fastest | Apache-2.0 |
+| Qwen2.5 0.5B Instruct | about 400–500 MB | anywhere | Apache-2.0 |
+| SmolLM2 1.7B Instruct | about 1.1 GB | laptop or desktop | Apache-2.0 |
+| Qwen2.5 Coder 1.5B Instruct | about 1.1 GB | laptop or desktop; code | Apache-2.0 |
+| SmolLM3 3B | about 1.9 GB | desktop | Apache-2.0 |
+| Phi-3.5 mini Instruct | about 2.4 GB | desktop | MIT |
+
+The six after Bonsai are the chat models from the owner's download queue.
+One model is in memory at a time; picking another
+unloads the last, and the panel lists what else is stored so it can be
+removed.
 
 It builds on the device rung (`docs/ON_DEVICE.md`), which runs the same weights
 in the tab for the Guide and the Keeper router. The two share one download and
@@ -22,7 +37,8 @@ already a dependency (the guidance rung in `deviceEngine.ts`).
 ## Using it
 
 1. Open the chat, open the engine menu (the chip left of the model name), and
-   choose **On-device (Bonsai 1.7B)**. It sits below the numbered chain.
+   choose **On-device**. It sits below the numbered chain. Then pick the model
+   in the model menu beside it; Bonsai is the default.
 2. The panel above the composer says whether this browser can run it and
    whether it has WebGPU. Press **Download**. Progress is shown; **Stop**
    cancels it and deletes the part that arrived. Switching engine does not:
@@ -60,7 +76,7 @@ fails to start, the chat says "could not start on this device" with the reason.
 
 ## Which bytes, from where
 
-Exactly one build: SHA-256 `3d7c6c90…cae5f7e3`, 248,302,272 bytes — the file
+**Bonsai** is exactly one build: SHA-256 `3d7c6c90…cae5f7e3`, 248,302,272 bytes — the file
 `public/models/bonsai-1.7b/bonsai-1.7b.gguf`'s LFS pointer names. A test reads
 that pointer and fails if the pins in `bonsaiDevice.ts` drift from it.
 
@@ -77,6 +93,20 @@ that pointer and fails if the pins in `bonsaiDevice.ts` drift from it.
 
 Either way the size that arrives is checked against the pin, and a download of
 the wrong size is deleted.
+
+**The other models** cannot be pinned the same way: nothing in this repository
+could reach Hugging Face to read their bytes. They are resolved on the device
+when Download is pressed (`src/lib/microai/deviceModels.ts`):
+
+- from a named repository — the publisher's own first (Qwen, HuggingFaceTB,
+  ggml-org), then a well-known re-quantizer (bartowski, MaziyarPanahi);
+- in a named quantization — Q4_K_M, else Q4_0, Q5_K_M or Q8_0 — and one file:
+  never a vision projector, one shard of a split model, or an ARM-only repack;
+- at the commit the listing came from, and kept only at the size it listed.
+
+That is the same trust wllama's own Hugging Face loader extends, with the
+publisher chosen here rather than by whoever uploaded last. The panel says
+which repository a model comes from before anything downloads.
 
 The file is kept in wllama's cache, in the browser's origin-private file system,
 and the download asks the browser to keep it (`navigator.storage.persist()`), so
@@ -164,8 +194,10 @@ an on-device answer fails with "Jackie's persona could not be fetched".
 | --- | --- |
 | `src/lib/microai/bonsaiDevice.ts` | Pins, source resolution, download, status, remove, the streamed answer |
 | `src/lib/microai/wllamaRuntime.ts` | Starting wllama: lazy, same-origin, no CDN; the compatibility build for Safari |
-| `src/components/microai/BonsaiDevicePanel.tsx` | The download / progress / remove panel |
+| `src/lib/microai/deviceModels.ts` | The models On-device offers, and how each is found on Hugging Face |
+| `src/components/microai/DeviceModelPanel.tsx` | The download / progress / remove panel, per model |
 | `src/lib/jackie-engines.ts`, `src/lib/jackie-router.ts` | The `device` engine and its turn |
 | `supabase/functions/jackie-device/` | Jackie's guarded system prompt for the device |
 | `src/test/jackie-device.test.ts` | Pins, sources, window fitting, streaming, routing |
+| `src/test/device-models.test.ts` | File choice, repository fallback, routing the picked model, one download at a time |
 | `src/test/wllama-runtime.test.ts` | Which build a browser gets, and that Safari's comes from this app |
