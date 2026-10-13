@@ -61,6 +61,10 @@ export const UNSUPPORTED_BROWSER =
 export const NOT_DOWNLOADED =
   `Bonsai is not on this device yet. Choose On-device in the engine menu and download it (${BONSAI_MB} MB, once).`;
 
+/** For callers that may fetch only from this app, never from a third party unasked. */
+export const NOT_ON_THIS_HOST =
+  `This host serves only the LFS pointer for Bonsai, not the weights. Download it once from the chat (On-device engine), or run git lfs pull on a self-hosted copy.`;
+
 /** Shaped like appActions' ActionResult, so `.error` reads without narrowing in this non-strict build. */
 export type Verdict<T extends object = object> =
   | ({ ok: true; error?: undefined; aborted?: undefined } & T)
@@ -96,6 +100,7 @@ export function isBonsaiUrl(url: string, origin: string = globalThis.location?.o
 export async function resolveBonsaiSource(
   fetchImpl: typeof fetch = fetch,
   origin: string = globalThis.location?.origin ?? "http://localhost",
+  { ownOriginOnly = false }: { ownOriginOnly?: boolean } = {},
 ): Promise<Verdict<{ source: BonsaiSource }>> {
   try {
     const head = await fetchImpl(GUIDE_WEIGHTS_PATH, { method: "HEAD" });
@@ -105,6 +110,7 @@ export async function resolveBonsaiSource(
   } catch {
     /* not served here; Hugging Face is the other source */
   }
+  if (ownOriginOnly) return { ok: false, error: NOT_ON_THIS_HOST };
 
   let listing: { sha?: unknown; siblings?: unknown } | null;
   try {
@@ -161,24 +167,120 @@ export interface BonsaiStatus {
   error?: string;
 }
 
-/** What is on this device now. Reads the cache, never the network. */
-export async function bonsaiStatus(): Promise<BonsaiStatus> {
-  const base = { supported: supportsDeviceModels(), gpu: await hasWebGpu() };
-  if (!base.supported) return { ...base, downloaded: false, partial: false };
+export type StoredBonsai = Omit<BonsaiStatus, "gpu">;
+
+/**
+ * Whether this browser can run Bonsai and has it stored. Reads the cache,
+ * never the network, and leaves the GPU alone: the Guide's ladder asks this
+ * on every route, and asking for a WebGPU adapter is not free.
+ */
+export async function storedBonsai(): Promise<StoredBonsai> {
+  if (!supportsDeviceModels()) return { supported: false, downloaded: false, partial: false };
   try {
     const all = (await (await manager()).getModels({ includeInvalid: true })).filter((m) => isBonsaiUrl(m.url));
     const ready = all.some((m) => m.validate() === "valid" && m.size === BONSAI_BYTES);
-    return { ...base, downloaded: ready, partial: !ready && all.length > 0 };
+    return { supported: true, downloaded: ready, partial: !ready && all.length > 0 };
   } catch (e) {
-    return { ...base, downloaded: false, partial: false, error: `Could not read this browser's model storage: ${message(e)}` };
+    return { supported: true, downloaded: false, partial: false, error: `Could not read this browser's model storage: ${message(e)}` };
   }
 }
 
-export async function downloadBonsai(
-  opts: { onProgress?: (p: { loaded: number; total: number }) => void; signal?: AbortSignal; fetchImpl?: typeof fetch } = {},
+/** Everything the panel shows: what is stored, and whether a GPU will run it. */
+export async function bonsaiStatus(): Promise<BonsaiStatus> {
+  const [stored, gpu] = await Promise.all([storedBonsai(), hasWebGpu()]);
+  return { ...stored, gpu };
+}
+
+export interface DownloadProgress {
+  loaded: number;
+  total: number;
+}
+
+interface DownloadJob {
+  progress: DownloadProgress;
+  controller: AbortController;
+  listeners: Set<(p: DownloadProgress) => void>;
+  result: Promise<Verdict<{ from: BonsaiSource["from"] }>>;
+}
+
+/**
+ * The download in flight, if any. One per tab, owned by this module rather
+ * than by whichever panel started it: a 237 MB download tied to a component
+ * was cancelled by switching engine for a moment, and two panels pressing
+ * Download wrote the same file twice at once.
+ */
+let job: DownloadJob | null = null;
+
+/** Progress of the download in flight, or null when none is. */
+export function bonsaiDownloadInProgress(): DownloadProgress | null {
+  return job ? { ...job.progress } : null;
+}
+
+/** Cancels the download in flight. What arrived is deleted. */
+export function stopBonsaiDownload(): void {
+  job?.controller.abort();
+}
+
+/**
+ * Downloads the pinned Bonsai, or joins the download already running.
+ *
+ * `onProgress` hears the shared download, from where it has got to. `signal`
+ * cancels it for everyone, which is what a Stop button means. A caller that
+ * merely goes away — a panel unmounting — should pass neither and let it run.
+ */
+export function downloadBonsai(
+  opts: {
+    onProgress?: (p: DownloadProgress) => void;
+    signal?: AbortSignal;
+    fetchImpl?: typeof fetch;
+    /** Fetch only from this app, never from Hugging Face. Ignored when joining a download. */
+    ownOriginOnly?: boolean;
+  } = {},
 ): Promise<Verdict<{ from: BonsaiSource["from"] }>> {
+  if (!job) {
+    const controller = new AbortController();
+    const current: DownloadJob = {
+      progress: { loaded: 0, total: BONSAI_BYTES },
+      controller,
+      listeners: new Set(),
+      result: Promise.resolve({ ok: false, error: "not started" }),
+    };
+    current.result = runDownload({
+      fetchImpl: opts.fetchImpl,
+      ownOriginOnly: opts.ownOriginOnly,
+      signal: controller.signal,
+      onProgress: (p) => {
+        current.progress = p;
+        for (const listener of current.listeners) listener(p);
+      },
+    }).finally(() => {
+      if (job === current) job = null;
+    });
+    job = current;
+  }
+  const active = job;
+  const { onProgress, signal } = opts;
+  if (onProgress) {
+    active.listeners.add(onProgress);
+    onProgress({ ...active.progress });
+  }
+  if (signal) {
+    if (signal.aborted) active.controller.abort();
+    else signal.addEventListener("abort", () => active.controller.abort(), { once: true });
+  }
+  return active.result.finally(() => {
+    if (onProgress) active.listeners.delete(onProgress);
+  });
+}
+
+async function runDownload(opts: {
+  onProgress: (p: DownloadProgress) => void;
+  signal: AbortSignal;
+  fetchImpl?: typeof fetch;
+  ownOriginOnly?: boolean;
+}): Promise<Verdict<{ from: BonsaiSource["from"] }>> {
   if (!supportsDeviceModels()) return { ok: false, error: UNSUPPORTED_BROWSER };
-  const resolved = await resolveBonsaiSource(opts.fetchImpl);
+  const resolved = await resolveBonsaiSource(opts.fetchImpl, undefined, { ownOriginOnly: opts.ownOriginOnly });
   if (resolved.ok === false) return { ok: false, error: resolved.error };
 
   // Best effort: without it the browser may evict 237 MB the next time
@@ -201,7 +303,7 @@ export async function downloadBonsai(
   const discardPartial = () => mm.cacheManager.delete(resolved.source.url).catch(() => undefined);
   try {
     const model = await mm.downloadModel(resolved.source.url, {
-      progressCallback: ({ loaded, total }) => opts.onProgress?.({ loaded, total: total || BONSAI_BYTES }),
+      progressCallback: ({ loaded, total }) => opts.onProgress({ loaded, total: total || BONSAI_BYTES }),
       signal: opts.signal,
     });
     if (model.size !== BONSAI_BYTES) {
@@ -214,7 +316,7 @@ export async function downloadBonsai(
     return { ok: true, from: resolved.source.from };
   } catch (e) {
     await discardPartial();
-    if (opts.signal?.aborted || (e as Error)?.name === "AbortError") {
+    if (opts.signal.aborted || (e as Error)?.name === "AbortError") {
       return { ok: false, aborted: true, error: "Download stopped, and the part that arrived was deleted." };
     }
     if (/quota/i.test(message(e))) {
@@ -224,8 +326,57 @@ export async function downloadBonsai(
   }
 }
 
+/**
+ * Bonsai in this browser's storage, fetching it from this app if it is not —
+ * never from Hugging Face. For the Guide's device rung, which runs without
+ * anyone pressing Download: 237 MB from a third party is the owner's call, and
+ * the chat's panel is where they make it.
+ */
+export async function ensureBonsai(opts: { onProgress?: (p: DownloadProgress) => void } = {}): Promise<Verdict> {
+  if (job) {
+    const joined = await downloadBonsai({ onProgress: opts.onProgress });
+    return joined.ok ? { ok: true } : { ok: false, error: joined.error };
+  }
+  const status = await storedBonsai();
+  if (status.downloaded) return { ok: true };
+  if (!status.supported) return { ok: false, error: UNSUPPORTED_BROWSER };
+  const fetched = await downloadBonsai({ onProgress: opts.onProgress, ownOriginOnly: true });
+  return fetched.ok ? { ok: true } : { ok: false, error: fetched.error };
+}
+
+/**
+ * One loaded Bonsai per tab, shared by the chat and the Guide's device rung.
+ * Each used to be able to hold its own, and two copies of the model plus two
+ * KV caches is more memory than a phone will give a tab.
+ */
 let session: Promise<Wllama> | null = null;
 let queue: Promise<unknown> = Promise.resolve();
+
+/** One generation at a time on the shared model, in the order asked. */
+function serialized<T>(task: () => Promise<T>): Promise<T> {
+  const run = queue.then(task);
+  queue = run.catch(() => undefined);
+  return run;
+}
+
+function acquireSession(onLoading?: () => void): Promise<Wllama> {
+  if (!session) {
+    onLoading?.();
+    const opening = openSession();
+    session = opening;
+    // A failed load is not remembered: the usual cause (not downloaded yet)
+    // is fixed by a download, not by a reload.
+    opening.catch(() => {
+      if (session === opening) session = null;
+    });
+  }
+  return session;
+}
+
+/** Runs `fn` against the loaded model, in turn with every other use of it. */
+export function withBonsai<T>(fn: (wllama: Wllama) => Promise<T>): Promise<T> {
+  return serialized(async () => fn(await acquireSession()));
+}
 
 async function openSession(): Promise<Wllama> {
   const mm = await manager();
@@ -238,19 +389,31 @@ async function openSession(): Promise<Wllama> {
   return wllama;
 }
 
-/** Frees the memory the loaded model holds. The download stays. */
-export async function unloadBonsai(): Promise<void> {
-  const current = session;
-  session = null;
-  if (!current) return;
-  try {
-    await (await current).exit();
-  } catch {
-    /* it never finished loading, so there is nothing to free */
-  }
+/**
+ * Frees the memory the loaded model holds. The download stays. Waits its turn
+ * behind any answer in progress, so it never pulls the model out from under a
+ * generation that the chat or the Guide is still reading.
+ */
+export function unloadBonsai(): Promise<void> {
+  return serialized(async () => {
+    const current = session;
+    session = null;
+    if (!current) return;
+    try {
+      await (await current).exit();
+    } catch {
+      /* it never finished loading, so there is nothing to free */
+    }
+  });
 }
 
 export async function removeBonsai(): Promise<Verdict> {
+  // A download still running would write the file straight back.
+  const running = job;
+  if (running) {
+    running.controller.abort();
+    await running.result;
+  }
   await unloadBonsai();
   try {
     const all = (await (await manager()).getModels({ includeInvalid: true })).filter((m) => isBonsaiUrl(m.url));
@@ -326,9 +489,7 @@ export interface DeviceChatOptions {
  * only the first answer of a session pays for reading it.
  */
 export function chatOnDevice(opts: DeviceChatOptions): Promise<Verdict> {
-  const run = queue.then(() => answer(opts));
-  queue = run.catch(() => undefined);
-  return run;
+  return serialized(() => answer(opts));
 }
 
 async function answer(opts: DeviceChatOptions): Promise<Verdict> {
@@ -345,16 +506,9 @@ async function answer(opts: DeviceChatOptions): Promise<Verdict> {
 
   let runtime: DeviceChatRuntime;
   try {
-    if (opts.runtime) {
-      runtime = await opts.runtime();
-    } else {
-      if (!session) opts.onStatus?.(`Loading ${GUIDANCE_MODEL.name} on this device…`);
-      session ??= openSession();
-      runtime = (await session.catch((e) => {
-        session = null;
-        throw e;
-      })) as unknown as DeviceChatRuntime;
-    }
+    runtime = opts.runtime
+      ? await opts.runtime()
+      : ((await acquireSession(() => opts.onStatus?.(`Loading ${GUIDANCE_MODEL.name} on this device…`))) as unknown as DeviceChatRuntime);
   } catch (e) {
     opts.onStatus?.(null);
     const text = message(e);

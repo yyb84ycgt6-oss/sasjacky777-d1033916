@@ -40,11 +40,13 @@ function fakeRuntime(overrides: Partial<DeviceRuntime> = {}) {
 
 const present = async () => ({ present: true, detail: "248 MB on disk" });
 const absent = async () => ({ present: false, detail: "an LFS pointer, not the weights" });
+// Nothing in this browser's storage unless a test says otherwise.
+const notDownloaded = async () => false;
 
 describe("what it costs before you ask it anything", () => {
   it("does not touch the weights to report that it is available", async () => {
     const { runtime, calls } = fakeRuntime();
-    const engine = deviceEngine({ checkWeights: present, createRuntime: async () => runtime });
+    const engine = deviceEngine({ isDownloaded: notDownloaded, checkWeights: present, createRuntime: async () => runtime });
 
     expect(await engine.available()).toBe(true);
     // A quarter of a gigabyte is not something to fetch because a page rendered.
@@ -53,7 +55,7 @@ describe("what it costs before you ask it anything", () => {
 
   it("loads the model once even when two questions arrive together", async () => {
     const { runtime, calls } = fakeRuntime();
-    const engine = deviceEngine({ checkWeights: present, createRuntime: async () => runtime });
+    const engine = deviceEngine({ isDownloaded: notDownloaded, checkWeights: present, createRuntime: async () => runtime });
 
     await Promise.all([engine.run("first"), engine.run("second")]);
 
@@ -65,13 +67,33 @@ describe("what it costs before you ask it anything", () => {
 describe("refusing honestly", () => {
   it("is unavailable when the clone has an LFS pointer instead of weights", async () => {
     const { runtime } = fakeRuntime();
-    const engine = deviceEngine({ checkWeights: absent, createRuntime: async () => runtime });
+    const engine = deviceEngine({ isDownloaded: notDownloaded, checkWeights: absent, createRuntime: async () => runtime });
     expect(await engine.available()).toBe(false);
+  });
+
+  it("is available from a copy downloaded through the chat, on a host that serves only the pointer", async () => {
+    const { runtime, calls } = fakeRuntime();
+    const engine = deviceEngine({ isDownloaded: async () => true, checkWeights: absent, createRuntime: async () => runtime });
+    expect(await engine.available()).toBe(true);
+    expect(calls.loads).toBe(0);
+  });
+
+  it("still finds the server's copy when this browser's storage cannot be read", async () => {
+    const { runtime } = fakeRuntime();
+    const engine = deviceEngine({
+      isDownloaded: async () => {
+        throw new Error("storage blocked");
+      },
+      checkWeights: present,
+      createRuntime: async () => runtime,
+    });
+    expect(await engine.available()).toBe(true);
   });
 
   it("is unavailable rather than throwing when the check itself fails", async () => {
     const { runtime } = fakeRuntime();
     const engine = deviceEngine({
+      isDownloaded: notDownloaded,
       checkWeights: async () => {
         throw new Error("offline");
       },
@@ -86,7 +108,7 @@ describe("refusing honestly", () => {
     const { runtime } = fakeRuntime({
       createCompletion: async () => ({ choices: [{ text: "   ", finish_reason: "stop" }] }),
     });
-    const engine = deviceEngine({ checkWeights: present, createRuntime: async () => runtime });
+    const engine = deviceEngine({ isDownloaded: notDownloaded, checkWeights: present, createRuntime: async () => runtime });
 
     await expect(engine.run("hello")).rejects.toThrow(/produced no text/);
   });
@@ -95,7 +117,7 @@ describe("refusing honestly", () => {
     const { runtime } = fakeRuntime({
       createCompletion: async () => ({ choices: [{ text: "", finish_reason: "content_filter" }] }),
     });
-    const engine = deviceEngine({ checkWeights: present, createRuntime: async () => runtime });
+    const engine = deviceEngine({ isDownloaded: notDownloaded, checkWeights: present, createRuntime: async () => runtime });
 
     await expect(engine.run("hello")).rejects.toThrow(/content filter/);
   });
@@ -103,6 +125,7 @@ describe("refusing honestly", () => {
   it("lets the next run retry after a failed load", async () => {
     let attempt = 0;
     const engine = deviceEngine({
+      isDownloaded: notDownloaded,
       checkWeights: present,
       createRuntime: async () => {
         attempt += 1;
@@ -121,7 +144,7 @@ describe("refusing honestly", () => {
 describe("what it reports", () => {
   it("names the model that actually ran, not the one that was asked for", async () => {
     const { runtime } = fakeRuntime();
-    const engine = deviceEngine({ checkWeights: present, createRuntime: async () => runtime });
+    const engine = deviceEngine({ isDownloaded: notDownloaded, checkWeights: present, createRuntime: async () => runtime });
     vi.spyOn(console, "info").mockImplementation(() => {});
 
     const result = await engine.run("hello", "llama3.3:70b");
@@ -132,7 +155,7 @@ describe("what it reports", () => {
   });
 
   it("sits on the device rung, which is what puts it first in the ladder", () => {
-    const engine = deviceEngine({ checkWeights: present });
+    const engine = deviceEngine({ isDownloaded: notDownloaded, checkWeights: present });
     expect(engine.locality).toBe("device");
     expect(engine.name).toContain(GUIDANCE_MODEL.name);
   });
@@ -148,6 +171,7 @@ describe("what it reports", () => {
       },
     });
     const engine = deviceEngine({
+      isDownloaded: notDownloaded,
       checkWeights: present,
       createRuntime: async () => runtime,
       onProgress: (p) => seen.push(p.fraction),
@@ -163,7 +187,7 @@ describe("what it reports", () => {
 describe("unloading", () => {
   it("frees the model and loads it again on the next run", async () => {
     const { runtime, calls } = fakeRuntime();
-    const engine = deviceEngine({ checkWeights: present, createRuntime: async () => runtime });
+    const engine = deviceEngine({ isDownloaded: notDownloaded, checkWeights: present, createRuntime: async () => runtime });
 
     await engine.run("hello");
     await engine.unload();
