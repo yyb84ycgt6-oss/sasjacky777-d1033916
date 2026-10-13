@@ -82,7 +82,16 @@ describe("third_party/", () => {
     }
   });
 
-  it("holds no project with submodules, which git archive leaves out and would make a copy look whole when it is not", () => {
-    for (const e of entries) expect(existsSync(join(dir, e.name, ".gitmodules")), e.name).toBe(false);
+  // git archive leaves a submodule out, so vendor.sh fetches each at the commit
+  // its project pins. An empty one would be a copy that looks whole and is not.
+  it("fills every submodule a project declares", () => {
+    for (const e of entries) {
+      const gitmodules = join(dir, e.name, ".gitmodules");
+      if (!existsSync(gitmodules)) continue;
+      for (const [, path] of readFileSync(gitmodules, "utf8").matchAll(/^\s*path\s*=\s*(.+?)\s*$/gm)) {
+        const sub = join(dir, e.name, path);
+        expect(existsSync(sub) && readdirSync(sub).length > 0, `${e.name}/${path} is empty`).toBe(true);
+      }
+    }
   });
 });

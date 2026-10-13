@@ -17,7 +17,9 @@
 # place — anything this repository needs to change lives outside third_party/.
 #
 # Archives come from `git archive`, so only tracked files arrive: no .git, no
-# build output, nothing a contributor had lying around.
+# build output, nothing a contributor had lying around. git archive leaves
+# submodules out, so each is fetched at the commit its superproject pins and
+# unpacked in its place: the copy is what `git clone --recursive` would give.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -47,7 +49,21 @@ if [ -n "$only" ] && ! entries | awk -v n="$only" '$1 == n { found = 1 } END { e
   exit 2
 fi
 
-# Fetches one commit and unpacks its tracked files into $3. Prints the full commit.
+# A submodule's URL, made fetchable: https only, relative ones resolved against
+# the superproject's.
+submodule_url() {
+  local base="$1" url="$2"
+  case "$url" in
+    https://*) ;;
+    git://github.com/* | http://github.com/*) url="https://${url#*://}" ;;
+    ../*) url="${base%/*}/${url#../}" ;;
+    *) echo "Submodule URL $url is not https; refusing to fetch it." >&2; return 2 ;;
+  esac
+  printf '%s\n' "${url%.git}"
+}
+
+# Fetches one commit and unpacks its tracked files into $3, submodules
+# included. Prints the full commit.
 unpack() {
   local url="$1" commit="$2" into="$3" repo
   repo="$(mktemp -d "$work/repo.XXXXXX")"
@@ -64,6 +80,17 @@ unpack() {
   esac
   mkdir -p "$into"
   git -C "$repo" archive FETCH_HEAD | tar -x -C "$into"
+  if [ -f "$into/.gitmodules" ]; then
+    local key path sub sha
+    while read -r key path; do
+      sub="$(git config -f "$into/.gitmodules" --get "${key%.path}.url")"
+      sha="$(git -C "$repo" ls-tree FETCH_HEAD -- "$path" | awk '$2 == "commit" { print $3 }')"
+      if [ -z "$sha" ]; then echo "$url declares submodule $path but pins no commit for it." >&2; return 2; fi
+      sub="$(submodule_url "$url" "$sub")" || return 2
+      # </dev/null: the nested fetch must not read this loop's input.
+      unpack "$sub" "$sha" "$into/$path" >/dev/null </dev/null || return 2
+    done < <(git config -f "$into/.gitmodules" --get-regexp '^submodule\..*\.path$')
+  fi
   rm -rf "$repo"
   printf '%s\n' "$got"
 }
@@ -79,11 +106,16 @@ importable() {
     echo "$name keeps files in Git LFS (${lfs#"$dir"/}); this script cannot import it whole." >&2
     return 2
   fi
-  # git archive leaves a submodule out entirely — freeminer's playable game is
-  # one — so the copy would look whole and silently not be.
+  # unpack fills each submodule; one still empty would make the copy look
+  # whole and silently not be (freeminer's playable game is a submodule).
   if [ -f "$dir/.gitmodules" ]; then
-    echo "$name has git submodules ($(grep -c 'path =' "$dir/.gitmodules") of them); git archive would leave them out, so the import would not be whole." >&2
-    return 2
+    local key path
+    while read -r key path; do
+      if [ -z "$(ls -A "$dir/$path" 2>/dev/null)" ]; then
+        echo "$name: submodule $path arrived empty, so the import would not be whole." >&2
+        return 2
+      fi
+    done < <(git config -f "$dir/.gitmodules" --get-regexp '^submodule\..*\.path$')
   fi
   # A symlink is committed as a link, and one that climbs out of its project
   # would point any tool that follows it at the rest of this repository, or the

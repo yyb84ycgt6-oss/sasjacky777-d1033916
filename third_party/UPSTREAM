@@ -16,6 +16,9 @@ luanti            https://github.com/luanti-org/luanti               5bb520ba544
 voxelibre         https://github.com/VoxeLibre/VoxeLibre             4492ce6ff8d856daa4567abe2ea689f4e7a39842
 cataclysm-dda     https://github.com/CleverRaven/Cataclysm-DDA       afe69bd280f3104955752d472ae95f252e488c34
 cubyz             https://github.com/PixelGuys/Cubyz                 457147a75e38f5bb32f7488b09904a183996c414
+# Its NBT library is a submodule (SirCmpwn/fNbt); vendor.sh fetches it at the
+# commit TrueCraft pins, into the path `git clone --recursive` would.
+truecraft         https://github.com/ddevault/TrueCraft              cd0ed366580160dc58ff93603da158c161eb3ad6
 cataclysm-bn      https://github.com/cataclysmbn/Cataclysm-BN        4fd1dbea600c50e6a1471e26c30b27a67d5e6680
 crafter           https://github.com/danijar/crafter                 e04542a2159f1aad3d4c5ad52e8185717380ee3a
 # Minicraft+'s main branch is mid-rewrite and upstream says so; this is the
@@ -26,4 +29,3 @@ rusted-ruins      https://github.com/garkimasera/rusted-ruins       44c786930be8
 rusted-ruins-pak  https://github.com/garkimasera/rusted-ruins-pak   380de845eee7a64e849a03e194e588a755011716
 cataclysm-tlg     https://github.com/Cataclysm-TLG/Cataclysm-TLG     436e2453fdf1bde8ad30ceb11bc4b3943e14fb6e
 manicdigger       https://github.com/manicdigger/manicdigger         0635de1d6d6817c30b74fd2c0399a359009fb9e6
-cataclysm         https://github.com/Whales/Cataclysm                f9b2b248ddef348090aef5a4743c00b2a44281b5
