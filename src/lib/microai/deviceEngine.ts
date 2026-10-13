@@ -103,7 +103,29 @@ async function sharedRuntime(): Promise<DeviceRuntime> {
       if (!ready.ok) throw new Error(ready.error);
       await withBonsai(async () => undefined);
     },
-    createCompletion: (options) => withBonsai((wllama) => wllama.createCompletion({ ...options, stream: false })),
+    // As a chat turn, not raw text. The router's prompt is an instruction —
+    // "You are the Keeper… Question: …" — and the LAN rungs hand it to
+    // runtimes that wrap it in the model's chat template. Sent raw, Bonsai had
+    // no end of turn to stop at: asked 3 + 4, it answered 7 and then wrote its
+    // own questions and answers until the 512-token cap, twelve minutes on a
+    // CPU, all of which came back as the answer.
+    createCompletion: async ({ prompt, max_tokens, temperature }) => {
+      const reply = await withBonsai((wllama) =>
+        wllama.createChatCompletion({
+          messages: [{ role: "user", content: prompt }],
+          max_tokens,
+          temperature,
+          chat_template_kwargs: { enable_thinking: false },
+          stream: false,
+        }),
+      );
+      return {
+        choices: (reply?.choices ?? []).map((c) => ({
+          text: typeof c.message?.content === "string" ? c.message.content : "",
+          finish_reason: c.finish_reason,
+        })),
+      };
+    },
     exit: () => unloadBonsai(),
   };
 }
