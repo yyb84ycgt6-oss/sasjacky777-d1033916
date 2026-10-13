@@ -8,3 +8,9 @@ filmcraft     https://github.com/storytold/filmcraft        ca36cf9a6af29ca6de15
 # FilmCraft's one git dependency, at the commit its Cargo.toml pins
 # (src/test/third-party.test.ts fails if the two drift apart).
 craft-libs    https://github.com/storytold/craft-libs       5c874d51eeb3de70e735c8ce87a59a7dedd47675
+
+# The ten most-starred open-world crafting survival games on GitHub (October
+# 2026), ranked in docs/THIRD_PARTY.md. Luanti is the engine VoxeLibre runs on:
+# together they are one game, and neither is playable as survival alone.
+luanti            https://github.com/luanti-org/luanti               5bb520ba544536c4c2914bc0a5ad386e758d7036
+voxelibre         https://github.com/VoxeLibre/VoxeLibre             4492ce6ff8d856daa4567abe2ea689f4e7a39842
