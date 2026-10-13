@@ -30,7 +30,7 @@ import {
   getMessageAttachments,
   type Attachment,
 } from "@/lib/jackie-attachments";
-import { detectSecurityFlag, detectMemoryTier } from "@/lib/jackie-security";
+import { detectSecurityFlag, detectMemoryTier, describeFlag, isCredentialFlag } from "@/lib/jackie-security";
 import { useAuth } from "@/hooks/useAuth";
 import { useTheme } from "@/hooks/useTheme";
 import { voiceManager } from "@/lib/voice-manager";
@@ -512,9 +512,9 @@ const JackieMessage = ({ message }: { message: DisplayMessage }) => {
       </div>
 
       {message.securityFlag && (
-        <div className="jackie-security-flag">
+        <div className={isCredentialFlag(message.securityFlag) ? "jackie-security-flag" : "jackie-security-flag jackie-security-flag--topic"}>
           <div className="font-mono text-xs font-semibold uppercase tracking-wider mb-1">
-            ⚠ {message.securityFlag}
+            {isCredentialFlag(message.securityFlag) ? "⚠" : "ⓘ"} {message.securityFlag}
           </div>
         </div>
       )}
@@ -734,7 +734,7 @@ const Index = () => {
             content: m.content,
             timestamp: new Date(m.created_at),
             memoryTier: (m.memory_tier as 1 | 2 | 3) ?? 1,
-            securityFlag: m.security_flag,
+            securityFlag: describeFlag(m.security_flag),
             attachments,
           };
         })
