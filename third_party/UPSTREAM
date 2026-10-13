@@ -16,6 +16,7 @@ luanti            https://github.com/luanti-org/luanti               5bb520ba544
 voxelibre         https://github.com/VoxeLibre/VoxeLibre             4492ce6ff8d856daa4567abe2ea689f4e7a39842
 cataclysm-dda     https://github.com/CleverRaven/Cataclysm-DDA       afe69bd280f3104955752d472ae95f252e488c34
 cubyz             https://github.com/PixelGuys/Cubyz                 457147a75e38f5bb32f7488b09904a183996c414
+cataclysm-bn      https://github.com/cataclysmbn/Cataclysm-BN        4fd1dbea600c50e6a1471e26c30b27a67d5e6680
 crafter           https://github.com/danijar/crafter                 e04542a2159f1aad3d4c5ad52e8185717380ee3a
 # Minicraft+'s main branch is mid-rewrite and upstream says so; this is the
 # head of 2.3.0-dev, the branch its README names as the latest working build.
