@@ -76,6 +76,27 @@ importable() {
     echo "$name keeps files in Git LFS (${lfs#"$dir"/}); this script cannot import it whole." >&2
     return 2
   fi
+  # git archive leaves a submodule out entirely — freeminer's playable game is
+  # one — so the copy would look whole and silently not be.
+  if [ -f "$dir/.gitmodules" ]; then
+    echo "$name has git submodules ($(grep -c 'path =' "$dir/.gitmodules") of them); git archive would leave them out, so the import would not be whole." >&2
+    return 2
+  fi
+  # A symlink is committed as a link, and one that climbs out of its project
+  # would point any tool that follows it at the rest of this repository, or the
+  # machine. Links inside the project (the Cataclysm forks' Android assets) are
+  # fine; a link whose target is missing is fine too, it resolves after a build.
+  local link escapes=""
+  while IFS= read -r -d '' link; do
+    case "$(realpath -m "$link")" in
+      "$(realpath -m "$dir")"/*) ;;
+      *) escapes="$escapes ${link#"$dir"/}" ;;
+    esac
+  done < <(find "$dir" -type l -print0)
+  if [ -n "$escapes" ]; then
+    echo "$name has symlinks pointing outside itself:$escapes" >&2
+    return 2
+  fi
   big="$(find "$dir" -type f -size +"${MAX_BYTES}"c -printf '%s %P\n' | head -5)"
   if [ -n "$big" ]; then
     echo "$name has files over GitHub's 100 MB limit:" >&2

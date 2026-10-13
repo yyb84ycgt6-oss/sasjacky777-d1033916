@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, statSync } from "node:fs";
+import { dirname, join, resolve, sep } from "node:path";
 
 /**
  * third_party/ holds other people's projects, each copied whole and untouched by
@@ -58,10 +58,31 @@ describe("third_party/", () => {
     expect(entries.find((e) => e.name === "craft-libs")?.commit).toBe(pinned);
   });
 
-  it("never carries a Git LFS pointer, which would make every push demand an object this repository lacks", () => {
+  // Every project's own .gitattributes applies inside this repository, at any
+  // depth: an LFS filter in one would make every push demand an object this
+  // repository never had.
+  it("never carries a Git LFS filter, at any depth", () => {
     for (const e of entries) {
-      const attributes = join(dir, e.name, ".gitattributes");
-      if (existsSync(attributes)) expect(readFileSync(attributes, "utf8"), e.name).not.toMatch(/filter=lfs/);
+      const files = readdirSync(join(dir, e.name), { recursive: true, encoding: "utf8" });
+      for (const f of files.filter((f) => f === ".gitattributes" || f.endsWith("/.gitattributes"))) {
+        expect(readFileSync(join(dir, e.name, f), "utf8"), `${e.name}/${f}`).not.toMatch(/filter=lfs/);
+      }
     }
+  });
+
+  it("keeps every symlink pointing inside its own project, never out into this repository or the machine", () => {
+    for (const e of entries) {
+      const project = join(dir, e.name);
+      for (const f of readdirSync(project, { recursive: true, encoding: "utf8" })) {
+        const path = join(project, f);
+        if (!lstatSync(path).isSymbolicLink()) continue;
+        const target = resolve(dirname(path), readlinkSync(path));
+        expect(target.startsWith(project + sep), `${e.name}/${f} -> ${readlinkSync(path)}`).toBe(true);
+      }
+    }
+  });
+
+  it("holds no project with submodules, which git archive leaves out and would make a copy look whole when it is not", () => {
+    for (const e of entries) expect(existsSync(join(dir, e.name, ".gitmodules")), e.name).toBe(false);
   });
 });
