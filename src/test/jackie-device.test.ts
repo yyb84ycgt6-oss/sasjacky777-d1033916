@@ -4,9 +4,12 @@ import {
   BONSAI_BYTES,
   BONSAI_MB,
   BONSAI_SHA256,
+  bonsaiDownloadInProgress,
   chatOnDevice,
+  downloadBonsai,
   fitToWindow,
   NOT_DOWNLOADED,
+  NOT_ON_THIS_HOST,
   resolveBonsaiSource,
   type DeviceChatRuntime,
 } from "@/lib/microai/bonsaiDevice";
@@ -84,6 +87,42 @@ describe("which Bonsai the device downloads", () => {
     const r = await resolveBonsaiSource(fetchImpl as unknown as typeof fetch, ORIGIN);
     expect(r.ok).toBe(false);
     expect(r.error).toMatch(/Could not reach Hugging Face.*needs a connection/);
+  });
+});
+
+describe("downloading without being asked twice", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("never reaches Hugging Face for a caller that may only use this app's copy", async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(head(134));
+    const r = await resolveBonsaiSource(fetchImpl as unknown as typeof fetch, ORIGIN, { ownOriginOnly: true });
+    expect(r).toEqual({ ok: false, error: NOT_ON_THIS_HOST });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("joins the download already running rather than starting the same 237 MB again", async () => {
+    // Node has no 64-bit WebAssembly memory; the browsers this runs in do.
+    vi.stubGlobal("WebAssembly", { Memory: function Memory() {} });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const fetchImpl = vi.fn(async (url: string) => {
+      await gate;
+      return url.startsWith("/") ? head(134) : listing([]);
+    });
+
+    const first = downloadBonsai({ fetchImpl: fetchImpl as unknown as typeof fetch });
+    const heard: Array<{ loaded: number; total: number }> = [];
+    const second = downloadBonsai({ onProgress: (p) => heard.push(p) });
+    expect(bonsaiDownloadInProgress()).toEqual({ loaded: 0, total: BONSAI_BYTES });
+
+    release();
+    const [a, b] = await Promise.all([first, second]);
+    expect(a).toEqual(b);
+    expect(a.error).toContain("no longer lists");
+    // One HEAD and one listing between them, not two of each.
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(heard[0]).toEqual({ loaded: 0, total: BONSAI_BYTES });
+    expect(bonsaiDownloadInProgress()).toBeNull();
   });
 });
 
@@ -234,7 +273,7 @@ describe("routing a question to the device", () => {
   beforeEach(() => vi.restoreAllMocks());
   afterEach(() => vi.restoreAllMocks());
 
-  const ready = { supported: true, downloaded: true, partial: false, gpu: true };
+  const ready = { supported: true, downloaded: true, partial: false };
   const ask = [{ role: "user" as const, content: "hi" }];
 
   function collect() {
@@ -250,7 +289,7 @@ describe("routing a question to the device", () => {
   }
 
   it("answers with the persona jackie-device built, sending it the memory context and not the conversation", async () => {
-    vi.spyOn(device, "bonsaiStatus").mockResolvedValue(ready);
+    vi.spyOn(device, "storedBonsai").mockResolvedValue(ready);
     const call = vi
       .spyOn(edge, "callEdgeFunction")
       .mockResolvedValue(new Response(JSON.stringify({ prompt: "You are Jackie. (guarded)", mode: "persona" }), { status: 200 }));
@@ -269,7 +308,7 @@ describe("routing a question to the device", () => {
   });
 
   it("does not answer at all, rather than as an anonymous assistant, when the persona cannot be fetched", async () => {
-    vi.spyOn(device, "bonsaiStatus").mockResolvedValue(ready);
+    vi.spyOn(device, "storedBonsai").mockResolvedValue(ready);
     vi.spyOn(edge, "callEdgeFunction").mockResolvedValue(new Response(JSON.stringify({ error: "boom" }), { status: 500 }));
     const chat = vi.spyOn(device, "chatOnDevice");
     const c = collect();
@@ -281,7 +320,7 @@ describe("routing a question to the device", () => {
   });
 
   it("tells a non-owner account why, instead of a bare 403", async () => {
-    vi.spyOn(device, "bonsaiStatus").mockResolvedValue(ready);
+    vi.spyOn(device, "storedBonsai").mockResolvedValue(ready);
     vi.spyOn(edge, "callEdgeFunction").mockResolvedValue(new Response(JSON.stringify({ error: "Forbidden" }), { status: 403 }));
     const c = collect();
     await routeChat({ messages: ask, engine: "device", ...c.handlers });
@@ -289,7 +328,7 @@ describe("routing a question to the device", () => {
   });
 
   it("says how to download Bonsai when it is not on this device, and asks no other engine", async () => {
-    vi.spyOn(device, "bonsaiStatus").mockResolvedValue({ ...ready, downloaded: false });
+    vi.spyOn(device, "storedBonsai").mockResolvedValue({ ...ready, downloaded: false });
     const call = vi.spyOn(edge, "callEdgeFunction");
     const c = collect();
     await routeChat({ messages: ask, engine: "device", ...c.handlers });

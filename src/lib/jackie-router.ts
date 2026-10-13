@@ -255,7 +255,7 @@ async function streamEngine(
  */
 async function askDevice(args: RouteChatOptions): Promise<Attempt> {
   const device = await import("@/lib/microai/bonsaiDevice");
-  const status = await device.bonsaiStatus();
+  const status = await device.storedBonsai();
   if (!status.supported) return { kind: "failed", reason: device.UNSUPPORTED_BROWSER };
   if (!status.downloaded) return { kind: "failed", reason: status.error ?? device.NOT_DOWNLOADED };
 

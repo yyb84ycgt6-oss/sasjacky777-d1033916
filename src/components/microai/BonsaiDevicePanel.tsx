@@ -11,9 +11,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Progress } from "@/components/ui/progress";
 import {
   BONSAI_MB,
+  bonsaiDownloadInProgress,
   bonsaiStatus,
   downloadBonsai,
   removeBonsai,
+  stopBonsaiDownload,
   UNSUPPORTED_BROWSER,
   type BonsaiStatus,
 } from "@/lib/microai/bonsaiDevice";
@@ -25,27 +27,34 @@ export function BonsaiDevicePanel() {
   const [progress, setProgress] = useState<{ loaded: number; total: number } | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
-  const abortRef = useRef<AbortController | null>(null);
+  // The download belongs to bonsaiDevice.ts, not to this panel, so switching
+  // engine mid-download leaves it running; this only stops listening.
+  const mounted = useRef(true);
 
-  const refresh = useCallback(async () => setStatus(await bonsaiStatus()), []);
+  const refresh = useCallback(async () => {
+    const next = await bonsaiStatus();
+    if (mounted.current) setStatus(next);
+  }, []);
 
-  useEffect(() => {
-    void refresh();
-    // Leaving the engine mid-download stops it; what arrived stays until removed.
-    return () => abortRef.current?.abort();
-  }, [refresh]);
-
-  const download = async () => {
-    const controller = new AbortController();
-    abortRef.current = controller;
+  const follow = useCallback(async () => {
     setNote(null);
-    setProgress({ loaded: 0, total: 0 });
-    const result = await downloadBonsai({ onProgress: setProgress, signal: controller.signal });
-    abortRef.current = null;
+    const result = await downloadBonsai({ onProgress: (p) => mounted.current && setProgress(p) });
+    if (!mounted.current) return;
     setProgress(null);
     setNote(result.ok ? `Downloaded from ${result.from}. Bonsai answers from this tab now.` : result.error);
     await refresh();
-  };
+  }, [refresh]);
+
+  useEffect(() => {
+    mounted.current = true;
+    void refresh();
+    // Back on this engine while a download runs: show it, rather than a
+    // Download button that would start the same 237 MB again.
+    if (bonsaiDownloadInProgress()) void follow();
+    return () => {
+      mounted.current = false;
+    };
+  }, [refresh, follow]);
 
   const remove = async () => {
     setConfirmRemove(false);
@@ -71,11 +80,11 @@ export function BonsaiDevicePanel() {
             <span className="flex-1">
               Downloading Bonsai 1.7B — {mb(progress.loaded)} of {progress.total ? mb(progress.total) : BONSAI_MB} MB
             </span>
-            <button className={button} onClick={() => abortRef.current?.abort()}>
+            <button className={button} onClick={stopBonsaiDownload}>
               Stop
             </button>
           </div>
-          <p>Stay on this engine until it finishes: switching engine stops the download.</p>
+          <p>It keeps going if you switch engine; come back here to see it finish.</p>
           <Progress
             className="h-1.5"
             value={progress.total ? (progress.loaded / progress.total) * 100 : 0}
@@ -114,7 +123,7 @@ export function BonsaiDevicePanel() {
             <p>This browser has no WebGPU, so Bonsai would run on the CPU — expect minutes, not seconds, for a first answer.</p>
           )}
           <div className="flex gap-2">
-            <button className={button} onClick={download}>
+            <button className={button} onClick={follow}>
               Download ({BONSAI_MB} MB)
             </button>
             {status.partial && (

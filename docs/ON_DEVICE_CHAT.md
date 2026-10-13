@@ -6,8 +6,10 @@ No AI provider sees the question. This is what PocketPal does on a phone,
 done inside the web app.
 
 It builds on the device rung (`docs/ON_DEVICE.md`), which runs the same weights
-in the tab for the Guide and the Keeper router; the two share
-`src/lib/microai/wllamaRuntime.ts`.
+in the tab for the Guide and the Keeper router. The two share one download and
+one loaded model: on a host that deploys only the LFS pointer, downloading
+Bonsai here is also what makes the Guide's rung available, and a tab that uses
+both holds one copy of the model in memory, not two.
 
 ## Why not PocketPal itself
 
@@ -23,8 +25,9 @@ already a dependency (the guidance rung in `deviceEngine.ts`).
    choose **On-device (Bonsai 1.7B)**. It sits below the numbered chain.
 2. The panel above the composer says whether this browser can run it and
    whether it has WebGPU. Press **Download**. Progress is shown; **Stop**
-   cancels it and deletes the part that arrived. Stay on the engine until it
-   finishes, because switching engine stops the download.
+   cancels it and deletes the part that arrived. Switching engine does not:
+   the download belongs to the page, not the panel, and the panel picks it
+   up again when you come back.
 3. Ask. The first answer of a session loads the model and reads Jackie's
    persona, and the composer shows how far it has got. Later answers reuse
    what was read (llama.cpp's prompt cache), so they start much sooner.
@@ -117,7 +120,8 @@ in, and what that would break elsewhere in the app has not been checked.
   never is. A message that cannot fit beside the persona is refused with a
   reason rather than cut.
 - **Answers** stop at 512 tokens.
-- **One question at a time.** A second send waits for the first.
+- **One question at a time.** A second send waits for the first, and so does
+  a Guide question asked while the chat is answering: they share the model.
 - **Thinking off.** Bonsai's Qwen-family template thinks aloud first unless
   told not to; at CPU speed that is minutes of tokens nobody sees.
 - wllama would otherwise fetch a "compat" build from `cdn.jsdelivr.net` for

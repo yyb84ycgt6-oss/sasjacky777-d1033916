@@ -82,4 +82,10 @@ git lfs pull          # or: npm run weights
 they are not.
 
 The main chat can answer from the same weights too, downloaded into the browser
-when the host does not serve them: `docs/ON_DEVICE_CHAT.md`.
+when the host does not serve them: `docs/ON_DEVICE_CHAT.md`. This rung uses that
+download and that loaded model. `available()` counts a copy in the browser's
+storage before it asks the server, so on a host that deploys only the LFS
+pointer the rung works once the owner has downloaded Bonsai from the chat. It
+fetches from the app's own copy when it has to fetch at all, and never from
+Hugging Face: a 237 MB download from a third party is started by the Download
+button, not by a question to the Guide.

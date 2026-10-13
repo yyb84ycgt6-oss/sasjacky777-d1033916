@@ -34,11 +34,16 @@
  * After the first load, wllama's cache holds the weights in the browser, so the
  * second question costs nothing and works with the radio off. That is the whole
  * point of the rung.
+ *
+ * The weights it runs are the ones the chat's On-device engine downloads, and
+ * the model in memory is the same one (`bonsaiDevice.ts`): on a host that
+ * deploys only the LFS pointer, a download from the chat is what makes this
+ * rung available at all.
  */
 import { GUIDE_WEIGHTS_PATH, checkGuideWeights } from "@/lib/guide/weights";
 import { GUIDANCE_MODEL } from "./models";
 import type { InferenceEngine } from "./contextRouter";
-import { createWllama } from "./wllamaRuntime";
+import { ensureBonsai, storedBonsai, unloadBonsai, withBonsai } from "./bonsaiDevice";
 
 /** How far the load has got, for a UI that has 248 MB to explain. */
 export interface DeviceLoadProgress {
@@ -53,10 +58,15 @@ export interface DeviceEngineOptions {
   weightsPath?: string;
   /** Called while the weights download. */
   onProgress?: (progress: DeviceLoadProgress) => void;
-  /** Context window. Bonsai trains at 4k; smaller keeps the heap honest. */
+  /**
+   * Context window, for an injected runtime. The shared model is loaded once
+   * with the chat's window (BONSAI_CONTEXT_TOKENS), whichever caller loads it.
+   */
   contextSize?: number;
   /** Injected so the availability test does not need a real browser. */
   checkWeights?: typeof checkGuideWeights;
+  /** Whether Bonsai is already in this browser's storage. Injected for tests. */
+  isDownloaded?: () => Promise<boolean>;
   /** Injected for tests. Real code never passes this. */
   createRuntime?: () => Promise<DeviceRuntime>;
 }
@@ -78,14 +88,28 @@ export interface DeviceRuntime {
   exit(): Promise<void>;
 }
 
-/** Loads wllama, and only then — `wllamaRuntime.ts` says why it is lazy and same-origin. */
-async function realRuntime(): Promise<DeviceRuntime> {
-  const wllama = await createWllama();
+/**
+ * The model the chat's On-device engine holds, shared rather than loaded twice
+ * (bonsaiDevice.ts says why). "Loading" means making sure Bonsai is in this
+ * browser's storage — from this app's own copy, never from a third party
+ * unasked — and then in memory. wllama itself stays a lazy import there.
+ */
+async function sharedRuntime(): Promise<DeviceRuntime> {
   return {
-    loadModelFromUrl: (url, params) => wllama.loadModelFromUrl(url, params ?? {}),
-    createCompletion: (options) => wllama.createCompletion({ ...options, stream: false }),
-    exit: () => wllama.exit(),
+    loadModelFromUrl: async (_url, params) => {
+      const progress = (params as { progressCallback?: (p: { loaded: number; total: number }) => void } | undefined)
+        ?.progressCallback;
+      const ready = await ensureBonsai({ onProgress: progress });
+      if (!ready.ok) throw new Error(ready.error);
+      await withBonsai(async () => undefined);
+    },
+    createCompletion: (options) => withBonsai((wllama) => wllama.createCompletion({ ...options, stream: false })),
+    exit: () => unloadBonsai(),
   };
+}
+
+async function downloadedHere(): Promise<boolean> {
+  return (await storedBonsai()).downloaded;
 }
 
 /** True when this browser can run WebAssembly at all. Never throws. */
@@ -110,7 +134,8 @@ export function deviceEngine(options: DeviceEngineOptions = {}): InferenceEngine
 } {
   const weightsPath = options.weightsPath ?? GUIDE_WEIGHTS_PATH;
   const checkWeights = options.checkWeights ?? checkGuideWeights;
-  const createRuntime = options.createRuntime ?? realRuntime;
+  const createRuntime = options.createRuntime ?? sharedRuntime;
+  const isDownloaded = options.isDownloaded ?? downloadedHere;
 
   let runtime: DeviceRuntime | null = null;
   let loading: Promise<DeviceRuntime> | null = null;
@@ -151,11 +176,18 @@ export function deviceEngine(options: DeviceEngineOptions = {}): InferenceEngine
     locality: "device",
 
     // Cheap and total: no WebAssembly, or no weights, means no engine. It asks
-    // the server how big the file is rather than fetching it, so checking
-    // costs a HEAD request and never a download.
+    // the browser's storage first — a copy the owner downloaded from the chat
+    // counts, which on a host that deploys only the LFS pointer is the only
+    // copy there is — and then the server how big its file is, so checking
+    // costs at most a HEAD request and never a download.
     available: async () => {
       if (!wasmSupported()) return false;
       if (runtime) return true;
+      try {
+        if (await isDownloaded()) return true;
+      } catch {
+        /* storage unreadable; the server's copy may still be there */
+      }
       try {
         const presence = await checkWeights(fetch, weightsPath);
         return presence.present;
