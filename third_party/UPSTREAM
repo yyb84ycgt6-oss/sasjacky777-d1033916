@@ -24,5 +24,6 @@ minicraft-plus    https://github.com/MinicraftPlus/minicraft-plus-revived  4dc00
 rusted-ruins      https://github.com/garkimasera/rusted-ruins       44c786930be83685b99297a3ce757b042ec8d333
 # Rusted Ruins' game data (items, maps, art, text), kept in its own repository.
 rusted-ruins-pak  https://github.com/garkimasera/rusted-ruins-pak   380de845eee7a64e849a03e194e588a755011716
+cataclysm-tlg     https://github.com/Cataclysm-TLG/Cataclysm-TLG     436e2453fdf1bde8ad30ceb11bc4b3943e14fb6e
 manicdigger       https://github.com/manicdigger/manicdigger         0635de1d6d6817c30b74fd2c0399a359009fb9e6
 cataclysm         https://github.com/Whales/Cataclysm                f9b2b248ddef348090aef5a4743c00b2a44281b5
