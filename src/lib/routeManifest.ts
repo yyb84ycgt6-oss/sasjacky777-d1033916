@@ -34,6 +34,7 @@ export const CORE_ROUTES: RouteEntry[] = [
   { path: "/bridge", label: "Local Bridge (terminal + model vault)", group: "core" },
   { path: "/play", label: "Play", group: "core" },
   { path: "/craft", label: "CollinSurvivalCraft (Minecraft-style block building and survival)", group: "core" },
+  { path: "/zomboid-realism", label: "Project Zomboid: Realism Overhaul (mod workspace)", group: "core" },
   { path: "/minecraft", label: "CollinSurvivalCraft (alias)", group: "core", alias: true },
   { path: "/csc", label: "CollinSurvivalCraft (alias)", group: "core", alias: true },
   { path: "/hub", label: "Telegram Hub", group: "core" },
