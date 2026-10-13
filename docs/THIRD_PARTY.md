@@ -23,19 +23,30 @@ mistake for "we checked it".
   repository root: a session started inside `third_party/filmcraft/` may not
   read the root settings and would load it. `/context` lists the memory files
   a session actually loaded.
-- **Their `.mcp.json` is inert here.** Claude Code reads project MCP servers
+- **Their `.mcp.json` and `.github/` are inert here.** Claude Code reads
+  project MCP servers, and GitHub reads workflows and Copilot instructions,
   only from the repository root.
-- **Commit imports with `git add -f third_party`.** The root `.gitignore`
-  ignores `dist` and `*.log` anywhere, and would otherwise drop an upstream
-  file without a word.
-- **No Git LFS, nothing over 100 MB.** `vendor.sh` refuses a project that
-  keeps files in LFS (`git archive` would hand over pointers, and a pointer
-  committed here makes every push demand an object this repository never had)
-  or carries a file GitHub would reject.
+- **Let `vendor.sh` stage what it imports.** A project's own `.gitattributes`
+  applies inside this repository, and Cataclysm's `* text=auto` would have
+  rewritten a file upstream stores with CRLF line endings; the script stages
+  through a temporary `-text` rule in `.git/info/attributes`, the one
+  attributes file that outranks every in-tree one, and with `-f`, because the
+  root `.gitignore` ignores `dist` and `*.log` anywhere. `--stage <name>`
+  re-stages a project without fetching it.
+- **What `vendor.sh` refuses:** a project that keeps files in Git LFS
+  (`git archive` would hand over pointers, and a pointer committed here makes
+  every push demand an object this repository never had), a file over
+  GitHub's 100 MB limit, and a symlink that points outside its own project.
+  Submodules, which `git archive` leaves out, are fetched at the commit the
+  project pins, as `git clone --recursive` would.
+- **Build a copy, never the folder here.** Every one of these writes build
+  output into its own tree. `cp -r third_party/<name> ~/src/` first.
 
 `src/test/third-party.test.ts` checks what can be checked offline: every
 folder is pinned, every pin is a full commit, every project kept its licence,
-and craft-libs is the commit FilmCraft builds against.
+no `.gitattributes` at any depth carries an LFS filter, every symlink stays in
+its project, every submodule is filled, and craft-libs is the commit FilmCraft
+builds against.
 
 ## FilmCraft — `third_party/filmcraft`
 
@@ -65,13 +76,16 @@ below found real rough edges.
   crates.io (shared UI components), at the commit FilmCraft's `Cargo.toml` pins
   (`5c874d5`), same licence. FilmCraft fetches that commit from GitHub when it
   builds; the hash fixes the content. To build from the copy here instead,
-  run cargo with a patch from inside `third_party/filmcraft`:
+  copy both side by side and give cargo a patch:
 
   ```bash
-  cargo build --release -p filmcraft \
+  mkdir -p ~/src && cp -r third_party/filmcraft third_party/craft-libs ~/src/
+  cd ~/src/filmcraft && cargo build --release -p filmcraft \
     --config 'patch."https://github.com/storytold/craft-libs".craft-ui.path="../craft-libs/crates/ui"'
-  git checkout -- Cargo.lock   # the patch rewrites one lockfile line; keep the copy pristine
   ```
+
+  (The patch rewrites one line of the copy's `Cargo.lock`, which is why it is
+  a copy.)
 
 ### Building and running it
 
@@ -138,3 +152,119 @@ not, and none is reachable from Jackie:
   dependencies into this repository.
 - `crates/h264enc/target/` is committed upstream despite its name: 3 MB of
   generated H.264 test output, inert.
+
+## The ten open-world survival crafting games
+
+Asked for "the 10 most highly rated GitHub open world crafting games —
+survival, realism", this is the ranking: GitHub stars, in October 2026, among
+open-source games whose source lives on GitHub and that have all three of an
+open or generated world you roam, crafting, and something to survive. Realism
+is described, not used to rank. Each claim below was checked against the
+game's own code or README, not taken from a list.
+
+| # | Game | Folder | Stars | Code / licence | Survival and crafting |
+|---|------|--------|------:|----------------|-----------------------|
+| 1 | **Luanti + VoxeLibre** | `luanti/`, `voxelibre/` | 13.7k | C++ and Lua. Luanti LGPL-2.1, media CC BY-SA; VoxeLibre GPL-3.0, no non-free media (its LEGAL.md) | An endless generated block world; hunger, health, hostile mobs, hundreds of recipes |
+| 2 | **Cataclysm: Dark Days Ahead** | `cataclysm-dda/` | 13.3k | C++, CC BY-SA 3.0 | The most realistic: hunger, thirst, body temperature and clothing layers, injuries per limb, disease, thousands of recipes, and vehicles you build and repair, in a persistent generated New England |
+| 3 | **Cubyz** | `cubyz/` | 3.7k | Zig, GPL-3.0 | A voxel world with no height limit and a huge view distance; procedural tool crafting; health and falling damage, no hunger yet |
+| 4 | **TrueCraft** | `truecraft/` | 2.5k | C#, MIT | A clean-room Minecraft beta 1.7.3: health, food, hostile mobs, the 2011 crafting recipes |
+| 5 | **Cataclysm: Bright Nights** | `cataclysm-bn/` | 1.3k | C++ and Lua, CC BY-SA 3.0 | Dark Days Ahead's oldest major fork: the same simulation, with Lua scripting and its own mod registry |
+| 6 | **Crafter** | `crafter/` | 599 | Python, MIT | A 2D generated world built as an AI benchmark and playable by hand: food, water, sleep, health, a crafting tree |
+| 7 | **Minicraft+** | `minicraft-plus/` | 584 | Java, GPL-3.0 | Notch's Minicraft extended: health, stamina, hunger, crafting, a survival mode |
+| 8 | **Rusted Ruins** | `rusted-ruins/`, `rusted-ruins-pak/` | 560 | Rust, GPL-3.0; game data CC BY 4.0 | An open-world roguelike with crafting, cooking and nutrition |
+| 9 | **Cataclysm: The Last Generation** | `cataclysm-tlg/` | 413 | C++, CC BY-SA 3.0 | A younger Dark Days Ahead fork, the same simulation |
+| 10 | **Manic Digger** | `manicdigger/` | 404 | C#, public domain | A 9984×9984 block world whose survival mode has crafting but no mobs yet |
+
+Luanti is an engine and VoxeLibre a game for it: since Luanti 5.8 the engine
+ships only a test game, so the pair is one entry, ranked by the engine's
+stars. VoxeLibre comes from its official GitHub mirror (168 stars); its
+primary home is git.minetest.land. Three of the ten are Cataclysm: that
+family is where open-source survival realism lives.
+
+### Notes per game
+
+- **VoxeLibre:** copy `third_party/voxelibre` into your Luanti games folder
+  (`~/.minetest/games/` on Linux), never into `third_party/luanti`, then pick
+  it in Luanti's menu.
+- **TrueCraft** was archived in 2018. Its launcher offers to download Mojang's
+  own Minecraft assets; that is Mojang's content under Mojang's terms, so do
+  not. It ships seven prebuilt .NET libraries (in `lib/`, its launcher and its
+  submodule), and a default texture pack (Pixeludi, by Wojtek Mroczek) whose licence the
+  repository does not state: fine as part of a copy of TrueCraft, not to be
+  reused elsewhere without asking. Its sounds are CC BY-SA, from Minetest and
+  Freesound.
+- **Minicraft+** is pinned to the head of `2.3.0-dev`, which its README names
+  as the latest working build; `main` is mid-rewrite.
+- **Rusted Ruins** needs its pak data, built from `rusted-ruins-pak` (see that
+  README). Upstream calls it a very early project; the last commit was in
+  February 2023.
+- **Manic Digger** commits 18 prebuilt Windows and macOS libraries and build
+  tools (`*.dll`, `*.exe`, `libenet.dylib`). Build from source; never run the
+  committed `.exe` files. Three of its sounds are Freesound samples under
+  Creative Commons Sampling Plus 1.0, which allows whole copies only for
+  non-commercial use: do not ship them in anything sold.
+- **Cataclysm: Bright Nights** carries `AGENTS.md` for its own contributors
+  (kept from Claude Code like FilmCraft's), and **Dark Days Ahead** a Copilot
+  instructions file that only applies at a repository's root.
+- **Cataclysm: The Last Generation** is the biggest folder, 505 MB, of which
+  396 MB is translations.
+- None of them has been built or run in this repository, for the same reason
+  as FilmCraft.
+
+### What the import checks found
+
+- No Git LFS, no file over 100 MB, a licence file in every project.
+- 25 symlinks, all inside their own project: translated docs reusing English
+  images, two READMEs and a docs icon, and the three Cataclysm games' Android
+  builds linking to their own `data/`, `gfx/`, `lang/` and `src/`. Some
+  dangle until a build creates the target; that is upstream's layout.
+- A read-only scan of every file: no private keys or API tokens, no
+  bidirectional or tag characters. Zero-width characters appear in 22 files,
+  all text and none code: 17 translation files (Persian, Kannada, Hebrew and
+  Malay in Arabic script use them as joiners and marks; the rest are stray
+  zero-width spaces), four docs, and one stray U+200B in Dark Days Ahead's
+  `data/json/recipes/recipe_medsandchemicals.json`.
+- Binaries: Manic Digger's and TrueCraft's prebuilt libraries above; the
+  Cataclysm forks' Android dependency archives (`android/app/deps*.zip`);
+  Gradle wrapper jars in five projects; a Windows `.fon` bitmap font in Bright
+  Nights.
+- Their own `.gitattributes` set `text=auto` in five projects; staging through
+  `vendor.sh` keeps every byte as upstream stores it, which `--check`
+  confirms.
+
+### What it costs
+
+The ten add roughly 380 MB, compressed, to this repository's history; it was
+about 21 MB before. Deleting a folder later does not take that back, and
+every fresh clone (Lovable's included) downloads it.
+
+### Licences, if any of this ever moves into Jackie
+
+Holding these copies is aggregation: each keeps its own licence and nothing in
+Jackie links to them. Copying their code *into* `src/` is different. GPL code
+(VoxeLibre, Cubyz, Minicraft+, Rusted Ruins) would make Jackie itself GPL;
+CC BY-SA content (the Cataclysm games, Luanti's media) requires credit and
+sharing alike; MIT, public-domain and CC BY material (TrueCraft's code,
+Crafter, Manic Digger's code, Rusted Ruins' data) needs only its notice
+kept. Ask before mixing any of it into the app.
+
+### Looked at and left out
+
+| Project | Stars | Why not |
+|---------|------:|---------|
+| Mindustry | 29.3k | Not an open world: tower defence across separate maps, where "survival" means surviving waves |
+| Craft (fogleman) | 11.1k | No crafting and no survival, despite the name |
+| Veloren | 7.6k | No survival needs (an RPG without hunger or thirst), and its art is in Git LFS |
+| Terasology | 3.9k | An engine; its survival game is a module repository with no licence file |
+| Unturned (U3-SDK) | 3.9k | Source-available, all rights reserved; needs the Steam game |
+| Space Station 14 | 3.9k | One space station per round, not an open world |
+| Space Engineers | 3.0k | Archived, under an EULA, ships no assets; needs the purchased game |
+| ClassiCube | 2.1k | Its README: "It will never support survival" |
+| Luanti's minetest_game | 1.6k | "No real goals or built-in enemy mobs", by its own README |
+| OpenStarbound | 1.4k | No licence; its README says it derives from Starbound's leaked source; needs the purchased game |
+| KeeperRL | 1.0k | A dungeon builder, not a survival game |
+| DwarfCorp | 631 | Its art, sound and music may not be redistributed |
+| Ethertum | 543 | No crafting in its code yet |
+| ourCraft | 509 | Its README describes neither survival nor crafting |
+| freeminer | 470 | Its playable game is a submodule I could not confirm has survival |
+| Cataclysm (Whales) | 384 | Qualifies; the 2010 original, eleventh by stars |
