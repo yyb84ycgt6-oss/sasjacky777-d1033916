@@ -35,7 +35,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useTheme } from "@/hooks/useTheme";
 import { voiceManager } from "@/lib/voice-manager";
 import { ChatMediaBar, type PendingFile } from "@/components/ChatMediaBar";
-import { BonsaiDevicePanel } from "@/components/microai/BonsaiDevicePanel";
+import { DeviceModelPanel } from "@/components/microai/DeviceModelPanel";
 import { VoiceRecorder } from "@/components/VoiceRecorder";
 import { AttachmentDisplay } from "@/components/AttachmentDisplay";
 import { toast } from "sonner";
@@ -1449,7 +1449,7 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
                 ⇄ {routeNote}
               </div>
             )}
-            {engineDef?.kind === "device" && <BonsaiDevicePanel />}
+            {engineDef?.kind === "device" && <DeviceModelPanel modelId={selectedModel} />}
             {engineStatus && isProcessing && (
               <div className="mb-2 font-mono text-[10px] text-muted-foreground" role="status">
                 … {engineStatus}

@@ -36,6 +36,7 @@
  */
 
 import { CHAT_MODELS } from "../../supabase/functions/_shared/chatRequest";
+import { DEVICE_MODELS } from "./microai/deviceModels";
 
 export type EngineId = "jacky" | "bionic" | "ollama" | "deepseek" | "cloud" | "device";
 
@@ -156,18 +157,19 @@ export const ENGINES: readonly EngineDef[] = [
   },
   {
     id: "device",
-    label: "On-device (Bonsai 1.7B)",
+    label: "On-device",
     short: "On-device",
     kind: "device",
     // Not a model call: it hands this tab Jackie's persona and morals, which
     // never ship in the bundle, and records what the device was given.
     fn: "jackie-device",
     description:
-      "Downloads Bonsai once and runs it in this browser, so no provider sees the question. Slow first answers without a GPU.",
+      "Bonsai or another small model, downloaded once and run in this browser, so no provider sees the question. Slow first answers without a GPU.",
     local: true,
-    // No allowlist to agree with (rule 5): the engine serves the one build
-    // bonsaiDevice.ts pins by SHA-256, whatever the picker says.
-    models: [{ id: "bonsai-1.7b", label: "Bonsai 1.7B", note: "1-bit, 237 MB, runs in this tab" }],
+    // No allowlist to agree with (rule 5): nothing server-side runs these.
+    // The list is deviceModels.ts's, so the picker cannot offer a model the
+    // device engine does not know how to fetch.
+    models: DEVICE_MODELS.map((m) => ({ id: m.id, label: m.name, note: m.note })),
   },
 ];
 
