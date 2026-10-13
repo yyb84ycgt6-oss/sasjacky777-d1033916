@@ -75,6 +75,7 @@ const JackieSkills = lazy(() => import("./pages/JackieSkills"));
 const GithubSync = lazy(() => import("./pages/GithubSync"));
 const LocalAITest = lazy(() => import("./pages/LocalAITest"));
 const MicroAI = lazy(() => import("./pages/MicroAI"));
+const ModelQueue = lazy(() => import("./pages/ModelQueue"));
 const IndexForge = lazy(() => import("./pages/IndexForge"));
 const MicroBoard = lazy(() => import("./pages/MicroBoard"));
 const BuildTriage = lazy(() => import("./pages/BuildTriage"));
@@ -397,6 +398,7 @@ const App = () => (
                   <Route path="/forge" element={<ProtectedRoute><IndexForge /></ProtectedRoute>} />
                   <Route path="/micro" element={<ProtectedRoute><MicroAI /></ProtectedRoute>} />
                   <Route path="/micro/board" element={<ProtectedRoute><MicroBoard /></ProtectedRoute>} />
+                  <Route path="/models" element={<ProtectedRoute><ModelQueue /></ProtectedRoute>} />
                   <Route path="/triage" element={<ProtectedRoute><BuildTriage /></ProtectedRoute>} />
                   <Route
 
