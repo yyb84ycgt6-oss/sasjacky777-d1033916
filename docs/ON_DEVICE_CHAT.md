@@ -33,9 +33,30 @@ already a dependency (the guidance rung in `deviceEngine.ts`).
    what was read (llama.cpp's prompt cache), so they start much sooner.
 4. **Remove** deletes the 237 MB from this browser.
 
-It needs the **owner** account (see below) and a browser with 64-bit
-WebAssembly memory, which current Chrome, Edge and Firefox have. A browser
-without it is told so before anything downloads.
+It needs the **owner** account (see below) and any browser with WebAssembly.
+Current Chrome and Edge run llama.cpp's fast build. Safari — and so every
+browser on an iPhone or iPad, since Chrome, Edge and Firefox there are Safari
+underneath — runs wllama's slower compatibility build, served from this app.
+The panel says which.
+
+## Keeping it on an iPhone
+
+Download it from the **Home Screen app**, not a Safari tab:
+
+1. In Safari, Share → **Add to Home Screen** (it is named "eYe").
+2. Open it from the Home Screen and sign in.
+3. Choose On-device and download there.
+
+Two reasons. Safari deletes everything a website has stored once it goes seven
+days of browsing without a visit; Home Screen apps are exempt. And a Home Screen
+app keeps its own storage, separate from Safari's, so a copy downloaded in a
+tab does not follow it. The panel shows this advice in an iPhone browser tab.
+
+The compatibility build is slower, and a phone gives a tab far less memory than
+a desktop does, so on it the model stores its attention keys at 8 bits, which
+saves about 115 MB of the 460 MB the window costs. Whether a given iPhone has
+the memory for the whole 4,096-token window has not been measured: if Bonsai
+fails to start, the chat says "could not start on this device" with the reason.
 
 ## Which bytes, from where
 
@@ -105,6 +126,7 @@ which has no GPU and a slow CPU, so they are a floor, not an estimate:
 | Next answer in the same session (1,225 of 1,313 tokens reused from the cache) | 76 s |
 | Same two, through WebGPU on SwiftShader (a software GPU, so also the CPU) | 12 min 37 s, then 85 s |
 | `bonsaiDevice.ts` end to end in Chromium: download from the app's origin, then a one-line system prompt and "What is 2 + 2?" (39 prompt tokens) | download 2.5 s; first token 52 s, including loading the model; answer "2 + 2 = 4." at 60 s |
+| The same through the compatibility build, in Chromium with JSPI and 64-bit memory hidden as on Safari (31 prompt tokens, 8-bit keys) | answer "4." at 38.5 s, including loading the model; every request to this app's own origin |
 
 On a laptop or phone with a real GPU, prompt reading is many times faster; that
 has not been measured here. Multi-threading would also help on the CPU, but it
@@ -124,10 +146,11 @@ in, and what that would break elsewhere in the app has not been checked.
   a Guide question asked while the chat is answering: they share the model.
 - **Thinking off.** Bonsai's Qwen-family template thinks aloud first unless
   told not to; at CPU speed that is minutes of tokens nobody sees.
-- wllama would otherwise fetch a "compat" build from `cdn.jsdelivr.net` for
-  browsers without JSPI or 64-bit memory. That is turned off
-  (`wllamaRuntime.ts`): third-party code would run beside Jackie's persona and
-  memory. Those browsers are told they cannot run Bonsai instead.
+- wllama would otherwise fetch its compatibility build from `cdn.jsdelivr.net`
+  for browsers without JSPI or 64-bit memory — third-party code running beside
+  Jackie's persona and memory. It comes from `@wllama/wllama-compat` instead,
+  pinned to exactly the runtime's version and served from this app
+  (`wllamaRuntime.ts`); a test fails if the two versions part.
 
 ## Deploying it
 
@@ -140,8 +163,9 @@ an on-device answer fails with "Jackie's persona could not be fetched".
 | File | What |
 | --- | --- |
 | `src/lib/microai/bonsaiDevice.ts` | Pins, source resolution, download, status, remove, the streamed answer |
-| `src/lib/microai/wllamaRuntime.ts` | Starting wllama: lazy, same-origin, no CDN |
+| `src/lib/microai/wllamaRuntime.ts` | Starting wllama: lazy, same-origin, no CDN; the compatibility build for Safari |
 | `src/components/microai/BonsaiDevicePanel.tsx` | The download / progress / remove panel |
 | `src/lib/jackie-engines.ts`, `src/lib/jackie-router.ts` | The `device` engine and its turn |
 | `supabase/functions/jackie-device/` | Jackie's guarded system prompt for the device |
 | `src/test/jackie-device.test.ts` | Pins, sources, window fitting, streaming, routing |
+| `src/test/wllama-runtime.test.ts` | Which build a browser gets, and that Safari's comes from this app |

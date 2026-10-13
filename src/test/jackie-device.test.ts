@@ -101,8 +101,6 @@ describe("downloading without being asked twice", () => {
   });
 
   it("joins the download already running rather than starting the same 237 MB again", async () => {
-    // Node has no 64-bit WebAssembly memory; the browsers this runs in do.
-    vi.stubGlobal("WebAssembly", { Memory: function Memory() {} });
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
     const fetchImpl = vi.fn(async (url: string) => {
