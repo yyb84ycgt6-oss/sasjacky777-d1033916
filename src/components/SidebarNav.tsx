@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 /**
@@ -133,6 +133,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "⚔️ Play Game", href: "/play" },
       { label: "⛏️ CollinSurvivalCraft", href: "/craft", title: "CollinSurvivalCraft (CSC) — Minecraft-style survival and creative, on desktop and mobile, with saves and online play" },
+      { label: "🧟 Project Zomboid: Realism Overhaul", href: "/zomboid-realism", title: "Mod workspace — Build 42.21 target, compatibility matrix, phases, checklist; first-person camera is blocked on pz3d" },
       { label: "🐉 Realm Accord ↗", href: "https://dragon-chaos-wars.lovable.app", title: "Realm Accord — strategy game", external: true },
       { label: "🌐 Horizon Network ↗", href: "https://jadelounge.lovable.app", title: "Horizon Network — social network", external: true },
       { label: "👑 Emperors of the Last Kingdom ↗", href: "https://chaos-dragon-emperor.lovable.app", title: "Emperors of the Last Kingdom — fantasy strategy", external: true },
@@ -163,6 +164,8 @@ const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
+export { NAV_GROUPS };
+
 const STORAGE_KEY = "jackie.sidebar.groups.v1";
 const DEFAULT_OPEN: Record<string, boolean> = { pc: true, build: true };
 
@@ -176,7 +179,23 @@ const loadOpenState = (): Record<string, boolean> => {
   return { ...DEFAULT_OPEN };
 };
 
-export function SidebarNav() {
+/**
+ * Whether a menu href is the page on screen. `/pc?app=x` items share one
+ * pathname, so the query must match too, or every PC shortcut would light up.
+ */
+export function isActiveHref(href: string, pathname: string, search: string): boolean {
+  const [path, query] = href.split("?");
+  const clean = (p: string) => (p.length > 1 ? p.replace(/\/+$/, "") : p);
+  if (clean(path) !== clean(pathname)) return false;
+  if (!query) return true;
+  const want = new URLSearchParams(query);
+  const have = new URLSearchParams(search);
+  return [...want.entries()].every(([k, v]) => have.get(k) === v);
+}
+
+/** `onNavigate` lets the mobile drawer close when a link is chosen. */
+export function SidebarNav({ onNavigate }: { onNavigate?: () => void } = {}) {
+  const { pathname, search } = useLocation();
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(loadOpenState);
 
   useEffect(() => {
@@ -191,9 +210,11 @@ export function SidebarNav() {
     setOpenGroups((prev) => ({ ...prev, [id]: !prev[id] }));
 
   return (
-    <nav className="space-y-0.5">
+    <nav className="space-y-0.5" aria-label="Jackie sections">
       {NAV_GROUPS.map((group) => {
-        const open = !!openGroups[group.id];
+        // A group holding the page you are on opens, so the highlight is never hidden.
+        const holdsActive = group.items.some((i) => !i.external && isActiveHref(i.href, pathname, search));
+        const open = !!openGroups[group.id] || holdsActive;
         return (
           <div key={group.id}>
             <button
@@ -208,29 +229,37 @@ export function SidebarNav() {
             </button>
             {open && (
               <div className="space-y-0.5 pb-1">
-                {group.items.map((item) =>
-                  item.external ? (
-                    <a
-                      key={item.href}
-                      href={item.href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-2 pl-5 pr-2 py-1.5 font-mono text-xs text-primary hover:bg-secondary/50 rounded-sm transition-colors"
-                      title={item.title}
-                    >
-                      {item.label}
-                    </a>
-                  ) : (
+                {group.items.map((item) => {
+                  if (item.external) {
+                    return (
+                      <a
+                        key={item.href}
+                        href={item.href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 pl-5 pr-2 py-1.5 font-mono text-xs text-primary hover:bg-secondary/50 rounded-sm transition-colors"
+                        title={item.title}
+                      >
+                        {item.label}
+                      </a>
+                    );
+                  }
+                  const active = isActiveHref(item.href, pathname, search);
+                  return (
                     <Link
                       key={item.href}
                       to={item.href}
-                      className="flex items-center gap-2 pl-5 pr-2 py-1.5 font-mono text-xs text-primary hover:bg-secondary/50 rounded-sm transition-colors"
+                      onClick={onNavigate}
+                      aria-current={active ? "page" : undefined}
+                      className={`flex items-center gap-2 pl-5 pr-2 py-1.5 font-mono text-xs rounded-sm transition-colors ${
+                        active ? "bg-secondary text-foreground" : "text-primary hover:bg-secondary/50"
+                      }`}
                       title={item.title}
                     >
                       {item.label}
                     </Link>
-                  )
-                )}
+                  );
+                })}
               </div>
             )}
           </div>
