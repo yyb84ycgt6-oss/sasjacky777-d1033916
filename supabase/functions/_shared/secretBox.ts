@@ -11,9 +11,14 @@
 
 export class SecretBoxError extends Error {}
 
-function fromBase64(b64: string): Uint8Array {
+// Backed by a plain ArrayBuffer on purpose: newer TypeScript DOM types refuse a
+// Uint8Array<ArrayBufferLike> as a BufferSource for Web Crypto, which failed the
+// typecheck for every build even though the bytes were always fine.
+function fromBase64(b64: string): Uint8Array<ArrayBuffer> {
   const bin = atob(b64);
-  return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+  const out = new Uint8Array(new ArrayBuffer(bin.length));
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
 }
 
 function toBase64(bytes: Uint8Array): string {
@@ -26,7 +31,7 @@ export async function importKey(base64Key: string | undefined): Promise<CryptoKe
   if (!base64Key) {
     throw new SecretBoxError("CONNECTIONS_SECRET_KEY is not set, so secrets cannot be stored or used. Add it in Cloud → Secrets (openssl rand -base64 32).");
   }
-  let raw: Uint8Array;
+  let raw: Uint8Array<ArrayBuffer>;
   try {
     raw = fromBase64(base64Key.trim());
   } catch {

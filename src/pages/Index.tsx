@@ -387,7 +387,7 @@ const Sidebar = ({
         </div>
 
         <div className="border-t border-border p-2 flex-shrink-0 max-h-[45vh] overflow-y-auto space-y-0.5">
-          <SidebarNav />
+          <SidebarNav onNavigate={onCloseMobile} />
           <div className="px-2 py-1 font-mono text-[10px] uppercase tracking-widest text-muted-foreground/70">
             Press ⌘K anywhere to jump to all 84 Eru modules.
           </div>

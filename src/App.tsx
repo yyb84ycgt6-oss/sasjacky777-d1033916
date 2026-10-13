@@ -50,6 +50,7 @@ const JackieControl = lazy(() => import("./pages/JackieControl"));
 const VeilOps = lazy(() => import("./pages/VeilOps"));
 const MarvelsRace = lazy(() => import("./pages/MarvelsRace"));
 const BlockCraft = lazy(() => import("./pages/BlockCraft"));
+const ZomboidRealism = lazy(() => import("./pages/ZomboidRealism"));
 const ApexHub = lazy(() => import("./pages/ApexHub"));
 const AIProviders = lazy(() => import("./pages/AIProviders"));
 const GrokStudio = lazy(() => import("./pages/GrokStudio"));
@@ -354,6 +355,7 @@ const App = () => (
                   />
                   <Route path="/marvels" element={<ProtectedRoute><MarvelsRace /></ProtectedRoute>} />
                   <Route path="/craft" element={<ProtectedRoute><BlockCraft /></ProtectedRoute>} />
+                  <Route path="/zomboid-realism" element={<ProtectedRoute><ZomboidRealism /></ProtectedRoute>} />
                   <Route path="/minecraft" element={<Navigate to="/craft" replace />} />
                   <Route path="/csc" element={<Navigate to="/craft" replace />} />
                   <Route path="/apex" element={<ProtectedRoute><ApexHub /></ProtectedRoute>} />
