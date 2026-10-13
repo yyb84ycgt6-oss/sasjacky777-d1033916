@@ -23,6 +23,13 @@
  * Order is priority. The router walks it from the chosen engine downward, so a
  * failure anywhere above still ends in an answer as long as one link works.
  *
+ * **On-device** sits outside the chain. It runs Bonsai 1.7B in the browser tab,
+ * so it is only there once the owner has downloaded it, and the reason to pick
+ * it is that no provider sees the question. Falling back from it to a cloud
+ * engine would send the question exactly where its sender chose not to,
+ * and falling *to* it from a server engine would start a 237 MB model nobody
+ * asked for. So it answers only when chosen, and nothing answers in its place.
+ *
  * Each engine names the secret that turns it on. An engine whose secret is
  * missing answers with `needs_secret`, which the router treats as "not
  * configured, move on" rather than an error worth stopping for.
@@ -30,14 +37,16 @@
 
 import { CHAT_MODELS } from "../../supabase/functions/_shared/chatRequest";
 
-export type EngineId = "jacky" | "bionic" | "ollama" | "deepseek" | "cloud";
+export type EngineId = "jacky" | "bionic" | "ollama" | "deepseek" | "cloud" | "device";
 
 /** How the router talks to an engine. */
 export type EngineKind =
   /** POST to `jacky-proxy` and read one whole JSON answer. */
   | "jacky"
   /** POST to an edge function that answers OpenAI-compatible SSE. */
-  | "sse";
+  | "sse"
+  /** Runs in this browser tab (src/lib/microai/bonsaiDevice.ts). */
+  | "device";
 
 export interface EngineModel {
   id: string;
@@ -145,10 +154,25 @@ export const ENGINES: readonly EngineDef[] = [
     // offer a model the server will reject.
     models: CHAT_MODELS.map((m) => ({ id: m.id, label: m.label, note: m.description })),
   },
+  {
+    id: "device",
+    label: "On-device (Bonsai 1.7B)",
+    short: "On-device",
+    kind: "device",
+    // Not a model call: it hands this tab Jackie's persona and morals, which
+    // never ship in the bundle, and records what the device was given.
+    fn: "jackie-device",
+    description:
+      "Downloads Bonsai once and runs it in this browser, so no provider sees the question. Slow first answers without a GPU.",
+    local: true,
+    // No allowlist to agree with (rule 5): the engine serves the one build
+    // bonsaiDevice.ts pins by SHA-256, whatever the picker says.
+    models: [{ id: "bonsai-1.7b", label: "Bonsai 1.7B", note: "1-bit, 237 MB, runs in this tab" }],
+  },
 ];
 
 /** Fallback order. The router starts at the chosen engine and walks down. */
-export const ENGINE_CHAIN: readonly EngineId[] = ENGINES.map((e) => e.id);
+export const ENGINE_CHAIN: readonly EngineId[] = ENGINES.filter((e) => e.kind !== "device").map((e) => e.id);
 
 /** What a fresh install talks to first. */
 export const DEFAULT_ENGINE: EngineId = "jacky";
@@ -166,9 +190,11 @@ export function isKnownEngine(id: unknown): id is EngineId {
  *
  * The preferred engine comes first even if it sits late in the chain; the rest
  * follow in chain order. Choosing Ollama by hand should not mean Jacky and
- * Bionic are gone — it means they come after.
+ * Bionic are gone — it means they come after. On-device is the exception, and
+ * the header says why: it is a chain of one.
  */
 export function chainFrom(preferred: EngineId): EngineId[] {
+  if (findEngine(preferred)?.kind === "device") return [preferred];
   const rest = ENGINE_CHAIN.filter((id) => id !== preferred);
   return [preferred, ...rest];
 }

@@ -57,6 +57,9 @@ export const PERSONA_ENGINES = [
   "jackie-together",
   "jackie-xai",
   "jackie-orchestrate",
+  // Builds the prompt for Bonsai running in the owner's browser; the model
+  // itself never touches a function, so this is where its attestation comes from.
+  "jackie-device",
 ] as const;
 
 /** What an engine reports when it had no morals to add, or could not load them. */

@@ -35,6 +35,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useTheme } from "@/hooks/useTheme";
 import { voiceManager } from "@/lib/voice-manager";
 import { ChatMediaBar, type PendingFile } from "@/components/ChatMediaBar";
+import { BonsaiDevicePanel } from "@/components/microai/BonsaiDevicePanel";
 import { VoiceRecorder } from "@/components/VoiceRecorder";
 import { AttachmentDisplay } from "@/components/AttachmentDisplay";
 import { toast } from "sonner";
@@ -609,6 +610,8 @@ const Index = () => {
   const [presetEngine, setPresetEngine] = useState<string>(() => getChatPreset().engine);
   /** Set while an answer is being served by something other than the choice. */
   const [routeNote, setRouteNote] = useState<string | null>(null);
+  /** What an engine running in this tab is doing before its first word. */
+  const [engineStatus, setEngineStatus] = useState<string | null>(null);
 
   const engineDef = findEngine(selectedEngine);
   const engineModels = engineDef?.models ?? [];
@@ -1114,6 +1117,7 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
         setRouteNote(`${failed} could not answer — trying ${to}.`);
         console.warn(`[jackie] ${failed} → ${to}: ${reason}`);
       },
+      onStatus: setEngineStatus,
       // A failover after partial output starts the answer over; the half from
       // the engine that broke must not be kept in front of it.
       onReset: () => {
@@ -1445,6 +1449,12 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
                 ⇄ {routeNote}
               </div>
             )}
+            {engineDef?.kind === "device" && <BonsaiDevicePanel />}
+            {engineStatus && isProcessing && (
+              <div className="mb-2 font-mono text-[10px] text-muted-foreground" role="status">
+                … {engineStatus}
+              </div>
+            )}
             <div className="mb-2 flex min-h-9 items-center gap-1 border-b border-border pb-2">
               <button
                 onClick={saveCurrentAsPreset}
@@ -1481,7 +1491,9 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
                             selectedEngine === e.id ? "text-primary bg-secondary/50" : "text-popover-foreground"
                           }`}
                         >
-                          <span className="mt-[2px] text-[10px] text-muted-foreground w-3 flex-shrink-0">{i + 1}</span>
+                          <span className="mt-[2px] text-[10px] text-muted-foreground w-3 flex-shrink-0">
+                            {e.kind === "device" ? "·" : i + 1}
+                          </span>
                           <span className="flex-1 min-w-0">
                             <span className="flex items-center gap-2">
                               <span className="font-semibold">{e.label}</span>
@@ -1489,14 +1501,14 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
                             </span>
                             <span className="block text-[10px] text-muted-foreground">{e.description}</span>
                             <span className="block text-[10px] text-muted-foreground/70">
-                              {e.local ? "on your hardware" : "leaves your hardware"}
+                              {e.kind === "device" ? "in this browser · not in the fallback chain" : e.local ? "on your hardware" : "leaves your hardware"}
                               {e.requiresSecret ? ` · needs ${e.requiresSecret}` : ""}
                             </span>
                           </span>
                         </button>
                       ))}
                       <div className="px-3 py-2 border-t border-border font-mono text-[10px] text-muted-foreground">
-                        Order is the fallback chain. If your pick cannot answer, the next one does.
+                        Numbered order is the fallback chain. If your pick cannot answer, the next one does.
                       </div>
                     </div>
                   </>

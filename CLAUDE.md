@@ -91,8 +91,8 @@ slips. A gate must **return a verdict, never throw**.
 
 Signed in is not the same as *owner*: anyone can sign in to this app (email,
 Google, the anonymous demo). Functions that reach the owner's own hardware or
-credentials — `jacky-proxy`, `jackie-bionic`, `jackie-ollama`, `github-sync` —
-go through `requireOwnerUser` / `admitOwner`, which check the `owner` role
+credentials — `jacky-proxy`, `jackie-bionic`, `jackie-ollama`, `github-sync`,
+and `jackie-device`, which hands the browser Jackie's persona — go through `requireOwnerUser` / `admitOwner`, which check the `owner` role
 before any quota is spent. A new function like them does the same.
 
 ### 3. Every response carries CORS headers. Including the failures.
@@ -220,6 +220,7 @@ src/lib/appActions.ts         everything an agent may do to the app (rule 9)
 src/lib/customTools.ts        skills and custom tools: limits, validation, the {{template}} language (docs/SKILLS.md)
 src/lib/jackie-morals.ts      the morals page's guard rail: ledger check, witness, verdicts (docs/GUARD_RAIL.md)
 src/lib/appAgent.ts           the in-app act→observe loop; localModels.ts reaches LM Studio/Ollama
+src/lib/microai/bonsaiDevice.ts  the On-device engine: Bonsai downloaded into the browser and run there (docs/ON_DEVICE_CHAT.md)
 src/lib/mcp/                  the MCP server's tools (generates supabase/functions/mcp)
 src/components/nav/           the one nav bar, SANDi and the Guide (docs/NAV_BAR.md)
 src/craft/                    CollinSurvivalCraft, the /craft game — engine, renderer, UI (docs/CSC.md)

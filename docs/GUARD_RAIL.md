@@ -32,6 +32,7 @@ After a break or a rewrite the owner can choose **trust the history from here**:
 
 - Someone with full database access can disable the triggers and write a whole new chain that verifies. The witness catches that only in a browser that looked before the rewrite. (Editing the morals with the triggers off, without rewriting the chain, is caught by the replay.)
 - Jacky's persona lives on the rig and cannot be fingerprinted from here; only the morals sent to it are checked.
+- On-device answers (Bonsai in the browser) are generated where no function can see them. `jackie-device` builds and attests the prompt it hands the tab, so the page shows what the device was *given*; that the tab then ran it is the browser's own code, held to it by `src/test/jackie-device.test.ts`.
 - Code that reports a false fingerprint about itself cannot be caught from inside the app. Git history and CI are the anchor for code, and `src/test/jackie-morals.test.ts` fails if an engine stops going through the guard.
 - Agents with their own system prompt do not get the morals. Adding prose to a prompt that must answer in strict JSON breaks the agent. They are counted instead.
 

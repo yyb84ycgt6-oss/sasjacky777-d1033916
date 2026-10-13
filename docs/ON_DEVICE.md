@@ -80,3 +80,6 @@ git lfs pull          # or: npm run weights
 
 `/guide` reports whether they are present, and says which command to run when
 they are not.
+
+The main chat can answer from the same weights too, downloaded into the browser
+when the host does not serve them: `docs/ON_DEVICE_CHAT.md`.
