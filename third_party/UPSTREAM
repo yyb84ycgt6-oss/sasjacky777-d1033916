@@ -15,3 +15,13 @@ craft-libs    https://github.com/storytold/craft-libs       5c874d51eeb3de70e735
 luanti            https://github.com/luanti-org/luanti               5bb520ba544536c4c2914bc0a5ad386e758d7036
 voxelibre         https://github.com/VoxeLibre/VoxeLibre             4492ce6ff8d856daa4567abe2ea689f4e7a39842
 cataclysm-dda     https://github.com/CleverRaven/Cataclysm-DDA       afe69bd280f3104955752d472ae95f252e488c34
+cubyz             https://github.com/PixelGuys/Cubyz                 457147a75e38f5bb32f7488b09904a183996c414
+crafter           https://github.com/danijar/crafter                 e04542a2159f1aad3d4c5ad52e8185717380ee3a
+# Minicraft+'s main branch is mid-rewrite and upstream says so; this is the
+# head of 2.3.0-dev, the branch its README names as the latest working build.
+minicraft-plus    https://github.com/MinicraftPlus/minicraft-plus-revived  4dc00332e24a727b96be7b885d5cbbdd9c85263c
+rusted-ruins      https://github.com/garkimasera/rusted-ruins       44c786930be83685b99297a3ce757b042ec8d333
+# Rusted Ruins' game data (items, maps, art, text), kept in its own repository.
+rusted-ruins-pak  https://github.com/garkimasera/rusted-ruins-pak   380de845eee7a64e849a03e194e588a755011716
+manicdigger       https://github.com/manicdigger/manicdigger         0635de1d6d6817c30b74fd2c0399a359009fb9e6
+cataclysm         https://github.com/Whales/Cataclysm                f9b2b248ddef348090aef5a4743c00b2a44281b5
