@@ -253,7 +253,10 @@ def test_no_module_uses_syntax_newer_than_the_declared_python_floor():
     for path in root.rglob("*.py"):
         # `archive/` is deleted branches kept to be read, never imported — it
         # holds the pre-recovery runtime, `X | None` and all, on purpose.
-        if {"node_modules", "__pycache__", "archive"} & set(path.relative_to(root).parts):
+        # `third_party/` is other people's projects, byte for byte and never
+        # imported; their Python floor is theirs (Cataclysm still carries
+        # Python 2 tileset tools), and editing them is not ours to do.
+        if {"node_modules", "__pycache__", "archive", "third_party"} & set(path.relative_to(root).parts):
             continue
         for node in ast.walk(ast.parse(path.read_text())):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
