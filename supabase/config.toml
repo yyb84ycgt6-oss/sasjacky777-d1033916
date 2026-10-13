@@ -6,3 +6,8 @@ project_id = "iezgzdhhmwmbqshnxrie"
 # RPC that also consumes the rate-limit slot.
 [functions.api-key-auth]
 verify_jwt = false
+
+# On-device chat still needs the protected profile service. Register it with
+# the deployment configuration; its handler also enforces the owner's role.
+[functions.jackie-device]
+verify_jwt = true

@@ -3,7 +3,10 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { DEFAULT_CHAT_MODEL, type ChatMessage } from "@/lib/jackie-stream";
-import { routeChat } from "@/lib/jackie-router";
+import { routeChat, type RouteChatOptions } from "@/lib/jackie-router";
+import { runChatHarness, type HarnessApproval, type HarnessEvent } from "@/lib/chatHarness";
+import type { DevicePersonaIssue } from "@/lib/microai/devicePersona";
+import { ChatWorkbench } from "@/components/chat/ChatWorkbench";
 import {
   ENGINES,
   DEFAULT_ENGINE,
@@ -495,7 +498,7 @@ const JackieMessage = ({ message }: { message: DisplayMessage }) => {
   };
 
   return (
-    <div className="space-y-3 stagger-enter">
+    <div className="rounded-2xl border border-border bg-card/95 p-4 space-y-3 stagger-enter">
       <div className="flex items-center justify-between">
         <span className="jackie-badge">Jackie here—</span>
         <div className="flex items-center gap-2">
@@ -550,14 +553,15 @@ const JackieMessage = ({ message }: { message: DisplayMessage }) => {
 };
 
 const UserMessage = ({ message }: { message: DisplayMessage }) => (
-  <div className="space-y-2">
-    <div className="text-muted-foreground leading-relaxed text-sm whitespace-pre-wrap">
+  <div className="ml-auto max-w-[92%] rounded-2xl border border-primary/20 bg-primary/5 p-4 space-y-2">
+    <div className="font-mono text-[10px] uppercase tracking-widest text-primary">You</div>
+    <div className="text-foreground leading-relaxed text-sm whitespace-pre-wrap break-words">
       {message.content}
     </div>
     {message.attachments && message.attachments.length > 0 && (
       <AttachmentDisplay attachments={message.attachments} />
     )}
-    <div className="font-mono text-[10px] text-muted-foreground/50">
+    <div className="font-mono text-[10px] text-muted-foreground">
       {message.timestamp.toLocaleTimeString("en-US", { hour12: false })}
     </div>
   </div>
@@ -612,6 +616,24 @@ const Index = () => {
   const [routeNote, setRouteNote] = useState<string | null>(null);
   /** What an engine running in this tab is doing before its first word. */
   const [engineStatus, setEngineStatus] = useState<string | null>(null);
+  const [focusMode, setFocusMode] = useState(true);
+  const [harnessMode, setHarnessMode] = useState<"chat" | "harness">("chat");
+  const [reviewWrites, setReviewWrites] = useState(false);
+  const [runOutcome, setRunOutcome] = useState<"idle" | "working" | "complete" | "blocked" | "stopped">("idle");
+  const [runEvents, setRunEvents] = useState<HarnessEvent[]>([]);
+  const [runError, setRunError] = useState<string | null>(null);
+  const [profileIssue, setProfileIssue] = useState<DevicePersonaIssue | null>(null);
+  const [pendingApproval, setPendingApproval] = useState<HarnessApproval | null>(null);
+  const approvalRef = useRef<((approved: boolean) => void) | null>(null);
+  const lastPromptRef = useRef("");
+  const recordRunEvent = useCallback((label: string, kind: HarnessEvent["kind"] = "info") => {
+    setRunEvents((events) => [...events.slice(-23), { id: `${Date.now()}-${Math.random()}`, at: Date.now(), label, kind }]);
+  }, []);
+  const decideAction = useCallback((approved: boolean) => {
+    approvalRef.current?.(approved);
+    approvalRef.current = null;
+    setPendingApproval(null);
+  }, []);
 
   const engineDef = findEngine(selectedEngine);
   const engineModels = engineDef?.models ?? [];
@@ -631,6 +653,7 @@ const Index = () => {
   // Holds the answer in flight so it can be stopped. Without this the composer
   // stayed locked until the model finished or the tab was reloaded.
   const abortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => { abortRef.current?.abort(); approvalRef.current?.(false); }, [user?.id]);
 
   const changeModel = useCallback(async (model: string) => {
     setSelectedModel(model);
@@ -753,6 +776,8 @@ const Index = () => {
 
   const selectConversation = useCallback(
     async (id: string) => {
+      if (isProcessing) { toast.info("Stop the current run before switching conversations."); return; }
+      setRunEvents([]); setRunError(null); setProfileIssue(null); setRunOutcome("idle");
       setActiveConvId(id);
       loadMessages(id);
       try {
@@ -764,10 +789,13 @@ const Index = () => {
         }
       } catch { /* use current */ }
     },
-    [loadMessages, selectedEngine]
+    [loadMessages, selectedEngine, isProcessing]
   );
 
   const startNewConversation = () => {
+    if (isProcessing) { toast.info("Stop the current run before starting another chat."); return; }
+    setRunEvents([]); setRunError(null); setProfileIssue(null); setRunOutcome("idle");
+    lastPromptRef.current = "";
     setActiveConvId(null);
     setMessages([]);
     setChatHistory([]);
@@ -801,6 +829,7 @@ const Index = () => {
   };
 
   const handleDeleteConversation = async (id: string) => {
+    if (isProcessing && id === activeConvId) { toast.info("Stop this run before deleting its conversation."); return; }
     try {
       await deleteConversation(id);
       if (activeConvId === id) {
@@ -997,6 +1026,11 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
     if ((!input.trim() && pendingFiles.length === 0) || isProcessing || rateLimitCooldown > 0) return;
 
     const userText = input.trim();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    lastPromptRef.current = userText;
+    setRunEvents([]); setRunError(null); setProfileIssue(null); setRunOutcome("working");
+    recordRunEvent(harnessMode === "harness" ? "Starting a bounded agent run" : "Starting a chat turn");
     const filesToUpload = [...pendingFiles];
     setInput("");
     setPendingFiles([]);
@@ -1012,13 +1046,15 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
         await loadConversations();
       } catch {
         toast.error("Failed to create conversation.");
+        setRunError("Could not create this conversation. Restore your prompt and try again.");
+        setRunOutcome("blocked");
         setIsProcessing(false);
         return;
       }
     }
 
     // ── Slash Commands ──
-    if (userText.startsWith('/')) {
+    if (harnessMode === "chat" && userText.startsWith('/')) {
       const slashResult = await handleSlashCommand(userText, convId);
       if (slashResult) {
         const sysMsg: DisplayMessage = {
@@ -1031,6 +1067,8 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
         setMessages((prev) => [...prev, sysMsg]);
         try { await saveMessage({ conversation_id: convId, role: "assistant", content: slashResult }); } catch {}
         setIsProcessing(false);
+        setRunOutcome("complete");
+        recordRunEvent("App command completed", "success");
         scrollToBottom();
         return;
       }
@@ -1091,8 +1129,6 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
       jackieContext = [gameContext, memCtx, taskCtx, fileCtx].filter(Boolean).join("\n");
     } catch { /* graceful degradation */ }
 
-    const controller = new AbortController();
-    abortRef.current = controller;
     // `streamChat` calls exactly one of onDone/onError, or neither when the
     // user stopped it. This records which happened, so the stopped-answer
     // handling below cannot also fire if a stop lands in the same tick as a
@@ -1101,7 +1137,7 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
 
     setRouteNote(null);
 
-    await routeChat({
+    const routeOptions: RouteChatOptions = {
       messages: newHistory,
       engine: selectedEngine,
       model: selectedModel,
@@ -1111,6 +1147,7 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
       // engine than the one named on screen is how a chat ends up lying about
       // what it is.
       onRoute: ({ engine, from, reason }) => {
+        recordRunEvent(`Calling ${findEngine(engine)?.short ?? engine}`);
         if (!from) return;
         const to = findEngine(engine)?.short ?? engine;
         const failed = findEngine(from)?.short ?? from;
@@ -1118,6 +1155,7 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
         console.warn(`[jackie] ${failed} → ${to}: ${reason}`);
       },
       onStatus: setEngineStatus,
+      onIssue: setProfileIssue,
       // A failover after partial output starts the answer over; the half from
       // the engine that broke must not be kept in front of it.
       onReset: () => {
@@ -1136,6 +1174,9 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
       onDone: async ({ engine, model, fellBackFrom }) => {
         settled = true;
         abortRef.current = null;
+        setRunOutcome("complete");
+        setEngineStatus(null);
+        recordRunEvent(`Answer received from ${findEngine(engine)?.short ?? engine}`, "success");
         const securityFlag = detectSecurityFlag(assistantContent);
         const memoryTier = detectMemoryTier(assistantContent, userText);
 
@@ -1176,7 +1217,9 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
 
         // Auto-extract memories from conversation
         try {
-          const candidates = extractMemoryCandidates(userText, assistantContent);
+          // A read-only harness must not write memories through the chat's
+          // automatic extractor after its tools correctly refused a write.
+          const candidates = harnessMode === "chat" ? extractMemoryCandidates(userText, assistantContent) : [];
           for (const c of candidates) {
             await upsertMemory(c.key, c.value, c.category, convId!);
           }
@@ -1186,6 +1229,10 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
       },
       onError: (err) => {
         settled = true;
+        setRunOutcome("blocked");
+        setRunError(err);
+        setEngineStatus(null);
+        recordRunEvent("Run blocked: " + err, "error");
         abortRef.current = null;
         if (err.includes("Rate limit") || err.includes("rate limit")) {
           const seconds = 30;
@@ -1201,19 +1248,56 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
               return prev - 1;
             });
           }, 1000);
-        } else {
+        } else if (selectedEngine !== "device") {
           toast.error(err);
         }
         setMessages((prev) => prev.filter((m) => m.id !== assistantTempId));
         setRouteNote(null);
         setIsProcessing(false);
       },
-    });
+    };
+    try {
+      if (harnessMode === "harness") {
+        if (!user?.id) throw new Error("Sign in before running an agent harness.");
+        const result = await runChatHarness({
+          userId: user.id, messages: newHistory, engine: selectedEngine, model: selectedModel,
+          context: jackieContext, signal: controller.signal, reviewWrites,
+          onEvent: recordRunEvent, onStatus: setEngineStatus, onIssue: setProfileIssue,
+          requestApproval: (action) => new Promise<boolean>((resolve) => {
+            if (controller.signal.aborted) { resolve(false); return; }
+            setPendingApproval(action);
+            const stop = () => finish(false);
+            const finish = (approved: boolean) => {
+              controller.signal.removeEventListener("abort", stop);
+              if (approvalRef.current === finish) approvalRef.current = null;
+              setPendingApproval(null);
+              resolve(approved);
+            };
+            approvalRef.current = finish;
+            controller.signal.addEventListener("abort", stop, { once: true });
+          }),
+        });
+        if (!controller.signal.aborted) {
+          if (result.ok && result.route) {
+            assistantContent = result.answer;
+            setMessages((prev) => prev.map((m) => m.id === assistantTempId ? { ...m, content: assistantContent } : m));
+            await routeOptions.onDone(result.route);
+          } else routeOptions.onError(result.error ?? "The harness did not produce a final answer.");
+        }
+      } else await routeChat(routeOptions);
+    } catch (error) {
+      if (!controller.signal.aborted && !settled) routeOptions.onError(error instanceof Error ? error.message : "This run failed unexpectedly.");
+    } finally {
+      setEngineStatus(null);
+      decideAction(false);
+    }
 
     // Stopping is neither success nor failure, so `streamChat` calls neither
     // callback. What already streamed is still worth keeping — throwing away a
     // half-written answer the moment someone stops it is the wrong instinct.
     if (controller.signal.aborted && !settled) {
+      setRunOutcome("stopped");
+      recordRunEvent("Stopped by you");
       abortRef.current = null;
       if (assistantContent.trim()) {
         setChatHistory((prev) => [...prev, { role: "assistant", content: assistantContent }]);
@@ -1321,13 +1405,13 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
   };
 
   return (
-    <div className="flex h-screen bg-background overflow-hidden relative">
+    <div className="flex h-[100dvh] bg-background overflow-hidden relative">
       {/* Epic neutron-star ambient backdrop — sits behind everything, low opacity for readability */}
-      <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
+      {!focusMode && <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden opacity-30">
         <AnimatedCanvas theme={bgSettings.theme} opacity={bgSettings.opacity} glow={bgSettings.glow} />
         <div className="absolute inset-0 bg-gradient-to-b from-background/40 via-background/20 to-background/60" />
-      </div>
-      <NeutronBackgroundSettings value={bgSettings} onChange={setBgSettings} />
+      </div>}
+      {!focusMode && <NeutronBackgroundSettings value={bgSettings} onChange={setBgSettings} />}
       <div className="relative z-10 flex h-full w-full overflow-hidden">
       <Sidebar
         conversations={conversations}
@@ -1371,10 +1455,10 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
           </div>
         )}
         {/* Mobile header */}
-        <div className="flex items-center gap-2 p-3 border-b border-border md:hidden flex-shrink-0">
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-background/95 md:hidden flex-shrink-0 pt-[max(.5rem,env(safe-area-inset-top))]">
           <button
             onClick={() => setSidebarOpen(true)}
-            className="p-1.5 rounded-sm text-muted-foreground hover:text-foreground hover:bg-secondary btn-mechanical transition-colors"
+            className="min-h-11 min-w-11 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
           >
             <Menu size={18} />
           </button>
@@ -1388,6 +1472,7 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
             size="sm"
             onClick={startNewConversation}
             className="h-9 rounded-sm border-primary/60 px-3 font-mono text-xs text-primary hover:bg-primary/10 hover:text-primary"
+            disabled={isProcessing}
             aria-label="Start a new chat"
           >
             <Plus size={16} />
@@ -1396,7 +1481,7 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
           {messages.length > 0 && (
             <button
               onClick={exportChat}
-              className="p-1.5 rounded-sm text-muted-foreground hover:text-foreground hover:bg-secondary btn-mechanical transition-colors"
+              className="min-h-11 min-w-11 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
               title="Export chat"
             >
               <Download size={16} />
@@ -1404,7 +1489,7 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
           )}
           <button
             onClick={toggleTheme}
-            className="p-1.5 rounded-sm text-muted-foreground hover:text-foreground hover:bg-secondary btn-mechanical transition-colors"
+            className="min-h-11 min-w-11 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
             title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
           >
             {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
@@ -1417,17 +1502,29 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
           </div>
         )}
 
+        <div className="max-h-[42dvh] flex-shrink-0 overflow-y-auto overscroll-contain px-3 pt-3 md:px-5">
+          <div className="mx-auto max-w-3xl">
+            <ChatWorkbench key={`${user?.id}:${selectedEngine}`} device={selectedEngine === "device"}
+              model={selectedModel} mode={harnessMode} onMode={setHarnessMode}
+              reviewWrites={reviewWrites} onReviewWrites={setReviewWrites}
+              focus={focusMode} onFocus={() => setFocusMode((value) => !value)}
+              running={isProcessing} status={engineStatus} outcome={runOutcome} events={runEvents}
+              issue={profileIssue} error={runError} approval={pendingApproval} onDecision={decideAction}
+              onIssue={(issue) => { setProfileIssue(issue); if (!issue) { setRunError(null); setRunOutcome("idle"); } }}
+              onRestore={runError && lastPromptRef.current ? () => { setInput(lastPromptRef.current); textareaRef.current?.focus(); } : null} />
+          </div>
+        </div>
         <ScrollNav targetRef={feedRef} />
-        <div className="flex-1 overflow-y-auto" ref={feedRef}>
-          <div className="max-w-[768px] p-4 space-y-6">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain" ref={feedRef}>
+          <div className="mx-auto max-w-3xl p-4 space-y-5 md:p-6">
             {messages.length === 0 && (
-              <div className="flex flex-col items-start justify-center min-h-[60vh] space-y-4">
+              <div className="flex flex-col items-start justify-center min-h-[25dvh] space-y-4">
                 <span className="font-mono text-4xl font-bold text-primary">J</span>
                 <div className="font-mono text-xs uppercase tracking-widest text-muted-foreground">
-                  System_Status: Grounded. Memory: Active.
+                  Your session. Your tools. Your control.
                 </div>
                 <p className="text-muted-foreground text-sm max-w-md">
-                  Jackie is ready. Type a command, ask a question, paste some code, or start building.
+                  Ask a question in Chat, or choose Agent harness to inspect your tasks and memories with a visible action trail. On-device chat needs both downloaded weights and an accessible owner profile.
                 </p>
               </div>
             )}
@@ -1442,8 +1539,8 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
         </div>
 
         {/* Command input */}
-        <div className="border-t border-border p-4 flex-shrink-0">
-          <div className="max-w-[768px]">
+        <div className="border-t border-border bg-background/95 p-3 pb-[max(.75rem,env(safe-area-inset-bottom))] flex-shrink-0 md:p-5">
+          <div className="mx-auto max-w-3xl">
             {routeNote && (
               <div className="mb-2 font-mono text-[10px] text-yellow-500" role="status">
                 ⇄ {routeNote}
@@ -1455,11 +1552,11 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
                 … {engineStatus}
               </div>
             )}
-            <div className="mb-2 flex min-h-9 items-center gap-1 border-b border-border pb-2">
+            <div className="mb-2 flex min-h-11 flex-wrap items-center gap-1 border-b border-border pb-2">
               <button
                 onClick={saveCurrentAsPreset}
                 className={`p-2 rounded-sm transition-colors ${
-                  isPinnedDefault ? "text-primary" : "text-muted-foreground hover:text-primary"
+                  isPinnedDefault ? "text-primary min-h-11 min-w-11" : "text-muted-foreground hover:text-primary min-h-11 min-w-11"
                 }`}
                 title={isPinnedDefault ? "Default engine + model for new chats" : "Pin as default"}
                 aria-label={isPinnedDefault ? "Default engine and model for new chats" : "Pin engine and model as default"}
@@ -1470,8 +1567,9 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
               {/* Engine picker — which brain answers first. */}
               <div className="relative">
                 <button
+                  disabled={isProcessing}
                   onClick={() => setEngineMenuOpen((prev) => !prev)}
-                  className="flex h-9 items-center gap-1 rounded-sm px-2 font-mono text-xs text-foreground hover:bg-secondary transition-colors"
+                  className="flex min-h-11 items-center gap-1 rounded-sm px-2 font-mono text-xs text-foreground hover:bg-secondary transition-colors"
                   aria-label="Choose engine"
                   aria-expanded={engineMenuOpen}
                 >
@@ -1518,8 +1616,9 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
               {engineModels.length > 0 ? (
                 <div className="relative">
                   <button
+                    disabled={isProcessing}
                     onClick={() => setModelMenuOpen((prev) => !prev)}
-                    className="flex h-9 items-center gap-1 rounded-sm px-2 font-mono text-xs text-foreground hover:bg-secondary transition-colors"
+                    className="flex min-h-11 items-center gap-1 rounded-sm px-2 font-mono text-xs text-foreground hover:bg-secondary transition-colors"
                     aria-label="Choose AI model"
                     aria-expanded={modelMenuOpen}
                   >
@@ -1529,7 +1628,7 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
                   {modelMenuOpen && (
                     <>
                       <div className="fixed inset-0 z-40" onClick={() => setModelMenuOpen(false)} />
-                      <div className="absolute bottom-full left-0 mb-2 z-50 bg-popover border border-border rounded-md shadow-lg py-1 min-w-[260px] max-w-[calc(100vw-2rem)]">
+                      <div className="absolute bottom-full right-0 md:left-0 md:right-auto mb-2 z-50 bg-popover border border-border rounded-md shadow-lg py-1 min-w-[260px] max-w-[calc(100vw-2rem)]">
                         {engineModels.map((m) => (
                           <button
                             key={m.id}
@@ -1587,8 +1686,9 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
                 onPaste={handlePaste}
-                placeholder="..."
-                className="jackie-input flex-1 resize-none overflow-hidden"
+                placeholder={harnessMode === "harness" ? "Give the harness a task…" : "Message Jackie…"}
+                aria-label="Message Jackie"
+                className="jackie-input flex-1 resize-none overflow-hidden rounded-xl text-base leading-relaxed"
                 style={{ minHeight: "44px", maxHeight: "200px" }}
                 disabled={isProcessing}
                 rows={1}
@@ -1624,6 +1724,7 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
                   disabled={!input.trim() && pendingFiles.length === 0}
                   className="p-3 rounded-sm bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-30 transition-opacity btn-mechanical flex-shrink-0"
                   title="Send (Enter)"
+                  aria-label="Send message"
                 >
                   <Send size={16} />
                 </button>

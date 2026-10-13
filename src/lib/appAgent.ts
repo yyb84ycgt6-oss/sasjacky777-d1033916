@@ -74,8 +74,8 @@ export function findAgentTool(name: string): AgentTool | undefined {
 }
 
 /** The instructions appended to an acting agent's own system prompt. */
-export function actionManual(allowDestructive: boolean): string {
-  const tools = AGENT_TOOLS.filter((t) => allowDestructive || !t.destructive)
+export function actionManual(allowDestructive: boolean, allowedTools?: readonly string[]): string {
+  const tools = AGENT_TOOLS.filter((t) => (allowDestructive || !t.destructive) && (!allowedTools || allowedTools.includes(t.name)))
     .map((t) => `- ${t.name} ${t.args} — ${t.description}`)
     .join("\n");
   return [
@@ -192,6 +192,8 @@ export interface RunAppAgentOptions {
    * reply is the answer whatever it contains.
    */
   canAct?: boolean;
+  /** A limited harness must refuse even a valid tool outside this set. */
+  allowedTools?: readonly string[];
   maxSteps?: number;
   onStep?: (step: AgentStep) => void;
   signal?: AbortSignal;
@@ -235,7 +237,7 @@ export async function runAppAgent(opts: RunAppAgentOptions): Promise<AgentRun> {
   const maxSteps = opts.maxSteps ?? 6;
   const allowDestructive = opts.allowDestructive ?? false;
   const canAct = opts.canAct ?? true;
-  const system = canAct ? `${opts.system.trim()}\n\n${actionManual(allowDestructive)}` : opts.system.trim();
+  const system = canAct ? `${opts.system.trim()}\n\n${actionManual(allowDestructive, opts.allowedTools)}` : opts.system.trim();
   const messages: ModelTurn[] = [{ role: "user", content: opts.prompt }];
   const steps: AgentStep[] = [];
 
@@ -269,6 +271,8 @@ export async function runAppAgent(opts: RunAppAgentOptions): Promise<AgentRun> {
           error: `There is no action called "${parsed.tool}". If it is one of the user's custom tools, call `
             + `run_custom_tool with {"name": "${parsed.tool}", "args": {…}}.`,
         }
+        : opts.allowedTools && !opts.allowedTools.includes(tool.name)
+        ? { ok: false, error: `${tool.name} is outside this run's allowed tools.` }
         : tool.destructive && !allowDestructive
         ? { ok: false, error: `${tool.name} is turned off for this agent: it deletes things, and deletes were not allowed.` }
         : await opts.execute(tool.name, parsed.args, { allowDestructive });

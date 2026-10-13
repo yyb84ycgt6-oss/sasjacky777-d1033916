@@ -34,8 +34,8 @@
  */
 import { streamSse, type ChatMessage } from "@/lib/jackie-stream";
 import { callEdgeFunction, describeEdgeFailure, describesUnreachable, NotSignedInError } from "@/lib/edgeFunction";
-import { clampContext } from "../../supabase/functions/_shared/chatRequest";
 import { deviceModelOrDefault } from "@/lib/microai/deviceModels";
+import { fetchDevicePersona, type DevicePersonaIssue } from "@/lib/microai/devicePersona";
 import {
   chainFrom,
   findEngine,
@@ -87,6 +87,8 @@ export interface RouteChatOptions {
    * and a blank bubble for minutes reads as a hang.
    */
   onStatus?: (note: string | null) => void;
+  /** A persistent recovery panel can show a problem instead of losing it in a toast. */
+  onIssue?: (issue: DevicePersonaIssue) => void;
   signal?: AbortSignal;
   /** Walk the rest of the chain on failure. Default true. */
   fallback?: boolean;
@@ -262,42 +264,20 @@ async function askDevice(args: RouteChatOptions, modelId: string): Promise<Attem
   if (!status.downloaded) return { kind: "failed", reason: status.error ?? device.notDownloaded(deviceModelOrDefault(modelId)) };
 
   args.onStatus?.("Fetching Jackie's persona…");
-  let system: string;
-  try {
-    const resp = await callEdgeFunction(
-      "jackie-device",
-      { context: clampContext(args.context, device.DEVICE_CONTEXT_CHARS) },
-      { signal: args.signal },
-    );
-    const body = await resp.json().catch(() => null);
-    if (resp.status === 401) {
-      args.onStatus?.(null);
-      return { kind: "stop", reason: "You are signed out, so Jackie cannot answer. Sign in and try again." };
-    }
-    if (!resp.ok || typeof body?.prompt !== "string" || !body.prompt.trim()) {
-      args.onStatus?.(null);
-      const detail = typeof body?.error === "string" ? body.error : `HTTP ${resp.status}`;
-      return {
-        kind: "failed",
-        reason:
-          resp.status === 403
-            ? "On-device answers use Jackie's persona, which only the owner's account can fetch, and this account is not the owner's."
-            : `Bonsai is ready, but Jackie's persona could not be fetched (jackie-device: ${detail}), so it did not answer as someone else.`,
-      };
-    }
-    system = body.prompt;
-  } catch (e) {
+  const profile = await fetchDevicePersona({ context: args.context, signal: args.signal });
+  if (!profile.ok) {
     args.onStatus?.(null);
-    if (args.signal?.aborted || (e as Error)?.name === "AbortError") return { kind: "stop" };
-    const reason = describeEdgeFailure(e, "jackie-device");
-    return e instanceof NotSignedInError
-      ? { kind: "stop", reason }
-      : { kind: "failed", reason: `Bonsai is ready, but Jackie's persona could not be fetched: ${reason}` };
+    if (profile.stopped) return { kind: "stop" };
+    args.onIssue?.(profile.issue);
+    return {
+      kind: profile.issue.code === "SIGNED_OUT" ? "stop" : "failed",
+      reason: `${deviceModelOrDefault(modelId).name} is stored, but Jackie's persona could not be fetched. ${profile.issue.detail} ${profile.issue.recovery}`,
+    };
   }
 
   const result = await device.chatOnDevice({
     modelId,
-    system,
+    system: profile.prompt,
     messages: args.messages,
     onDelta: args.onDelta,
     onStatus: args.onStatus,
@@ -354,7 +334,7 @@ export async function routeChat(args: RouteChatOptions): Promise<void> {
     const { result, model } = await attempt(args, id, pace);
 
     if (result.kind === "ok") {
-      args.onDone({ engine: id, model, fellBackFrom: [...fellBackFrom] });
+      await args.onDone({ engine: id, model, fellBackFrom: [...fellBackFrom] });
       return;
     }
     if (result.kind === "stop") {

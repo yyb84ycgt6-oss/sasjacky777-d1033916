@@ -74,7 +74,7 @@ export function DeviceModelPanel({ modelId }: { modelId: string }) {
     const result = await downloadDeviceModel(spec.id, { onProgress: (p) => mounted.current && setProgress(p) });
     if (!mounted.current) return;
     setProgress(null);
-    setNote(result.ok ? `Downloaded from ${result.from}. ${spec.name} answers from this tab now.` : result.error);
+    setNote(result.ok ? `Model weights saved from ${result.from}. Check connection in the workspace to verify Jackie's profile.` : result.error);
     await refresh();
   }, [spec.id, spec.name, refresh]);
 
@@ -101,7 +101,7 @@ export function DeviceModelPanel({ modelId }: { modelId: string }) {
   };
 
   const button =
-    "rounded-sm border border-border px-2 py-1 font-mono text-[10px] text-foreground hover:bg-secondary transition-colors disabled:opacity-50";
+    "min-h-11 rounded-lg border border-border px-3 py-2 text-xs text-foreground hover:bg-secondary transition-colors disabled:opacity-50";
 
   if (!status) {
     return <div className="mb-2 font-mono text-[10px] text-muted-foreground">Checking this browser for {spec.name}…</div>;
@@ -112,7 +112,11 @@ export function DeviceModelPanel({ modelId }: { modelId: string }) {
   const busyWithOther = elsewhere && elsewhere.modelId !== spec.id ? findDeviceModel(elsewhere.modelId) : undefined;
 
   return (
-    <div className="mb-2 rounded-sm border border-border p-2 font-mono text-[10px] text-muted-foreground" role="region" aria-label="On-device model">
+    <details className="mb-2 rounded-xl border border-border bg-card/95 text-xs text-muted-foreground" open={!!progress || !status.downloaded} aria-label="On-device model">
+      <summary className="min-h-11 cursor-pointer px-3 py-3 font-medium text-foreground">
+        {spec.name} · {progress ? "Downloading" : status.downloaded ? "Stored locally" : "Model setup"}
+      </summary>
+      <div className="border-t border-border p-3 space-y-2">
       {!status.supported ? (
         <p>{UNSUPPORTED_BROWSER}</p>
       ) : progress ? (
@@ -135,8 +139,8 @@ export function DeviceModelPanel({ modelId }: { modelId: string }) {
       ) : status.downloaded ? (
         <div className="flex flex-wrap items-center gap-2">
           <span className="flex-1">
-            <span className="text-primary">●</span> {spec.name} is on this device ·{" "}
-            {status.gpu ? "runs on the GPU (WebGPU)" : "no WebGPU here, so it runs on the CPU: a first answer can take minutes"}
+            <span className="text-primary">●</span> {spec.name} weights are stored here ·{" "}
+            {status.gpu ? "WebGPU is available" : "no WebGPU here, so it runs on the CPU: a first answer can take minutes"}
             {status.compat && " · Safari's engine runs the slower compatibility build"}
           </span>
           {confirmRemove ? (
@@ -172,12 +176,12 @@ export function DeviceModelPanel({ modelId }: { modelId: string }) {
           {status.compat && (
             <p>
               This browser runs models in their slower compatibility build (Safari's engine — on an iPhone, every browser
-              is Safari underneath). It works; it is not quick.
+              is Safari underneath). Performance and memory limits depend on the device.
             </p>
           )}
           {status.compat && !spec.phone && (
             <p className="text-destructive">
-              {spec.name} is likely too big for a phone's browser memory. Bonsai, SmolLM2 360M or Qwen2.5 0.5B fit.
+              {spec.name} is likely too big for a phone's browser memory. Bonsai, SmolLM2 360M and Qwen2.5 0.5B are smaller candidates; their memory use still needs checking on your device.
             </p>
           )}
           <div className="flex gap-2">
@@ -211,6 +215,7 @@ export function DeviceModelPanel({ modelId }: { modelId: string }) {
       {status.supported && iosInBrowserTab() && <p className="mt-1">{KEEP_ON_IPHONE}</p>}
       {status.error && <p className="mt-1 text-destructive">{status.error}</p>}
       {note && <p className="mt-1" role="status">{note}</p>}
-    </div>
+      </div>
+    </details>
   );
 }

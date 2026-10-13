@@ -81,13 +81,16 @@ const EXECUTORS: Record<string, Executor> = {
 export async function executeAsUser(
   tool: string,
   args: Record<string, unknown>,
-  ctx: { allowDestructive?: boolean } = {},
+  ctx: { allowDestructive?: boolean; expectedUserId?: string } = {},
 ): Promise<ActionResult> {
   const run = EXECUTORS[tool];
   if (!run) return { ok: false, error: `There is no action called "${tool}".` };
   const { data } = await supabase.auth.getUser();
   const userId = data.user?.id;
   if (!userId) return { ok: false, error: "You are signed out, so the agent cannot act on your app. Sign in and run it again." };
+  if (ctx.expectedUserId && userId !== ctx.expectedUserId) {
+    return { ok: false, error: "The signed-in account changed. Start a new run before allowing app actions." };
+  }
   // An in-app operator's own Allow deletes reaches its custom tools too: a tool
   // with a deleting step is refused when deletes were not allowed.
   return run(supabase, userId, args, {

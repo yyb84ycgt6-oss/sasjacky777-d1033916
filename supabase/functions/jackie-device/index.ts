@@ -41,7 +41,11 @@ serve(async (req) => {
     // owner's chat, so the only prompt it hands out is Jackie's.
     const guarded = await guardedSystemPrompt(FUNCTION_NAME, { context });
     await guarded.recorded;
-    return json({ prompt: guarded.prompt, mode: guarded.mode }, 200, guarded.headers);
+    return json({ prompt: guarded.prompt, mode: guarded.mode }, 200, {
+      ...guarded.headers,
+      // A protected profile must not be reused across browser account changes.
+      "Cache-Control": "no-store",
+    });
   } catch (e) {
     console.error(`${FUNCTION_NAME}: unexpected failure`, e);
     return json({ error: e instanceof Error ? e.message : "Internal error" }, 500);
