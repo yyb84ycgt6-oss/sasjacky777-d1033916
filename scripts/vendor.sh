@@ -7,6 +7,7 @@
 #   scripts/vendor.sh <name>              # re-import one
 #   scripts/vendor.sh <name> <commit>     # move one to another upstream commit (updates UPSTREAM)
 #   scripts/vendor.sh --check [<name>]    # exit 1 unless what is committed equals upstream, byte for byte
+#   scripts/vendor.sh --stage <name>      # re-stage a project already in place, byte for byte (no fetch)
 #
 # Why untouched copies: a vendored tree nobody can regenerate is a tree nobody
 # can audit, and --check turning up empty is the proof that third_party/ holds
@@ -26,6 +27,8 @@ MAX_BYTES=$((100 * 1024 * 1024))
 
 check=0
 if [ "${1:-}" = "--check" ]; then check=1; shift; fi
+restage=0
+if [ "${1:-}" = "--stage" ]; then restage=1; shift; fi
 only="${1:-}"
 move_to="${2:-}"
 if [ -n "$move_to" ] && [ "$check" = 1 ]; then
@@ -105,6 +108,38 @@ importable() {
   fi
 }
 
+# Stages a project exactly as upstream stores it. A project's own .gitattributes
+# applies inside this repository too, and a `* text=auto` there rewrites any
+# CRLF file upstream committed before adopting the rule (Cataclysm's
+# CDDA.natvis): the copy would quietly stop being byte-identical.
+# $GIT_DIR/info/attributes outranks every in-tree file, so a temporary -text
+# there stores each byte as it came. -f because the root .gitignore's 'dist'
+# and '*.log' patterns would otherwise drop upstream files without a word.
+stage() {
+  local name="$1" attrs saved=""
+  attrs="$(git -C "$ROOT" rev-parse --git-path info/attributes)"
+  case "$attrs" in /*) ;; *) attrs="$ROOT/$attrs" ;; esac
+  mkdir -p "$(dirname "$attrs")"
+  if [ -f "$attrs" ]; then saved="$(cat "$attrs")"; fi
+  printf '%s\n/third_party/%s/** -text -filter -ident\n' "$saved" "$name" >"$attrs"
+  local ok=0
+  # New files are hashed as they are; files already tracked keep a stale,
+  # normalised blob unless --renormalize makes git read them again.
+  git -C "$ROOT" add -f -- "third_party/$name" || ok=1
+  git -C "$ROOT" add -f --renormalize -- "third_party/$name" || ok=1
+  if [ -n "$saved" ]; then printf '%s\n' "$saved" >"$attrs"; else rm -f "$attrs"; fi
+  return "$ok"
+}
+
+if [ "$restage" = 1 ]; then
+  if [ -z "$only" ] || [ ! -d "$ROOT/third_party/$only" ]; then
+    echo "--stage needs the name of a project already in third_party/." >&2
+    exit 2
+  fi
+  stage "$only" && echo "$only: staged byte for byte."
+  exit
+fi
+
 status=0
 while read -r name url pinned; do
   [ -z "$only" ] || [ "$name" = "$only" ] || continue
@@ -133,14 +168,15 @@ while read -r name url pinned; do
   if ! importable "$name" "$out"; then status=1; continue; fi
   rm -rf "${ROOT:?}/third_party/$name"
   mv "$out" "$ROOT/third_party/$name"
+  if ! stage "$name"; then echo "$name: imported but could not be staged." >&2; status=1; continue; fi
   if [ "$commit" != "$pinned" ]; then
     awk -v n="$name" -v c="$commit" '$1 == n && !/^[[:space:]]*#/ { sub($3, c) } { print }' "$MANIFEST" >"$work/UPSTREAM"
     cat "$work/UPSTREAM" >"$MANIFEST"
   fi
-  echo "$name: imported $commit into third_party/$name."
+  echo "$name: imported $commit into third_party/$name and staged it."
 done < <(entries)
 
 if [ "$check" = 0 ] && [ "$status" = 0 ]; then
-  echo "Commit with: git add -f third_party   (-f: the root .gitignore's 'dist' and '*.log' patterns must not drop upstream files)"
+  echo "Staged byte for byte; commit with: git add third_party/UPSTREAM && git commit"
 fi
 exit "$status"
