@@ -91,4 +91,6 @@ export const ru: Partial<Record<keyof typeof en, string>> = {
   "common.close": "Закрыть",
   "common.copied": "Скопировано",
   "common.lastChecked": "последняя проверка {when}",
+
+  "backend.notConnected": "Не сохранено: сервер не подключён. Эта сборка работает без сети.",
 };

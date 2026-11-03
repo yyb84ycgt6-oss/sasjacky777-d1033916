@@ -89,4 +89,6 @@ export const uk: Partial<Record<keyof typeof en, string>> = {
   "common.close": "Закрити",
   "common.copied": "Скопійовано",
   "common.lastChecked": "остання перевірка {when}",
+
+  "backend.notConnected": "Не збережено: сервер не підключено. Ця збірка працює без мережі.",
 };

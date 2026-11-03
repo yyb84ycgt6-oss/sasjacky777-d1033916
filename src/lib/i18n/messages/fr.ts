@@ -98,4 +98,6 @@ export const fr: Partial<Record<keyof typeof en, string>> = {
   "common.close": "Fermer",
   "common.copied": "Copié",
   "common.lastChecked": "dernière vérification {when}",
+
+  "backend.notConnected": "Non enregistré : aucun serveur n'est connecté. Cette version fonctionne hors ligne.",
 };

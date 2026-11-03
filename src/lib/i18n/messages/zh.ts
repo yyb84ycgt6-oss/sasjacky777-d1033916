@@ -83,4 +83,6 @@ export const zhHans: Partial<Record<keyof typeof en, string>> = {
   "common.close": "关闭",
   "common.copied": "已复制",
   "common.lastChecked": "上次检测 {when}",
+
+  "backend.notConnected": "未保存：未连接后端。此版本离线运行。",
 };

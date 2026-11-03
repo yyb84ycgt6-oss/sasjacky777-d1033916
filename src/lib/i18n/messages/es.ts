@@ -94,4 +94,6 @@ export const es: Partial<Record<keyof typeof en, string>> = {
   "common.close": "Cerrar",
   "common.copied": "Copiado",
   "common.lastChecked": "última comprobación {when}",
+
+  "backend.notConnected": "No se ha guardado: no hay ningún servidor conectado. Esta versión funciona sin conexión.",
 };

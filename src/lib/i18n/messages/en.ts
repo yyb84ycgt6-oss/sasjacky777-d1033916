@@ -89,6 +89,8 @@ export const en = {
   "common.close": "Close",
   "common.copied": "Copied",
   "common.lastChecked": "last checked {when}",
+
+  "backend.notConnected": "Not saved: no backend is connected. This build runs offline.",
 } as const;
 
 export type MessageKey = keyof typeof en;
