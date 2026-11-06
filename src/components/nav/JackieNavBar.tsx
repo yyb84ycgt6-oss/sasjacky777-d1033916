@@ -39,6 +39,8 @@ import {
   NAV_ROW_CHOICES,
   NAV_LABEL_SIZES,
   NAV_TINTS,
+  NAV_ICON_SIZES,
+  NAV_THEMES,
   clampPos,
   distributeRows,
   nextMode,
@@ -97,7 +99,7 @@ function BarButton({
   );
   const body = (
     <>
-      <Icon style={{ width: 18, height: 18 }} aria-hidden />
+      <Icon style={{ width: "var(--nav-icon,18px)", height: "var(--nav-icon,18px)" }} aria-hidden />
       {showLabel && <span className="text-[length:var(--nav-label,8px)] font-medium leading-none">{label}</span>}
       {!!badge && (
         <span className="absolute -right-0.5 -top-0.5 min-w-3.5 rounded-full bg-primary px-1 text-[8px] font-bold leading-[14px] text-primary-foreground">
@@ -180,7 +182,7 @@ export function JackieNavBar() {
   const showLabels = prefs.mode === "expanded";
   const controlsOnly = prefs.mode === "controls";
   const horizontal = prefs.orientation === "horizontal";
-  const pos = dragPos ?? prefs.pos;
+  const pos = prefs.snapped ? null : dragPos ?? prefs.pos;
 
   const pinnedPages = useMemo(() => NAV_PAGES.filter((p) => prefs.pinned.includes(p.id)), [prefs.pinned]);
 
@@ -287,7 +289,7 @@ export function JackieNavBar() {
 
   const onPointerDown = (e: React.PointerEvent) => {
     const el = navRef.current;
-    if (!el || e.button > 0) return;
+    if (!el || e.button > 0 || prefs.snapped) return;
     const rect = el.getBoundingClientRect();
     dragOffset.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
     holdStart.current = { x: e.clientX, y: e.clientY, pointerId: e.pointerId };
@@ -365,23 +367,38 @@ export function JackieNavBar() {
           // without touching the app's own colours.
           ["--primary" as string]: `var(--${prefs.tint})`,
           ["--nav-label" as string]: `${prefs.labelSize}px`,
+          ["--nav-icon" as string]: `${prefs.iconSize}px`,
         }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endHold}
         onPointerCancel={endHold}
         onClickCapture={onClickCapture}
-        title="Press and hold to move"
+        title={prefs.snapped ? undefined : "Press and hold to move"}
         className={cn(
           "liquid-glass fixed z-[70] w-fit rounded-2xl px-2 py-1.5 text-foreground",
           held && "liquid-glass-held cursor-grabbing",
+          prefs.theme !== "plain" && `nav-theme-${prefs.theme}`,
           horizontal ? "flex items-center gap-0.5" : "flex flex-col gap-0.5",
         )}
       >
         {/* The control strip. It stacks against the bar's direction — vertical
             beside a horizontal bar, horizontal above a vertical one — so it
             costs the least room either way, as in Cybernetic. */}
-        <div className={cn("flex items-center gap-[2px] text-muted-foreground/50", horizontal ? "flex-col pr-0.5 justify-center" : "flex-row pb-0.5")}>
+        <div
+          style={{ zoom: prefs.iconSize / 18 }}
+          className={cn("flex items-center gap-[2px] text-muted-foreground/50", horizontal ? "flex-col pr-0.5 justify-center" : "flex-row pb-0.5")}
+        >
+          <button
+            type="button"
+            onClick={() => setPrefs((p) => ({ ...p, snapped: !p.snapped }))}
+            className={cn(microButton, prefs.snapped && "text-primary")}
+            aria-pressed={prefs.snapped}
+            aria-label={prefs.snapped ? "Unsnap bar so it can be moved" : "Snap and lock bar in place"}
+            title={prefs.snapped ? "Snapped — click to unlock and move" : "Free — click to snap and lock"}
+          >
+            {prefs.snapped ? <Lock style={{ width: 10, height: 10 }} /> : <LockOpen style={{ width: 10, height: 10 }} />}
+          </button>
           <button
             type="button"
             onClick={() => (window.history.length > 1 ? navigate(-1) : navigate("/"))}
@@ -463,7 +480,7 @@ export function JackieNavBar() {
                   showLabels ? "px-2.5 py-1.5" : "px-1.5 py-1",
                 )}
               >
-                <Plus style={{ width: 18, height: 18 }} aria-hidden />
+                <Plus style={{ width: "var(--nav-icon,18px)", height: "var(--nav-icon,18px)" }} aria-hidden />
                 {showLabels && <span className="text-[length:var(--nav-label,8px)] font-medium leading-none">Create</span>}
               </button>
             </PopoverTrigger>
@@ -493,7 +510,7 @@ export function JackieNavBar() {
           )}
         >
           <span className="relative">
-            <Bot style={{ width: 18, height: 18 }} aria-hidden />
+            <Bot style={{ width: "var(--nav-icon,18px)", height: "var(--nav-icon,18px)" }} aria-hidden />
             <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-primary" />
           </span>
           {showLabels && <span className="font-mono text-[8px] font-semibold leading-none tracking-wider">SANDi</span>}
@@ -570,7 +587,7 @@ function NavEditor({
   onTogglePage: (id: string) => void;
   onToggleWidget: (id: NavWidgetId) => void;
   onRows: (rows: NavPrefs["rows"]) => void;
-  onStyle: (patch: Partial<Pick<NavPrefs, "labelSize" | "tint">>) => void;
+  onStyle: (patch: Partial<Pick<NavPrefs, "labelSize" | "tint" | "iconSize" | "theme">>) => void;
   onResetPosition: () => void;
   onClose: () => void;
 }) {
@@ -744,6 +761,35 @@ function NavEditor({
                   style={{ fontSize: s }}
                 >
                   A
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-1" role="group" aria-label="Icon size">
+              <span className="mr-1">Icons</span>
+              {NAV_ICON_SIZES.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => onStyle({ iconSize: s })}
+                  aria-pressed={prefs.iconSize === s}
+                  aria-label={`Icon size ${s}px`}
+                  className={cn("h-8 min-w-8 rounded px-1 font-medium", prefs.iconSize === s ? "bg-primary text-primary-foreground" : "hover:text-foreground")}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-wrap items-center gap-1" role="group" aria-label="Bar theme">
+              <span className="mr-1">Theme</span>
+              {NAV_THEMES.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => onStyle({ theme: t })}
+                  aria-pressed={prefs.theme === t}
+                  className={cn("h-8 rounded-lg px-2 capitalize", t !== "plain" && `nav-theme-${t}`, prefs.theme === t ? "ring-2 ring-foreground" : "")}
+                >
+                  {t}
                 </button>
               ))}
             </div>
