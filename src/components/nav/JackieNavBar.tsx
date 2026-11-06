@@ -37,6 +37,8 @@ import { NAV_PAGES, NAV_SECTIONS, NAV_WIDGETS, type NavPage, type NavWidgetId } 
 import {
   NAV_MODES,
   NAV_ROW_CHOICES,
+  NAV_LABEL_SIZES,
+  NAV_TINTS,
   clampPos,
   distributeRows,
   nextMode,
@@ -557,6 +559,7 @@ function NavEditor({
   onTogglePage,
   onToggleWidget,
   onRows,
+  onStyle,
   onResetPosition,
   onClose,
 }: {
