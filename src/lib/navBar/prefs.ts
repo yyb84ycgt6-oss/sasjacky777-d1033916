@@ -28,6 +28,12 @@ export const NAV_LABEL_SIZES: readonly NavLabelSize[] = [8, 10, 12, 14];
  */
 export type NavTint = "primary" | "accent" | "foreground" | "destructive";
 export const NAV_TINTS: readonly NavTint[] = ["primary", "accent", "foreground", "destructive"];
+/** Icon size in px, for the bar's buttons; the control strip scales with it. */
+export type NavIconSize = 16 | 18 | 22 | 26;
+export const NAV_ICON_SIZES: readonly NavIconSize[] = [16, 18, 22, 26];
+/** Animated looks for the bar alone. "plain" is the original glass. */
+export type NavTheme = "plain" | "neon" | "pulse" | "aurora" | "disco";
+export const NAV_THEMES: readonly NavTheme[] = ["plain", "neon", "pulse", "aurora", "disco"];
 
 export interface NavPos {
   x: number;
@@ -42,6 +48,13 @@ export interface NavPrefs {
   mode: NavMode;
   labelSize: NavLabelSize;
   tint: NavTint;
+  iconSize: NavIconSize;
+  theme: NavTheme;
+  /**
+   * Snapped bars sit at the default spot and ignore press-and-hold, so a new
+   * visitor never ends up with a bar wandering over the page. Unsnap to drag.
+   */
+  snapped: boolean;
   /** Null until the bar has been dragged: it then rests at its default spot. */
   pos: NavPos | null;
 }
@@ -54,6 +67,9 @@ export const DEFAULT_NAV_PREFS: NavPrefs = {
   mode: "expanded",
   labelSize: 8,
   tint: "primary",
+  iconSize: 18,
+  theme: "plain",
+  snapped: true,
   pos: null,
 };
 
@@ -103,6 +119,10 @@ export function parseNavPrefs(raw: string | null): NavPrefs {
     mode: (NAV_MODES as readonly unknown[]).includes(data.mode) ? (data.mode as NavMode) : "expanded",
     labelSize: (NAV_LABEL_SIZES as readonly unknown[]).includes(data.labelSize) ? (data.labelSize as NavLabelSize) : 8,
     tint: (NAV_TINTS as readonly unknown[]).includes(data.tint) ? (data.tint as NavTint) : "primary",
+    iconSize: (NAV_ICON_SIZES as readonly unknown[]).includes(data.iconSize) ? (data.iconSize as NavIconSize) : 18,
+    theme: (NAV_THEMES as readonly unknown[]).includes(data.theme) ? (data.theme as NavTheme) : "plain",
+    // Older saved layouts that were already dragged somewhere stay free.
+    snapped: typeof data.snapped === "boolean" ? data.snapped : !(pos && isFiniteNumber(pos.x)),
     pos: pos && isFiniteNumber(pos.x) && isFiniteNumber(pos.y) ? { x: pos.x, y: pos.y } : null,
   };
 }

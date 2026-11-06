@@ -195,6 +195,26 @@
       0 18px 48px -12px hsl(0 0% 0% / 0.55);
   }
 
+  /* Animated looks for the nav bar only, built from theme tokens. */
+  .nav-theme-neon { border-color: hsl(var(--primary)); animation: nav-neon 1.8s ease-in-out infinite; }
+  .nav-theme-pulse { animation: nav-pulse 2.4s ease-in-out infinite; }
+  .nav-theme-aurora, .nav-theme-disco {
+    background-image: linear-gradient(120deg, hsl(var(--primary) / 0.35), hsl(var(--accent) / 0.35), hsl(var(--destructive) / 0.3), hsl(var(--primary) / 0.35));
+    background-size: 300% 300%;
+    animation: nav-aurora 8s ease infinite;
+  }
+  .nav-theme-disco { animation: nav-aurora 2s linear infinite, nav-hue 4s linear infinite; }
+  @keyframes nav-neon {
+    0%, 100% { box-shadow: 0 0 6px hsl(var(--primary) / 0.6), 0 0 18px hsl(var(--primary) / 0.35); }
+    50% { box-shadow: 0 0 12px hsl(var(--primary)), 0 0 36px hsl(var(--primary) / 0.6); }
+  }
+  @keyframes nav-pulse { 0%, 100% { border-color: hsl(var(--primary) / 0.3); } 50% { border-color: hsl(var(--accent)); box-shadow: 0 0 24px hsl(var(--accent) / 0.5); } }
+  @keyframes nav-aurora { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+  @keyframes nav-hue { to { filter: hue-rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    .nav-theme-neon, .nav-theme-pulse, .nav-theme-aurora, .nav-theme-disco { animation: none; }
+  }
+
   .jackie-badge {
     @apply inline-flex items-center px-2 py-0.5 text-xs border rounded-sm;
     font-family: var(--font-mono);
