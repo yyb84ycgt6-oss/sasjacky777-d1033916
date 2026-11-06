@@ -27,6 +27,8 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, ArrowLeftRight, ArrowUpRightFromSquare, Bot, Check, Eye, EyeOff, GripHorizontal,
   Hammer, Maximize2, Minimize2, Pencil, Plus, SquareKanban, StickyNote, Volume2, VolumeX, X,
+  Lock,
+  LockOpen,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
