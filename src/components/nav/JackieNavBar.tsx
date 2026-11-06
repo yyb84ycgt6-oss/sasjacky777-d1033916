@@ -37,6 +37,8 @@ import { NAV_PAGES, NAV_SECTIONS, NAV_WIDGETS, type NavPage, type NavWidgetId } 
 import {
   NAV_MODES,
   NAV_ROW_CHOICES,
+  NAV_LABEL_SIZES,
+  NAV_TINTS,
   clampPos,
   distributeRows,
   nextMode,
@@ -96,7 +98,7 @@ function BarButton({
   const body = (
     <>
       <Icon style={{ width: 18, height: 18 }} aria-hidden />
-      {showLabel && <span className="text-[8px] font-medium leading-none">{label}</span>}
+      {showLabel && <span className="text-[length:var(--nav-label,8px)] font-medium leading-none">{label}</span>}
       {!!badge && (
         <span className="absolute -right-0.5 -top-0.5 min-w-3.5 rounded-full bg-primary px-1 text-[8px] font-bold leading-[14px] text-primary-foreground">
           {badge}
@@ -355,7 +357,15 @@ export function JackieNavBar() {
       <nav
         ref={navRef}
         aria-label="Main navigation"
-        style={{ ...barStyle, touchAction: "none", userSelect: "none" }}
+        style={{
+          ...barStyle,
+          touchAction: "none",
+          userSelect: "none",
+          // Scoped to the bar: re-points its highlight at another theme token
+          // without touching the app's own colours.
+          ["--primary" as string]: `var(--${prefs.tint})`,
+          ["--nav-label" as string]: `${prefs.labelSize}px`,
+        }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endHold}
@@ -454,7 +464,7 @@ export function JackieNavBar() {
                 )}
               >
                 <Plus style={{ width: 18, height: 18 }} aria-hidden />
-                {showLabels && <span className="text-[8px] font-medium leading-none">Create</span>}
+                {showLabels && <span className="text-[length:var(--nav-label,8px)] font-medium leading-none">Create</span>}
               </button>
             </PopoverTrigger>
             <PopoverContent className="liquid-glass w-52 rounded-2xl p-1.5" onPointerDown={(e) => e.stopPropagation()}>
@@ -513,6 +523,7 @@ export function JackieNavBar() {
           onToggleWidget={(id) => setPrefs((p) => toggleWidget(p, id))}
           onTogglePage={(id) => setPrefs((p) => togglePinned(p, id))}
           onRows={(rows) => setPrefs((p) => ({ ...p, rows }))}
+          onStyle={(patch) => setPrefs((p) => ({ ...p, ...patch }))}
           onResetPosition={() => setPrefs((p) => ({ ...p, pos: null, orientation: "horizontal", rows: 1 }))}
           onClose={() => setEditing(false)}
           widgetsOn={widgetsOn}
@@ -548,6 +559,7 @@ function NavEditor({
   onTogglePage,
   onToggleWidget,
   onRows,
+  onStyle,
   onResetPosition,
   onClose,
 }: {
@@ -558,6 +570,7 @@ function NavEditor({
   onTogglePage: (id: string) => void;
   onToggleWidget: (id: NavWidgetId) => void;
   onRows: (rows: NavPrefs["rows"]) => void;
+  onStyle: (patch: Partial<Pick<NavPrefs, "labelSize" | "tint">>) => void;
   onResetPosition: () => void;
   onClose: () => void;
 }) {
@@ -696,7 +709,7 @@ function NavEditor({
             <button type="button" onClick={onClose} className="flex-1 rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground">
               Done
             </button>
-            <div className="flex gap-1 rounded-xl bg-secondary p-1" role="group" aria-label="Rows">
+            <div className="grid grid-cols-5 gap-1 rounded-xl bg-secondary p-1" role="group" aria-label="Rows">
               {NAV_ROW_CHOICES.map((r) => (
                 <button
                   key={r}
@@ -711,6 +724,41 @@ function NavEditor({
                 >
                   {r}
                 </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-3 rounded-xl bg-secondary/60 p-2 text-xs text-muted-foreground">
+            <div className="flex items-center gap-1" role="group" aria-label="Label size">
+              <span className="mr-1">Text</span>
+              {NAV_LABEL_SIZES.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => onStyle({ labelSize: s })}
+                  aria-pressed={prefs.labelSize === s}
+                  aria-label={`Label size ${s}px`}
+                  className={cn(
+                    "h-8 min-w-8 rounded px-1 font-medium",
+                    prefs.labelSize === s ? "bg-primary text-primary-foreground" : "hover:text-foreground",
+                  )}
+                  style={{ fontSize: s }}
+                >
+                  A
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-1.5" role="group" aria-label="Highlight colour">
+              <span className="mr-1">Colour</span>
+              {NAV_TINTS.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => onStyle({ tint: t })}
+                  aria-pressed={prefs.tint === t}
+                  aria-label={`Highlight ${t}`}
+                  className={cn("h-8 w-8 rounded-full border-2", prefs.tint === t ? "border-foreground" : "border-transparent")}
+                  style={{ background: `hsl(var(--${t}))` }}
+                />
               ))}
             </div>
           </div>

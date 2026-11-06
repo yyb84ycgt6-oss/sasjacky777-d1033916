@@ -86,7 +86,7 @@ describe("one person's layout", () => {
 
   it("falls back to the default bar, not a blank one, when the stored record is corrupt", () => {
     expect(parseNavPrefs("{not json")).toEqual(DEFAULT_NAV_PREFS);
-    expect(parseNavPrefs(JSON.stringify({ rows: 9, mode: "sideways", pos: { x: "a", y: 2 } }))).toMatchObject({
+    expect(parseNavPrefs(JSON.stringify({ rows: 11, mode: "sideways", pos: { x: "a", y: 2 } }))).toMatchObject({
       rows: 1,
       mode: "expanded",
       pos: null,
@@ -111,9 +111,9 @@ describe("one person's layout", () => {
     expect(NAV_WIDGETS.map((w) => w.id).sort()).toEqual(Object.keys(off.widgets).sort());
   });
 
-  it("cycles expanded → icons → controls → expanded, and rows 1 → 4 → 1, as Cybernetic does", () => {
+  it("cycles expanded → icons → controls → expanded, and rows 1 → 10 → 1, as Cybernetic does", () => {
     expect([nextMode("expanded"), nextMode("icons"), nextMode("controls")]).toEqual(["icons", "controls", "expanded"]);
-    expect([nextRows(1), nextRows(2), nextRows(3), nextRows(4)]).toEqual([2, 3, 4, 1]);
+    expect([nextRows(1), nextRows(4), nextRows(9), nextRows(10)]).toEqual([2, 5, 10, 1]);
   });
 });
 
@@ -121,7 +121,7 @@ describe("laying the buttons out", () => {
   it("never leaves an empty row, which the chunking it replaces did for five buttons on four rows", () => {
     expect(distributeRows([1, 2, 3, 4, 5], 4).map((r) => r.length)).toEqual([2, 1, 1, 1]);
     for (let n = 0; n <= 12; n++) {
-      for (let rows = 1; rows <= 4; rows++) {
+      for (let rows = 1; rows <= 10; rows++) {
         const out = distributeRows(Array.from({ length: n }, (_, i) => i), rows);
         expect(out.flat()).toHaveLength(n);
         expect(out.every((row) => row.length > 0)).toBe(true);

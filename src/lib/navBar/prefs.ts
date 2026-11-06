@@ -17,8 +17,17 @@ export type NavOrientation = "horizontal" | "vertical";
 /** Cybernetic's three stages: full labels → icons only → just the control strip. */
 export type NavMode = "expanded" | "icons" | "controls";
 export const NAV_MODES: readonly NavMode[] = ["expanded", "icons", "controls"];
-export type NavRows = 1 | 2 | 3 | 4;
-export const NAV_ROW_CHOICES: readonly NavRows[] = [1, 2, 3, 4];
+export type NavRows = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
+export const NAV_ROW_CHOICES: readonly NavRows[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+/** Label size in px. Small steps: the bar is a dense strip, not a menu. */
+export type NavLabelSize = 8 | 10 | 12 | 14;
+export const NAV_LABEL_SIZES: readonly NavLabelSize[] = [8, 10, 12, 14];
+/**
+ * Highlight colour, chosen from the theme's own tokens so it stays legible in
+ * light and dark and never introduces a colour the theme doesn't have.
+ */
+export type NavTint = "primary" | "accent" | "foreground" | "destructive";
+export const NAV_TINTS: readonly NavTint[] = ["primary", "accent", "foreground", "destructive"];
 
 export interface NavPos {
   x: number;
@@ -31,6 +40,8 @@ export interface NavPrefs {
   orientation: NavOrientation;
   rows: NavRows;
   mode: NavMode;
+  labelSize: NavLabelSize;
+  tint: NavTint;
   /** Null until the bar has been dragged: it then rests at its default spot. */
   pos: NavPos | null;
 }
@@ -41,6 +52,8 @@ export const DEFAULT_NAV_PREFS: NavPrefs = {
   orientation: "horizontal",
   rows: 1,
   mode: "expanded",
+  labelSize: 8,
+  tint: "primary",
   pos: null,
 };
 
@@ -88,6 +101,8 @@ export function parseNavPrefs(raw: string | null): NavPrefs {
     orientation: data.orientation === "vertical" ? "vertical" : "horizontal",
     rows: (NAV_ROW_CHOICES as readonly unknown[]).includes(data.rows) ? (data.rows as NavRows) : 1,
     mode: (NAV_MODES as readonly unknown[]).includes(data.mode) ? (data.mode as NavMode) : "expanded",
+    labelSize: (NAV_LABEL_SIZES as readonly unknown[]).includes(data.labelSize) ? (data.labelSize as NavLabelSize) : 8,
+    tint: (NAV_TINTS as readonly unknown[]).includes(data.tint) ? (data.tint as NavTint) : "primary",
     pos: pos && isFiniteNumber(pos.x) && isFiniteNumber(pos.y) ? { x: pos.x, y: pos.y } : null,
   };
 }
