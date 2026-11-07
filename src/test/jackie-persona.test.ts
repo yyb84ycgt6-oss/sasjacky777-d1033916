@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { BASE_PROMPT, buildSystemPrompt } from "../../supabase/functions/_shared/persona";
+import { BASE_PROMPT, STRATEGIC_DIRECTIVES, PERSONA_SOURCE, buildSystemPrompt } from "../../supabase/functions/_shared/persona";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const RIG_PROMPT = readFileSync(path.join(REPO_ROOT, "Jackie", "prompts", "system_prompt.md"), "utf8");
@@ -16,6 +16,19 @@ const honestyBullets = (() => {
 })();
 
 describe("Jackie's persona", () => {
+  it("includes strategic guidance once inside the sealed persona without replacing owner morals or context", () => {
+    const morals = "Owner boundary: ask before changing hardware.";
+    const context = "Observed: network disconnected.";
+    for (const memory of ["", context]) {
+      const prompt = buildSystemPrompt(memory, morals);
+      expect(prompt.split(STRATEGIC_DIRECTIVES)).toHaveLength(2);
+      expect(prompt.indexOf(STRATEGIC_DIRECTIVES)).toBeLessThan(prompt.indexOf(morals));
+      expect(prompt).toContain(morals);
+      if (memory) expect(prompt.indexOf(morals)).toBeLessThan(prompt.indexOf(memory));
+    }
+    expect(PERSONA_SOURCE).toContain(STRATEGIC_DIRECTIVES);
+    expect(RIG_PROMPT).toContain(STRATEGIC_DIRECTIVES);
+  });
   it("gives every engine the honesty rules, whether or not there is project context", () => {
     for (const prompt of [buildSystemPrompt(""), buildSystemPrompt("Router decision: keep the chain.")]) {
       expect(prompt).toContain("Never invent facts, numbers, quotes, sources, links, APIs, file contents, or memories.");

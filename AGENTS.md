@@ -39,6 +39,8 @@ Do not report a change as working on the strength of a typecheck alone.
    the UI.
 6. **Every chat engine builds its system prompt from `_shared/persona.ts`**, so
    a fallback still answers as Jackie.
+   Strategic guidance remains inside the fingerprinted base persona and mirrors
+   the rig prompt; never replace owner-managed morals to add shared guidance.
 7. **Python is a package with a 3.9 floor.** Relative imports, `Optional[X]` not
    `X | None`, entrypoints run as `python -m …` from the repo root.
 8. **Never report success when nothing happened.** An empty stream, a failed
