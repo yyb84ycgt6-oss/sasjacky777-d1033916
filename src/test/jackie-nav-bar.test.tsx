@@ -144,10 +144,26 @@ describe("the nav bar", () => {
     expect(within(bar()).getByText("Tasks")).toBeInTheDocument();
   });
 
+  it("starts snapped for a new visitor, so holding it does not move it", () => {
+    vi.useFakeTimers();
+    try {
+      renderBar();
+      const tasks = within(bar()).getByRole("link", { name: "Tasks" });
+      fireEvent.pointerDown(tasks, { clientX: 100, clientY: 100, pointerId: 1 });
+      vi.advanceTimersByTime(600);
+      fireEvent.pointerMove(tasks, { clientX: 160, clientY: 60, pointerId: 1 });
+      fireEvent.pointerUp(tasks, { pointerId: 1 });
+      expect(JSON.parse(localStorage.getItem(navPrefsKey("user-a")) ?? "{}").pos ?? null).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("moves only after a half-second hold, and dropping it does not also press the button underneath", () => {
     vi.useFakeTimers();
     try {
       renderBar();
+      fireEvent.click(within(bar()).getByRole("button", { name: "Unsnap bar so it can be moved" }));
       const tasks = within(bar()).getByRole("link", { name: "Tasks" });
 
       // A quick press is a click, not a drag.
