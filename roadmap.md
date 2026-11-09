@@ -10,6 +10,7 @@
 - [x] Guests: cannot hold API keys or outside-service connections; other guest access stays own-rows-only
 
 ## Open
+- [ ] Complete bot integration and verify shared persona on every supported platform
 - [ ] Bazar Stand real payment verification + fulfilment (blocked: needs a payment provider decision; purchases currently wait and never complete)
 - [ ] Game economy server-authoritative (diamonds/claims still live in the browser; ledger only audits)
 - [ ] Offline photo question on Thinking Chain (blocked: needs a real GPU browser — the operator's RTX 3090)
