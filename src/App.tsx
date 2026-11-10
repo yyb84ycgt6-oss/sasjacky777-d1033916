@@ -51,6 +51,7 @@ const TaskCalendar = lazy(() => import("./pages/TaskCalendar"));
 const BotFoundry = lazy(() => import("./pages/BotFoundry"));
 const BotSwarm = lazy(() => import("./pages/BotSwarm"));
 const JackieBotLocal = lazy(() => import("./pages/JackieBotLocal"));
+const OfflineCheck = lazy(() => import("./pages/OfflineCheck"));
 const ApiKeyManager = lazy(() => import("./pages/ApiKeyManager"));
 const GunitLayout = lazy(() => import("./pages/gunit/GunitLayout"));
 const GunitDashboard = lazy(() => import("./pages/gunit/GunitDashboard"));
@@ -407,6 +408,7 @@ const App = () => (
                   <Route path="/providers" element={<ProtectedRoute><AIProviders /></ProtectedRoute>} />
                   <Route path="/grok" element={<ProtectedRoute><GrokStudio /></ProtectedRoute>} />
                   <Route path="/repair" element={<ProtectedRoute><RepairBay /></ProtectedRoute>} />
+                  <Route path="/offline-check" element={<ProtectedRoute><OfflineCheck /></ProtectedRoute>} />
                   <Route path="/bridge" element={<ProtectedRoute><LocalBridge /></ProtectedRoute>} />
                   <Route path="/pods" element={<ProtectedRoute><PodStation /></ProtectedRoute>} />
                   <Route path="/eyepod" element={<ProtectedRoute><PodStation /></ProtectedRoute>} />
