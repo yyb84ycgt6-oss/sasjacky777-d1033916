@@ -50,6 +50,7 @@ const TaskBoard = lazy(() => import("./pages/TaskBoard"));
 const TaskCalendar = lazy(() => import("./pages/TaskCalendar"));
 const BotFoundry = lazy(() => import("./pages/BotFoundry"));
 const BotSwarm = lazy(() => import("./pages/BotSwarm"));
+const JackieBotLocal = lazy(() => import("./pages/JackieBotLocal"));
 const ApiKeyManager = lazy(() => import("./pages/ApiKeyManager"));
 const GunitLayout = lazy(() => import("./pages/gunit/GunitLayout"));
 const GunitDashboard = lazy(() => import("./pages/gunit/GunitDashboard"));
@@ -330,6 +331,14 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <BotFoundry />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/jackie-bot"
+                    element={
+                      <ProtectedRoute>
+                        <JackieBotLocal />
                       </ProtectedRoute>
                     }
                   />
