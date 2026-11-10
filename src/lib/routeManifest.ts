@@ -31,6 +31,7 @@ export const CORE_ROUTES: RouteEntry[] = [
   { path: "/pc", label: "The PC", group: "core" },
   { path: "/pc-apps", label: "PC App Library", group: "core" },
   { path: "/repair", label: "Repair Bay", group: "core" },
+  { path: "/offline-check", label: "Offline check", group: "core" },
   { path: "/bridge", label: "Local Bridge (terminal + model vault)", group: "core" },
   { path: "/play", label: "Play", group: "core" },
   { path: "/craft", label: "CollinSurvivalCraft (Minecraft-style block building and survival)", group: "core" },
