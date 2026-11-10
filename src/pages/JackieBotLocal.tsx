@@ -17,11 +17,12 @@ export default function JackieBotLocal() {
     setBusy(true);
     setStatus("");
     const r = await askJackieBotLocal(text, { history: turns });
-    if (r.ok) {
+    if ("error" in r) setStatus(r.error);
+    else {
       setTurns([...turns, { role: "user", content: text }, { role: "assistant", content: r.reply }]);
       setInput("");
       setStatus(`Answered by ${r.model} on LM Studio${r.personaFromCache ? " (saved persona)" : ""}.`);
-    } else setStatus(r.error);
+    }
     setBusy(false);
   };
 

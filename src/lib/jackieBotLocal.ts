@@ -32,7 +32,7 @@ export async function askJackieBotLocal(
 
   const persona = await (deps.persona ?? (() => fetchDevicePersona()))();
   // Without her persona this would be an anonymous model, so refuse instead.
-  if (!persona.ok) return { ok: false, error: `${persona.issue.title}. ${persona.issue.recovery}` };
+  if ("issue" in persona) return { ok: false, error: `${persona.issue.title}. ${persona.issue.recovery}` };
 
   const model = pickModel(await listModels(fetchImpl), options.model);
   if (!model) {
