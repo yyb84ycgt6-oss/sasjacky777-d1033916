@@ -80,6 +80,7 @@ Conversation context itself has no ceiling. `src/lib/microai/ledger.ts` is an en
 `src/lib/autocorrect.ts` is the one word list; `extension/autocorrect.js` carries a copy and `src/test/autocorrect.test.ts` checks they agree, so the app and other sites never correct differently. The word list runs first and automatically; any AI layer only adds on top, never replaces it.
 
 ## Trust boundaries
+- Offline diagnostics treat discovery and worker registration as evidence, not proof of inference or offline reopening; reply verification uses only the saved account persona and LM Studio loopback, and reports never include prompts or reply text.
 - Only an account with the `owner` role may replace an engine's system prompt; anyone else's `system` text rides inside the first user turn (`carryBrief`), because the persona and morals must survive any caller.
 - Value (diamonds, claims, purchases) is decided by `_shared/gameLedger.ts` rules on the server, never by amounts in the request; a purchase needs a verified payment event, which does not exist yet.
 - The LAN relay admits only the game's own origins, lets guests join only worlds a host opened (`?role=host`), and locks out addresses that keep guessing codes.

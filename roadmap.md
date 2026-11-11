@@ -10,6 +10,7 @@
 - [x] Guests: cannot hold API keys or outside-service connections; other guest access stays own-rows-only
 
 ## Open
+- [ ] Make offline checks evidence-based, add explicit local reply verification and a device-only report
 - [ ] Complete bot integration and verify shared persona on every supported platform
 - [ ] Spawn the nav diagonally at the upper right without covering inputs or controls
 - [ ] Bazar Stand real payment verification + fulfilment (blocked: needs a payment provider decision; purchases currently wait and never complete)
