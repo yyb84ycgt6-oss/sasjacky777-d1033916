@@ -25,7 +25,7 @@ export async function verifyOfflineReply(deps: ReplyDeps = {}): Promise<CheckRes
         fetchImpl,
         persona: async () => ({ ok: true, prompt: persona.prompt, fromCache: true }),
       });
-      if (!result.ok) return { ...base, status: "fail", detail: result.error };
+      if (result.ok === false) return { ...base, status: "fail", detail: (result as { error?: string }).error ?? "Local reply failed." };
       // The report deliberately excludes reply text and any profile content.
       return { ...base, status: "pass", detail: `${result.model} generated a nonempty reply using the saved persona. No online provider was called. Offline page reopening is a separate check.` };
     } finally { clearTimeout(timer); }
