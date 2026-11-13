@@ -109,7 +109,7 @@ serve(async (req) => {
 
     const selected = chosen.model;
 
-    const guarded = await guardedSystemPrompt(FUNCTION_NAME, { system, context, userId: admission.userId });
+    const guarded = await guardedSystemPrompt(FUNCTION_NAME, { system, context, userId: admission.userId, allowOverride: false });
     const systemPrompt = guarded.prompt;
 
     const apiKey = Deno.env.get("BIONIC_API_KEY");

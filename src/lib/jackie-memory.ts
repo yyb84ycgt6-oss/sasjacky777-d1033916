@@ -86,10 +86,14 @@ export async function deleteMemory(id: string): Promise<void> {
 }
 
 export async function searchMemories(searchTerm: string): Promise<JackieMemory[]> {
+  // Strip filter syntax and wildcards so a typed term can only be a literal
+  // search, never extra PostgREST conditions (e.g. via /forget).
+  const term = String(searchTerm ?? "").replace(/[,()%*_\\:"'.]/g, " ").trim().slice(0, 100);
+  if (!term) return [];
   const { data, error } = await supabase
     .from("jackie_memory")
     .select("*")
-    .or(`key.ilike.%${searchTerm}%,value.ilike.%${searchTerm}%`)
+    .or(`key.ilike.%${term}%,value.ilike.%${term}%`)
     .order("confidence", { ascending: false })
     .limit(20);
   if (error) throw error;

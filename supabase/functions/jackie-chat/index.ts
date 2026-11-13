@@ -90,7 +90,7 @@ serve(async (req) => {
     if (explicitSystem.length > MAX_SYSTEM_CHARS) {
       return json({ error: "System prompt too large" }, 413);
     }
-    const guarded = await guardedSystemPrompt("jackie-chat", { system: explicitSystem, context, userId: admission.userId });
+    const guarded = await guardedSystemPrompt("jackie-chat", { system: explicitSystem, context, userId: admission.userId, allowOverride: false });
     const systemPrompt = guarded.prompt;
 
     // A gateway that accepts the connection and then never answers leaves the

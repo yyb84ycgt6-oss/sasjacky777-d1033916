@@ -46,6 +46,8 @@ Deno.serve(async (req) => {
         .from('eye_pod_registry')
         .select('id,capability,version,content_hash,color,glyph')
         .eq('id', router.pod_id)
+        // A router may only read a pod its own owner registered.
+        .eq('user_id', router.user_id)
         .maybeSingle();
       if (pod) {
         seed = { capability: pod.capability, version: pod.version, content_hash: pod.content_hash, color: pod.color, glyph: pod.glyph };

@@ -145,11 +145,13 @@ async function mayReplacePersona(userId: string | null | undefined): Promise<boo
  */
 export async function guardedSystemPrompt(
   engine: string,
-  opts: { system?: unknown; context?: unknown; userId?: string | null },
+  opts: { system?: unknown; context?: unknown; userId?: string | null; allowOverride?: boolean },
 ): Promise<GuardedPrompt> {
   const explicit = typeof opts.system === "string" ? opts.system.trim() : "";
 
-  if (explicit && (await mayReplacePersona(opts.userId))) {
+  // Chat engines pass allowOverride:false: the persona and morals must survive
+  // every caller, the owner included; their brief rides in the first user turn.
+  if (explicit && opts.allowOverride !== false && (await mayReplacePersona(opts.userId))) {
     // The owner's Agent Lab agent or in-app operator brings its whole identity
     // in `system` — by design, so "Scout" is not Jackie under another name. The
     // owner's morals are not added: they are Jackie's, and appending prose to a

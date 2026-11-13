@@ -108,7 +108,7 @@ serve(async (req) => {
     const admission = await admit(req, "jackie-anthropic", selected);
     if (admission instanceof Response) return admission;
 
-    const guarded = await guardedSystemPrompt("jackie-anthropic", { system: explicitSystem, context, userId: admission.userId });
+    const guarded = await guardedSystemPrompt("jackie-anthropic", { system: explicitSystem, context, userId: admission.userId, allowOverride: false });
 
     const resp = await fetch(BASE, {
       method: "POST",

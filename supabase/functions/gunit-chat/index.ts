@@ -60,9 +60,11 @@ serve(async (req) => {
       .order("created_at", { ascending: false })
       .limit(10);
 
-    const contextMessages = (history || []).reverse().map((m: any) => ({
-      role: m.role, content: m.content,
-    }));
+    // Stored rows never carry the system role into the model: only user and
+    // assistant turns are replayed, so a crafted row cannot rewrite the prompt.
+    const contextMessages = (history || []).reverse()
+      .filter((m: any) => m.role === "user" || m.role === "assistant")
+      .map((m: any) => ({ role: m.role, content: String(m.content ?? "") }));
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
