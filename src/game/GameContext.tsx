@@ -96,12 +96,14 @@ async function saveToCloud(state: GameState) {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
     
-    await supabase.from('game_saves' as any).upsert({
+    const { error } = await supabase.from('game_saves').upsert({
       user_id: session.user.id,
       game_state: state as any,
-      realm_name: state.realmName,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'user_id' });
+    // The realm name already lives in game_state; a nonexistent extra column
+    // rejected every save, and returned errors do not reach catch themselves.
+    if (error) console.warn('Cloud save failed:', error.message);
   } catch (e) {
     console.warn('Cloud save failed:', e);
   }

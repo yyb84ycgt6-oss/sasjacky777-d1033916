@@ -1,5 +1,11 @@
 # Roadmap
 
+## Guest security verification (Nov 20, 2026)
+- [x] Re-scan security and review intentional guest ownership boundaries; informational notice reviewed as intended
+- [x] Verify real guest chat and game saves, cross-guest isolation, and protected credentials
+- [x] Repair and regression-test the rejected game cloud save; 25 related tests and preview build passed
+- [ ] Deep scan follow-up (blocked: background scan results pending)
+
 ## Security pass (Nov 2026) — done
 - [x] Dependencies: patched versions resolved (scanner: 0 known issues); typecheck, 1,986 tests and build pass
 - [x] Agent cycle touches only the caller's own agent
