@@ -136,9 +136,10 @@ serve(async (req) => {
     const score = scoreMatch ? Math.min(10, Math.max(0, parseInt(scoreMatch[1]))) : 5;
 
     // Save improvement
-    await admin.from("gunit_improvements").insert({
+    const { error: saveError } = await admin.from("gunit_improvements").insert({
       user_id: user.id, goal, execution, analysis, improvement, score,
     });
+    if (saveError) throw new Error(`Cycle completed but its history could not be saved: ${saveError.message}`);
 
     // Reset agent status
     if (agentId) {

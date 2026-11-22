@@ -85,3 +85,4 @@ Conversation context itself has no ceiling. `src/lib/microai/ledger.ts` is an en
 - Value (diamonds, claims, purchases) is decided by `_shared/gameLedger.ts` rules on the server, never by amounts in the request; a purchase needs a verified payment event, which does not exist yet.
 - The LAN relay admits only the game's own origins, lets guests join only worlds a host opened (`?role=host`), and locks out addresses that keep guessing codes.
 - Guest (anonymous) sessions are intentional but may never hold credentials: API keys and connections exclude them by restrictive policy and in the functions.
+- Fold references are checked before embedding and by a database trigger; cycle score writes are server-only, so alternate writers cannot bypass ownership or forge progress.

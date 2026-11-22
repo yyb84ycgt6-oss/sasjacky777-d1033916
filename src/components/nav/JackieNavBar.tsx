@@ -186,6 +186,27 @@ export function JackieNavBar() {
   const horizontal = prefs.orientation === "horizontal";
   const pos = prefs.snapped ? null : dragPos ?? prefs.pos;
 
+  // The chat must reserve the bar's actual lower-screen footprint, including
+  // custom rows and icon sizes, without moving the person's chosen layout.
+  useEffect(() => {
+    const node = navRef.current;
+    if (!node) return;
+    const update = () => {
+      const rect = node.getBoundingClientRect();
+      const clearance = rect.top >= window.innerHeight / 2 ? window.innerHeight - rect.top + 8 : 0;
+      document.documentElement.style.setProperty('--jackie-nav-clearance', `${clearance}px`);
+    };
+    update();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
+    observer?.observe(node);
+    window.addEventListener('resize', update);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', update);
+      document.documentElement.style.removeProperty('--jackie-nav-clearance');
+    };
+  }, [prefs, pos]);
+
   const pinnedPages = useMemo(() => NAV_PAGES.filter((p) => prefs.pinned.includes(p.id)), [prefs.pinned]);
 
   const togglePanel = useCallback((next: Exclude<Panel, null>) => {

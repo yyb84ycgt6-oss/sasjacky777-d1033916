@@ -140,6 +140,12 @@ serve(async (req) => {
     if (!payload || typeof payload !== "object") return json({ error: "Expected a JSON body" }, 400);
     const p = payload as Record<string, unknown>;
     const admin = adminClient();
+    // Service-role reads bypass the no-guests policies, so repeat that boundary
+    // before any secret or connection is fetched, for every action.
+    const { data: account, error: accountError } = await admin.auth.admin.getUserById(userId);
+    if (accountError || !account.user || account.user.is_anonymous) {
+      return json({ error: 'Sign in with a full account to use connections.', code: 'GUEST_REFUSED' }, 403);
+    }
 
     // ── secrets: the person only, from the app (T1) ───────────────────────
     if (p.action === "set_secret" || p.action === "clear_secret" || p.action === "secrets") {

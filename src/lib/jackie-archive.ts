@@ -142,7 +142,8 @@ export async function importArchive(file: File): Promise<ImportSummary> {
 
     if (rows.length > 0) {
       const { error } = await supabase.from("chat_messages").insert(rows);
-      if (!error) msgCount += rows.length;
+      if (error) throw new Error(`Import stopped: messages for "${title}" were not saved. ${error.message}`);
+      msgCount += rows.length;
     }
   }
 

@@ -1066,7 +1066,8 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
           memoryTier: 1,
         };
         setMessages((prev) => [...prev, sysMsg]);
-        try { await saveMessage({ conversation_id: convId, role: "assistant", content: slashResult }); } catch {}
+        try { await saveMessage({ conversation_id: convId, role: "assistant", content: slashResult }); }
+        catch { toast.error('Command completed, but its reply was not saved. Export this chat before leaving.'); }
         setIsProcessing(false);
         setRunOutcome("complete");
         recordRunEvent("App command completed", "success");
@@ -1105,6 +1106,7 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
       await saveMessage({ conversation_id: convId, role: "user", content: displayContent });
     } catch {
       console.error("Failed to persist user message");
+      toast.error('Your message was not saved. Export this chat before leaving.');
     }
 
     const newHistory: ChatMessage[] = [...chatHistory, { role: "user", content: displayContent }];
@@ -1222,6 +1224,7 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
           }
         } catch {
           console.error("Failed to persist assistant message");
+          toast.error('Jackie answered, but the reply was not saved. Export this chat before leaving.');
         }
 
         // Auto-extract memories from conversation
@@ -1317,7 +1320,7 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
             content: assistantContent,
             memory_tier: 1,
           });
-        } catch { /* the message is on screen either way */ }
+        } catch { toast.error('The partial reply was not saved. Export this chat before leaving.'); }
       } else {
         setMessages((prev) => prev.filter((m) => m.id !== assistantTempId));
       }
@@ -1548,7 +1551,7 @@ Keep it concise but thorough. No hype, no false alarm — just truth.`;
         </div>
 
         {/* Command input */}
-        <div className="border-t border-border bg-background/95 p-3 pb-[max(.75rem,env(safe-area-inset-bottom))] flex-shrink-0 md:p-5">
+        <div className="border-t border-border bg-background/95 p-3 pb-[max(.75rem,env(safe-area-inset-bottom))] flex-shrink-0 md:p-5" style={{ paddingBottom: 'calc(max(.75rem, env(safe-area-inset-bottom)) + var(--jackie-nav-clearance, 0px))' }}>
           <div className="mx-auto max-w-3xl">
             {routeNote && (
               <div className="mb-2 font-mono text-[10px] text-yellow-500" role="status">

@@ -4,8 +4,10 @@ import { GameProvider, useGame } from '@/game/GameContext';
 
 const cloud = vi.hoisted(() => ({
   upsert: vi.fn(),
+  notify: vi.fn(),
   guest: { id: 'guest-save-test', is_anonymous: true },
 }));
+vi.mock('sonner', () => ({ toast: { error: cloud.notify } }));
 vi.mock('@/integrations/supabase/client', () => ({
   supabase: {
     auth: { getSession: async () => ({ data: { session: { user: cloud.guest } } }) },
@@ -22,7 +24,7 @@ function StartGuestGame() {
 }
 
 describe('guest game cloud saving', () => {
-  beforeEach(() => { localStorage.clear(); cloud.upsert.mockReset().mockResolvedValue({ error: null }); });
+  beforeEach(() => { localStorage.clear(); cloud.notify.mockReset(); cloud.upsert.mockReset().mockResolvedValue({ error: null }); });
   afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
   it('saves a guest realm under its own user with only deployed fields', async () => {
@@ -42,5 +44,6 @@ describe('guest game cloud saving', () => {
     const ui = render(<GameProvider><StartGuestGame /></GameProvider>);
     fireEvent.click(ui.getByText('Start'));
     await waitFor(() => expect(warning).toHaveBeenCalledWith('Cloud save failed:', 'Save refused'));
+    expect(cloud.notify).toHaveBeenCalledWith('Cloud save failed. Your realm is still saved on this device.', { id: 'game-cloud-save' });
   });
 });

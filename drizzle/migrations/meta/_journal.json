@@ -29,6 +29,13 @@
       "when": 1794529960977,
       "tag": "0003_harden_game_saves_and_gunit_memory",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795355048071,
+      "tag": "0004_protect_fold_links_and_cycle_scores",
+      "breakpoints": true
     }
   ]
 }

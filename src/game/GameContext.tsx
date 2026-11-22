@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
 import { saveStateChecksum, verifyStateIntegrity } from './transactionGuard';
 import {
   GameState, Resources, March, BattleReport, TroopClass, RareMaterials, FactionId, FactionState, AllianceLevel, GearItem, CraftingMaterialType, CreatureHunt, MarchSpeed, MarchFormation, AIEventLog, GachaItem, GachaPull, BagItem, PlayerActionType,
@@ -103,9 +104,13 @@ async function saveToCloud(state: GameState) {
     }, { onConflict: 'user_id' });
     // The realm name already lives in game_state; a nonexistent extra column
     // rejected every save, and returned errors do not reach catch themselves.
-    if (error) console.warn('Cloud save failed:', error.message);
+    if (error) {
+      console.warn('Cloud save failed:', error.message);
+      toast.error('Cloud save failed. Your realm is still saved on this device.', { id: 'game-cloud-save' });
+    }
   } catch (e) {
     console.warn('Cloud save failed:', e);
+    toast.error('Cloud save failed. Your realm is still saved on this device.', { id: 'game-cloud-save' });
   }
 }
 
@@ -120,9 +125,14 @@ async function loadFromCloud(): Promise<GameState | null> {
       .eq('user_id', session.user.id)
       .maybeSingle();
     
-    if (error || !data) return null;
+    if (error) {
+      toast.error('Could not load your cloud realm. Using this device’s save instead.', { id: 'game-cloud-load' });
+      return null;
+    }
+    if (!data) return null;
     return (data as any).game_state as GameState;
   } catch {
+    toast.error('Could not load your cloud realm. Using this device’s save instead.', { id: 'game-cloud-load' });
     return null;
   }
 }
@@ -285,9 +295,10 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (session) {
-        await supabase.from('game_saves' as any).delete().eq('user_id', session.user.id);
+        const { error } = await supabase.from('game_saves').delete().eq('user_id', session.user.id);
+        if (error) toast.error('Reset on this device only; the cloud copy could not be removed.');
       }
-    } catch { /* ignore */ }
+    } catch { toast.error('Reset on this device only; the cloud copy could not be removed.'); }
   }, []);
 
   // ── AI Adaptation: track action and re-evaluate ──

@@ -267,7 +267,6 @@ const Auth = () => {
                   setLoading(true);
                   try {
                     await startDemoSession();
-                    toast.success("Welcome, demo user!");
                     enterApp();
                   } catch (err: any) {
                     toast.error(err.message || "Demo login failed.");

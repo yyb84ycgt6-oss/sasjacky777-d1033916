@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.58.0";
 import { consumeQuota } from "../_shared/entitlement.ts";
+import { verifyAccessToken } from "../_shared/authGate.ts";
 
 // These headers are defined here rather than imported from
 // `@supabase/supabase-js/cors`, the way the other thirty-odd functions define
@@ -26,14 +27,16 @@ Deno.serve(async (req) => {
     const auth = req.headers.get('Authorization');
     if (!auth) return new Response(JSON.stringify({ error: 'unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
-    const url = Deno.env.get('SUPABASE_URL')!;
-    const anon = Deno.env.get('SUPABASE_ANON_KEY')!;
-    const service = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const url = Deno.env.get('SUPABASE_URL');
+    const anon = Deno.env.get('SUPABASE_ANON_KEY');
+    const service = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    if (!url || !anon || !service) return new Response(JSON.stringify({ error: 'Service unavailable' }), { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     const lovableKey = Deno.env.get('LOVABLE_API_KEY');
 
     const userClient = createClient(url, anon, { global: { headers: { Authorization: auth } } });
-    const { data: userData, error: userErr } = await userClient.auth.getUser();
-    if (userErr || !userData.user) return new Response(JSON.stringify({ error: 'unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    const { data: userData, error: userErr } = await verifyAccessToken(userClient.auth, auth.replace(/^Bearer\s+/i, ''));
+    const userId = userData?.claims?.sub;
+    if (userErr || typeof userId !== 'string' || !userId) return new Response(JSON.stringify({ error: 'unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
     const body = await req.json();
     const text = String(body?.text ?? '').slice(0, 30000);
@@ -45,13 +48,22 @@ Deno.serve(async (req) => {
     const glyph = body?.glyph ? String(body.glyph).slice(0, 6) : null;
     if (!text) return new Response(JSON.stringify({ error: 'text required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
+    // Refuse foreign references before spending embedding credits. The database
+    // trigger repeats this boundary for races and other writers.
+    const admin = createClient(url, service);
+    for (const [table, id] of [['eye_pod_registry', pod_id], ['mesh_routers', router_id]] as const) {
+      if (!id) continue;
+      const { data: owned, error: ownershipError } = await admin.from(table).select('id').eq('id', id).eq('user_id', userId).maybeSingle();
+      if (ownershipError || !owned) return new Response(JSON.stringify({ error: 'Pod or router unavailable to this account' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
     if (!lovableKey) {
       return new Response(JSON.stringify({ error: 'LOVABLE_API_KEY not configured', needs_secret: 'LOVABLE_API_KEY' }), { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
     // Metered like every other function that spends the project's AI credit.
     // This one was missed when the rest were gated, so any account could loop on
     // it without limit — and an empty balance takes the main chat down with it.
-    const denied = await consumeQuota({ userId: userData.user.id, functionName: 'pod-fold' });
+    const denied = await consumeQuota({ userId, functionName: 'pod-fold' });
     if (denied) return denied;
 
     const embRes = await fetch('https://ai.gateway.lovable.dev/v1/embeddings', {
@@ -72,9 +84,8 @@ Deno.serve(async (req) => {
     if (!Array.isArray(vector)) return new Response(JSON.stringify({ error: 'no embedding' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
     const source_hash = await sha256(text);
-    const admin = createClient(url, service);
     const { data, error } = await admin.from('pod_folds').insert({
-      user_id: userData.user.id,
+      user_id: userId,
       pod_id, router_id, capability, source_ref, source_hash, color, glyph,
       embedding: vector as any,
     }).select('id,source_hash').single();
