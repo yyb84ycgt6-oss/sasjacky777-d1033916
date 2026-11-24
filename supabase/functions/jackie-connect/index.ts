@@ -15,7 +15,7 @@
  * carries CORS headers, failures included (rule 3).
  */
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { adminClient, consumeQuota, corsHeaders, json, preflight, requireUser } from "../_shared/entitlement.ts";
+import { adminClient, consumeQuota, corsHeaders, json, preflight, requireOwnerUser } from "../_shared/entitlement.ts";
 import {
   buildRequest, checkCallArgs, CONNECTION_LIMITS, isPublicAddress, isWrite, redact, validateConnectionSpec, wrapResponse,
   type ConnectionOperation,
@@ -131,7 +131,11 @@ serve(async (req) => {
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
   try {
-    const auth = await requireUser(req);
+    // Outbound requests to person-configured hosts carry saved credentials, so
+    // like the other functions that reach the owner's own services, only an
+    // account holding the owner role may use them (security finding: any
+    // signed-in user could aim this function at a destination they chose).
+    const auth = await requireOwnerUser(req);
     if (auth instanceof Response) return auth;
     const userId = auth.userId;
     const clientId = clientIdOf(req);

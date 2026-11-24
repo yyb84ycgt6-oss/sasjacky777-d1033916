@@ -39,7 +39,7 @@ describe('privileged handlers preserve account boundaries', () => {
       const read = vi.fn();
       const network = vi.fn();
       const run = loadHandler('supabase/functions/jackie-connect/index.ts', {
-        requireUser: async () => ({ userId: 'guest-one' }),
+        requireOwnerUser: async () => ({ userId: 'guest-one' }),
         adminClient: () => ({ auth: { admin: { getUserById: async () => ({ data: { user: { is_anonymous: true } }, error: null }) } }, from: read }),
         json: (body: object, status = 200) => new Response(JSON.stringify(body), { status }),
         fetch: network,
@@ -49,4 +49,18 @@ describe('privileged handlers preserve account boundaries', () => {
       expect(network).not.toHaveBeenCalled();
     });
   }
+
+  it('refuses a signed-in non-owner before any connection is read or any request leaves', async () => {
+    const read = vi.fn();
+    const network = vi.fn();
+    const run = loadHandler('supabase/functions/jackie-connect/index.ts', {
+      requireOwnerUser: async () => new Response(JSON.stringify({ code: 'OWNER_ONLY' }), { status: 403 }),
+      adminClient: () => ({ from: read }),
+      json: (body: object, status = 200) => new Response(JSON.stringify(body), { status }),
+      fetch: network,
+    });
+    expect((await run({ action: 'call', connection: 'x', operation: 'y' })).status).toBe(403);
+    expect(read).not.toHaveBeenCalled();
+    expect(network).not.toHaveBeenCalled();
+  });
 });
