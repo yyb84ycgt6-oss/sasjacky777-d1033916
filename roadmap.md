@@ -17,6 +17,9 @@
 - [x] Bazar Stand: no client-side "verified" payment credits
 - [x] Guests: cannot hold API keys or outside-service connections; other guest access stays own-rows-only
 
+## Guest blocking (Nov 24, 2026 — operator decision)
+- [ ] Block guests from saving anything: restrictive RLS on all app tables, readable "sign in to save" messaging, update guest-save tests, clear the anonymous-access scan notice
+
 ## Open
 - [ ] Make offline checks evidence-based, add explicit local reply verification and a device-only report
 - [ ] Complete bot integration and verify shared persona on every supported platform
