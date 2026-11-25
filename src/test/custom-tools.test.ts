@@ -192,4 +192,26 @@ describe("the code and the database agree", () => {
   it("uses the same name pattern as the SQL check", () => {
     expect(SQL).toContain(`name ~ '${NAME_PATTERN.source}'`);
   });
+
+  it("rejects __proto__, constructor, and prototype keys in tool specs and template resolution", () => {
+    const pollutedArgs = JSON.parse('{"title":"ok","__proto__":{"priority":"urgent"}}');
+    expect(validateToolSpec({
+      ...tool(),
+      steps: [{ action: "create_task", args: pollutedArgs }],
+    } as never)).toMatch(/cannot include "__proto__"/);
+
+    const nestedPolluted = JSON.parse('{"nested":{"constructor":{"prototype":{"admin":true}}}}');
+    expect(validateToolSpec({
+      ...tool(),
+      steps: [{ action: "create_task", args: nestedPolluted }],
+    } as never)).toMatch(/cannot include "constructor"/);
+
+    const resolved = resolveTemplate(pollutedArgs, { params: {}, steps: [] });
+    expect(resolved.ok).toBe(false);
+    expect(resolved.error).toMatch(/__proto__/);
+
+    const clean = resolveTemplate({ title: "hello" }, { params: {}, steps: [] });
+    expect(clean.ok).toBe(true);
+    expect(Object.getPrototypeOf(clean.value)).toBeNull();
+  });
 });

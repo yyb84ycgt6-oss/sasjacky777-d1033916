@@ -93,6 +93,25 @@ export interface ToolSpec {
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+const FORBIDDEN_OBJECT_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+function forbiddenKeyIn(value: unknown): string | null {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const bad = forbiddenKeyIn(item);
+      if (bad) return bad;
+    }
+    return null;
+  }
+  if (isObject(value)) {
+    for (const key of Object.keys(value)) {
+      if (FORBIDDEN_OBJECT_KEYS.has(key)) return key;
+      const bad = forbiddenKeyIn(value[key]);
+      if (bad) return bad;
+    }
+  }
+  return null;
+}
 
 function nameProblem(kind: "skill" | "tool", name: unknown): string | null {
   if (typeof name !== "string" || !NAME_PATTERN.test(name)) {
@@ -166,6 +185,8 @@ export function validateToolSpec(t: Partial<Record<keyof ToolSpec, unknown>>): s
       return `Step ${i + 1} must call one of: ${CUSTOM_TOOL_ACTIONS.join(", ")}.`;
     }
     if (s.args !== undefined && !isObject(s.args)) return `Step ${i + 1}'s args must be an object.`;
+    const badKey = forbiddenKeyIn(s.args);
+    if (badKey) return `Step ${i + 1}'s args cannot include "${badKey}".`;
     let fedOutside: number | null = null;
     for (const ref of placeholders(s.args)) {
       const step = /^steps\.(\d+)(\.|$)/.exec(ref);
@@ -220,11 +241,12 @@ export function checkArgs(params: readonly ToolParam[], args: Record<string, unk
 
 function lookup(path: string, scope: { params: Record<string, unknown>; steps: unknown[] }): { found: boolean; value?: unknown } {
   const parts = path.split(".");
+  if (parts.some((p) => FORBIDDEN_OBJECT_KEYS.has(p))) return { found: false };
   let cur: unknown = parts[0] === "steps" ? scope.steps : scope.params[parts[0]];
-  if (parts[0] !== "steps" && !(parts[0] in scope.params)) return { found: false };
+  if (parts[0] !== "steps" && !Object.prototype.hasOwnProperty.call(scope.params, parts[0])) return { found: false };
   for (const part of parts.slice(1)) {
     if (Array.isArray(cur) && /^\d+$/.test(part)) cur = cur[Number(part)];
-    else if (isObject(cur) && part in cur) cur = cur[part];
+    else if (isObject(cur) && Object.prototype.hasOwnProperty.call(cur, part)) cur = cur[part];
     else return { found: false };
   }
   return { found: true, value: cur };
@@ -271,8 +293,11 @@ export function resolveTemplate(value: unknown, scope: { params: Record<string, 
     return { ok: true, value: out };
   }
   if (isObject(value)) {
-    const out: Record<string, unknown> = {};
+    const out: Record<string, unknown> = Object.create(null);
     for (const [k, v] of Object.entries(value)) {
+      if (FORBIDDEN_OBJECT_KEYS.has(k)) {
+        return { ok: false, error: `Argument key "${k}" is not allowed` };
+      }
       const r = resolveTemplate(v, scope);
       if (!r.ok) return r;
       // An optional parameter left out drops its argument, rather than sending
