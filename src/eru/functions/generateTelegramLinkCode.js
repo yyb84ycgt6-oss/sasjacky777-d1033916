@@ -2,7 +2,9 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.25';
 /* global Deno */
 
 function makeCode() {
-  return Math.random().toString(36).slice(2, 8).toUpperCase();
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('').toUpperCase();
 }
 
 Deno.serve(async (req) => {

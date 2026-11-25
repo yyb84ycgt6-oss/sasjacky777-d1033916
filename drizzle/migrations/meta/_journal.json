@@ -43,6 +43,13 @@
       "when": 1795505842100,
       "tag": "0005_block_guest_saves",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795609120399,
+      "tag": "0006_harden_game_save_resources",
+      "breakpoints": true
     }
   ]
 }

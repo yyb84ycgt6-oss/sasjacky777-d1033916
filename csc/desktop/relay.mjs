@@ -52,7 +52,7 @@ const PRIVATE_HOST = /^(localhost|127(?:\.\d{1,3}){3}|10(?:\.\d{1,3}){3}|192\.16
  * none, and the world code still has to be right for them.
  */
 export function originAllowed(origin, extra = []) {
-  if (origin == null || origin === "" || origin === "null") return true;
+  if (origin == null || origin === "" || origin === "null") return false;
   if (extra.includes(origin)) return true;
   let url;
   try {

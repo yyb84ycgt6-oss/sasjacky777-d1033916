@@ -98,7 +98,19 @@ serve(async (req) => {
       const scopes = Array.isArray(body.scopes)
         ? body.scopes.filter((s: unknown) => typeof s === "string" && s.length < 50).slice(0, 32)
         : ["bot:create"];
-      const rateLimit = Math.min(Math.max(Number(body.rate_limit) || 60, 1), 1000);
+
+      // Derive the maximum allowed rate_limit from the server-managed quota
+      // policy (default 60/min). Callers may request a lower limit, never a higher one.
+      const { data: policy } = await admin
+        .from("provider_quota_policy")
+        .select("per_minute")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      const maxRate = Math.min(Math.max(Number(policy?.per_minute) || 60, 1), 1000);
+      const requested = Number(body.rate_limit);
+      const rateLimit = Number.isFinite(requested) && requested >= 1
+        ? Math.min(Math.floor(requested), maxRate)
+        : maxRate;
 
       const rawKey = generateRawKey();
       const prefix = rawKey.slice(0, 16);
