@@ -149,34 +149,15 @@ export async function guardedSystemPrompt(
 ): Promise<GuardedPrompt> {
   const explicit = typeof opts.system === "string" ? opts.system.trim() : "";
 
-  // Chat engines pass allowOverride:false: the persona and morals must survive
-  // every caller, the owner included; their brief rides in the first user turn.
-  if (explicit && opts.allowOverride !== false && (await mayReplacePersona(opts.userId))) {
-    // The owner's Agent Lab agent or in-app operator brings its whole identity
-    // in `system` — by design, so "Scout" is not Jackie under another name. The
-    // owner's morals are not added: they are Jackie's, and appending prose to a
-    // prompt that must answer in strict JSON breaks the agent.
-    //
-    // Recorded under one marker, not a hash of the caller's prompt, so the
-    // attestation table holds one row per engine, not one per prompt variant.
-    return {
-      prompt: explicit,
-      mode: "override",
-      headers: headersFor("override", OWN_PROMPT, "n/a"),
-      recorded: attest(engine, "override", OWN_PROMPT, "n/a", null),
-      conversation: (turns) => turns.slice(),
-    };
-  }
-
+  // The server-owned persona and morals always stay in the system prompt for
+  // every caller, including the owner. Any caller-supplied brief travels inside
+  // the first user turn via carryBrief so model instructions cannot be replaced.
   const morals = await loadMoralsBlock();
   const prompt = buildSystemPrompt(clampContext(opts.context), morals.block);
   const personaFp = await fingerprint(PERSONA_SOURCE);
   const mode: PromptMode = morals.error ? "persona-without-morals" : "persona";
   const moralsFp = morals.error ? MORALS_UNAVAILABLE : await moralsFingerprint(morals.block);
-  // A non-owner's `system` is not thrown away — the app's own features send
-  // task briefs that way — but it travels inside the conversation, under the
-  // persona, never as the system prompt.
-  const detail = [morals.error, explicit ? "caller brief carried as a user turn (caller is not the owner)" : null]
+  const detail = [morals.error, explicit ? "caller brief carried as a user turn" : null]
     .filter(Boolean).join("; ") || null;
   return {
     prompt,
