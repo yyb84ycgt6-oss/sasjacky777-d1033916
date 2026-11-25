@@ -126,6 +126,24 @@ var LIMITS = {
 var PARAM_TYPES = ["string", "number", "boolean"];
 var isObject = (v) => !!v && typeof v === "object" && !Array.isArray(v);
 var str = (v) => typeof v === "string" ? v.trim() : "";
+var FORBIDDEN_OBJECT_KEYS = /* @__PURE__ */ new Set(["__proto__", "constructor", "prototype"]);
+function forbiddenKeyIn(value) {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const bad = forbiddenKeyIn(item);
+      if (bad) return bad;
+    }
+    return null;
+  }
+  if (isObject(value)) {
+    for (const key of Object.keys(value)) {
+      if (FORBIDDEN_OBJECT_KEYS.has(key)) return key;
+      const bad = forbiddenKeyIn(value[key]);
+      if (bad) return bad;
+    }
+  }
+  return null;
+}
 function nameProblem(kind, name) {
   if (typeof name !== "string" || !NAME_PATTERN.test(name)) {
     return `The ${kind}'s name must be 2\u201348 characters of lowercase letters, digits and underscores, starting with a letter (e.g. weekly_review).`;
@@ -185,6 +203,8 @@ function validateToolSpec(t) {
       return `Step ${i + 1} must call one of: ${CUSTOM_TOOL_ACTIONS.join(", ")}.`;
     }
     if (s.args !== void 0 && !isObject(s.args)) return `Step ${i + 1}'s args must be an object.`;
+    const badKey = forbiddenKeyIn(s.args);
+    if (badKey) return `Step ${i + 1}'s args cannot include "${badKey}".`;
     let fedOutside = null;
     for (const ref of placeholders(s.args)) {
       const step = /^steps\.(\d+)(\.|$)/.exec(ref);
@@ -229,11 +249,12 @@ function checkArgs(params, args) {
 }
 function lookup(path, scope) {
   const parts = path.split(".");
+  if (parts.some((p) => FORBIDDEN_OBJECT_KEYS.has(p))) return { found: false };
   let cur = parts[0] === "steps" ? scope.steps : scope.params[parts[0]];
-  if (parts[0] !== "steps" && !(parts[0] in scope.params)) return { found: false };
+  if (parts[0] !== "steps" && !Object.prototype.hasOwnProperty.call(scope.params, parts[0])) return { found: false };
   for (const part of parts.slice(1)) {
     if (Array.isArray(cur) && /^\d+$/.test(part)) cur = cur[Number(part)];
-    else if (isObject(cur) && part in cur) cur = cur[part];
+    else if (isObject(cur) && Object.prototype.hasOwnProperty.call(cur, part)) cur = cur[part];
     else return { found: false };
   }
   return { found: true, value: cur };
@@ -268,8 +289,11 @@ function resolveTemplate(value, scope) {
     return { ok: true, value: out };
   }
   if (isObject(value)) {
-    const out = {};
+    const out = /* @__PURE__ */ Object.create(null);
     for (const [k, v] of Object.entries(value)) {
+      if (FORBIDDEN_OBJECT_KEYS.has(k)) {
+        return { ok: false, error: `Argument key "${k}" is not allowed` };
+      }
       const r = resolveTemplate(v, scope);
       if (!r.ok) return r;
       if (r.value !== void 0 && r.value !== null && !(typeof v === "string" && r.value === "" && /^\{\{[^{}]+\}\}$/.test(v.trim()))) {
