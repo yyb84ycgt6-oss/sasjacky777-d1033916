@@ -39,7 +39,12 @@ export const BATTLE_PASS_DIAMONDS: Readonly<Record<string, number>> = {
 };
 
 /** The spend that unlocks premium claims. */
-export const PREMIUM_UPGRADE = { source: "battle_pass", source_id: "premium_upgrade" } as const;
+export const PREMIUM_UPGRADE = {
+  source: "battle_pass",
+  source_id: "premium_upgrade",
+  currency: "diamonds",
+  cost: 500,
+} as const;
 
 /** The largest single spend the ledger accepts. A typo, not a policy. */
 export const MAX_SPEND = 10_000_000;
@@ -101,6 +106,11 @@ export function decideLedgerEntry(record: unknown): LedgerDecision {
       const raw = Number(r.amount);
       if (!Number.isInteger(raw) || raw === 0 || Math.abs(raw) > MAX_SPEND) {
         return refuse(400, "INVALID_AMOUNT", "A spend must be a whole, non-zero amount");
+      }
+      if (source === PREMIUM_UPGRADE.source && sourceId === PREMIUM_UPGRADE.source_id) {
+        if (currency !== PREMIUM_UPGRADE.currency || Math.abs(raw) !== PREMIUM_UPGRADE.cost) {
+          return refuse(400, "INVALID_PREMIUM_UPGRADE", `Premium upgrade costs ${PREMIUM_UPGRADE.cost} ${PREMIUM_UPGRADE.currency}`);
+        }
       }
       // A spend lowers the balance whatever sign the client used.
       return {

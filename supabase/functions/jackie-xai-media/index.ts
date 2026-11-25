@@ -193,11 +193,31 @@ serve(async (req) => {
 
     // ---- Responses API ----------------------------------------------------
     if (action === "respond") {
-      const input = payload.input ?? prompt;
-      if (input === null || input === undefined || input === "") {
+      const rawInput = payload.input ?? prompt;
+      if (rawInput === null || rawInput === undefined || rawInput === "") {
         return json({ error: "input is required" }, 400);
       }
-      if (tooLarge(input, MAX_INPUT_CHARS)) return json({ error: "input too large" }, 413);
+      if (tooLarge(rawInput, MAX_INPUT_CHARS)) return json({ error: "input too large" }, 413);
+
+      // Never let callers inject system or developer roles into Responses API items.
+      let input: unknown = rawInput;
+      if (typeof rawInput === "string") {
+        input = rawInput;
+      } else if (Array.isArray(rawInput)) {
+        const ALLOWED_ROLES = new Set(["user", "assistant"]);
+        for (const item of rawInput) {
+          if (typeof item === "string") continue;
+          if (!item || typeof item !== "object" || Array.isArray(item)) {
+            return json({ error: "Invalid input item" }, 400);
+          }
+          const role = (item as Record<string, unknown>).role;
+          if (role !== undefined && (typeof role !== "string" || !ALLOWED_ROLES.has(role))) {
+            return json({ error: "Only user and assistant roles are allowed in input" }, 400);
+          }
+        }
+      } else {
+        return json({ error: "input must be a string or message array" }, 400);
+      }
 
       const resp = await xai(key, "/responses", {
         method: "POST",

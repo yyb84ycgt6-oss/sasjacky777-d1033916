@@ -58,6 +58,8 @@ serve(async (req) => {
         const { data: premium, error: premErr } = await admin
           .from("game_transactions").select("id")
           .eq("user_id", user.id).eq("transaction_type", "spend")
+          .eq("currency_type", PREMIUM_UPGRADE.currency)
+          .lte("amount", -PREMIUM_UPGRADE.cost)
           .eq("source", PREMIUM_UPGRADE.source).eq("source_id", PREMIUM_UPGRADE.source_id)
           .limit(1).maybeSingle();
         if (premErr) throw premErr;

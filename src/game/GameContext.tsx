@@ -95,7 +95,7 @@ function saveState(state: GameState) {
 async function saveToCloud(state: GameState) {
   try {
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return;
+    if (!session || session.user.is_anonymous) return;
     
     const { error } = await supabase.from('game_saves').upsert({
       user_id: session.user.id,
@@ -117,7 +117,7 @@ async function saveToCloud(state: GameState) {
 async function loadFromCloud(): Promise<GameState | null> {
   try {
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return null;
+    if (!session || session.user.is_anonymous) return null;
     
     const { data, error } = await supabase
       .from('game_saves' as any)

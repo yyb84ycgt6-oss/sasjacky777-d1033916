@@ -18,7 +18,8 @@
 - [x] Guests: cannot hold API keys or outside-service connections; other guest access stays own-rows-only
 
 ## Guest blocking (Nov 24, 2026 — operator decision)
-- [ ] Block guests from saving anything: restrictive RLS on all app tables, readable "sign in to save" messaging, update guest-save tests, clear the anonymous-access scan notice
+- [x] Block guests from saving anything: restrictive RLS on all 31 app tables (`0005_block_guest_saves.sql`), game cloud saves skip anonymous sessions, 9/9 tests and build pass
+- [x] Deep scan fixes: premium battle pass now requires 500 diamonds (`game-transaction`); xAI responses now block system/developer roles (`jackie-xai-media`); owner override notices marked intended
 
 ## Open
 - [ ] Make offline checks evidence-based, add explicit local reply verification and a device-only report

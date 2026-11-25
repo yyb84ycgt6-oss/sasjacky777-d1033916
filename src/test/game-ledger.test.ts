@@ -35,6 +35,8 @@ describe("the game ledger decides how much a transaction is worth", () => {
   it("only ever lets a spend lower the balance, whatever sign it was sent with", () => {
     expect(decideLedgerEntry({ transaction_type: "spend", currency_type: "diamonds", amount: 500, source: "battle_pass", source_id: "premium_upgrade" }))
       .toMatchObject({ ok: true, amount: -500 });
+    expect(decideLedgerEntry({ transaction_type: "spend", currency_type: "diamonds", amount: 1, source: "battle_pass", source_id: "premium_upgrade" }))
+      .toMatchObject({ ok: false, code: "INVALID_PREMIUM_UPGRADE" });
     expect(decideLedgerEntry({ transaction_type: "spend", currency_type: "diamonds", amount: 1.5, source: "jade_store" }))
       .toMatchObject({ ok: false, code: "INVALID_AMOUNT" });
   });

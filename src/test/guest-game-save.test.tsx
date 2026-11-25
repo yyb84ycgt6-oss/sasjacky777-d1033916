@@ -5,12 +5,12 @@ import { GameProvider, useGame } from '@/game/GameContext';
 const cloud = vi.hoisted(() => ({
   upsert: vi.fn(),
   notify: vi.fn(),
-  guest: { id: 'guest-save-test', is_anonymous: true },
+  user: { id: 'signed-in-save-test', is_anonymous: false },
 }));
 vi.mock('sonner', () => ({ toast: { error: cloud.notify } }));
 vi.mock('@/integrations/supabase/client', () => ({
   supabase: {
-    auth: { getSession: async () => ({ data: { session: { user: cloud.guest } } }) },
+    auth: { getSession: async () => ({ data: { session: { user: cloud.user } } }) },
     from: () => ({
       upsert: cloud.upsert,
       select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }),
@@ -23,19 +23,32 @@ function StartGuestGame() {
   return <button onClick={() => startGame('Guest Verification Realm')}>Start</button>;
 }
 
-describe('guest game cloud saving', () => {
-  beforeEach(() => { localStorage.clear(); cloud.notify.mockReset(); cloud.upsert.mockReset().mockResolvedValue({ error: null }); });
+describe('game cloud saving', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    cloud.user = { id: 'signed-in-save-test', is_anonymous: false };
+    cloud.notify.mockReset();
+    cloud.upsert.mockReset().mockResolvedValue({ error: null });
+  });
   afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
-  it('saves a guest realm under its own user with only deployed fields', async () => {
+  it('saves a full account realm under its own user with only deployed fields', async () => {
     const ui = render(<GameProvider><StartGuestGame /></GameProvider>);
     fireEvent.click(ui.getByText('Start'));
     await waitFor(() => expect(cloud.upsert).toHaveBeenCalled());
     const [row, options] = cloud.upsert.mock.calls[0];
     expect(Object.keys(row).sort()).toEqual(['game_state', 'updated_at', 'user_id']);
-    expect(row.user_id).toBe('guest-save-test');
+    expect(row.user_id).toBe('signed-in-save-test');
     expect(row.game_state.realmName).toBe('Guest Verification Realm');
     expect(options).toEqual({ onConflict: 'user_id' });
+  });
+
+  it('does not attempt cloud saves for anonymous guest sessions', async () => {
+    cloud.user = { id: 'guest-save-test', is_anonymous: true };
+    const ui = render(<GameProvider><StartGuestGame /></GameProvider>);
+    fireEvent.click(ui.getByText('Start'));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(cloud.upsert).not.toHaveBeenCalled();
   });
 
   it('reports a returned save refusal instead of silently treating it as success', async () => {
